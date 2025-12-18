@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "test": "jest",
-    "dev": "npm test && node ./src/index.js"
+    "dev": "npm test && node ./src/index.js",
+    "db:push": "npx drizzle-kit push",
+    "db:generate": "npx drizzle-kit generate"
   },
   "keywords": [],
   "author": "",

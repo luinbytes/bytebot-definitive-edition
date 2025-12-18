@@ -1,7 +1,10 @@
-const { Events, Collection, PermissionFlagsBits } = require('discord.js');
+const { Events, Collection, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const logger = require('../utils/logger');
 const embeds = require('../utils/embeds');
 const config = require('../../config.json');
+const { db } = require('../database/index');
+const { users } = require('../database/schema');
+const { sql } = require('drizzle-orm');
 
 module.exports = {
     name: Events.InteractionCreate,
@@ -17,26 +20,25 @@ module.exports = {
 
         // --- SECURITY & EDGE CASES ---
 
-        // 1. Guild Only Restriction
-        // Prevent the bot from crashing in DMs if the command isn't designed for it.
-        if (!interaction.guild && !command.dmPermission) {
+        // 1. Guild Only Restriction (Check data.dm_permission if undefined, default to true for slash commands)
+        const isDM = !interaction.guild;
+        const dmAllowed = command.data.dm_permission !== false;
+
+        if (isDM && !dmAllowed) {
             return interaction.reply({
                 embeds: [embeds.error('Guild Only', 'This command can only be used within a server.')],
-                ephemeral: true
+                flags: [MessageFlags.Ephemeral]
             });
         }
 
-        // 2. Bot Permission Verification
-        // Ensure the bot can actually send embeds before trying to do so.
+        // 2. Bot Permission Verification (Only if in a guild)
         if (interaction.guild) {
             const botMember = interaction.guild.members.me;
             if (!botMember.permissionsIn(interaction.channel).has([PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks])) {
-                // We can't use our embed utility here because we lack permissions!
-                // Fallback to a plain text message if possible.
                 try {
                     return await interaction.reply({
                         content: '❌ I do not have permission to send embeds in this channel. Please ensure I have "Send Messages" and "Embed Links" permissions.',
-                        ephemeral: true
+                        flags: [MessageFlags.Ephemeral]
                     });
                 } catch (e) {
                     logger.error(`Failed to notify about missing permissions in ${interaction.guild.id}: ${e}`);
@@ -49,16 +51,16 @@ module.exports = {
         if (command.devOnly && !config.developers.includes(interaction.user.id)) {
             return interaction.reply({
                 embeds: [embeds.error('Access Denied', 'This command is restricted to bot developers.')],
-                ephemeral: true
+                flags: [MessageFlags.Ephemeral]
             });
         }
 
-        // 4. Permission Checks (User)
-        if (command.permissions && command.permissions.length > 0) {
+        // 4. Permission Checks (User - Only if in a guild)
+        if (interaction.guild && command.permissions && command.permissions.length > 0) {
             if (!interaction.member.permissions.has(command.permissions)) {
                 return interaction.reply({
                     embeds: [embeds.error('Insufficient Permissions', `You need the following permissions: \`${command.permissions.join(', ')}\``)],
-                    ephemeral: true
+                    flags: [MessageFlags.Ephemeral]
                 });
             }
         }
@@ -81,18 +83,37 @@ module.exports = {
                 const expiredTimestamp = Math.round(expirationTime / 1000);
                 return interaction.reply({
                     embeds: [embeds.warn('Cooldown Active', `Please wait, you can use this command again <t:${expiredTimestamp}:R>.`)],
-                    ephemeral: true
+                    flags: [MessageFlags.Ephemeral]
                 });
             }
+        }
+
+        // --- AUTHORIZED EXECUTION START ---
+
+        // Update database tracking
+        try {
+            await db.insert(users).values({
+                id: interaction.user.id,
+                guildId: interaction.guild?.id ?? 'DM',
+                commandsRun: 1,
+                lastSeen: new Date(),
+            }).onConflictDoUpdate({
+                target: users.id,
+                set: {
+                    commandsRun: sql`${users.commandsRun} + 1`,
+                    lastSeen: new Date(),
+                },
+            });
+        } catch (error) {
+            logger.error(`Failed to update user stats: ${error}`);
         }
 
         timestamps.set(interaction.user.id, now);
         setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
 
         // 6. Interaction Deferral
-        // If a command is marked as 'longRunning', we defer it immediately.
         if (command.longRunning) {
-            await interaction.deferReply({ ephemeral: command.ephemeral ?? false });
+            await interaction.deferReply({ flags: command.data.ephemeral ? [MessageFlags.Ephemeral] : [] });
         }
 
         // 7. Execution
@@ -105,9 +126,9 @@ module.exports = {
             const errorMessage = embeds.error('Critical Error', 'An unexpected error occurred while executing this command. The developers have been notified.');
 
             if (interaction.replied || interaction.deferred) {
-                await interaction.followUp({ embeds: [errorMessage], ephemeral: true });
+                await interaction.followUp({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral] });
             } else {
-                await interaction.reply({ embeds: [errorMessage], ephemeral: true });
+                await interaction.reply({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral] });
             }
         }
     },

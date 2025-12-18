@@ -1,0 +1,27 @@
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const embeds = require('../../utils/embeds');
+
+module.exports = {
+    data: new SlashCommandBuilder()
+        .setName('lock')
+        .setDescription('Locks the current channel.')
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+
+    async execute(interaction) {
+        try {
+            await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
+                SendMessages: false
+            });
+
+            await interaction.reply({
+                embeds: [embeds.success('Channel Locked', 'The @everyone role can no longer send messages in this channel.')]
+            });
+        } catch (error) {
+            console.error(error);
+            await interaction.reply({
+                embeds: [embeds.error('Error', 'An error occurred while trying to lock the channel.')],
+                flags: [MessageFlags.Ephemeral]
+            });
+        }
+    },
+};
