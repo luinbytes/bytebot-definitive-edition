@@ -13,9 +13,14 @@ module.exports = async (client) => {
         const command = require(filePath);
 
         if ('data' in command && 'execute' in command) {
+            // Extract category from path (e.g., src/commands/utility/ping.js -> utility)
+            const parts = file.split(/[\\/]/);
+            const category = parts[parts.length - 2];
+            command.category = category.charAt(0).toUpperCase() + category.slice(1);
+
             client.commands.set(command.data.name, command);
             commands.push(command.data.toJSON());
-            logger.info(`Loaded Command: ${command.data.name}`);
+            logger.info(`Loaded Command: ${command.data.name} [${command.category}]`);
         } else {
             logger.warn(`The command at ${file} is missing a required "data" or "execute" property.`);
         }

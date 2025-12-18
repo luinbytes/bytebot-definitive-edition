@@ -2,7 +2,7 @@
 module.exports = {
     schema: "./src/database/schema.js",
     out: "./drizzle",
-    driver: 'better-sqlite',
+    dialect: "sqlite",
     dbCredentials: {
         url: "sqlite.db",
     }
