@@ -1,9 +1,15 @@
 {
-  "developers": [],
-  "colors": {
-    "primary": "#5865F2",
-    "success": "#57F287",
-    "error": "#ED4245",
-    "warning": "#FEE75C"
-  }
+    "developers": [],
+    "brand": {
+        "name": "ByteBot",
+        "color": "#8A2BE2",
+        "logo": ""
+    },
+    "colors": {
+        "primary": "#8A2BE2",
+        "success": "#57F287",
+        "error": "#ED4245",
+        "warning": "#FEE75C",
+        "white": "#FFFFFF"
+    }
 }

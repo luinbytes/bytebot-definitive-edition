@@ -4,13 +4,15 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest",
+    "dev": "npm test && node ./src/index.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "axios": "^1.13.2",
     "better-sqlite3": "^12.5.0",
     "chalk": "^4.1.2",
     "discord.js": "^14.25.1",
@@ -19,6 +21,7 @@
     "glob": "^13.0.0"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.31.8"
+    "drizzle-kit": "^0.31.8",
+    "jest": "^30.2.0"
   }
 }
