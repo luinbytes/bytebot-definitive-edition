@@ -22,6 +22,30 @@ module.exports = {
             return;
         }
 
+        // Handle BytePod Interactions
+        if ((interaction.isButton() || interaction.isAnySelectMenu() || interaction.isModalSubmit()) && interaction.customId.startsWith('bytepod_')) {
+            const command = client.commands.get('bytepod');
+            if (command && command.handleInteraction) {
+                try {
+                    await command.handleInteraction(interaction, client);
+                } catch (error) {
+                    logger.error(`BytePod Interaction Error: ${error}`);
+                    // Attempt to notify user if possible
+                    try {
+                        const errorEmbed = embeds.error('Interaction Failed', 'An error occurred while processing this action. The channel may have been deleted or the bot lacks permissions.');
+                        if (interaction.replied || interaction.deferred) {
+                            await interaction.followUp({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+                        } else {
+                            await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+                        }
+                    } catch (e) {
+                        logger.error('Failed to send error response to user:', e);
+                    }
+                }
+            }
+            return;
+        }
+
         if (!interaction.isChatInputCommand()) return;
 
         const command = client.commands.get(interaction.commandName);

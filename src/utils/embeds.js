@@ -47,6 +47,14 @@ const embeds = {
     brand: (title, description) => {
         return embeds.base(title, description)
             .setColor(config.brand.color);
+    },
+
+    /**
+     * Info response (Primary brand color, typically)
+     */
+    info: (title, description) => {
+        return embeds.base(`ℹ️ ${title}`, description)
+            .setColor(config.brand.color);
     }
 };
 

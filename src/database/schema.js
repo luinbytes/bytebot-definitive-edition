@@ -6,6 +6,8 @@ const guilds = sqliteTable('guilds', {
     logChannel: text('log_channel'),
     welcomeChannel: text('welcome_channel'),
     joinedAt: integer('joined_at', { mode: 'timestamp' }),
+    voiceHubChannelId: text('voice_hub_channel_id'),
+    voiceHubCategoryId: text('voice_hub_category_id'),
 });
 
 const users = sqliteTable('users', {
@@ -33,4 +35,18 @@ const commandPermissions = sqliteTable('command_permissions', {
     roleId: text('role_id').notNull(),
 });
 
-module.exports = { guilds, users, moderationLogs, commandPermissions };
+const bytepods = sqliteTable('bytepods', {
+    channelId: text('channel_id').primaryKey(),
+    guildId: text('guild_id').notNull(),
+    ownerId: text('owner_id').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date()),
+});
+
+const bytepodAutoWhitelist = sqliteTable('bytepod_autowhitelist', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: text('user_id').notNull(),
+    targetUserId: text('target_user_id').notNull(),
+    guildId: text('guild_id'),
+});
+
+module.exports = { guilds, users, moderationLogs, commandPermissions, bytepods, bytepodAutoWhitelist };

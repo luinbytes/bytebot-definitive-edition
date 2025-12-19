@@ -8,6 +8,7 @@ module.exports = async (client) => {
     const commands = [];
     const commandFiles = await glob('src/commands/**/*.js');
 
+    const loadedCommands = [];
     for (const file of commandFiles) {
         const filePath = path.resolve(file);
         const command = require(filePath);
@@ -20,11 +21,13 @@ module.exports = async (client) => {
 
             client.commands.set(command.data.name, command);
             commands.push(command.data.toJSON());
-            logger.info(`Loaded Command: ${command.data.name} [${command.category}]`);
+            loadedCommands.push(command.data.name);
         } else {
             logger.warn(`The command at ${file} is missing a required "data" or "execute" property.`);
         }
     }
+
+    logger.info(`Loaded ${loadedCommands.length} Commands: ${loadedCommands.join(', ')}`);
 
     const rest = new REST().setToken(process.env.DISCORD_TOKEN);
 
