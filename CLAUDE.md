@@ -38,7 +38,7 @@ ByteBot is a modular, production-ready Discord bot built with Discord.js v14, fe
 
 ### Database Layer (src/database/)
 
-**schema.js** - 7 tables:
+**schema.js** - 10 tables:
 ```javascript
 guilds: {
   id, prefix, logChannel, welcomeChannel, joinedAt,
@@ -73,6 +73,21 @@ bytepodAutoWhitelist: {
 bytepodUserSettings: {
   userId (PK), autoLock (boolean)
   // Per-user BytePod preferences
+}
+
+bytepodActiveSessions: {
+  id, podId, userId, guildId, startTime (ms)
+  // Tracks active voice sessions for restart resilience
+}
+
+bytepodVoiceStats: {
+  id, odId, guildId, totalSeconds, sessionCount
+  // Aggregate voice activity stats per user per guild
+}
+
+bytepodTemplates: {
+  id, userId, name, userLimit, autoLock, whitelistUserIds (JSON)
+  // Saved BytePod configuration templates
 }
 ```
 
@@ -223,6 +238,10 @@ User leaves channel
   - Calculates K/D, win rate
 
 ### Moderation (src/commands/moderation/)
+- **audit.js** - Comprehensive moderation log viewer
+  - `/audit user @target [action] [limit]` - View target's moderation history
+  - `/audit recent [limit]` - View recent actions across all users
+  - `/audit by @moderator [limit]` - View actions by specific moderator
 - **ban.js** - Ban member + log to DB
 - **kick.js** - Kick member + log to DB
 - **clear.js** - Bulk delete messages (1-100)
@@ -237,11 +256,13 @@ User leaves channel
 - **ping.js** - Roundtrip latency + WS heartbeat
 - **serverinfo.js** - Guild stats
 - **userinfo.js** - User info with roles (top 20)
-- **bytepod.js** - BytePod management (394 lines!)
+- **bytepod.js** - BytePod management (~560 lines)
   - `/bytepod setup` - Configure hub (Admin)
   - `/bytepod panel` - Resend control panel
   - `/bytepod preset add/remove/list` - Auto-whitelist presets
   - `/bytepod preset autolock` - Toggle auto-lock
+  - `/bytepod stats [@user]` - View voice activity statistics
+  - `/bytepod template save/load/list/delete` - Configuration templates
   - `handleInteraction()` - Massive router for all buttons/menus/modals
 
 ---
@@ -551,6 +572,24 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
 ---
 
 ## Recent Changes
+
+### 2025-12-19 - Voice Activity Stats, Templates & Audit Command
+- **New Feature: Voice Activity Stats** - Tracks cumulative time spent in BytePods
+  - Persistent session tracking via `bytepodActiveSessions` table (survives bot restarts)
+  - On startup, validates and finalizes stale sessions from before restart
+  - `/bytepod stats [@user]` displays total time, session count, and average session length
+- **New Feature: BytePod Templates** - Save and reuse channel configurations
+  - `/bytepod template save <name>` - Captures limit, lock state, whitelist
+  - `/bytepod template load <name>` - Applies saved configuration
+  - `/bytepod template list` - View all saved templates
+  - `/bytepod template delete <name>` - Remove a template
+- **New Feature: /audit Command** - Comprehensive moderation log viewer
+  - `/audit user @target [action] [limit]` - Filter by user and action type
+  - `/audit recent [limit]` - View recent actions across guild
+  - `/audit by @moderator [limit]` - View actions by specific moderator
+- **Database Changes:** Added 3 new tables: `bytepodActiveSessions`, `bytepodVoiceStats`, `bytepodTemplates`
+- **Files modified:** `schema.js`, `voiceStateUpdate.js`, `ready.js`, `bytepod.js`
+- **Files created:** `audit.js`
 
 ### 2025-12-19 - BytePod Interaction Timeout Prevention
 - Fixed `DiscordAPIError[10062]: Unknown interaction` across ALL BytePod operations

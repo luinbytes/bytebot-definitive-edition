@@ -54,4 +54,43 @@ const bytepodUserSettings = sqliteTable('bytepod_user_settings', {
     autoLock: integer('auto_lock', { mode: 'boolean' }).default(false),
 });
 
-module.exports = { guilds, users, moderationLogs, commandPermissions, bytepods, bytepodAutoWhitelist, bytepodUserSettings };
+// Active voice sessions (persisted - survives bot restarts)
+const bytepodActiveSessions = sqliteTable('bytepod_active_sessions', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    podId: text('pod_id').notNull(),       // References bytepods.channelId
+    userId: text('user_id').notNull(),
+    guildId: text('guild_id').notNull(),
+    startTime: integer('start_time').notNull(), // Unix timestamp ms
+});
+
+// Voice activity stats (per-user, per-guild aggregate)
+const bytepodVoiceStats = sqliteTable('bytepod_voice_stats', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: text('user_id').notNull(),
+    guildId: text('guild_id').notNull(),
+    totalSeconds: integer('total_seconds').default(0),
+    sessionCount: integer('session_count').default(0),
+});
+
+// Template presets (saved channel configurations)
+const bytepodTemplates = sqliteTable('bytepod_templates', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: text('user_id').notNull(),
+    name: text('name').notNull(),
+    userLimit: integer('user_limit').default(0),
+    autoLock: integer('auto_lock', { mode: 'boolean' }).default(false),
+    whitelistUserIds: text('whitelist_user_ids'), // JSON stringified array
+});
+
+module.exports = {
+    guilds,
+    users,
+    moderationLogs,
+    commandPermissions,
+    bytepods,
+    bytepodAutoWhitelist,
+    bytepodUserSettings,
+    bytepodActiveSessions,
+    bytepodVoiceStats,
+    bytepodTemplates
+};

@@ -1,11 +1,45 @@
 const { Events, ChannelType, PermissionFlagsBits } = require('discord.js');
 const { db } = require('../database');
-const { guilds, bytepods, bytepodAutoWhitelist, bytepodUserSettings } = require('../database/schema');
-const { eq } = require('drizzle-orm');
+const { guilds, bytepods, bytepodAutoWhitelist, bytepodUserSettings, bytepodActiveSessions, bytepodVoiceStats } = require('../database/schema');
+const { eq, and } = require('drizzle-orm');
 const logger = require('../utils/logger');
-const embeds = require('../utils/embeds'); // Ensure embeds is imported
+const embeds = require('../utils/embeds');
 const { checkBotPermissions } = require('../utils/permissionCheck');
 const { getControlPanel } = require('../components/bytepodControls');
+
+// Helper to finalize a voice session and update stats
+async function finalizeVoiceSession(session) {
+    const durationSeconds = Math.floor((Date.now() - session.startTime) / 1000);
+
+    // Delete active session
+    await db.delete(bytepodActiveSessions)
+        .where(eq(bytepodActiveSessions.id, session.id));
+
+    // Upsert aggregate stats
+    const existing = await db.select().from(bytepodVoiceStats)
+        .where(and(
+            eq(bytepodVoiceStats.userId, session.userId),
+            eq(bytepodVoiceStats.guildId, session.guildId)
+        )).get();
+
+    if (existing) {
+        await db.update(bytepodVoiceStats)
+            .set({
+                totalSeconds: existing.totalSeconds + durationSeconds,
+                sessionCount: existing.sessionCount + 1
+            })
+            .where(eq(bytepodVoiceStats.id, existing.id));
+    } else {
+        await db.insert(bytepodVoiceStats).values({
+            userId: session.userId,
+            guildId: session.guildId,
+            totalSeconds: durationSeconds,
+            sessionCount: 1
+        });
+    }
+
+    return durationSeconds;
+}
 
 module.exports = {
     name: Events.VoiceStateUpdate,
@@ -83,11 +117,19 @@ module.exports = {
                 // Move Member
                 await member.voice.setChannel(newChannel);
 
-                // DB Insert
+                // DB Insert - BytePod record
                 await db.insert(bytepods).values({
                     channelId: newChannel.id,
                     guildId: guild.id,
                     ownerId: member.id,
+                });
+
+                // Start voice session tracking (persisted to DB)
+                await db.insert(bytepodActiveSessions).values({
+                    podId: newChannel.id,
+                    userId: member.id,
+                    guildId: guild.id,
+                    startTime: Date.now()
                 });
 
                 // Send Control Panel
@@ -113,6 +155,21 @@ module.exports = {
 
         // --- LEAVE POD TRIGGER ---
         if (leftChannelId && leftChannelId !== hubId) {
+            // Finalize voice session for the leaving user
+            const session = await db.select().from(bytepodActiveSessions)
+                .where(and(
+                    eq(bytepodActiveSessions.podId, leftChannelId),
+                    eq(bytepodActiveSessions.userId, member.id)
+                )).get();
+
+            if (session) {
+                try {
+                    await finalizeVoiceSession(session);
+                } catch (e) {
+                    logger.error(`Failed to finalize voice session: ${e}`);
+                }
+            }
+
             // Check if it's a BytePod
             const podData = await db.select().from(bytepods).where(eq(bytepods.channelId, leftChannelId)).get();
 
@@ -121,7 +178,14 @@ module.exports = {
 
                 if (channel && channel.members.size === 0) {
                     try {
-                        // Delete
+                        // Finalize any remaining sessions for this pod (edge case: multiple users left simultaneously)
+                        const remainingSessions = await db.select().from(bytepodActiveSessions)
+                            .where(eq(bytepodActiveSessions.podId, leftChannelId));
+                        for (const s of remainingSessions) {
+                            await finalizeVoiceSession(s);
+                        }
+
+                        // Delete channel and pod record
                         await channel.delete();
                         await db.delete(bytepods).where(eq(bytepods.channelId, leftChannelId));
                     } catch (error) {
@@ -129,6 +193,8 @@ module.exports = {
                         // If channel deleted manually, verify DB cleanup
                         if (error.code === 10003) { // Unknown Channel
                             await db.delete(bytepods).where(eq(bytepods.channelId, leftChannelId));
+                            // Also cleanup any orphaned sessions
+                            await db.delete(bytepodActiveSessions).where(eq(bytepodActiveSessions.podId, leftChannelId));
                         }
                     }
                 }
