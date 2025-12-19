@@ -80,6 +80,7 @@ module.exports = {
                 return interaction.reply({ embeds: [embeds.error('Permission Denied', 'Only Administrators can use this command.')], flags: [MessageFlags.Ephemeral] });
             }
 
+            await interaction.deferReply();
             const channel = interaction.options.getChannel('channel');
             const category = interaction.options.getChannel('category');
             const targetCategoryId = category ? category.id : null; // Use null if no category
@@ -97,20 +98,21 @@ module.exports = {
                 }
             });
 
-            return interaction.reply({ embeds: [embeds.success('Setup Complete', `BytePod Hub set to ${channel}. New pods will be created in ${category ? category : 'the same category as the Hub'}.`)] });
+            return interaction.editReply({ embeds: [embeds.success('Setup Complete', `BytePod Hub set to ${channel}. New pods will be created in ${category ? category : 'the same category as the Hub'}.`)] });
         }
 
         if (subdomain === 'panel') {
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
             // Check if user owns a pod
             const userPod = await db.select().from(bytepods).where(eq(bytepods.ownerId, interaction.user.id)).get();
             // Also check if they are in the channel?
             if (!userPod) {
-                return interaction.reply({ embeds: [embeds.error('No Pod Found', 'You do not seem to have an active BytePod.')], flags: [MessageFlags.Ephemeral] });
+                return interaction.editReply({ embeds: [embeds.error('No Pod Found', 'You do not seem to have an active BytePod.')] });
             }
 
             const channel = interaction.guild.channels.cache.get(userPod.channelId);
             if (!channel) {
-                return interaction.reply({ embeds: [embeds.error('Error', 'Your BytePod channel was not found. It may have been deleted.')], flags: [MessageFlags.Ephemeral] });
+                return interaction.editReply({ embeds: [embeds.error('Error', 'Your BytePod channel was not found. It may have been deleted.')] });
             }
 
             // Get current state
@@ -119,7 +121,7 @@ module.exports = {
             const displayCoOwners = coOwners.filter(id => id !== interaction.user.id);
 
             const { embeds: panelEmbeds, components } = getControlPanel(channel.id, isLocked, limit, displayWhitelist, displayCoOwners);
-            return interaction.reply({ embeds: panelEmbeds, components: components });
+            return interaction.editReply({ embeds: panelEmbeds, components: components });
         }
 
         if (group === 'preset') {
@@ -127,6 +129,7 @@ module.exports = {
                 const target = interaction.options.getUser('user');
                 if (target.id === interaction.user.id) return interaction.reply({ content: "You can't whitelist yourself.", flags: [MessageFlags.Ephemeral] });
 
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
                 // Check duplicate
                 const existing = await db.select().from(bytepodAutoWhitelist)
                     .where(and(
@@ -134,27 +137,29 @@ module.exports = {
                         eq(bytepodAutoWhitelist.targetUserId, target.id)
                     )).get();
 
-                if (existing) return interaction.reply({ content: `${target} is already in your preset.`, flags: [MessageFlags.Ephemeral] });
+                if (existing) return interaction.editReply({ content: `${target} is already in your preset.` });
 
                 await db.insert(bytepodAutoWhitelist).values({
                     userId: interaction.user.id,
                     targetUserId: target.id
                 });
-                return interaction.reply({ embeds: [embeds.success('Preset Added', `Added ${target} to your auto-whitelist.`)], flags: [MessageFlags.Ephemeral] });
+                return interaction.editReply({ embeds: [embeds.success('Preset Added', `Added ${target} to your auto-whitelist.`)] });
             }
             if (subdomain === 'remove') {
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
                 const target = interaction.options.getUser('user');
                 await db.delete(bytepodAutoWhitelist)
                     .where(and(
                         eq(bytepodAutoWhitelist.userId, interaction.user.id),
                         eq(bytepodAutoWhitelist.targetUserId, target.id)
                     ));
-                return interaction.reply({ embeds: [embeds.success('Preset Removed', `Removed ${target} from your auto-whitelist.`)], flags: [MessageFlags.Ephemeral] });
+                return interaction.editReply({ embeds: [embeds.success('Preset Removed', `Removed ${target} from your auto-whitelist.`)] });
             }
             if (subdomain === 'list') {
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
                 const presets = await db.select().from(bytepodAutoWhitelist).where(eq(bytepodAutoWhitelist.userId, interaction.user.id));
                 const names = presets.map(p => `<@${p.targetUserId}>`).join(', ') || 'No users.';
-                return interaction.reply({ embeds: [embeds.info('Auto-Whitelist Presets', names)], flags: [MessageFlags.Ephemeral] });
+                return interaction.editReply({ embeds: [embeds.info('Auto-Whitelist Presets', names)] });
             }
             if (subdomain === 'autolock') {
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
@@ -262,8 +267,9 @@ module.exports = {
                 const newName = interaction.fields.getTextInputValue('bytepod_rename_input').trim();
                 if (newName.length === 0) return interaction.reply({ content: 'Name cannot be empty.', flags: [MessageFlags.Ephemeral] });
 
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
                 await channel.setName(newName);
-                await interaction.reply({ content: `Renamed channel to **${newName}**.`, flags: [MessageFlags.Ephemeral] });
+                await interaction.editReply({ content: `Renamed channel to **${newName}**.` });
             }
 
             if (customId === 'bytepod_limit') {
@@ -343,14 +349,15 @@ module.exports = {
 
             if (customId.startsWith('bytepod_coowner_select')) {
                 if (!isOwner) return interaction.reply({ content: 'Only the Owner can manage Co-Owners.', flags: [MessageFlags.Ephemeral] });
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
                 const targetPanelId = customId.split('_')[3];
                 const targetId = interaction.values[0];
                 try {
                     await channel.permissionOverwrites.edit(targetId, { ManageChannels: true, MoveMembers: true, Connect: true });
-                    await interaction.reply({ content: `<@${targetId}> is now a Co-Owner.`, flags: [MessageFlags.Ephemeral] });
+                    await interaction.editReply({ content: `<@${targetId}> is now a Co-Owner.` });
                     await updatePanel(targetPanelId);
                 } catch (e) {
-                    if (e.code === 10003) return interaction.reply({ content: 'Channel deleted.', flags: [MessageFlags.Ephemeral] });
+                    if (e.code === 10003) return interaction.editReply({ content: 'Channel deleted.' });
                     throw e;
                 }
             }
@@ -360,16 +367,17 @@ module.exports = {
                 const targetId = interaction.values[0];
                 if (targetId === podData.ownerId) return interaction.reply({ content: 'You cannot kick the Owner.', flags: [MessageFlags.Ephemeral] });
 
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
                 const member = await interaction.guild.members.fetch(targetId);
                 if (member && member.voice.channelId === channel.id) {
                     await member.voice.disconnect('Kicked from BytePod');
                     try {
                         await channel.permissionOverwrites.edit(targetId, { Connect: false });
                     } catch (e) { }
-                    await interaction.reply({ content: `Kicked and blocked <@${targetId}>.`, flags: [MessageFlags.Ephemeral] });
+                    await interaction.editReply({ content: `Kicked and blocked <@${targetId}>.` });
                     await updatePanel(targetPanelId);
                 } else {
-                    await interaction.reply({ content: `User is not in the voice channel.`, flags: [MessageFlags.Ephemeral] });
+                    await interaction.editReply({ content: `User is not in the voice channel.` });
                 }
             }
 
@@ -382,8 +390,9 @@ module.exports = {
                 const limit = parseInt(limitStr);
                 if (isNaN(limit) || limit < 0 || limit > 99) return interaction.reply({ content: 'Invalid limit (0-99).', flags: [MessageFlags.Ephemeral] });
 
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
                 await channel.setUserLimit(limit);
-                await interaction.reply({ content: `Limit set to ${limit}.`, flags: [MessageFlags.Ephemeral] });
+                await interaction.editReply({ content: `Limit set to ${limit}.` });
                 await updatePanel(targetPanelId);
             }
 
