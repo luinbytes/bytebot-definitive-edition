@@ -34,7 +34,7 @@ module.exports = {
             }
 
             const description = logs.map(log =>
-                `**[${log.action}]** <t:${Math.floor(log.timestamp / 1000)}:d>: ${log.reason} (By: <@${log.executorId}>)`
+                `**ID: ${log.id}** | **[${log.action}]** <t:${Math.floor(log.timestamp / 1000)}:d>: ${log.reason} (By: <@${log.executorId}>)`
             ).join('\n');
 
             const embed = embeds.brand(`${target.username}'s Moderation History`, description)

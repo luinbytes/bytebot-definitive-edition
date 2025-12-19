@@ -10,8 +10,7 @@ module.exports = {
         const { guild } = interaction;
         const { members, channels, roles, emojis } = guild;
 
-        const embed = embeds.brand(`${guild.name} Info`, '')
-            .setThumbnail(guild.iconURL({ dynamic: true }))
+        const embed = embeds.brand(`${guild.name} Info`, null)
             .addFields(
                 { name: 'Owner', value: `<@${guild.ownerId}>`, inline: true },
                 { name: 'ID', value: guild.id, inline: true },
@@ -23,6 +22,10 @@ module.exports = {
                 { name: 'Boost Level', value: `Level ${guild.premiumTier}`, inline: true },
                 { name: 'Verification', value: guild.verificationLevel.toString(), inline: true }
             );
+
+        if (guild.iconURL()) {
+            embed.setThumbnail(guild.iconURL({ dynamic: true }));
+        }
 
         if (guild.description) {
             embed.setDescription(guild.description);
