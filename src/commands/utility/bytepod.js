@@ -185,7 +185,10 @@ module.exports = {
         }
 
         const isOwner = podData.ownerId === interaction.user.id;
-        const isCoOwner = channel.permissionsFor(interaction.user).has(PermissionFlagsBits.ManageChannels);
+        // Strict check: Only count as Co-Owner if they have an EXPLICIT allow overwrite for ManageChannels on this channel.
+        // This prevents global Admins/Mods from bypassing the "Co-Owner" list logic if that's intended, 
+        // effectively locking controls to the Pod Owner and their chosen Delegates.
+        const isCoOwner = channel.permissionOverwrites.cache.get(interaction.user.id)?.allow.has(PermissionFlagsBits.ManageChannels);
 
         if (!isOwner && !isCoOwner) {
             return interaction.reply({ content: 'You do not have permission to control this BytePod.', flags: [MessageFlags.Ephemeral] });
