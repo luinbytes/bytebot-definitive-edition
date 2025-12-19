@@ -260,6 +260,14 @@ module.exports = {
                 await interaction.showModal(getRenameModal());
             }
 
+            if (customId === 'bytepod_rename_modal') {
+                const newName = interaction.fields.getTextInputValue('bytepod_rename_input').trim();
+                if (newName.length === 0) return interaction.reply({ content: 'Name cannot be empty.', flags: [MessageFlags.Ephemeral] });
+
+                await channel.setName(newName);
+                await interaction.reply({ content: `Renamed channel to **${newName}**.`, flags: [MessageFlags.Ephemeral] });
+            }
+
             if (customId === 'bytepod_limit') {
                 const modal = getLimitModal();
                 modal.setCustomId(`bytepod_limit_modal_${panelId}`);
@@ -280,36 +288,63 @@ module.exports = {
             // DYNAMIC HANDLERS
             if (customId.startsWith('bytepod_whitelist_select')) {
                 const targetPanelId = customId.split('_')[3];
-                const added = [];
-                const removed = [];
+                const resolvedUsers = [];
+                let anyNew = false;
 
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
-                for (const targetId of interaction.values) {
+                // 1. Resolve Users & Determine Intent
+                for (const id of interaction.values) {
+                    // Safety: Prevent Owner from modifying themselves via this menu
+                    if (id === podData.ownerId) continue;
+
                     try {
-                        const hasPerm = channel.permissionOverwrites.cache.get(targetId)?.allow.has(PermissionFlagsBits.Connect);
-                        if (hasPerm) {
-                            await channel.permissionOverwrites.delete(targetId);
-                            removed.push(targetId);
-                        } else {
-                            await channel.permissionOverwrites.edit(targetId, { Connect: true });
-                            added.push(targetId);
+                        const member = await interaction.guild.members.fetch(id).catch(() => null);
+                        const user = member ? member.user : await interaction.client.users.fetch(id).catch(() => null);
+
+                        if (user) {
+                            resolvedUsers.push(user);
+                            const currentPerms = channel.permissionOverwrites.cache.get(user.id);
+                            // If user does not have an overwrite OR does not have Connect Allow
+                            if (!currentPerms || !currentPerms.allow.has(PermissionFlagsBits.Connect)) {
+                                anyNew = true;
+                            }
                         }
-                    } catch (error) {
-                        if (error.code === 10003) return interaction.editReply({ content: 'Channel deleted.' });
-                        throw error;
+                    } catch (e) {
+                        console.error(`Failed to resolve user ${id}:`, e);
                     }
                 }
 
-                let msg = '';
-                if (added.length) msg += `Whitelisted: ${added.map(id => `<@${id}>`).join(', ')}. `;
-                if (removed.length) msg += `Removed: ${removed.map(id => `<@${id}>`).join(', ')}.`;
+                // 2. Execute Batch Action
+                const modified = [];
+                const action = anyNew ? 'add' : 'remove';
 
-                await interaction.editReply({ content: msg || 'No changes made.' });
+                for (const user of resolvedUsers) {
+                    try {
+                        if (action === 'add') {
+                            await channel.permissionOverwrites.edit(user, { Connect: true });
+                            modified.push(`${user}`);
+                        } else {
+                            // Only delete if they exist to avoid errors? delete is safe usually.
+                            await channel.permissionOverwrites.delete(user.id);
+                            modified.push(`${user}`);
+                        }
+                    } catch (e) {
+                        if (e.code === 10003) return interaction.editReply({ content: 'Channel deleted.' });
+                        console.error(e);
+                    }
+                }
+
+                const msg = action === 'add'
+                    ? `Whitelisted: ${modified.join(', ')}`
+                    : `Removed: ${modified.join(', ')}`;
+
+                await interaction.editReply({ content: msg || 'No valid users selected.' });
                 await updatePanel(targetPanelId);
             }
 
             if (customId.startsWith('bytepod_coowner_select')) {
+                if (!isOwner) return interaction.reply({ content: 'Only the Owner can manage Co-Owners.', flags: [MessageFlags.Ephemeral] });
                 const targetPanelId = customId.split('_')[3];
                 const targetId = interaction.values[0];
                 try {
@@ -325,6 +360,8 @@ module.exports = {
             if (customId.startsWith('bytepod_kick_select')) {
                 const targetPanelId = customId.split('_')[3];
                 const targetId = interaction.values[0];
+                if (targetId === podData.ownerId) return interaction.reply({ content: 'You cannot kick the Owner.', flags: [MessageFlags.Ephemeral] });
+
                 const member = await interaction.guild.members.fetch(targetId);
                 if (member && member.voice.channelId === channel.id) {
                     await member.voice.disconnect('Kicked from BytePod');
@@ -339,11 +376,7 @@ module.exports = {
             }
 
             // MODALS
-            if (customId === 'bytepod_rename_modal') {
-                const newName = interaction.fields.getTextInputValue('bytepod_rename_input');
-                await channel.setName(newName);
-                await interaction.reply({ content: `Renamed channel to **${newName}**.`, flags: [MessageFlags.Ephemeral] });
-            }
+
 
             if (customId.startsWith('bytepod_limit_modal')) {
                 const targetPanelId = customId.split('_')[3];

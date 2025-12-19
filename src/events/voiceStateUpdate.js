@@ -67,7 +67,14 @@ module.exports = {
                 const presets = await db.select().from(bytepodAutoWhitelist).where(eq(bytepodAutoWhitelist.userId, member.id));
                 for (const preset of presets) {
                     try {
-                        await newChannel.permissionOverwrites.edit(preset.targetUserId, { Connect: true });
+                        const targetMember = await guild.members.fetch(preset.targetUserId).catch(() => null);
+                        const targetUser = targetMember ? targetMember.user : await guild.client.users.fetch(preset.targetUserId).catch(() => null);
+
+                        if (targetUser) {
+                            await newChannel.permissionOverwrites.edit(targetUser, { Connect: true });
+                        } else {
+                            logger.warn(`Could not find user ${preset.targetUserId} for whitelist preset.`);
+                        }
                     } catch (e) {
                         logger.error(`Failed to apply whitelist preset for ${preset.targetUserId}: ${e}`);
                     }
