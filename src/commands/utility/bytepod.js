@@ -157,6 +157,7 @@ module.exports = {
                 return interaction.reply({ embeds: [embeds.info('Auto-Whitelist Presets', names)], flags: [MessageFlags.Ephemeral] });
             }
             if (subdomain === 'autolock') {
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
                 const enabled = interaction.options.getBoolean('enabled');
                 await db.insert(bytepodUserSettings).values({
                     userId: interaction.user.id,
@@ -165,7 +166,7 @@ module.exports = {
                     target: bytepodUserSettings.userId,
                     set: { autoLock: enabled }
                 });
-                return interaction.reply({ embeds: [embeds.success('Settings Updated', `Auto-Lock is now **${enabled ? 'Enabled' : 'Disabled'}**.`)], flags: [MessageFlags.Ephemeral] });
+                return interaction.editReply({ embeds: [embeds.success('Settings Updated', `Auto-Lock is now **${enabled ? 'Enabled' : 'Disabled'}**.`)] });
             }
         }
     },
