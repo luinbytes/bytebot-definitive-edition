@@ -115,9 +115,6 @@ module.exports = {
 
             // Get current state
             const { isLocked, limit, whitelist, coOwners } = getPodState(channel);
-            // Optional: Filter out logic if needed, but getPodState handles basic logic.
-            // Owner is not in stored whitelist usually if implicit, but if they are there, filter them?
-            // Actually bytepods.ownerId tells us who the owner is.
             const displayWhitelist = whitelist.filter(id => id !== interaction.user.id);
             const displayCoOwners = coOwners.filter(id => id !== interaction.user.id);
 
@@ -204,9 +201,6 @@ module.exports = {
             if (!msg) return;
 
             const { isLocked, limit, whitelist, coOwners } = getPodState(channel);
-            // We need permission data for getControlPanel.
-            // But getPodState returns whitelist array.
-            // Oh wait, PodData.ownerId is needed.
             const displayWhitelist = whitelist.filter(id => id !== podData.ownerId);
             const displayCoOwners = coOwners.filter(id => id !== podData.ownerId);
 
