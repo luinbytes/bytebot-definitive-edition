@@ -26,4 +26,11 @@ const moderationLogs = sqliteTable('moderation_logs', {
     timestamp: integer('timestamp', { mode: 'timestamp' }).default(new Date()),
 });
 
-module.exports = { guilds, users, moderationLogs };
+const commandPermissions = sqliteTable('command_permissions', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    commandName: text('command_name').notNull(),
+    roleId: text('role_id').notNull(),
+});
+
+module.exports = { guilds, users, moderationLogs, commandPermissions };
