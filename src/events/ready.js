@@ -11,9 +11,9 @@ module.exports = {
         let i = 0;
         setInterval(() => {
             const activities = [
-                { name: 'Doomscrolling 🟣', type: ActivityType.Competing }, // Competing in Doomscrolling
-                { name: 'you Touch Grass 🟣', type: ActivityType.Watching }, // Watching you Touch Grass
-                { name: 'Disassociation Sim 🟣', type: ActivityType.Playing }, // Playing Disassociation Sim
+                { name: 'Doomscrolling (Ranked) 🟣', type: ActivityType.Playing },
+                { name: 'Touch Grass (Any%) 🟣', type: ActivityType.Playing },
+                { name: 'Existential Dread (Hard Mode) 🟣', type: ActivityType.Playing },
             ];
 
             client.user.setPresence({
