@@ -1,9 +1,23 @@
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType, ActionRowBuilder, UserSelectMenuBuilder, MessageFlags } = require('discord.js');
 const { db } = require('../../database');
-const { guilds, bytepods, bytepodAutoWhitelist, bytepodUserSettings } = require('../../database/schema');
+const { guilds, bytepods, bytepodAutoWhitelist, bytepodUserSettings, bytepodVoiceStats, bytepodTemplates } = require('../../database/schema');
 const { eq, and } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const { getControlPanel, getRenameModal, getLimitModal } = require('../../components/bytepodControls');
+
+// Helper to format seconds into human-readable time
+function formatDuration(totalSeconds) {
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    const parts = [];
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0) parts.push(`${minutes}m`);
+    if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
+
+    return parts.join(' ');
+}
 
 // Helper to get state
 function getPodState(channel) {
@@ -69,7 +83,31 @@ module.exports = {
                 .addSubcommand(sub =>
                     sub.setName('autolock')
                         .setDescription('Set whether your BytePods should automatically lock on creation.')
-                        .addBooleanOption(option => option.setName('enabled').setDescription('Enable or disable auto-lock').setRequired(true)))),
+                        .addBooleanOption(option => option.setName('enabled').setDescription('Enable or disable auto-lock').setRequired(true))))
+        .addSubcommand(sub =>
+            sub.setName('stats')
+                .setDescription('View BytePod voice activity statistics.')
+                .addUserOption(opt => opt
+                    .setName('user')
+                    .setDescription('User to view stats for (defaults to you)')))
+        .addSubcommandGroup(group =>
+            group.setName('template')
+                .setDescription('Manage BytePod configuration templates.')
+                .addSubcommand(sub =>
+                    sub.setName('save')
+                        .setDescription('Save current pod configuration as a template.')
+                        .addStringOption(opt => opt.setName('name').setDescription('Template name').setRequired(true).setMaxLength(32)))
+                .addSubcommand(sub =>
+                    sub.setName('load')
+                        .setDescription('Load a saved template to current pod.')
+                        .addStringOption(opt => opt.setName('name').setDescription('Template name').setRequired(true)))
+                .addSubcommand(sub =>
+                    sub.setName('list')
+                        .setDescription('List your saved templates.'))
+                .addSubcommand(sub =>
+                    sub.setName('delete')
+                        .setDescription('Delete a saved template.')
+                        .addStringOption(opt => opt.setName('name').setDescription('Template name').setRequired(true)))),
 
     async execute(interaction) {
         const subdomain = interaction.options.getSubcommand();
@@ -172,6 +210,162 @@ module.exports = {
                     set: { autoLock: enabled }
                 });
                 return interaction.editReply({ embeds: [embeds.success('Settings Updated', `Auto-Lock is now **${enabled ? 'Enabled' : 'Disabled'}**.`)] });
+            }
+        }
+
+        // --- STATS SUBCOMMAND ---
+        if (subdomain === 'stats') {
+            await interaction.deferReply();
+            const target = interaction.options.getUser('user') ?? interaction.user;
+
+            const stats = await db.select().from(bytepodVoiceStats)
+                .where(and(
+                    eq(bytepodVoiceStats.userId, target.id),
+                    eq(bytepodVoiceStats.guildId, interaction.guild.id)
+                )).get();
+
+            if (!stats || stats.totalSeconds === 0) {
+                return interaction.editReply({
+                    embeds: [embeds.brand(`${target.username}'s BytePod Stats`, 'No voice activity recorded yet.')]
+                });
+            }
+
+            const avgSeconds = Math.floor(stats.totalSeconds / stats.sessionCount);
+            const embed = embeds.brand(`${target.username}'s BytePod Stats`)
+                .addFields(
+                    { name: '⏱️ Total Time', value: formatDuration(stats.totalSeconds), inline: true },
+                    { name: '📊 Sessions', value: stats.sessionCount.toString(), inline: true },
+                    { name: '📈 Avg Session', value: formatDuration(avgSeconds), inline: true }
+                );
+
+            return interaction.editReply({ embeds: [embed] });
+        }
+
+        // --- TEMPLATE SUBCOMMAND GROUP ---
+        if (group === 'template') {
+            if (subdomain === 'save') {
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+                const templateName = interaction.options.getString('name').trim().toLowerCase();
+
+                // Check if user is in a BytePod they own
+                const voiceChannel = interaction.member.voice.channel;
+                if (!voiceChannel) {
+                    return interaction.editReply({ embeds: [embeds.error('Not in Voice', 'You must be in your BytePod to save a template.')] });
+                }
+
+                const podData = await db.select().from(bytepods).where(eq(bytepods.channelId, voiceChannel.id)).get();
+                if (!podData || podData.ownerId !== interaction.user.id) {
+                    return interaction.editReply({ embeds: [embeds.error('Not Your Pod', 'You must be in a BytePod you own to save a template.')] });
+                }
+
+                // Get current state
+                const { isLocked, limit, whitelist } = getPodState(voiceChannel);
+                const whitelistJson = JSON.stringify(whitelist.filter(id => id !== interaction.user.id));
+
+                // Check for existing template with same name
+                const existing = await db.select().from(bytepodTemplates)
+                    .where(and(
+                        eq(bytepodTemplates.userId, interaction.user.id),
+                        eq(bytepodTemplates.name, templateName)
+                    )).get();
+
+                if (existing) {
+                    // Update existing
+                    await db.update(bytepodTemplates)
+                        .set({
+                            userLimit: limit,
+                            autoLock: isLocked,
+                            whitelistUserIds: whitelistJson
+                        })
+                        .where(eq(bytepodTemplates.id, existing.id));
+                    return interaction.editReply({ embeds: [embeds.success('Template Updated', `Template **${templateName}** has been updated.`)] });
+                } else {
+                    // Create new
+                    await db.insert(bytepodTemplates).values({
+                        userId: interaction.user.id,
+                        name: templateName,
+                        userLimit: limit,
+                        autoLock: isLocked,
+                        whitelistUserIds: whitelistJson
+                    });
+                    return interaction.editReply({ embeds: [embeds.success('Template Saved', `Template **${templateName}** has been saved.`)] });
+                }
+            }
+
+            if (subdomain === 'load') {
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+                const templateName = interaction.options.getString('name').trim().toLowerCase();
+
+                // Check if user is in a BytePod they own
+                const voiceChannel = interaction.member.voice.channel;
+                if (!voiceChannel) {
+                    return interaction.editReply({ embeds: [embeds.error('Not in Voice', 'You must be in your BytePod to load a template.')] });
+                }
+
+                const podData = await db.select().from(bytepods).where(eq(bytepods.channelId, voiceChannel.id)).get();
+                if (!podData || podData.ownerId !== interaction.user.id) {
+                    return interaction.editReply({ embeds: [embeds.error('Not Your Pod', 'You must be in a BytePod you own to load a template.')] });
+                }
+
+                // Fetch template
+                const template = await db.select().from(bytepodTemplates)
+                    .where(and(
+                        eq(bytepodTemplates.userId, interaction.user.id),
+                        eq(bytepodTemplates.name, templateName)
+                    )).get();
+
+                if (!template) {
+                    return interaction.editReply({ embeds: [embeds.error('Not Found', `Template **${templateName}** does not exist.`)] });
+                }
+
+                // Apply settings
+                await voiceChannel.setUserLimit(template.userLimit);
+                await voiceChannel.permissionOverwrites.edit(interaction.guild.id, {
+                    Connect: template.autoLock ? false : null
+                });
+
+                // Apply whitelist
+                const whitelistIds = template.whitelistUserIds ? JSON.parse(template.whitelistUserIds) : [];
+                for (const userId of whitelistIds) {
+                    try {
+                        await voiceChannel.permissionOverwrites.edit(userId, { Connect: true });
+                    } catch (e) {
+                        // User may no longer exist or be fetchable
+                    }
+                }
+
+                return interaction.editReply({ embeds: [embeds.success('Template Loaded', `Template **${templateName}** has been applied to your BytePod.`)] });
+            }
+
+            if (subdomain === 'list') {
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+                const templates = await db.select().from(bytepodTemplates)
+                    .where(eq(bytepodTemplates.userId, interaction.user.id));
+
+                if (templates.length === 0) {
+                    return interaction.editReply({ embeds: [embeds.brand('Your Templates', 'You have no saved templates.')] });
+                }
+
+                const description = templates.map(t => {
+                    const whitelistCount = t.whitelistUserIds ? JSON.parse(t.whitelistUserIds).length : 0;
+                    return `**${t.name}** - Limit: ${t.userLimit}, Lock: ${t.autoLock ? 'Yes' : 'No'}, Whitelist: ${whitelistCount} users`;
+                }).join('\n');
+
+                return interaction.editReply({ embeds: [embeds.brand('Your Templates', description)] });
+            }
+
+            if (subdomain === 'delete') {
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+                const templateName = interaction.options.getString('name').trim().toLowerCase();
+
+                const result = await db.delete(bytepodTemplates)
+                    .where(and(
+                        eq(bytepodTemplates.userId, interaction.user.id),
+                        eq(bytepodTemplates.name, templateName)
+                    ));
+
+                // Drizzle doesn't return affected rows easily, so we just confirm
+                return interaction.editReply({ embeds: [embeds.success('Template Deleted', `Template **${templateName}** has been deleted (if it existed).`)] });
             }
         }
     },

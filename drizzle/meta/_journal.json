@@ -8,6 +8,13 @@
       "when": 1766108748872,
       "tag": "0000_public_microchip",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1766185842014,
+      "tag": "0001_lonely_wrecker",
+      "breakpoints": true
     }
   ]
 }
