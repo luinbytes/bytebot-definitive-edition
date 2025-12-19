@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType, ActionRowBuilder, UserSelectMenuBuilder, MessageFlags } = require('discord.js');
 const { db } = require('../../database');
-const { guilds, bytepods, bytepodAutoWhitelist } = require('../../database/schema');
+const { guilds, bytepods, bytepodAutoWhitelist, bytepodUserSettings } = require('../../database/schema');
 const { eq, and } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const { getControlPanel, getRenameModal, getLimitModal } = require('../../components/bytepodControls');
@@ -65,7 +65,11 @@ module.exports = {
                         .addUserOption(option => option.setName('user').setDescription('The user to remove').setRequired(true)))
                 .addSubcommand(sub =>
                     sub.setName('list')
-                        .setDescription('View your current auto-whitelist.'))),
+                        .setDescription('View your current auto-whitelist.'))
+                .addSubcommand(sub =>
+                    sub.setName('autolock')
+                        .setDescription('Set whether your BytePods should automatically lock on creation.')
+                        .addBooleanOption(option => option.setName('enabled').setDescription('Enable or disable auto-lock').setRequired(true)))),
 
     async execute(interaction) {
         const subdomain = interaction.options.getSubcommand();
@@ -154,6 +158,17 @@ module.exports = {
                 const presets = await db.select().from(bytepodAutoWhitelist).where(eq(bytepodAutoWhitelist.userId, interaction.user.id));
                 const names = presets.map(p => `<@${p.targetUserId}>`).join(', ') || 'No users.';
                 return interaction.reply({ embeds: [embeds.info('Auto-Whitelist Presets', names)], flags: [MessageFlags.Ephemeral] });
+            }
+            if (subdomain === 'autolock') {
+                const enabled = interaction.options.getBoolean('enabled');
+                await db.insert(bytepodUserSettings).values({
+                    userId: interaction.user.id,
+                    autoLock: enabled
+                }).onConflictDoUpdate({
+                    target: bytepodUserSettings.userId,
+                    set: { autoLock: enabled }
+                });
+                return interaction.reply({ embeds: [embeds.success('Settings Updated', `Auto-Lock is now **${enabled ? 'Enabled' : 'Disabled'}**.`)], flags: [MessageFlags.Ephemeral] });
             }
         }
     },

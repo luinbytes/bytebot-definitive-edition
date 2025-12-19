@@ -1,6 +1,6 @@
 const { Events, ChannelType, PermissionFlagsBits } = require('discord.js');
 const { db } = require('../database');
-const { guilds, bytepods, bytepodAutoWhitelist } = require('../database/schema');
+const { guilds, bytepods, bytepodAutoWhitelist, bytepodUserSettings } = require('../database/schema');
 const { eq } = require('drizzle-orm');
 const logger = require('../utils/logger');
 const embeds = require('../utils/embeds'); // Ensure embeds is imported
@@ -37,6 +37,10 @@ module.exports = {
             }
 
             try {
+                // Fetch User Settings
+                const userSettings = await db.select().from(bytepodUserSettings).where(eq(bytepodUserSettings.userId, member.id)).get();
+                const autoLock = userSettings?.autoLock || false;
+
                 // Determine Category
                 const categoryId = guildData.voiceHubCategoryId || newState.channel.parentId;
 
@@ -49,7 +53,8 @@ module.exports = {
                     permissionOverwrites: [
                         {
                             id: guild.id,
-                            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect], // Visible and Connect by default
+                            allow: [PermissionFlagsBits.ViewChannel],
+                            deny: autoLock ? [PermissionFlagsBits.Connect] : [], // Apply Auto-Lock
                         },
                         {
                             id: member.id,
@@ -80,7 +85,7 @@ module.exports = {
 
                 // Send Control Panel
                 const whitelistIDs = presets.map(p => p.targetUserId);
-                const { embeds: panelEmbeds, components } = getControlPanel(newChannel.id, false, 0, whitelistIDs); // Default Open, No Limit, Presets whitelist
+                const { embeds: panelEmbeds, components } = getControlPanel(newChannel.id, autoLock, 0, whitelistIDs); // Pass autoLock state
                 await newChannel.send({ content: `Welcome to your BytePod, ${member}!`, embeds: panelEmbeds, components });
 
             } catch (error) {
