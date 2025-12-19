@@ -29,6 +29,9 @@ process.on('uncaughtException', (err) => {
         const eventHandler = require('./handlers/eventHandler');
         const commandHandler = require('./handlers/commandHandler');
 
+        const { runMigrations } = require('./database/index');
+        await runMigrations();
+
         await eventHandler(client);
         await commandHandler(client);
 
