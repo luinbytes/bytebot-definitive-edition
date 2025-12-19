@@ -8,7 +8,7 @@ module.exports = {
         .setDMPermission(true),
     devOnly: true,
     async execute(interaction, client) {
-        const guilds = client.guilds.cache;
+        const guilds = client.guilds.cache.sort((a, b) => b.memberCount - a.memberCount);
 
         if (guilds.size === 0) {
             return await interaction.reply({
