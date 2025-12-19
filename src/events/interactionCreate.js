@@ -3,12 +3,25 @@ const logger = require('../utils/logger');
 const embeds = require('../utils/embeds');
 const config = require('../../config.json');
 const { db } = require('../database/index');
-const { users } = require('../database/schema');
-const { sql } = require('drizzle-orm');
+const { users, commandPermissions } = require('../database/schema');
+const { sql, eq, and } = require('drizzle-orm');
 
 module.exports = {
     name: Events.InteractionCreate,
     async execute(interaction, client) {
+        // Handle Autocomplete interactions
+        if (interaction.isAutocomplete()) {
+            const command = client.commands.get(interaction.commandName);
+            if (!command) return;
+
+            try {
+                await command.autocomplete(interaction, client);
+            } catch (error) {
+                logger.error(`Autocomplete Error: ${error}`);
+            }
+            return;
+        }
+
         if (!interaction.isChatInputCommand()) return;
 
         const command = client.commands.get(interaction.commandName);
@@ -55,11 +68,14 @@ module.exports = {
             });
         }
 
-        // 4. Permission Checks (User - Only if in a guild)
-        if (interaction.guild && command.permissions && command.permissions.length > 0) {
-            if (!interaction.member.permissions.has(command.permissions)) {
+        // 4. Permission Checks (Modular)
+        if (interaction.guild) {
+            const { checkUserPermissions } = require('../utils/permissions');
+            const { allowed, error } = await checkUserPermissions(interaction, command);
+
+            if (!allowed) {
                 return interaction.reply({
-                    embeds: [embeds.error('Insufficient Permissions', `You need the following permissions: \`${command.permissions.join(', ')}\``)],
+                    embeds: [error],
                     flags: [MessageFlags.Ephemeral]
                 });
             }
