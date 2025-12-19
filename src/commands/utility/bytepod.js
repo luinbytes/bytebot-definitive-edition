@@ -187,11 +187,7 @@ module.exports = {
         const isOwner = podData.ownerId === interaction.user.id;
         const isCoOwner = channel.permissionsFor(interaction.user).has(PermissionFlagsBits.ManageChannels);
 
-        // Check permissions based on the base ID (remove dynamic part)
-        const baseCustomId = interaction.customId.split('_').slice(0, 3).join('_'); // bytepod_whitelist_select_... -> bytepod_whitelist_select
-        const isPublicInteraction = ['bytepod_whitelist_select', 'bytepod_whitelist_menu_open'].includes(baseCustomId) || ['bytepod_whitelist_select', 'bytepod_whitelist_menu_open'].includes(interaction.customId);
-
-        if (!isOwner && !isCoOwner && !isPublicInteraction) {
+        if (!isOwner && !isCoOwner) {
             return interaction.reply({ content: 'You do not have permission to control this BytePod.', flags: [MessageFlags.Ephemeral] });
         }
 
