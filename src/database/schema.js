@@ -49,4 +49,9 @@ const bytepodAutoWhitelist = sqliteTable('bytepod_autowhitelist', {
     guildId: text('guild_id'),
 });
 
-module.exports = { guilds, users, moderationLogs, commandPermissions, bytepods, bytepodAutoWhitelist };
+const bytepodUserSettings = sqliteTable('bytepod_user_settings', {
+    userId: text('user_id').primaryKey(),
+    autoLock: integer('auto_lock', { mode: 'boolean' }).default(false),
+});
+
+module.exports = { guilds, users, moderationLogs, commandPermissions, bytepods, bytepodAutoWhitelist, bytepodUserSettings };
