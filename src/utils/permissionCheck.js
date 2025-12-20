@@ -1,5 +1,6 @@
 const { PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const embeds = require('./embeds');
+const logger = require('./logger');
 
 /**
  * Checks if the bot has the required permissions to manage BytePods.
@@ -24,7 +25,7 @@ async function checkBotPermissions(guild, triggerMember) {
     if (missingPermissions.length === 0) return true;
 
     // Permissions are missing, attempt to notify
-    console.error(`[BytePods] Missing permissions in guild ${guild.name} (${guild.id}):`, missingPermissions);
+    logger.warn(`[BytePods] Missing permissions in guild ${guild.name} (${guild.id}): ${missingPermissions.join(', ')}`);
 
     const errorEmbed = embeds.error(
         'Missing Permissions',
@@ -49,7 +50,7 @@ async function checkBotPermissions(guild, triggerMember) {
                 embeds: [errorEmbed]
             });
         } catch (err) {
-            console.error('Failed to notify guild owner of permission error.');
+            logger.warn('Failed to notify guild owner of permission error.');
         }
     }
 

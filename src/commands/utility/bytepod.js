@@ -3,6 +3,7 @@ const { db } = require('../../database');
 const { guilds, bytepods, bytepodAutoWhitelist, bytepodUserSettings, bytepodVoiceStats, bytepodTemplates } = require('../../database/schema');
 const { eq, and } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
+const logger = require('../../utils/logger');
 const { getControlPanel, getRenameModal, getLimitModal } = require('../../components/bytepodControls');
 
 // Helper to format seconds into human-readable time
@@ -624,7 +625,7 @@ module.exports = {
                             }
                         }
                     } catch (e) {
-                        console.error(`Failed to resolve user ${id}:`, e);
+                        logger.warn(`Failed to resolve user ${id}:`, e.message);
                     }
                 }
 
@@ -644,7 +645,7 @@ module.exports = {
                         }
                     } catch (e) {
                         if (e.code === 10003) return interaction.editReply({ content: 'Channel deleted.' });
-                        console.error(e);
+                        logger.warn(`Failed to modify permissions: ${e.message}`);
                     }
                 }
 
@@ -706,7 +707,7 @@ module.exports = {
             }
 
         } catch (error) {
-            console.error(error);
+            logger.error(error);
             if (!interaction.replied) await interaction.reply({ content: 'action failed.', flags: [MessageFlags.Ephemeral] });
         }
     }

@@ -3,6 +3,7 @@ const { db } = require('../../database/index');
 const { moderationLogs } = require('../../database/schema');
 const { eq, and } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
+const logger = require('../../utils/logger');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -57,7 +58,7 @@ module.exports = {
             });
 
         } catch (error) {
-            console.error(error);
+            logger.error(error);
             return interaction.reply({
                 embeds: [embeds.error('Error', 'An error occurred while removing the warning.')],
                 flags: [MessageFlags.Ephemeral]

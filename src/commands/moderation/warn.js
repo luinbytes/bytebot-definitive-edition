@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
+const logger = require('../../utils/logger');
 const { db } = require('../../database/index');
 const { moderationLogs } = require('../../database/schema');
 
@@ -45,7 +46,7 @@ module.exports = {
                 embeds: [embeds.success('Member Warned', `**${target.tag}** has been warned.\n**Reason:** ${reason}`)]
             });
         } catch (error) {
-            console.error(error);
+            logger.error(error);
             await interaction.reply({
                 embeds: [embeds.error('Error', 'An error occurred while trying to warn this member.')],
                 flags: [MessageFlags.Ephemeral]
