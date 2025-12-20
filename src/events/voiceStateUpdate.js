@@ -423,22 +423,28 @@ module.exports = {
                         pendingOwnershipTransfers.delete(leftChannelId);
 
                         try {
+                            logger.debug(`[Transfer Timeout] Checking pod ${leftChannelId} for transfer`);
+
                             // Re-fetch pod data and channel state
                             const currentPodData = await db.select().from(bytepods).where(eq(bytepods.channelId, leftChannelId)).get();
                             if (!currentPodData || !currentPodData.ownerLeftAt) {
-                                // Owner returned or pod deleted
+                                logger.debug(`[Transfer Timeout] Skipping - pod deleted or owner returned (ownerLeftAt: ${currentPodData?.ownerLeftAt})`);
                                 return;
                             }
 
                             const currentChannel = await guild.channels.fetch(leftChannelId).catch(() => null);
                             if (!currentChannel || currentChannel.members.size === 0) {
+                                logger.debug(`[Transfer Timeout] Skipping - channel deleted or empty (exists: ${!!currentChannel}, members: ${currentChannel?.members.size || 0})`);
                                 return; // Channel deleted or empty
                             }
 
                             // Pick the first member in the channel as new owner
                             const newOwner = currentChannel.members.first();
                             if (newOwner && !newOwner.user.bot) {
+                                logger.debug(`[Transfer Timeout] Transferring ownership to ${newOwner.id}`);
                                 await transferOwnership(currentChannel, currentPodData, newOwner.id, guild.client);
+                            } else {
+                                logger.debug(`[Transfer Timeout] Skipping - no valid new owner (newOwner: ${newOwner?.id}, isBot: ${newOwner?.user.bot})`);
                             }
                         } catch (error) {
                             logger.errorContext('Ownership transfer timeout failed', error, {
