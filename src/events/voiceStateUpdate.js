@@ -139,6 +139,12 @@ async function transferOwnership(channel, podData, newOwnerId, client) {
         });
 
     } catch (error) {
+        // Handle channel deletion race condition
+        if (error.code === 10003) {
+            logger.info(`Channel ${channel.id} was deleted during ownership transfer, skipping`);
+            return;
+        }
+
         logger.errorContext('Failed to transfer BytePod ownership', error, {
             channelId: channel.id,
             oldOwnerId,

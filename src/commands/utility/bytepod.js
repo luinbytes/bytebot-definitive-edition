@@ -734,6 +734,12 @@ module.exports = {
         }
 
         } catch (error) {
+            // Handle stale control panel interactions gracefully
+            if (error.code === 10062) {
+                logger.info(`Stale control panel interaction (${interaction.customId}) - user clicked old panel, ignoring`);
+                return; // Silently ignore - user will see "this interaction failed" which is expected for old panels
+            }
+
             logger.errorContext('BytePod interaction failed', error, {
                 customId: interaction.customId,
                 user: interaction.user.tag,
