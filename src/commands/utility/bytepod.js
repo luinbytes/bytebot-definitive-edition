@@ -480,17 +480,33 @@ module.exports = {
                     embeds: [embeds.success('Ownership Transferred', `<@${oldOwnerId}> accepted the request. <@${requesterId}> is now the owner.`)]
                 });
 
-                // Send fresh control panel for new owner
-                const { isLocked, limit, whitelist, coOwners } = getPodState(channel);
-                const displayWhitelist = whitelist.filter(id => id !== requesterId);
-                const displayCoOwners = coOwners.filter(id => id !== requesterId);
+                // Send fresh control panel to new owner via DM
+                try {
+                    const requesterUser = await interaction.client.users.fetch(requesterId);
+                    const { isLocked, limit, whitelist, coOwners } = getPodState(channel);
+                    const displayWhitelist = whitelist.filter(id => id !== requesterId);
+                    const displayCoOwners = coOwners.filter(id => id !== requesterId);
 
-                const { embeds: panelEmbeds, components: panelComponents } = getControlPanel(channel.id, isLocked, limit, displayWhitelist, displayCoOwners);
-                await channel.send({
-                    content: `<@${requesterId}>, you are now the owner! Use the controls below:`,
-                    embeds: panelEmbeds,
-                    components: panelComponents
-                });
+                    const { embeds: panelEmbeds, components: panelComponents } = getControlPanel(channel.id, isLocked, limit, displayWhitelist, displayCoOwners);
+                    await requesterUser.send({
+                        content: `You are now the owner of **${channel.name}**! Use the controls below:`,
+                        embeds: panelEmbeds,
+                        components: panelComponents
+                    });
+                } catch (dmError) {
+                    // User has DMs disabled - send in channel as fallback
+                    logger.warn(`Could not DM control panel to ${requesterId}: ${dmError.message}`);
+                    const { isLocked, limit, whitelist, coOwners } = getPodState(channel);
+                    const displayWhitelist = whitelist.filter(id => id !== requesterId);
+                    const displayCoOwners = coOwners.filter(id => id !== requesterId);
+
+                    const { embeds: panelEmbeds, components: panelComponents } = getControlPanel(channel.id, isLocked, limit, displayWhitelist, displayCoOwners);
+                    await channel.send({
+                        content: `<@${requesterId}>, you are now the owner! Use the controls below (DMs disabled, using channel):`,
+                        embeds: panelEmbeds,
+                        components: panelComponents
+                    });
+                }
 
                 await interaction.message.delete().catch(() => { });
             } catch (e) {
