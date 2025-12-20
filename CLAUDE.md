@@ -94,7 +94,10 @@ bytepodTemplates: {
 **index.js** - Database initialization:
 - Initializes better-sqlite3 connection to `sqlite.db`
 - Wraps with Drizzle ORM for type-safe queries
-- `runMigrations()` applies schema changes from `./drizzle` folder
+- `runMigrations()` applies schema changes:
+  1. First runs `validateAndFixSchema()` to check/add missing tables/columns
+  2. Then runs Drizzle migrations (won't crash if schema already fixed)
+- **Auto-Schema Validation:** `expectedSchema` object defines all tables/columns - kept in sync with schema.js
 
 ### Handlers (src/handlers/)
 
@@ -615,7 +618,11 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
   - `logger.errorContext()` method for detailed debugging
   - Discord API error details (code, status, method, URL) now logged
   - AggregateError breakdowns for `Promise.all` failures
-- **Files modified:** `schema.js`, `voiceStateUpdate.js`, `bytepod.js`, `logger.js`, `interactionCreate.js`
+- **Auto-Schema Validation** - Database self-heals on startup
+  - `validateAndFixSchema()` checks all tables/columns before Drizzle runs
+  - Missing tables created, missing columns added automatically
+  - No more migration failures or need to delete database
+- **Files modified:** `schema.js`, `voiceStateUpdate.js`, `bytepod.js`, `logger.js`, `interactionCreate.js`, `database/index.js`
 
 ### 2025-12-19 - Voice Activity Stats, Templates & Audit Command
 - **New Feature: Voice Activity Stats** - Tracks cumulative time spent in BytePods
