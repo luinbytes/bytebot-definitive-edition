@@ -120,10 +120,17 @@ async function transferOwnership(channel, podData, newOwnerId, client) {
         );
 
         logger.debug(`[Transfer] Step 5: Renaming channel`);
-        // Rename channel to new owner's name
+        // Rename channel to new owner's name (with timeout to prevent Discord rate limit hangs)
         try {
             const newOwnerMember = await guild.members.fetch(newOwnerId);
-            await channel.setName(`${newOwnerMember.user.username}'s Pod`);
+
+            // Use Promise.race to timeout after 5 seconds (Discord rate limits channel renames)
+            await Promise.race([
+                channel.setName(`${newOwnerMember.user.username}'s Pod`),
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('Rename timeout - likely rate limited by Discord')), 5000)
+                )
+            ]);
         } catch (e) {
             logger.warn(`Failed to rename channel for new owner: ${e.message}`);
         }
