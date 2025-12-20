@@ -398,7 +398,11 @@ module.exports = {
                 return interaction.reply({ content: 'Only the original creator can request ownership back.', flags: [MessageFlags.Ephemeral] });
             }
 
-            await interaction.deferUpdate();
+            // Use reply instead of deferUpdate to avoid voice reconnect issue
+            await interaction.reply({
+                content: '✅ Request sent to the current owner!',
+                flags: [MessageFlags.Ephemeral]
+            });
 
             // Send request to current owner with Accept/Deny buttons
             const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
@@ -423,10 +427,12 @@ module.exports = {
                     components: [decisionRow]
                 });
 
-                // Remove the original prompt
-                await interaction.message.delete().catch(() => { });
+                // Update the original message to disable the button (prevents duplicate requests)
+                await interaction.message.edit({
+                    components: [] // Remove all buttons
+                }).catch(() => { });
             } catch (e) {
-                await interaction.followUp({ content: 'Failed to send request.', flags: [MessageFlags.Ephemeral] });
+                logger.error(`Failed to send reclaim request: ${e.message}`);
             }
             return;
         }
@@ -446,9 +452,12 @@ module.exports = {
                 // Transfer ownership back
                 const oldOwnerId = podData.ownerId;
 
-                // Update database
+                // Update database - clear pending flag and transfer ownership
                 await db.update(bytepods)
-                    .set({ ownerId: requesterId })
+                    .set({
+                        ownerId: requesterId,
+                        reclaimRequestPending: false
+                    })
                     .where(eq(bytepods.channelId, channel.id));
 
                 // Update permissions
@@ -476,6 +485,7 @@ module.exports = {
 
                 await interaction.message.delete().catch(() => { });
             } catch (e) {
+                logger.error(`Failed to transfer ownership: ${e.message}`);
                 await interaction.followUp({ content: 'Failed to transfer ownership.', flags: [MessageFlags.Ephemeral] });
             }
             return;
@@ -491,6 +501,11 @@ module.exports = {
             }
 
             await interaction.deferUpdate();
+
+            // Clear pending flag in database
+            await db.update(bytepods)
+                .set({ reclaimRequestPending: false })
+                .where(eq(bytepods.channelId, channel.id));
 
             await channel.send({
                 embeds: [embeds.error('Request Denied', `<@${podData.ownerId}> denied the ownership request from <@${requesterId}>.`)]
