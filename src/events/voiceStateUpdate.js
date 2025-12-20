@@ -82,12 +82,12 @@ async function transferOwnership(channel, podData, newOwnerId, client) {
     const oldOwnerId = podData.ownerId;
 
     try {
-        // Update database - new owner takes over as original owner after grace period expires
+        // Update database (keep originalOwnerId unchanged - creator can always reclaim)
         await db.update(bytepods)
             .set({
                 ownerId: newOwnerId,
                 ownerLeftAt: null,
-                originalOwnerId: newOwnerId // New owner becomes the original owner
+                reclaimRequestPending: false // Clear any pending reclaim requests
             })
             .where(eq(bytepods.channelId, channel.id));
 
