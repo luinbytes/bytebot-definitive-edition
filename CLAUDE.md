@@ -61,8 +61,11 @@ commandPermissions: {
 }
 
 bytepods: {
-  channelId (PK), guildId, ownerId, createdAt
+  channelId (PK), guildId, ownerId, originalOwnerId, ownerLeftAt, reclaimRequestPending, createdAt
   // Tracks active ephemeral voice channels
+  // originalOwnerId: Who created the pod (for reclaim eligibility)
+  // ownerLeftAt: Timestamp when owner left (null if present)
+  // reclaimRequestPending: Prevents duplicate reclaim prompts
 }
 
 bytepodAutoWhitelist: {
@@ -601,6 +604,26 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
 ---
 
 ## Recent Changes
+
+### 2025-12-20 - Fix BytePod Ownership Reclaim Edge Cases
+- **CRITICAL FIX: Voice Reconnect Bug** - Fixed button interaction causing voice disconnects
+  - Root cause: Using `deferUpdate()` then deleting the message confused Discord's state management
+  - Fix: Changed to `reply({ ephemeral: true })` and disable button instead of deleting message
+  - Result: No more unexpected voice reconnects when clicking "Request Ownership Back"
+- **CRITICAL FIX: Duplicate Reclaim Prompts** - Prevented spam of ownership reclaim buttons
+  - Added `reclaimRequestPending` boolean to `bytepods` table
+  - Only send reclaim prompt if no pending request exists
+  - Clear flag when accepted/denied
+  - Result: Original owner gets ONE prompt, not infinite prompts on every join
+- **New Feature: Automatic originalOwnerId Backfill** - Fixes reclaim for old pods
+  - Detects when current owner joins their pod but `originalOwnerId` is null
+  - Automatically sets `originalOwnerId` to current `ownerId`
+  - Enables reclaim feature for pods created before this system existed
+- **Improved Button Handling** - Better UX for reclaim requests
+  - Original prompt button is disabled (not deleted) after clicking
+  - Ephemeral confirmation message sent to requester
+  - Accept/Deny messages properly cleanup pending flags
+- **Files modified:** `schema.js`, `database/index.js`, `voiceStateUpdate.js`, `bytepod.js`, `CLAUDE.md`
 
 ### 2025-12-20 - BytePod Ownership Transfer System
 - **New Feature: Ownership Transfer** - When owner leaves, ownership transfers after 5 minutes

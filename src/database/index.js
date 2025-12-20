@@ -72,6 +72,7 @@ const expectedSchema = {
         owner_id: 'TEXT NOT NULL',
         original_owner_id: 'TEXT',
         owner_left_at: 'INTEGER',
+        reclaim_request_pending: 'INTEGER DEFAULT 0',
         created_at: 'INTEGER'
     },
     bytepod_autowhitelist: {

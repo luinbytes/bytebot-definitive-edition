@@ -41,6 +41,7 @@ const bytepods = sqliteTable('bytepods', {
     ownerId: text('owner_id').notNull(),
     originalOwnerId: text('original_owner_id'), // Who created the pod (for reclaim eligibility)
     ownerLeftAt: integer('owner_left_at'),      // Timestamp (ms) when owner left - null if owner present
+    reclaimRequestPending: integer('reclaim_request_pending', { mode: 'boolean' }).default(false), // Prevents duplicate reclaim prompts
     createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date()),
 });
 
