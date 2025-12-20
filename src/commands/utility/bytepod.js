@@ -373,10 +373,10 @@ module.exports = {
 
     // --- INTERACTION HANDLER ---
     async handleInteraction(interaction) {
-        try {
-            const channel = interaction.channel;
-            const { customId } = interaction;
+        const channel = interaction.channel;
+        const { customId } = interaction;
 
+        try {
             // Fetch pod data first
             const podData = await db.select().from(bytepods).where(eq(bytepods.channelId, channel.id)).get();
             if (!podData) {
