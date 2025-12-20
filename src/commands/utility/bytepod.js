@@ -376,11 +376,14 @@ module.exports = {
         const channel = interaction.channel;
         const { customId } = interaction;
 
-        // Fetch pod data first
-        const podData = await db.select().from(bytepods).where(eq(bytepods.channelId, channel.id)).get();
-        if (!podData) {
-            return interaction.reply({ content: 'This channel is not a valid BytePod.', flags: [MessageFlags.Ephemeral] });
-        }
+        try {
+            // Fetch pod data first
+            const podData = await db.select().from(bytepods).where(eq(bytepods.channelId, channel.id)).get();
+            if (!podData) {
+                return interaction.reply({ content: 'This channel is not a valid BytePod.', flags: [MessageFlags.Ephemeral] });
+            }
+
+            logger.debug(`BytePod interaction: ${customId} by ${interaction.user.tag} in ${channel.id}`);
 
         // --- RECLAIM REQUEST HANDLERS (before ownership check) ---
         // These can be used by people who are NOT the current owner
@@ -398,7 +401,11 @@ module.exports = {
                 return interaction.reply({ content: 'Only the original creator can request ownership back.', flags: [MessageFlags.Ephemeral] });
             }
 
-            await interaction.deferUpdate();
+            // Use reply instead of deferUpdate to avoid voice reconnect issue
+            await interaction.reply({
+                content: '✅ Request sent to the current owner!',
+                flags: [MessageFlags.Ephemeral]
+            });
 
             // Send request to current owner with Accept/Deny buttons
             const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
@@ -423,10 +430,12 @@ module.exports = {
                     components: [decisionRow]
                 });
 
-                // Remove the original prompt
-                await interaction.message.delete().catch(() => { });
+                // Update the original message to disable the button (prevents duplicate requests)
+                await interaction.message.edit({
+                    components: [] // Remove all buttons
+                }).catch(() => { });
             } catch (e) {
-                await interaction.followUp({ content: 'Failed to send request.', flags: [MessageFlags.Ephemeral] });
+                logger.error(`Failed to send reclaim request: ${e.message}`);
             }
             return;
         }
@@ -446,9 +455,12 @@ module.exports = {
                 // Transfer ownership back
                 const oldOwnerId = podData.ownerId;
 
-                // Update database
+                // Update database - clear pending flag and transfer ownership
                 await db.update(bytepods)
-                    .set({ ownerId: requesterId })
+                    .set({
+                        ownerId: requesterId,
+                        reclaimRequestPending: false
+                    })
                     .where(eq(bytepods.channelId, channel.id));
 
                 // Update permissions
@@ -463,19 +475,15 @@ module.exports = {
                     MoveMembers: true
                 });
 
-                // Rename channel
-                try {
-                    const newOwnerMember = await interaction.guild.members.fetch(requesterId);
-                    await channel.setName(`${newOwnerMember.user.username}'s Pod`);
-                } catch (e) { }
-
                 // Notify and cleanup
                 await channel.send({
-                    embeds: [embeds.success('Ownership Transferred', `<@${oldOwnerId}> accepted the request. <@${requesterId}> is now the owner.`)]
+                    embeds: [embeds.success('Ownership Transferred', `<@${oldOwnerId}> accepted the request. <@${requesterId}> is now the owner.`)],
+                    content: `<@${requesterId}>, run \`/bytepod panel\` to access controls.`
                 });
 
                 await interaction.message.delete().catch(() => { });
             } catch (e) {
+                logger.error(`Failed to transfer ownership: ${e.message}`);
                 await interaction.followUp({ content: 'Failed to transfer ownership.', flags: [MessageFlags.Ephemeral] });
             }
             return;
@@ -491,6 +499,11 @@ module.exports = {
             }
 
             await interaction.deferUpdate();
+
+            // Clear pending flag in database
+            await db.update(bytepods)
+                .set({ reclaimRequestPending: false })
+                .where(eq(bytepods.channelId, channel.id));
 
             await channel.send({
                 embeds: [embeds.error('Request Denied', `<@${podData.ownerId}> denied the ownership request from <@${requesterId}>.`)]
@@ -524,191 +537,217 @@ module.exports = {
             await msg.edit({ embeds: e, components });
         };
 
+        // BUTTONS
+        if (customId === 'bytepod_toggle_lock') {
+            await interaction.deferUpdate(); // Defer first to prevent timeout
+            try {
+                const isLocked = channel.permissionOverwrites.cache.get(interaction.guild.id)?.deny.has(PermissionFlagsBits.Connect);
+                await channel.permissionOverwrites.edit(interaction.guild.id, {
+                    Connect: isLocked ? null : false
+                });
 
-        try {
-            // BUTTONS
-            if (customId === 'bytepod_toggle_lock') {
+                // Update the message after deferring
+                const { isLocked: newLock, limit, whitelist, coOwners } = getPodState(channel);
+                const displayWhitelist = whitelist.filter(id => id !== podData.ownerId);
+                const displayCoOwners = coOwners.filter(id => id !== podData.ownerId);
+                const { embeds: e, components } = getControlPanel(channel.id, newLock, limit, displayWhitelist, displayCoOwners);
+                await interaction.editReply({ embeds: e, components });
+            } catch (error) {
+                if (error.code === 10003) return interaction.followUp({ content: 'This BytePod channel no longer exists.', flags: [MessageFlags.Ephemeral] });
+                throw error;
+            }
+        }
+
+        if (customId === 'bytepod_whitelist_menu_open') {
+            const row = new ActionRowBuilder().addComponents(
+                new UserSelectMenuBuilder()
+                    .setCustomId(`bytepod_whitelist_select_${panelId}`) // Pass Panel ID
+                    .setPlaceholder('Select users to whitelist/remove')
+                    .setMinValues(1)
+                    .setMaxValues(10)
+            );
+            await interaction.reply({ content: 'Select users:', components: [row], flags: [MessageFlags.Ephemeral] });
+        }
+
+        if (customId === 'bytepod_coowner_menu_open') {
+            if (!isOwner) return interaction.reply({ content: 'Only the Owner can add Co-Owners.', flags: [MessageFlags.Ephemeral] });
+            const row = new ActionRowBuilder().addComponents(
+                new UserSelectMenuBuilder()
+                    .setCustomId(`bytepod_coowner_select_${panelId}`) // Pass Panel ID
+                    .setPlaceholder('Select a user to make Co-Owner')
+                    .setMinValues(1)
+                    .setMaxValues(1)
+            );
+            await interaction.reply({ content: 'Select Co-Owner:', components: [row], flags: [MessageFlags.Ephemeral] });
+        }
+
+        if (customId === 'bytepod_rename') {
+            await interaction.showModal(getRenameModal());
+        }
+
+        if (customId === 'bytepod_rename_modal') {
+            const newName = interaction.fields.getTextInputValue('bytepod_rename_input').trim();
+            if (newName.length === 0) return interaction.reply({ content: 'Name cannot be empty.', flags: [MessageFlags.Ephemeral] });
+
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+            await channel.setName(newName);
+            await interaction.editReply({ content: `Renamed channel to **${newName}**.` });
+        }
+
+        if (customId === 'bytepod_limit') {
+            const modal = getLimitModal();
+            modal.setCustomId(`bytepod_limit_modal_${panelId}`);
+            await interaction.showModal(modal);
+        }
+
+        if (customId === 'bytepod_kick_menu_open') {
+            const row = new ActionRowBuilder().addComponents(
+                new UserSelectMenuBuilder()
+                    .setCustomId(`bytepod_kick_select_${panelId}`)
+                    .setPlaceholder('Select user to kick')
+                    .setMinValues(1)
+                    .setMaxValues(1)
+            );
+            await interaction.reply({ content: 'Select user to kick:', components: [row], flags: [MessageFlags.Ephemeral] });
+        }
+
+        // DYNAMIC HANDLERS
+        if (customId.startsWith('bytepod_whitelist_select')) {
+            const targetPanelId = customId.split('_')[3];
+            const resolvedUsers = [];
+            let anyNew = false;
+
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
+            // 1. Resolve Users & Determine Intent
+            for (const id of interaction.values) {
+                // Safety: Prevent Owner from modifying themselves via this menu
+                if (id === podData.ownerId) continue;
+
                 try {
-                    const isLocked = channel.permissionOverwrites.cache.get(interaction.guild.id)?.deny.has(PermissionFlagsBits.Connect);
-                    await channel.permissionOverwrites.edit(interaction.guild.id, {
-                        Connect: isLocked ? null : false
-                    });
+                    const member = await interaction.guild.members.fetch(id).catch(() => null);
+                    const user = member ? member.user : await interaction.client.users.fetch(id).catch(() => null);
 
-                    // Update via update() since we are on the button
-                    const { isLocked: newLock, limit, whitelist, coOwners } = getPodState(channel);
-                    const displayWhitelist = whitelist.filter(id => id !== podData.ownerId);
-                    const displayCoOwners = coOwners.filter(id => id !== podData.ownerId);
-                    const { embeds: e, components } = getControlPanel(channel.id, newLock, limit, displayWhitelist, displayCoOwners);
-                    await interaction.update({ embeds: e, components });
-                } catch (error) {
-                    if (error.code === 10003) return interaction.reply({ content: 'This BytePod channel no longer exists.', flags: [MessageFlags.Ephemeral] });
-                    throw error;
-                }
-            }
-
-            if (customId === 'bytepod_whitelist_menu_open') {
-                const row = new ActionRowBuilder().addComponents(
-                    new UserSelectMenuBuilder()
-                        .setCustomId(`bytepod_whitelist_select_${panelId}`) // Pass Panel ID
-                        .setPlaceholder('Select users to whitelist/remove')
-                        .setMinValues(1)
-                        .setMaxValues(10)
-                );
-                await interaction.reply({ content: 'Select users:', components: [row], flags: [MessageFlags.Ephemeral] });
-            }
-
-            if (customId === 'bytepod_coowner_menu_open') {
-                if (!isOwner) return interaction.reply({ content: 'Only the Owner can add Co-Owners.', flags: [MessageFlags.Ephemeral] });
-                const row = new ActionRowBuilder().addComponents(
-                    new UserSelectMenuBuilder()
-                        .setCustomId(`bytepod_coowner_select_${panelId}`) // Pass Panel ID
-                        .setPlaceholder('Select a user to make Co-Owner')
-                        .setMinValues(1)
-                        .setMaxValues(1)
-                );
-                await interaction.reply({ content: 'Select Co-Owner:', components: [row], flags: [MessageFlags.Ephemeral] });
-            }
-
-            if (customId === 'bytepod_rename') {
-                await interaction.showModal(getRenameModal());
-            }
-
-            if (customId === 'bytepod_rename_modal') {
-                const newName = interaction.fields.getTextInputValue('bytepod_rename_input').trim();
-                if (newName.length === 0) return interaction.reply({ content: 'Name cannot be empty.', flags: [MessageFlags.Ephemeral] });
-
-                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-                await channel.setName(newName);
-                await interaction.editReply({ content: `Renamed channel to **${newName}**.` });
-            }
-
-            if (customId === 'bytepod_limit') {
-                const modal = getLimitModal();
-                modal.setCustomId(`bytepod_limit_modal_${panelId}`);
-                await interaction.showModal(modal);
-            }
-
-            if (customId === 'bytepod_kick_menu_open') {
-                const row = new ActionRowBuilder().addComponents(
-                    new UserSelectMenuBuilder()
-                        .setCustomId(`bytepod_kick_select_${panelId}`)
-                        .setPlaceholder('Select user to kick')
-                        .setMinValues(1)
-                        .setMaxValues(1)
-                );
-                await interaction.reply({ content: 'Select user to kick:', components: [row], flags: [MessageFlags.Ephemeral] });
-            }
-
-            // DYNAMIC HANDLERS
-            if (customId.startsWith('bytepod_whitelist_select')) {
-                const targetPanelId = customId.split('_')[3];
-                const resolvedUsers = [];
-                let anyNew = false;
-
-                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-
-                // 1. Resolve Users & Determine Intent
-                for (const id of interaction.values) {
-                    // Safety: Prevent Owner from modifying themselves via this menu
-                    if (id === podData.ownerId) continue;
-
-                    try {
-                        const member = await interaction.guild.members.fetch(id).catch(() => null);
-                        const user = member ? member.user : await interaction.client.users.fetch(id).catch(() => null);
-
-                        if (user) {
-                            resolvedUsers.push(user);
-                            const currentPerms = channel.permissionOverwrites.cache.get(user.id);
-                            // If user does not have an overwrite OR does not have Connect Allow
-                            if (!currentPerms || !currentPerms.allow.has(PermissionFlagsBits.Connect)) {
-                                anyNew = true;
-                            }
+                    if (user) {
+                        resolvedUsers.push(user);
+                        const currentPerms = channel.permissionOverwrites.cache.get(user.id);
+                        // If user does not have an overwrite OR does not have Connect Allow
+                        if (!currentPerms || !currentPerms.allow.has(PermissionFlagsBits.Connect)) {
+                            anyNew = true;
                         }
-                    } catch (e) {
-                        logger.warn(`Failed to resolve user ${id}:`, e.message);
                     }
+                } catch (e) {
+                    logger.warn(`Failed to resolve user ${id}:`, e.message);
                 }
-
-                // 2. Execute Batch Action
-                const modified = [];
-                const action = anyNew ? 'add' : 'remove';
-
-                for (const user of resolvedUsers) {
-                    try {
-                        if (action === 'add') {
-                            await channel.permissionOverwrites.edit(user, { Connect: true });
-                            modified.push(`${user}`);
-                        } else {
-                            // Only delete if they exist to avoid errors? delete is safe usually.
-                            await channel.permissionOverwrites.delete(user.id);
-                            modified.push(`${user}`);
-                        }
-                    } catch (e) {
-                        if (e.code === 10003) return interaction.editReply({ content: 'Channel deleted.' });
-                        logger.warn(`Failed to modify permissions: ${e.message}`);
-                    }
-                }
-
-                const msg = action === 'add'
-                    ? `Whitelisted: ${modified.join(', ')}`
-                    : `Removed: ${modified.join(', ')}`;
-
-                await interaction.editReply({ content: msg || 'No valid users selected.' });
-                await updatePanel(targetPanelId);
             }
 
-            if (customId.startsWith('bytepod_coowner_select')) {
-                if (!isOwner) return interaction.reply({ content: 'Only the Owner can manage Co-Owners.', flags: [MessageFlags.Ephemeral] });
-                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-                const targetPanelId = customId.split('_')[3];
-                const targetId = interaction.values[0];
+            // 2. Execute Batch Action
+            const modified = [];
+            const action = anyNew ? 'add' : 'remove';
+
+            for (const user of resolvedUsers) {
                 try {
-                    await channel.permissionOverwrites.edit(targetId, { ManageChannels: true, MoveMembers: true, Connect: true });
-                    await interaction.editReply({ content: `<@${targetId}> is now a Co-Owner.` });
-                    await updatePanel(targetPanelId);
+                    if (action === 'add') {
+                        await channel.permissionOverwrites.edit(user, { Connect: true });
+                        modified.push(`${user}`);
+                    } else {
+                        // Only delete if they exist to avoid errors? delete is safe usually.
+                        await channel.permissionOverwrites.delete(user.id);
+                        modified.push(`${user}`);
+                    }
                 } catch (e) {
                     if (e.code === 10003) return interaction.editReply({ content: 'Channel deleted.' });
-                    throw e;
+                    logger.warn(`Failed to modify permissions: ${e.message}`);
                 }
             }
 
-            if (customId.startsWith('bytepod_kick_select')) {
-                const targetPanelId = customId.split('_')[3];
-                const targetId = interaction.values[0];
-                if (targetId === podData.ownerId) return interaction.reply({ content: 'You cannot kick the Owner.', flags: [MessageFlags.Ephemeral] });
+            const msg = action === 'add'
+                ? `Whitelisted: ${modified.join(', ')}`
+                : `Removed: ${modified.join(', ')}`;
 
-                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-                const member = await interaction.guild.members.fetch(targetId);
-                if (member && member.voice.channelId === channel.id) {
-                    await member.voice.disconnect('Kicked from BytePod');
-                    try {
-                        await channel.permissionOverwrites.edit(targetId, { Connect: false });
-                    } catch (e) { }
-                    await interaction.editReply({ content: `Kicked and blocked <@${targetId}>.` });
-                    await updatePanel(targetPanelId);
-                } else {
-                    await interaction.editReply({ content: `User is not in the voice channel.` });
-                }
-            }
+            await interaction.editReply({ content: msg || 'No valid users selected.' });
+            await updatePanel(targetPanelId);
+        }
 
-            // MODALS
-
-
-            if (customId.startsWith('bytepod_limit_modal')) {
-                const targetPanelId = customId.split('_')[3];
-                const limitStr = interaction.fields.getTextInputValue('bytepod_limit_input');
-                const limit = parseInt(limitStr);
-                if (isNaN(limit) || limit < 0 || limit > 99) return interaction.reply({ content: 'Invalid limit (0-99).', flags: [MessageFlags.Ephemeral] });
-
-                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-                await channel.setUserLimit(limit);
-                await interaction.editReply({ content: `Limit set to ${limit}.` });
+        if (customId.startsWith('bytepod_coowner_select')) {
+            if (!isOwner) return interaction.reply({ content: 'Only the Owner can manage Co-Owners.', flags: [MessageFlags.Ephemeral] });
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+            const targetPanelId = customId.split('_')[3];
+            const targetId = interaction.values[0];
+            try {
+                await channel.permissionOverwrites.edit(targetId, { ManageChannels: true, MoveMembers: true, Connect: true });
+                await interaction.editReply({ content: `<@${targetId}> is now a Co-Owner.` });
                 await updatePanel(targetPanelId);
+            } catch (e) {
+                if (e.code === 10003) return interaction.editReply({ content: 'Channel deleted.' });
+                throw e;
             }
+        }
+
+        if (customId.startsWith('bytepod_kick_select')) {
+            const targetPanelId = customId.split('_')[3];
+            const targetId = interaction.values[0];
+            if (targetId === podData.ownerId) return interaction.reply({ content: 'You cannot kick the Owner.', flags: [MessageFlags.Ephemeral] });
+
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+            const member = await interaction.guild.members.fetch(targetId);
+            if (member && member.voice.channelId === channel.id) {
+                await member.voice.disconnect('Kicked from BytePod');
+                try {
+                    await channel.permissionOverwrites.edit(targetId, { Connect: false });
+                } catch (e) { }
+                await interaction.editReply({ content: `Kicked and blocked <@${targetId}>.` });
+                await updatePanel(targetPanelId);
+            } else {
+                await interaction.editReply({ content: `User is not in the voice channel.` });
+            }
+        }
+
+        // MODALS
+
+        if (customId.startsWith('bytepod_limit_modal')) {
+            const targetPanelId = customId.split('_')[3];
+            const limitStr = interaction.fields.getTextInputValue('bytepod_limit_input');
+            const limit = parseInt(limitStr);
+            if (isNaN(limit) || limit < 0 || limit > 99) return interaction.reply({ content: 'Invalid limit (0-99).', flags: [MessageFlags.Ephemeral] });
+
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+            await channel.setUserLimit(limit);
+            await interaction.editReply({ content: `Limit set to ${limit}.` });
+            await updatePanel(targetPanelId);
+        }
 
         } catch (error) {
-            logger.error(error);
-            if (!interaction.replied) await interaction.reply({ content: 'action failed.', flags: [MessageFlags.Ephemeral] });
+            // Handle stale control panel interactions gracefully
+            if (error.code === 10062) {
+                logger.info(`Stale control panel interaction (${interaction.customId}) - user clicked old panel, ignoring`);
+                return; // Silently ignore - user will see "this interaction failed" which is expected for old panels
+            }
+
+            logger.errorContext('BytePod interaction failed', error, {
+                customId: interaction.customId,
+                user: interaction.user.tag,
+                channel: interaction.channel.id,
+                replied: interaction.replied,
+                deferred: interaction.deferred
+            });
+
+            // Try to send an error message if possible
+            try {
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({
+                        content: '❌ Something went wrong with this control. Please try `/bytepod panel` to get a fresh control panel.',
+                        flags: [MessageFlags.Ephemeral]
+                    });
+                } else if (interaction.deferred) {
+                    await interaction.editReply({
+                        content: '❌ Something went wrong with this control. Please try `/bytepod panel` to get a fresh control panel.'
+                    });
+                }
+            } catch (e) {
+                // Failed to send error message, user will see "interaction failed"
+                logger.error(`Could not send error message: ${e.message}`);
+            }
         }
     }
 };
