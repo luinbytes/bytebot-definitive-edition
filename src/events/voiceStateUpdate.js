@@ -119,23 +119,7 @@ async function transferOwnership(channel, podData, newOwnerId, client) {
             `<@${oldOwnerId}> left the channel. <@${newOwnerId}> is now the owner of this BytePod.`
         );
 
-        logger.debug(`[Transfer] Step 5: Renaming channel`);
-        // Rename channel to new owner's name (with timeout to prevent Discord rate limit hangs)
-        try {
-            const newOwnerMember = await guild.members.fetch(newOwnerId);
-
-            // Use Promise.race to timeout after 10 seconds (Discord can be slow during high load)
-            await Promise.race([
-                channel.setName(`${newOwnerMember.user.username}'s Pod`),
-                new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('Rename timeout - Discord rate limited or slow to respond')), 10000)
-                )
-            ]);
-        } catch (e) {
-            logger.warn(`Failed to rename channel for new owner: ${e.message}`);
-        }
-
-        logger.debug(`[Transfer] Step 6: Sending notification embed`);
+        logger.debug(`[Transfer] Step 5: Sending notification embed`);
         await channel.send({ embeds: [embed] });
         logger.info(`BytePod ownership transferred: ${channel.id} from ${oldOwnerId} to ${newOwnerId}`);
 

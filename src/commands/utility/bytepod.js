@@ -475,12 +475,6 @@ module.exports = {
                     MoveMembers: true
                 });
 
-                // Rename channel
-                try {
-                    const newOwnerMember = await interaction.guild.members.fetch(requesterId);
-                    await channel.setName(`${newOwnerMember.user.username}'s Pod`);
-                } catch (e) { }
-
                 // Notify and cleanup
                 await channel.send({
                     embeds: [embeds.success('Ownership Transferred', `<@${oldOwnerId}> accepted the request. <@${requesterId}> is now the owner.`)]
