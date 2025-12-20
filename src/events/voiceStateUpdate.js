@@ -41,6 +41,70 @@ async function finalizeVoiceSession(session) {
     return durationSeconds;
 }
 
+// --- OWNERSHIP TRANSFER SYSTEM ---
+// In-memory map to track pending ownership transfers: channelId -> timeoutId
+const pendingOwnershipTransfers = new Map();
+const OWNERSHIP_TRANSFER_DELAY_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Transfer ownership of a BytePod to a new member
+ */
+async function transferOwnership(channel, podData, newOwnerId, client) {
+    const guild = channel.guild;
+    const oldOwnerId = podData.ownerId;
+
+    try {
+        // Update database
+        await db.update(bytepods)
+            .set({
+                ownerId: newOwnerId,
+                ownerLeftAt: null
+            })
+            .where(eq(bytepods.channelId, channel.id));
+
+        // Remove ManageChannels from old owner (if still in server)
+        try {
+            await channel.permissionOverwrites.edit(oldOwnerId, {
+                ManageChannels: null,
+                MoveMembers: null
+            });
+        } catch (e) {
+            // Old owner may have left the server entirely
+        }
+
+        // Grant ManageChannels to new owner
+        await channel.permissionOverwrites.edit(newOwnerId, {
+            Connect: true,
+            ManageChannels: true,
+            MoveMembers: true
+        });
+
+        // Notify the channel
+        const newOwner = await client.users.fetch(newOwnerId).catch(() => null);
+        const embed = embeds.info('Ownership Transferred',
+            `<@${oldOwnerId}> left the channel. <@${newOwnerId}> is now the owner of this BytePod.`
+        );
+
+        // Rename channel to new owner's name
+        try {
+            const newOwnerMember = await guild.members.fetch(newOwnerId);
+            await channel.setName(`${newOwnerMember.user.username}'s Pod`);
+        } catch (e) {
+            logger.warn(`Failed to rename channel for new owner: ${e.message}`);
+        }
+
+        await channel.send({ embeds: [embed] });
+        logger.info(`BytePod ownership transferred: ${channel.id} from ${oldOwnerId} to ${newOwnerId}`);
+
+    } catch (error) {
+        logger.errorContext('Failed to transfer BytePod ownership', error, {
+            channelId: channel.id,
+            oldOwnerId,
+            newOwnerId
+        });
+    }
+}
+
 module.exports = {
     name: Events.VoiceStateUpdate,
     async execute(oldState, newState) {
@@ -122,6 +186,7 @@ module.exports = {
                     channelId: newChannel.id,
                     guildId: guild.id,
                     ownerId: member.id,
+                    originalOwnerId: member.id, // Track original creator for reclaim feature
                 });
 
                 // Start voice session tracking (persisted to DB)
@@ -153,6 +218,84 @@ module.exports = {
             }
         }
 
+        // --- JOIN POD TRIGGER (Existing BytePod) ---
+        // Handle ownership return / reclaim when someone joins an existing pod
+        if (joinedChannelId && joinedChannelId !== hubId) {
+            const podData = await db.select().from(bytepods).where(eq(bytepods.channelId, joinedChannelId)).get();
+
+            if (podData) {
+                const channel = newState.channel;
+
+                // Case 1: Owner returned during grace period - cancel transfer
+                if (podData.ownerId === member.id && podData.ownerLeftAt) {
+                    logger.info(`BytePod owner ${member.id} returned to ${joinedChannelId}, cancelling ownership transfer`);
+
+                    // Cancel pending timeout
+                    if (pendingOwnershipTransfers.has(joinedChannelId)) {
+                        clearTimeout(pendingOwnershipTransfers.get(joinedChannelId));
+                        pendingOwnershipTransfers.delete(joinedChannelId);
+                    }
+
+                    // Clear ownerLeftAt in DB
+                    await db.update(bytepods)
+                        .set({ ownerLeftAt: null })
+                        .where(eq(bytepods.channelId, joinedChannelId));
+
+                    // Notify channel
+                    try {
+                        await channel.send({
+                            embeds: [embeds.success('Owner Returned', `<@${member.id}> has returned. Ownership transfer cancelled.`)]
+                        });
+                    } catch (e) { }
+                }
+
+                // Case 2: Original owner rejoins AFTER ownership was transferred
+                // (They are originalOwnerId but NOT ownerId, and transfer already happened)
+                else if (
+                    podData.originalOwnerId === member.id &&
+                    podData.ownerId !== member.id &&
+                    !podData.ownerLeftAt // Transfer already completed (not in grace period)
+                ) {
+                    // Send reclaim prompt to the channel
+                    const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+
+                    const reclaimRow = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(`bytepod_reclaim_request_${joinedChannelId}_${member.id}`)
+                            .setLabel('Request Ownership Back')
+                            .setStyle(ButtonStyle.Primary)
+                            .setEmoji('👑')
+                    );
+
+                    try {
+                        await channel.send({
+                            content: `<@${member.id}>`,
+                            embeds: [embeds.info('Welcome Back!', `You originally created this BytePod. Would you like to request ownership back from <@${podData.ownerId}>?`)],
+                            components: [reclaimRow]
+                        });
+                    } catch (e) {
+                        logger.warn(`Failed to send reclaim prompt: ${e.message}`);
+                    }
+                }
+
+                // Start voice session for this user
+                const existingSession = await db.select().from(bytepodActiveSessions)
+                    .where(and(
+                        eq(bytepodActiveSessions.podId, joinedChannelId),
+                        eq(bytepodActiveSessions.userId, member.id)
+                    )).get();
+
+                if (!existingSession) {
+                    await db.insert(bytepodActiveSessions).values({
+                        podId: joinedChannelId,
+                        userId: member.id,
+                        guildId: guild.id,
+                        startTime: Date.now()
+                    });
+                }
+            }
+        }
+
         // --- LEAVE POD TRIGGER ---
         if (leftChannelId && leftChannelId !== hubId) {
             // Finalize voice session for the leaving user
@@ -177,8 +320,15 @@ module.exports = {
                 const channel = oldState.channel || await guild.channels.fetch(leftChannelId).catch(() => null);
 
                 if (channel && channel.members.size === 0) {
+                    // --- CHANNEL EMPTY: DELETE POD ---
+                    // Cancel any pending ownership transfer
+                    if (pendingOwnershipTransfers.has(leftChannelId)) {
+                        clearTimeout(pendingOwnershipTransfers.get(leftChannelId));
+                        pendingOwnershipTransfers.delete(leftChannelId);
+                    }
+
                     try {
-                        // Finalize any remaining sessions for this pod (edge case: multiple users left simultaneously)
+                        // Finalize any remaining sessions
                         const remainingSessions = await db.select().from(bytepodActiveSessions)
                             .where(eq(bytepodActiveSessions.podId, leftChannelId));
                         for (const s of remainingSessions) {
@@ -190,13 +340,50 @@ module.exports = {
                         await db.delete(bytepods).where(eq(bytepods.channelId, leftChannelId));
                     } catch (error) {
                         logger.error(`Failed to cleanup BytePod ${leftChannelId}: ${error}`);
-                        // If channel deleted manually, verify DB cleanup
-                        if (error.code === 10003) { // Unknown Channel
+                        if (error.code === 10003) {
                             await db.delete(bytepods).where(eq(bytepods.channelId, leftChannelId));
-                            // Also cleanup any orphaned sessions
                             await db.delete(bytepodActiveSessions).where(eq(bytepodActiveSessions.podId, leftChannelId));
                         }
                     }
+                } else if (channel && channel.members.size > 0 && podData.ownerId === member.id) {
+                    // --- OWNER LEFT BUT OTHERS REMAIN: SCHEDULE TRANSFER ---
+                    logger.info(`BytePod owner ${member.id} left channel ${leftChannelId}, scheduling ownership transfer in 5 minutes`);
+
+                    // Mark owner as left in DB
+                    await db.update(bytepods)
+                        .set({ ownerLeftAt: Date.now() })
+                        .where(eq(bytepods.channelId, leftChannelId));
+
+                    // Schedule transfer after 5 minutes
+                    const timeoutId = setTimeout(async () => {
+                        pendingOwnershipTransfers.delete(leftChannelId);
+
+                        try {
+                            // Re-fetch pod data and channel state
+                            const currentPodData = await db.select().from(bytepods).where(eq(bytepods.channelId, leftChannelId)).get();
+                            if (!currentPodData || !currentPodData.ownerLeftAt) {
+                                // Owner returned or pod deleted
+                                return;
+                            }
+
+                            const currentChannel = await guild.channels.fetch(leftChannelId).catch(() => null);
+                            if (!currentChannel || currentChannel.members.size === 0) {
+                                return; // Channel deleted or empty
+                            }
+
+                            // Pick the first member in the channel as new owner
+                            const newOwner = currentChannel.members.first();
+                            if (newOwner && !newOwner.user.bot) {
+                                await transferOwnership(currentChannel, currentPodData, newOwner.id, guild.client);
+                            }
+                        } catch (error) {
+                            logger.errorContext('Ownership transfer timeout failed', error, {
+                                channelId: leftChannelId
+                            });
+                        }
+                    }, OWNERSHIP_TRANSFER_DELAY_MS);
+
+                    pendingOwnershipTransfers.set(leftChannelId, timeoutId);
                 }
             }
         }

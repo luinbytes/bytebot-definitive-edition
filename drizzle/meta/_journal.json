@@ -15,6 +15,13 @@
       "when": 1766185842014,
       "tag": "0001_lonely_wrecker",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1766193640583,
+      "tag": "0002_tired_harpoon",
+      "breakpoints": true
     }
   ]
 }
