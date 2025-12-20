@@ -120,41 +120,11 @@ async function transferOwnership(channel, podData, newOwnerId, client) {
         );
 
         logger.debug(`[Transfer] Step 5: Sending notification embed`);
-        await channel.send({ embeds: [embed] });
+        await channel.send({
+            embeds: [embed],
+            content: `<@${newOwnerId}>, you are now the owner! Run \`/bytepod panel\` to access controls.`
+        });
         logger.info(`BytePod ownership transferred: ${channel.id} from ${oldOwnerId} to ${newOwnerId}`);
-
-        logger.debug(`[Transfer] Step 7: Sending control panel via DM`);
-        // Send fresh control panel to new owner via DM
-        if (newOwner) {
-            try {
-                const { getControlPanel } = require('../components/bytepodControls');
-                const { isLocked, limit, whitelist, coOwners } = getPodState(channel);
-                const displayWhitelist = whitelist.filter(id => id !== newOwnerId);
-                const displayCoOwners = coOwners.filter(id => id !== newOwnerId);
-
-                const { embeds: panelEmbeds, components } = getControlPanel(channel.id, isLocked, limit, displayWhitelist, displayCoOwners);
-                await newOwner.send({
-                    content: `You are now the owner of **${channel.name}**! Use the controls below:`,
-                    embeds: panelEmbeds,
-                    components
-                });
-                logger.debug(`[Transfer] Control panel sent via DM`);
-            } catch (e) {
-                // User has DMs disabled - send in channel as fallback
-                logger.warn(`Could not DM control panel to ${newOwnerId}: ${e.message}`);
-                const { getControlPanel } = require('../components/bytepodControls');
-                const { isLocked, limit, whitelist, coOwners } = getPodState(channel);
-                const displayWhitelist = whitelist.filter(id => id !== newOwnerId);
-                const displayCoOwners = coOwners.filter(id => id !== newOwnerId);
-
-                const { embeds: panelEmbeds, components } = getControlPanel(channel.id, isLocked, limit, displayWhitelist, displayCoOwners);
-                await channel.send({
-                    content: `<@${newOwnerId}>, you are now the owner! Use the controls below (DMs disabled, using channel):`,
-                    embeds: panelEmbeds,
-                    components
-                });
-            }
-        }
         logger.debug(`[Transfer] Complete!`);
 
     } catch (error) {
@@ -326,7 +296,7 @@ module.exports = {
                     !podData.ownerLeftAt && // Transfer already completed (not in grace period)
                     !podData.reclaimRequestPending // No pending request already
                 ) {
-                    // Send reclaim prompt via DM
+                    // Send reclaim prompt in channel
                     const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
                     const reclaimRow = new ActionRowBuilder().addComponents(
@@ -338,8 +308,9 @@ module.exports = {
                     );
 
                     try {
-                        await member.send({
-                            embeds: [embeds.info('Welcome Back!', `You originally created **${channel.name}**. Would you like to request ownership back from <@${podData.ownerId}>?`)],
+                        await channel.send({
+                            content: `<@${member.id}>`,
+                            embeds: [embeds.info('Welcome Back!', `You originally created this BytePod. Would you like to request ownership back from <@${podData.ownerId}>?`)],
                             components: [reclaimRow]
                         });
 
@@ -350,24 +321,7 @@ module.exports = {
 
                         logger.info(`Sent ownership reclaim prompt to ${member.id} for pod ${joinedChannelId}`);
                     } catch (e) {
-                        // User has DMs disabled - send in channel as fallback
-                        logger.warn(`Could not DM reclaim prompt to ${member.id}: ${e.message}, sending in channel`);
-                        try {
-                            await channel.send({
-                                content: `<@${member.id}>`,
-                                embeds: [embeds.info('Welcome Back!', `You originally created this BytePod. Would you like to request ownership back from <@${podData.ownerId}>? (DMs disabled, using channel)`)],
-                                components: [reclaimRow]
-                            });
-
-                            // Mark request as pending
-                            await db.update(bytepods)
-                                .set({ reclaimRequestPending: true })
-                                .where(eq(bytepods.channelId, joinedChannelId));
-
-                            logger.info(`Sent ownership reclaim prompt to ${member.id} for pod ${joinedChannelId} (in channel)`);
-                        } catch (channelError) {
-                            logger.error(`Failed to send reclaim prompt in channel: ${channelError.message}`);
-                        }
+                        logger.error(`Failed to send reclaim prompt: ${e.message}`);
                     }
                 }
                 // Case 3: Backfill originalOwnerId for old pods that don't have it set
