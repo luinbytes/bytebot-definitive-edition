@@ -82,6 +82,7 @@ async function transferOwnership(channel, podData, newOwnerId, client) {
     const oldOwnerId = podData.ownerId;
 
     try {
+        logger.debug(`[Transfer] Step 1: Updating database for ${channel.id}`);
         // Update database (keep originalOwnerId unchanged - creator can always reclaim)
         await db.update(bytepods)
             .set({
@@ -91,6 +92,7 @@ async function transferOwnership(channel, podData, newOwnerId, client) {
             })
             .where(eq(bytepods.channelId, channel.id));
 
+        logger.debug(`[Transfer] Step 2: Removing old owner permissions`);
         // Remove ManageChannels from old owner (if still in server)
         try {
             await channel.permissionOverwrites.edit(oldOwnerId, {
@@ -99,8 +101,10 @@ async function transferOwnership(channel, podData, newOwnerId, client) {
             });
         } catch (e) {
             // Old owner may have left the server entirely
+            logger.debug(`[Transfer] Old owner permission edit failed: ${e.message}`);
         }
 
+        logger.debug(`[Transfer] Step 3: Granting new owner permissions`);
         // Grant ManageChannels to new owner
         await channel.permissionOverwrites.edit(newOwnerId, {
             Connect: true,
@@ -108,12 +112,14 @@ async function transferOwnership(channel, podData, newOwnerId, client) {
             MoveMembers: true
         });
 
+        logger.debug(`[Transfer] Step 4: Fetching new owner user`);
         // Notify the channel
         const newOwner = await client.users.fetch(newOwnerId).catch(() => null);
         const embed = embeds.info('Ownership Transferred',
             `<@${oldOwnerId}> left the channel. <@${newOwnerId}> is now the owner of this BytePod.`
         );
 
+        logger.debug(`[Transfer] Step 5: Renaming channel`);
         // Rename channel to new owner's name
         try {
             const newOwnerMember = await guild.members.fetch(newOwnerId);
@@ -122,9 +128,11 @@ async function transferOwnership(channel, podData, newOwnerId, client) {
             logger.warn(`Failed to rename channel for new owner: ${e.message}`);
         }
 
+        logger.debug(`[Transfer] Step 6: Sending notification embed`);
         await channel.send({ embeds: [embed] });
         logger.info(`BytePod ownership transferred: ${channel.id} from ${oldOwnerId} to ${newOwnerId}`);
 
+        logger.debug(`[Transfer] Step 7: Sending control panel`);
         // Send fresh control panel for new owner
         const { getControlPanel } = require('../components/bytepodControls');
         const { isLocked, limit, whitelist, coOwners } = getPodState(channel);
@@ -137,8 +145,11 @@ async function transferOwnership(channel, podData, newOwnerId, client) {
             embeds: panelEmbeds,
             components
         });
+        logger.debug(`[Transfer] Complete!`);
 
     } catch (error) {
+        logger.error(`[Transfer] ERROR at step: ${error.message}`);
+
         // Handle channel deletion race condition
         if (error.code === 10003) {
             logger.info(`Channel ${channel.id} was deleted during ownership transfer, skipping`);
