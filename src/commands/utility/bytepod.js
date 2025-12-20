@@ -373,14 +373,17 @@ module.exports = {
 
     // --- INTERACTION HANDLER ---
     async handleInteraction(interaction) {
-        const channel = interaction.channel;
-        const { customId } = interaction;
+        try {
+            const channel = interaction.channel;
+            const { customId } = interaction;
 
-        // Fetch pod data first
-        const podData = await db.select().from(bytepods).where(eq(bytepods.channelId, channel.id)).get();
-        if (!podData) {
-            return interaction.reply({ content: 'This channel is not a valid BytePod.', flags: [MessageFlags.Ephemeral] });
-        }
+            // Fetch pod data first
+            const podData = await db.select().from(bytepods).where(eq(bytepods.channelId, channel.id)).get();
+            if (!podData) {
+                return interaction.reply({ content: 'This channel is not a valid BytePod.', flags: [MessageFlags.Ephemeral] });
+            }
+
+            logger.debug(`BytePod interaction: ${customId} by ${interaction.user.tag} in ${channel.id}`);
 
         // --- RECLAIM REQUEST HANDLERS (before ownership check) ---
         // These can be used by people who are NOT the current owner
@@ -481,6 +484,18 @@ module.exports = {
                 // Notify and cleanup
                 await channel.send({
                     embeds: [embeds.success('Ownership Transferred', `<@${oldOwnerId}> accepted the request. <@${requesterId}> is now the owner.`)]
+                });
+
+                // Send fresh control panel for new owner
+                const { isLocked, limit, whitelist, coOwners } = getPodState(channel);
+                const displayWhitelist = whitelist.filter(id => id !== requesterId);
+                const displayCoOwners = coOwners.filter(id => id !== requesterId);
+
+                const { embeds: panelEmbeds, components: panelComponents } = getControlPanel(channel.id, isLocked, limit, displayWhitelist, displayCoOwners);
+                await channel.send({
+                    content: `<@${requesterId}>, you are now the owner! Use the controls below:`,
+                    embeds: panelEmbeds,
+                    components: panelComponents
                 });
 
                 await interaction.message.delete().catch(() => { });
@@ -722,8 +737,30 @@ module.exports = {
             }
 
         } catch (error) {
-            logger.error(error);
-            if (!interaction.replied) await interaction.reply({ content: 'action failed.', flags: [MessageFlags.Ephemeral] });
+            logger.errorContext('BytePod interaction failed', error, {
+                customId: interaction.customId,
+                user: interaction.user.tag,
+                channel: interaction.channel.id,
+                replied: interaction.replied,
+                deferred: interaction.deferred
+            });
+
+            // Try to send an error message if possible
+            try {
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({
+                        content: '❌ Something went wrong with this control. Please try `/bytepod panel` to get a fresh control panel.',
+                        flags: [MessageFlags.Ephemeral]
+                    });
+                } else if (interaction.deferred) {
+                    await interaction.editReply({
+                        content: '❌ Something went wrong with this control. Please try `/bytepod panel` to get a fresh control panel.'
+                    });
+                }
+            } catch (e) {
+                // Failed to send error message, user will see "interaction failed"
+                logger.error(`Could not send error message: ${e.message}`);
+            }
         }
     }
 };

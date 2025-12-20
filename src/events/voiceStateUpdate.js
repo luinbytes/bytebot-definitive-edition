@@ -7,6 +7,34 @@ const embeds = require('../utils/embeds');
 const { checkBotPermissions } = require('../utils/permissionCheck');
 const { getControlPanel } = require('../components/bytepodControls');
 
+// Helper to get pod state (lock status, whitelist, etc.)
+function getPodState(channel) {
+    const { PermissionFlagsBits } = require('discord.js');
+    const isLocked = channel.permissionOverwrites.cache.get(channel.guild.id)?.deny.has(PermissionFlagsBits.Connect);
+    const limit = channel.userLimit;
+
+    const whitelist = [];
+    const coOwners = [];
+
+    channel.permissionOverwrites.cache.forEach((overwrite) => {
+        if (overwrite.type !== 1) return; // Member only
+
+        // Co-Owner: ManageChannels
+        if (overwrite.allow.has(PermissionFlagsBits.ManageChannels)) {
+            coOwners.push(overwrite.id);
+        }
+
+        // Whitelist: Connect = true
+        if (overwrite.allow.has(PermissionFlagsBits.Connect)) {
+            if (!coOwners.includes(overwrite.id)) {
+                whitelist.push(overwrite.id);
+            }
+        }
+    });
+
+    return { isLocked, limit, whitelist, coOwners };
+}
+
 // Helper to finalize a voice session and update stats
 async function finalizeVoiceSession(session) {
     const durationSeconds = Math.floor((Date.now() - session.startTime) / 1000);
@@ -95,6 +123,19 @@ async function transferOwnership(channel, podData, newOwnerId, client) {
 
         await channel.send({ embeds: [embed] });
         logger.info(`BytePod ownership transferred: ${channel.id} from ${oldOwnerId} to ${newOwnerId}`);
+
+        // Send fresh control panel for new owner
+        const { getControlPanel } = require('../components/bytepodControls');
+        const { isLocked, limit, whitelist, coOwners } = getPodState(channel);
+        const displayWhitelist = whitelist.filter(id => id !== newOwnerId);
+        const displayCoOwners = coOwners.filter(id => id !== newOwnerId);
+
+        const { embeds: panelEmbeds, components } = getControlPanel(channel.id, isLocked, limit, displayWhitelist, displayCoOwners);
+        await channel.send({
+            content: `<@${newOwnerId}>, you are now the owner! Use the controls below:`,
+            embeds: panelEmbeds,
+            components
+        });
 
     } catch (error) {
         logger.errorContext('Failed to transfer BytePod ownership', error, {
