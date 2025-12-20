@@ -254,7 +254,8 @@ module.exports = {
                 else if (
                     podData.originalOwnerId === member.id &&
                     podData.ownerId !== member.id &&
-                    !podData.ownerLeftAt // Transfer already completed (not in grace period)
+                    !podData.ownerLeftAt && // Transfer already completed (not in grace period)
+                    !podData.reclaimRequestPending // No pending request already
                 ) {
                     // Send reclaim prompt to the channel
                     const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
@@ -273,9 +274,24 @@ module.exports = {
                             embeds: [embeds.info('Welcome Back!', `You originally created this BytePod. Would you like to request ownership back from <@${podData.ownerId}>?`)],
                             components: [reclaimRow]
                         });
+
+                        // Mark request as pending to prevent duplicate prompts
+                        await db.update(bytepods)
+                            .set({ reclaimRequestPending: true })
+                            .where(eq(bytepods.channelId, joinedChannelId));
+
+                        logger.info(`Sent ownership reclaim prompt to ${member.id} for pod ${joinedChannelId}`);
                     } catch (e) {
                         logger.warn(`Failed to send reclaim prompt: ${e.message}`);
                     }
+                }
+                // Case 3: Backfill originalOwnerId for old pods that don't have it set
+                else if (!podData.originalOwnerId && podData.ownerId === member.id) {
+                    // Current owner joining their own pod but originalOwnerId is null - backfill it
+                    await db.update(bytepods)
+                        .set({ originalOwnerId: member.id })
+                        .where(eq(bytepods.channelId, joinedChannelId));
+                    logger.info(`Backfilled originalOwnerId for pod ${joinedChannelId}`);
                 }
 
                 // Start voice session for this user
