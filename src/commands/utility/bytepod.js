@@ -231,7 +231,7 @@ module.exports = {
             }
 
             const avgSeconds = Math.floor(stats.totalSeconds / stats.sessionCount);
-            const embed = embeds.brand(`${target.username}'s BytePod Stats`)
+            const embed = embeds.brand(`${target.username}'s BytePod Stats`, 'Voice activity in this server:')
                 .addFields(
                     { name: '⏱️ Total Time', value: formatDuration(stats.totalSeconds), inline: true },
                     { name: '📊 Sessions', value: stats.sessionCount.toString(), inline: true },
@@ -372,26 +372,141 @@ module.exports = {
 
     // --- INTERACTION HANDLER ---
     async handleInteraction(interaction) {
-        // Verify ownership/permissions
         const channel = interaction.channel;
+        const { customId } = interaction;
 
-        // We need to check if this channel is a valid BytePod TO SECURE IT.
+        // Fetch pod data first
         const podData = await db.select().from(bytepods).where(eq(bytepods.channelId, channel.id)).get();
         if (!podData) {
             return interaction.reply({ content: 'This channel is not a valid BytePod.', flags: [MessageFlags.Ephemeral] });
         }
 
+        // --- RECLAIM REQUEST HANDLERS (before ownership check) ---
+        // These can be used by people who are NOT the current owner
+
+        if (customId.startsWith('bytepod_reclaim_request_')) {
+            // Original owner clicking "Request Ownership Back"
+            const parts = customId.split('_');
+            const requesterId = parts[4]; // bytepod_reclaim_request_channelId_requesterId
+
+            if (interaction.user.id !== requesterId) {
+                return interaction.reply({ content: 'This button is not for you!', flags: [MessageFlags.Ephemeral] });
+            }
+
+            if (podData.originalOwnerId !== requesterId) {
+                return interaction.reply({ content: 'Only the original creator can request ownership back.', flags: [MessageFlags.Ephemeral] });
+            }
+
+            await interaction.deferUpdate();
+
+            // Send request to current owner with Accept/Deny buttons
+            const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+
+            const decisionRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`bytepod_reclaim_accept_${channel.id}_${requesterId}`)
+                    .setLabel('Accept')
+                    .setStyle(ButtonStyle.Success)
+                    .setEmoji('✅'),
+                new ButtonBuilder()
+                    .setCustomId(`bytepod_reclaim_deny_${channel.id}_${requesterId}`)
+                    .setLabel('Deny')
+                    .setStyle(ButtonStyle.Danger)
+                    .setEmoji('❌')
+            );
+
+            try {
+                await channel.send({
+                    content: `<@${podData.ownerId}>`,
+                    embeds: [embeds.warn('Ownership Request', `<@${requesterId}> (the original creator) is requesting ownership of this BytePod back.`)],
+                    components: [decisionRow]
+                });
+
+                // Remove the original prompt
+                await interaction.message.delete().catch(() => { });
+            } catch (e) {
+                await interaction.followUp({ content: 'Failed to send request.', flags: [MessageFlags.Ephemeral] });
+            }
+            return;
+        }
+
+        if (customId.startsWith('bytepod_reclaim_accept_')) {
+            const parts = customId.split('_');
+            const requesterId = parts[4];
+
+            // Only current owner can accept
+            if (interaction.user.id !== podData.ownerId) {
+                return interaction.reply({ content: 'Only the current owner can accept this request.', flags: [MessageFlags.Ephemeral] });
+            }
+
+            await interaction.deferUpdate();
+
+            try {
+                // Transfer ownership back
+                const oldOwnerId = podData.ownerId;
+
+                // Update database
+                await db.update(bytepods)
+                    .set({ ownerId: requesterId })
+                    .where(eq(bytepods.channelId, channel.id));
+
+                // Update permissions
+                await channel.permissionOverwrites.edit(oldOwnerId, {
+                    ManageChannels: null,
+                    MoveMembers: null
+                }).catch(() => { });
+
+                await channel.permissionOverwrites.edit(requesterId, {
+                    Connect: true,
+                    ManageChannels: true,
+                    MoveMembers: true
+                });
+
+                // Rename channel
+                try {
+                    const newOwnerMember = await interaction.guild.members.fetch(requesterId);
+                    await channel.setName(`${newOwnerMember.user.username}'s Pod`);
+                } catch (e) { }
+
+                // Notify and cleanup
+                await channel.send({
+                    embeds: [embeds.success('Ownership Transferred', `<@${oldOwnerId}> accepted the request. <@${requesterId}> is now the owner.`)]
+                });
+
+                await interaction.message.delete().catch(() => { });
+            } catch (e) {
+                await interaction.followUp({ content: 'Failed to transfer ownership.', flags: [MessageFlags.Ephemeral] });
+            }
+            return;
+        }
+
+        if (customId.startsWith('bytepod_reclaim_deny_')) {
+            const parts = customId.split('_');
+            const requesterId = parts[4];
+
+            // Only current owner can deny
+            if (interaction.user.id !== podData.ownerId) {
+                return interaction.reply({ content: 'Only the current owner can deny this request.', flags: [MessageFlags.Ephemeral] });
+            }
+
+            await interaction.deferUpdate();
+
+            await channel.send({
+                embeds: [embeds.error('Request Denied', `<@${podData.ownerId}> denied the ownership request from <@${requesterId}>.`)]
+            });
+
+            await interaction.message.delete().catch(() => { });
+            return;
+        }
+
+        // --- STANDARD CONTROLS (require ownership) ---
         const isOwner = podData.ownerId === interaction.user.id;
-        // Strict check: Only count as Co-Owner if they have an EXPLICIT allow overwrite for ManageChannels on this channel.
-        // This prevents global Admins/Mods from bypassing the "Co-Owner" list logic if that's intended, 
-        // effectively locking controls to the Pod Owner and their chosen Delegates.
         const isCoOwner = channel.permissionOverwrites.cache.get(interaction.user.id)?.allow.has(PermissionFlagsBits.ManageChannels);
 
         if (!isOwner && !isCoOwner) {
             return interaction.reply({ content: 'You do not have permission to control this BytePod.', flags: [MessageFlags.Ephemeral] });
         }
 
-        const { customId } = interaction;
         const panelId = interaction.message?.id; // Available for buttons on the panel (not for ephemeral menu submits)
 
         // Helper to update specific panel

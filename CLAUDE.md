@@ -175,6 +175,32 @@ User leaves channel
       → Delete channel
       → Delete from bytepods table
       → Handle edge case: If channel already deleted (error 10003), cleanup DB
+    → If OWNER leaves but others remain:
+      → Set ownerLeftAt timestamp
+      → Schedule 5-minute timeout
+      → After timeout: Transfer ownership to first remaining member
+```
+
+**Ownership Transfer System:**
+```
+Owner leaves (others remain):
+  → pendingOwnershipTransfers Map tracks timeout
+  → After 5 min: Pick first member as new owner
+    → Update DB ownerId
+    → Update channel permissions
+    → Rename channel
+    → Notify in channel
+
+Owner returns DURING grace period:
+  → Cancel timeout
+  → Clear ownerLeftAt
+  → Notify in channel
+
+Original owner returns AFTER transfer:
+  → Prompt: "Request ownership back?"
+  → If yes: Send Accept/Deny buttons to current owner
+  → Accept: Transfer back, update perms
+  → Deny: Notify, no changes
 ```
 
 **Control Panel Interactions (src/commands/utility/bytepod.js:174-393):**
@@ -572,6 +598,24 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
 ---
 
 ## Recent Changes
+
+### 2025-12-20 - BytePod Ownership Transfer System
+- **New Feature: Ownership Transfer** - When owner leaves, ownership transfers after 5 minutes
+  - `ownerLeftAt` and `originalOwnerId` columns added to `bytepods` table
+  - In-memory `pendingOwnershipTransfers` Map tracks scheduled transfers
+  - Owner returning during grace period cancels the transfer
+  - After timeout: First remaining member becomes new owner
+  - Channel renamed, permissions updated, notification sent
+- **New Feature: Ownership Reclaim** - Original owner can request ownership back
+  - When original owner rejoins after transfer: "Request Ownership Back" button appears
+  - Current owner sees Accept/Deny buttons
+  - Accept: Ownership transfers back with permission updates
+  - Deny: Notification sent, no changes
+- **Enhanced Error Logging** - Improved `logger.js` with full stack traces and context
+  - `logger.errorContext()` method for detailed debugging
+  - Discord API error details (code, status, method, URL) now logged
+  - AggregateError breakdowns for `Promise.all` failures
+- **Files modified:** `schema.js`, `voiceStateUpdate.js`, `bytepod.js`, `logger.js`, `interactionCreate.js`
 
 ### 2025-12-19 - Voice Activity Stats, Templates & Audit Command
 - **New Feature: Voice Activity Stats** - Tracks cumulative time spent in BytePods

@@ -39,6 +39,8 @@ const bytepods = sqliteTable('bytepods', {
     channelId: text('channel_id').primaryKey(),
     guildId: text('guild_id').notNull(),
     ownerId: text('owner_id').notNull(),
+    originalOwnerId: text('original_owner_id'), // Who created the pod (for reclaim eligibility)
+    ownerLeftAt: integer('owner_left_at'),      // Timestamp (ms) when owner left - null if owner present
     createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date()),
 });
 
