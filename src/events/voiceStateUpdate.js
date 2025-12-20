@@ -124,11 +124,11 @@ async function transferOwnership(channel, podData, newOwnerId, client) {
         try {
             const newOwnerMember = await guild.members.fetch(newOwnerId);
 
-            // Use Promise.race to timeout after 5 seconds (Discord rate limits channel renames)
+            // Use Promise.race to timeout after 10 seconds (Discord can be slow during high load)
             await Promise.race([
                 channel.setName(`${newOwnerMember.user.username}'s Pod`),
                 new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('Rename timeout - likely rate limited by Discord')), 5000)
+                    setTimeout(() => reject(new Error('Rename timeout - Discord rate limited or slow to respond')), 10000)
                 )
             ]);
         } catch (e) {
