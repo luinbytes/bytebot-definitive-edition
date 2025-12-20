@@ -82,11 +82,12 @@ async function transferOwnership(channel, podData, newOwnerId, client) {
     const oldOwnerId = podData.ownerId;
 
     try {
-        // Update database
+        // Update database - new owner takes over as original owner after grace period expires
         await db.update(bytepods)
             .set({
                 ownerId: newOwnerId,
-                ownerLeftAt: null
+                ownerLeftAt: null,
+                originalOwnerId: newOwnerId // New owner becomes the original owner
             })
             .where(eq(bytepods.channelId, channel.id));
 
