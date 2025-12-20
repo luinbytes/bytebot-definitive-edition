@@ -91,4 +91,4 @@ The project uses **Drizzle ORM**.
 The `/help` command in `src/commands/utility/help.js` uses a `categoryMetadata` object to map folder names to icons and descriptions. When adding a new command category folder, update this mapping to maintain visual polish.
 
 ---
-*Built with transparency and modularity as first-class citizens.*
+*Empowering communities, one command at a time.*

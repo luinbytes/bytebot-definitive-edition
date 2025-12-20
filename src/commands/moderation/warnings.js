@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
+const logger = require('../../utils/logger');
 const { db } = require('../../database/index');
 const { moderationLogs } = require('../../database/schema');
 const { eq, and, desc } = require('drizzle-orm');
@@ -42,7 +43,7 @@ module.exports = {
 
             await interaction.reply({ embeds: [embed] });
         } catch (error) {
-            console.error(error);
+            logger.error(error);
             await interaction.reply({
                 embeds: [embeds.error('Error', 'An error occurred while fetching moderation history.')],
                 flags: [MessageFlags.Ephemeral]

@@ -3,6 +3,7 @@ const { db } = require('../../database/index');
 const { guilds } = require('../../database/schema');
 const { eq } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
+const logger = require('../../utils/logger');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -38,7 +39,7 @@ module.exports = {
                     embeds: [embeds.success('Configuration Updated', `Moderation logs will now be sent to ${channel}.`)]
                 });
             } catch (error) {
-                console.error(error);
+                logger.error(error);
                 return interaction.reply({
                     embeds: [embeds.error('Error', 'Failed to update configuration.')],
                     flags: [MessageFlags.Ephemeral]

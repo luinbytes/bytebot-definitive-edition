@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
+const logger = require('../../utils/logger');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -17,7 +18,7 @@ module.exports = {
                 embeds: [embeds.success('Channel Locked', 'The @everyone role can no longer send messages in this channel.')]
             });
         } catch (error) {
-            console.error(error);
+            logger.error(error);
             await interaction.reply({
                 embeds: [embeds.error('Error', 'An error occurred while trying to lock the channel.')],
                 flags: [MessageFlags.Ephemeral]

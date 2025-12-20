@@ -1,5 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
 const embeds = require('../../utils/embeds');
+const logger = require('../../utils/logger');
 const axios = require('axios');
 
 module.exports = {
@@ -20,7 +21,7 @@ module.exports = {
                 ]
             });
         } catch (error) {
-            console.error(error);
+            logger.error(error);
             await interaction.editReply({
                 embeds: [embeds.error('Error', 'Failed to fetch a joke. Try again later!')]
             });
