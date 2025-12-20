@@ -556,20 +556,21 @@ module.exports = {
 
         // BUTTONS
         if (customId === 'bytepod_toggle_lock') {
+            await interaction.deferUpdate(); // Defer first to prevent timeout
             try {
                 const isLocked = channel.permissionOverwrites.cache.get(interaction.guild.id)?.deny.has(PermissionFlagsBits.Connect);
                 await channel.permissionOverwrites.edit(interaction.guild.id, {
                     Connect: isLocked ? null : false
                 });
 
-                // Update via update() since we are on the button
+                // Update the message after deferring
                 const { isLocked: newLock, limit, whitelist, coOwners } = getPodState(channel);
                 const displayWhitelist = whitelist.filter(id => id !== podData.ownerId);
                 const displayCoOwners = coOwners.filter(id => id !== podData.ownerId);
                 const { embeds: e, components } = getControlPanel(channel.id, newLock, limit, displayWhitelist, displayCoOwners);
-                await interaction.update({ embeds: e, components });
+                await interaction.editReply({ embeds: e, components });
             } catch (error) {
-                if (error.code === 10003) return interaction.reply({ content: 'This BytePod channel no longer exists.', flags: [MessageFlags.Ephemeral] });
+                if (error.code === 10003) return interaction.followUp({ content: 'This BytePod channel no longer exists.', flags: [MessageFlags.Ephemeral] });
                 throw error;
             }
         }
