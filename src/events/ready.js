@@ -1,7 +1,7 @@
 const { Events, ActivityType } = require('discord.js');
 const logger = require('../utils/logger');
 const { db } = require('../database');
-const { bytepodActiveSessions, bytepodVoiceStats } = require('../database/schema');
+const { bytepodActiveSessions, bytepodVoiceStats, bytepods } = require('../database/schema');
 const { eq, and } = require('drizzle-orm');
 
 // Helper to finalize a stale voice session
@@ -91,6 +91,56 @@ module.exports = {
             }
         } catch (e) {
             logger.error(`Failed to validate BytePod sessions on startup: ${e}`);
+        }
+
+        // --- Validate BytePod Channels (Cleanup orphans & empty pods) ---
+        try {
+            const allPods = await db.select().from(bytepods);
+            let deleted = 0;
+            let orphaned = 0;
+            let active = 0;
+
+            for (const pod of allPods) {
+                try {
+                    const guild = await client.guilds.fetch(pod.guildId).catch(() => null);
+                    if (!guild) {
+                        // Guild no longer accessible, remove DB record
+                        await db.delete(bytepods).where(eq(bytepods.channelId, pod.channelId));
+                        orphaned++;
+                        continue;
+                    }
+
+                    const channel = await guild.channels.fetch(pod.channelId).catch(() => null);
+                    if (!channel) {
+                        // Channel was deleted while bot was offline, cleanup DB
+                        await db.delete(bytepods).where(eq(bytepods.channelId, pod.channelId));
+                        orphaned++;
+                        continue;
+                    }
+
+                    // Channel exists - check if empty
+                    if (channel.members.size === 0) {
+                        // Empty pod, delete it
+                        await channel.delete('BytePod cleanup: Empty on bot restart').catch(() => null);
+                        await db.delete(bytepods).where(eq(bytepods.channelId, pod.channelId));
+                        deleted++;
+                    } else {
+                        // Pod has members, keep it
+                        active++;
+                    }
+                } catch (e) {
+                    logger.error(`BytePod cleanup error for ${pod.channelId}: ${e.message}`);
+                    // On error, try to cleanup the DB record to prevent permanent orphans
+                    await db.delete(bytepods).where(eq(bytepods.channelId, pod.channelId)).catch(() => { });
+                    orphaned++;
+                }
+            }
+
+            if (allPods.length > 0) {
+                logger.info(`BytePod cleanup: ${deleted} empty deleted, ${orphaned} orphaned removed, ${active} active`);
+            }
+        } catch (e) {
+            logger.error(`Failed to validate BytePod channels on startup: ${e}`);
         }
 
         // --- Rich Presence Rotation ---
