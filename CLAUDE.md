@@ -289,12 +289,15 @@ Original owner returns AFTER transfer:
 - **ping.js** - Roundtrip latency + WS heartbeat
 - **serverinfo.js** - Guild stats
 - **userinfo.js** - User info with roles (top 20)
-- **bytepod.js** - BytePod management (~560 lines)
+- **stats.js** - Server statistics dashboard
+  - `/stats server` - Comprehensive server analytics (members, channels, bot activity)
+- **bytepod.js** - BytePod management (~600 lines)
   - `/bytepod setup` - Configure hub (Admin)
   - `/bytepod panel` - Resend control panel
   - `/bytepod preset add/remove/list` - Auto-whitelist presets
   - `/bytepod preset autolock` - Toggle auto-lock
   - `/bytepod stats [@user]` - View voice activity statistics
+  - `/bytepod leaderboard` - Top 10 users by voice time
   - `/bytepod template save/load/list/delete` - Configuration templates
   - `handleInteraction()` - Massive router for all buttons/menus/modals
 
@@ -605,6 +608,25 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
 ---
 
 ## Recent Changes
+
+### 2025-12-20 - BytePod Leaderboard, Server Stats & Startup Cleanup
+- **New Feature: /bytepod leaderboard** - Voice activity leaderboard
+  - Shows top 10 users by total voice time in BytePods
+  - Displays medals (🥇🥈🥉) for top 3, session counts, formatted durations
+  - Uses existing `bytepodVoiceStats` table data
+- **New Feature: /stats server** - Comprehensive server statistics
+  - Members, channels (text/voice/categories), roles, emojis
+  - Verification level, boost tier, server creation date
+  - Bot activity: commands run, mod actions, active BytePods
+  - Top 3 voice users mini-leaderboard
+  - Server owner display
+- **New Feature: BytePod Startup Cleanup** - Restart resilience
+  - On bot startup, validates all BytePods in database
+  - Deletes empty channels (no members after restart)
+  - Removes orphaned DB records (channel deleted while offline)
+  - Logs cleanup stats: `BytePod cleanup: X empty deleted, Y orphaned removed, Z active`
+- **Files created:** `src/commands/utility/stats.js`
+- **Files modified:** `src/commands/utility/bytepod.js`, `src/events/ready.js`
 
 ### 2025-12-20 - Guild Management Command
 - **New Feature: /manageguilds** - Bot owner guild management tool
