@@ -168,13 +168,13 @@ describe('Ownership Reclaim - Error Handling', () => {
 
     test('should handle errors when sending reclaim prompt', () => {
         const reclaimPromptSection = voiceStateContent.match(
-            /Send reclaim prompt via DM([\s\S]*?)Case 3:/
+            /Send reclaim prompt in channel([\s\S]*?)Case 3:/
         );
 
         expect(reclaimPromptSection).toBeTruthy();
         expect(reclaimPromptSection[0]).toContain('try {');
         expect(reclaimPromptSection[0]).toContain('} catch (e)');
-        expect(reclaimPromptSection[0]).toContain('Could not DM reclaim prompt');
+        expect(reclaimPromptSection[0]).toContain('Failed to send reclaim prompt');
     });
 
     test('should handle errors when sending Accept/Deny message', () => {
