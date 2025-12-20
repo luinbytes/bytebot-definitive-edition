@@ -29,7 +29,12 @@ module.exports = {
                 try {
                     await command.handleInteraction(interaction, client);
                 } catch (error) {
-                    logger.error(`BytePod Interaction Error: ${error}`);
+                    logger.errorContext('BytePod Interaction Error', error, {
+                        customId: interaction.customId,
+                        channelId: interaction.channelId,
+                        userId: interaction.user?.id,
+                        guildId: interaction.guildId
+                    });
                     // Attempt to notify user if possible
                     try {
                         const errorEmbed = embeds.error('Interaction Failed', 'An error occurred while processing this action. The channel may have been deleted or the bot lacks permissions.');
@@ -160,8 +165,40 @@ module.exports = {
         try {
             await command.execute(interaction, client);
         } catch (error) {
-            logger.error(`Error executing ${interaction.commandName}`);
-            logger.error(error);
+            // Build detailed context for debugging
+            const subcommand = interaction.options.getSubcommand(false);
+            const subcommandGroup = interaction.options.getSubcommandGroup(false);
+            let commandPath = interaction.commandName;
+            if (subcommandGroup) commandPath += ` ${subcommandGroup}`;
+            if (subcommand) commandPath += ` ${subcommand}`;
+
+            // Extract options for context (avoid sensitive data)
+            const options = {};
+            try {
+                interaction.options.data.forEach(opt => {
+                    if (opt.type === 1) { // Subcommand
+                        opt.options?.forEach(o => {
+                            options[o.name] = o.value;
+                        });
+                    } else if (opt.type === 2) { // Subcommand Group
+                        opt.options?.forEach(sub => {
+                            sub.options?.forEach(o => {
+                                options[o.name] = o.value;
+                            });
+                        });
+                    } else {
+                        options[opt.name] = opt.value;
+                    }
+                });
+            } catch { }
+
+            logger.errorContext(`Error executing command: ${commandPath}`, error, {
+                command: commandPath,
+                options: Object.keys(options).length > 0 ? options : undefined,
+                userId: interaction.user?.id,
+                guildId: interaction.guildId,
+                channelId: interaction.channelId
+            });
 
             const errorMessage = embeds.error('Critical Error', 'An unexpected error occurred while executing this command. The developers have been notified.');
 
