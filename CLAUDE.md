@@ -254,6 +254,7 @@ Original owner returns AFTER transfer:
 
 ### Developer (src/commands/developer/)
 - **guilds.js** - List all guilds bot is in (devOnly: true)
+- **manageguilds.js** - List and leave guilds via select menu (devOnly: true)
 
 ### Fun (src/commands/fun/)
 - **8ball.js** - Magic 8-ball (20 responses)
@@ -604,6 +605,14 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
 ---
 
 ## Recent Changes
+
+### 2025-12-20 - Guild Management Command
+- **New Feature: /manageguilds** - Bot owner guild management tool
+  - Lists all guilds the bot is in with member counts
+  - Provides a select menu to choose guilds to leave (up to 25 at once)
+  - Shows success/failure results after leaving guilds
+  - devOnly command restricted to developers in config.json
+- **File created:** `src/commands/developer/manageguilds.js`
 
 ### 2025-12-20 - Fix BytePod Ownership Reclaim Edge Cases
 - **CRITICAL FIX: Voice Reconnect Bug** - Fixed button interaction causing voice disconnects
