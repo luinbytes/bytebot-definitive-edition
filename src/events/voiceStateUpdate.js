@@ -264,6 +264,7 @@ module.exports = {
             const podData = await db.select().from(bytepods).where(eq(bytepods.channelId, joinedChannelId)).get();
 
             if (podData) {
+                logger.debug(`[Voice State] User ${member.id} joined BytePod ${joinedChannelId} (owner: ${podData.ownerId}, originalOwner: ${podData.originalOwnerId})`);
                 const channel = newState.channel;
 
                 // Case 1: Owner returned during grace period - cancel transfer
@@ -354,6 +355,8 @@ module.exports = {
 
         // --- LEAVE POD TRIGGER ---
         if (leftChannelId && leftChannelId !== hubId) {
+            logger.debug(`[Voice State] User ${member.id} left channel ${leftChannelId} (joined: ${joinedChannelId || 'none'})`);
+
             // Finalize voice session for the leaving user
             const session = await db.select().from(bytepodActiveSessions)
                 .where(and(
@@ -403,7 +406,22 @@ module.exports = {
                     }
                 } else if (channel && channel.members.size > 0 && podData.ownerId === member.id) {
                     // --- OWNER LEFT BUT OTHERS REMAIN: SCHEDULE TRANSFER ---
-                    logger.info(`BytePod owner ${member.id} left channel ${leftChannelId}, scheduling ownership transfer in 5 minutes`);
+
+                    // Defensive check: Verify owner is actually absent (Discord sometimes sends false leave events)
+                    const freshChannel = await guild.channels.fetch(leftChannelId).catch(() => null);
+                    if (!freshChannel) {
+                        logger.debug(`Channel ${leftChannelId} no longer exists, skipping transfer logic`);
+                        return;
+                    }
+
+                    if (freshChannel.members.has(member.id)) {
+                        logger.warn(`[FALSE LEAVE] Owner ${member.id} appears to still be in channel ${leftChannelId} despite leave event. Skipping transfer.`);
+                        logger.debug(`[FALSE LEAVE] Channel members: ${Array.from(freshChannel.members.keys()).join(', ')}`);
+                        return;
+                    }
+
+                    logger.info(`BytePod owner ${member.id} left channel ${leftChannelId} (verified absent), scheduling ownership transfer in 5 minutes`);
+                    logger.debug(`Remaining members: ${Array.from(freshChannel.members.keys()).join(', ')}`);
 
                     // Mark owner as left in DB
                     await db.update(bytepods)
@@ -428,6 +446,17 @@ module.exports = {
                             if (!currentChannel || currentChannel.members.size === 0) {
                                 logger.debug(`[Transfer Timeout] Skipping - channel deleted or empty (exists: ${!!currentChannel}, members: ${currentChannel?.members.size || 0})`);
                                 return; // Channel deleted or empty
+                            }
+
+                            // Defensive check: Verify owner is still absent before transferring
+                            if (currentChannel.members.has(currentPodData.ownerId)) {
+                                logger.warn(`[Transfer Timeout] Owner ${currentPodData.ownerId} is back in channel ${leftChannelId}, cancelling transfer`);
+                                logger.debug(`[Transfer Timeout] Channel members: ${Array.from(currentChannel.members.keys()).join(', ')}`);
+                                // Clear ownerLeftAt since they're back
+                                await db.update(bytepods)
+                                    .set({ ownerLeftAt: null })
+                                    .where(eq(bytepods.channelId, leftChannelId));
+                                return;
                             }
 
                             // Pick the first member in the channel as new owner
