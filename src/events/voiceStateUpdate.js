@@ -465,7 +465,12 @@ module.exports = {
                                 logger.debug(`[Transfer Timeout] Transferring ownership to ${newOwner.id}`);
                                 await transferOwnership(currentChannel, currentPodData, newOwner.id, guild.client);
                             } else {
-                                logger.debug(`[Transfer Timeout] Skipping - no valid new owner (newOwner: ${newOwner?.id}, isBot: ${newOwner?.user.bot})`);
+                                // No eligible members found (only old owner or bots remain)
+                                // Clear the ownerLeftAt since owner is still the only eligible person
+                                await db.update(bytepods)
+                                    .set({ ownerLeftAt: null })
+                                    .where(eq(bytepods.channelId, leftChannelId));
+                                logger.debug(`[Transfer Timeout] No eligible new owner found - only old owner or bots remain`);
                             }
                         } catch (error) {
                             logger.errorContext('Ownership transfer timeout failed', error, {
