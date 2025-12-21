@@ -236,10 +236,11 @@ module.exports = {
                     startTime: Date.now()
                 });
 
-                // Send Control Panel
-                const whitelistIDs = presets.map(p => p.targetUserId);
-                const { embeds: panelEmbeds, components } = getControlPanel(newChannel.id, autoLock, 0, whitelistIDs); // Pass autoLock state
-                await newChannel.send({ content: `Welcome to your BytePod, ${member}!`, embeds: panelEmbeds, components });
+                // Send Welcome Message
+                await newChannel.send({
+                    embeds: [embeds.brand('Welcome to Your BytePod!', `Your personal voice channel has been created! 🎉\n\n**To manage your pod:** Run \`/bytepod panel\` to access controls (lock/unlock, whitelist, co-owners, etc.)`)],
+                    content: `Welcome, ${member}!`
+                });
 
             } catch (error) {
                 logger.error(`Failed to create BytePod for ${member.user.tag}: ${error}`);
