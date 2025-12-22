@@ -335,10 +335,41 @@ Original owner returns AFTER transfer:
   - `handleInteraction()` - Massive router for all buttons/menus/modals
 
 ### Context Menus (src/commands/context-menus/)
-- **bookmark.js** - Message context menu for bookmarking
+
+**Message Context Menus:**
+- **bookmark.js** - Bookmark messages for later reference
   - Right-click message → Apps → "Bookmark Message"
   - Saves message with content cache, attachments, metadata
   - DM-enabled, 3-second cooldown, auto-deferred
+
+**User Context Menus:**
+- **avatar.js** - View user avatars with download links
+  - Shows server avatar and user avatar (if different)
+  - PNG, WebP, and GIF download links for animated avatars
+  - DM-enabled, 2-second cooldown
+- **userinfo.js** - Comprehensive user information
+  - Account creation, server join, roles, nickname
+  - Bot activity stats, user badges, bot/system indicators
+  - DM-enabled (skips guild fields in DMs), 3-second cooldown, auto-deferred
+- **copyid.js** - Quick user ID copy
+  - Code block format for easy selection
+  - DM-enabled, 1-second cooldown
+- **permissions.js** - Channel-specific permission analysis
+  - Categorizes: Dangerous (red), Important (yellow), Other (green)
+  - Administrator warning, total permission count
+  - Guild-only, 3-second cooldown
+- **activity.js** - User activity tracking
+  - Bot usage, BytePod voice stats, current voice status
+  - Last message in channel with jump link
+  - Guild-only, 5-second cooldown, auto-deferred
+- **modactions.js** - Interactive moderation panel (~350 lines)
+  - Buttons: Warn, Kick, Ban, History
+  - Modal-based reason input with database logging
+  - Role hierarchy validation, permission checks
+  - DM notifications to targets, moderation history viewer
+  - `handleButton()` - Routes button interactions to modals
+  - `handleModal()` - Executes moderation actions (warn/kick/ban)
+  - Guild-only, requires ManageMessages, 3-second cooldown
 
 ---
 
@@ -690,6 +721,58 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
   - `src/database/schema.js` - Added birthday tables with indexes
   - `src/database/index.js` - Added expectedSchema entries
   - `src/events/ready.js` - Initialize BirthdayService on startup
+
+### 2025-12-22 - User Context Menus
+- **New Feature: 6 User Context Menu Actions** - Right-click any user for quick actions
+  - **View Avatar** - Display user's avatar with download links (PNG, WebP, GIF)
+    - Shows both server avatar and user avatar if different
+    - Detects animated avatars and provides GIF download
+    - DM-enabled
+  - **User Info** - Comprehensive user information display
+    - Account creation date, server join date, nickname
+    - Roles list (top 20), highest role color applied
+    - Bot activity stats (commands run, last seen) from database
+    - User badges (Discord Staff, Early Supporter, Bug Hunter, etc.)
+    - Bot/System account indicators
+    - DM-enabled (skips guild-specific fields in DMs)
+  - **Copy User ID** - Quick user ID copy in code block format
+    - Simple, ephemeral response for easy copying
+    - DM-enabled
+  - **Check Permissions** - Channel-specific permission analysis
+    - Categorizes permissions: Dangerous (red), Important (yellow), Other (green)
+    - Administrator warning if user has full permissions
+    - Shows total permission count
+    - Guild-only (permissions are channel-specific)
+  - **Activity History** - User activity tracking across bot features
+    - Bot usage stats (commands run, last seen)
+    - BytePod voice stats (total time, session count)
+    - Current voice channel status (muted/deafened/streaming)
+    - Last message in current channel with jump link
+    - Guild-only
+  - **Moderate User** - Interactive moderation panel with buttons
+    - Buttons: Warn, Kick, Ban, History
+    - Modal-based reason input for all actions
+    - Role hierarchy validation (can't moderate equal/higher roles)
+    - Bot permission checks (disables buttons if bot lacks permissions)
+    - Self-moderation protection
+    - Bot moderation requires Administrator permission
+    - Automatic database logging of all actions
+    - DM notifications to target users
+    - View 10 most recent moderation actions
+    - Guild-only, requires ManageMessages permission
+- **Security Features:**
+  - All context menus use full security pipeline (DM checks, RBAC, cooldowns)
+  - Moderate User has additional hierarchy checks and permission validation
+  - Modal submissions re-validate hierarchy (user might have left/role changed)
+- **Files created:**
+  - `src/commands/context-menus/avatar.js` (~70 lines)
+  - `src/commands/context-menus/userinfo.js` (~140 lines)
+  - `src/commands/context-menus/copyid.js` (~20 lines)
+  - `src/commands/context-menus/permissions.js` (~120 lines)
+  - `src/commands/context-menus/activity.js` (~130 lines)
+  - `src/commands/context-menus/modactions.js` (~350 lines)
+- **Files modified:**
+  - `src/events/interactionCreate.js` - Added moderation button and modal handlers
 
 ### 2025-12-22 - Message Bookmarks & Context Menu System
 - **NEW ARCHITECTURE: Context Menus** - First implementation of Discord's context menu system
