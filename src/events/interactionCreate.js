@@ -6,9 +6,21 @@ const { db } = require('../database/index');
 const { users, commandPermissions } = require('../database/schema');
 const { sql, eq, and } = require('drizzle-orm');
 
+// Track processed interactions to prevent duplicates
+const processedInteractions = new Set();
+setInterval(() => {
+    processedInteractions.clear(); // Clear every minute to prevent memory leak
+}, 60000);
+
 module.exports = {
     name: Events.InteractionCreate,
     async execute(interaction, client) {
+        // Prevent duplicate processing of the same interaction
+        if (processedInteractions.has(interaction.id)) {
+            logger.debug(`Skipping duplicate interaction: ${interaction.id}`);
+            return;
+        }
+        processedInteractions.add(interaction.id);
         // Handle Autocomplete interactions
         if (interaction.isAutocomplete()) {
             const command = client.commands.get(interaction.commandName);
