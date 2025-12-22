@@ -148,6 +148,25 @@ const expectedSchema = {
         use_count: 'INTEGER DEFAULT 0',
         created_at: 'INTEGER',
         last_used: 'INTEGER'
+    },
+    starboard_config: {
+        guild_id: 'TEXT PRIMARY KEY',
+        channel_id: 'TEXT NOT NULL',
+        threshold: 'INTEGER DEFAULT 5 NOT NULL',
+        emoji: 'TEXT DEFAULT ⭐ NOT NULL',
+        enabled: 'INTEGER DEFAULT 1 NOT NULL'
+    },
+    starboard_messages: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        original_message_id: 'TEXT NOT NULL',
+        original_channel_id: 'TEXT NOT NULL',
+        starboard_message_id: 'TEXT',
+        author_id: 'TEXT NOT NULL',
+        star_count: 'INTEGER DEFAULT 0 NOT NULL',
+        content: 'TEXT',
+        image_url: 'TEXT',
+        posted_at: 'INTEGER NOT NULL'
     }
 };
 

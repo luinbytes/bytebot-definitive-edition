@@ -152,6 +152,34 @@ const autoResponses = sqliteTable('auto_responses', {
     guildChannelIdx: index('autoresponse_guild_channel_idx').on(table.guildId, table.channelId),
 }));
 
+// Starboard configuration (per-guild)
+const starboardConfig = sqliteTable('starboard_config', {
+    guildId: text('guild_id').primaryKey(),
+    channelId: text('channel_id').notNull(),
+    threshold: integer('threshold').default(5).notNull(), // Stars needed to be featured
+    emoji: text('emoji').default('⭐').notNull(), // Reaction emoji to track
+    enabled: integer('enabled', { mode: 'boolean' }).default(true).notNull()
+});
+
+// Starboard messages (tracks starred messages)
+const starboardMessages = sqliteTable('starboard_messages', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    originalMessageId: text('original_message_id').notNull().unique(), // Original message ID
+    originalChannelId: text('original_channel_id').notNull(),
+    starboardMessageId: text('starboard_message_id'), // Message ID in starboard channel (null if removed)
+    authorId: text('author_id').notNull(),
+    starCount: integer('star_count').default(0).notNull(),
+    content: text('content'), // Cached content
+    imageUrl: text('image_url'), // First image attachment URL
+    postedAt: integer('posted_at', { mode: 'timestamp_ms' }).notNull()
+}, (table) => ({
+    // Index for leaderboard queries (top starred messages)
+    guildStarCountIdx: index('starboard_guild_starcount_idx').on(table.guildId, table.starCount),
+    // Index for author stats
+    authorGuildIdx: index('starboard_author_guild_idx').on(table.authorId, table.guildId),
+}));
+
 module.exports = {
     guilds,
     users,
@@ -166,5 +194,7 @@ module.exports = {
     birthdays,
     birthdayConfig,
     bookmarks,
-    autoResponses
+    autoResponses,
+    starboardConfig,
+    starboardMessages
 };
