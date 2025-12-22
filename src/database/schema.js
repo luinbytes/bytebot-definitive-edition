@@ -1,4 +1,4 @@
-const { sqliteTable, text, integer } = require('drizzle-orm/sqlite-core');
+const { sqliteTable, text, integer, index, unique } = require('drizzle-orm/sqlite-core');
 
 const guilds = sqliteTable('guilds', {
     id: text('id').primaryKey(),
@@ -85,6 +85,120 @@ const bytepodTemplates = sqliteTable('bytepod_templates', {
     whitelistUserIds: text('whitelist_user_ids'), // JSON stringified array
 });
 
+// Birthday tracking (per-user, per-guild)
+const birthdays = sqliteTable('birthdays', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: text('user_id').notNull(),
+    guildId: text('guild_id').notNull(),
+    month: integer('month').notNull(), // 1-12
+    day: integer('day').notNull(),     // 1-31
+    createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date()),
+}, (table) => ({
+    // Composite unique constraint: one birthday per user per guild
+    userGuildUnique: unique().on(table.userId, table.guildId),
+    // Index for daily birthday queries
+    guildMonthDayIdx: index('birthdays_guild_month_day_idx').on(table.guildId, table.month, table.day),
+    // Index for user lookups
+    userGuildIdx: index('birthdays_user_guild_idx').on(table.userId, table.guildId),
+}));
+
+// Birthday announcement configuration (per-guild)
+const birthdayConfig = sqliteTable('birthday_config', {
+    guildId: text('guild_id').primaryKey(),
+    channelId: text('channel_id').notNull(),
+    roleId: text('role_id'), // Optional birthday role
+    enabled: integer('enabled', { mode: 'boolean' }).default(true).notNull(),
+    lastCheck: integer('last_check', { mode: 'timestamp' }), // Last midnight check
+});
+
+// Message bookmarks (per-user, cross-guild)
+const bookmarks = sqliteTable('bookmarks', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: text('user_id').notNull(),
+    guildId: text('guild_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    messageId: text('message_id').notNull(),
+    content: text('content').notNull(), // Cached message content
+    authorId: text('author_id').notNull(), // Original message author
+    attachmentUrls: text('attachment_urls'), // JSON array of attachment URLs
+    savedAt: integer('saved_at', { mode: 'timestamp' }).default(new Date()),
+    messageDeleted: integer('message_deleted', { mode: 'boolean' }).default(false).notNull()
+}, (table) => ({
+    // Index for user's bookmark list (sorted by saved date)
+    userSavedIdx: index('bookmarks_user_saved_idx').on(table.userId, table.savedAt),
+    // Index for search queries
+    userContentIdx: index('bookmarks_user_content_idx').on(table.userId, table.content),
+}));
+
+// Auto-responder (keyword-based automated responses)
+const autoResponses = sqliteTable('auto_responses', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    trigger: text('trigger').notNull(), // Keyword or pattern
+    response: text('response').notNull(), // Response text (max 2000 chars)
+    channelId: text('channel_id'), // null = guild-wide
+    creatorId: text('creator_id').notNull(),
+    enabled: integer('enabled', { mode: 'boolean' }).default(true).notNull(),
+    cooldown: integer('cooldown').default(60), // Seconds between triggers
+    matchType: text('match_type').default('contains').notNull(), // exact, contains, wildcard, regex
+    requireRoleId: text('require_role_id'), // null = any user
+    useCount: integer('use_count').default(0), // Analytics
+    createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date()),
+    lastUsed: integer('last_used', { mode: 'timestamp' })
+}, (table) => ({
+    // Index for active response lookups
+    guildEnabledIdx: index('autoresponse_guild_enabled_idx').on(table.guildId, table.enabled),
+    // Index for channel-specific responses
+    guildChannelIdx: index('autoresponse_guild_channel_idx').on(table.guildId, table.channelId),
+}));
+
+// Starboard configuration (per-guild)
+const starboardConfig = sqliteTable('starboard_config', {
+    guildId: text('guild_id').primaryKey(),
+    channelId: text('channel_id').notNull(),
+    threshold: integer('threshold').default(5).notNull(), // Stars needed to be featured
+    emoji: text('emoji').default('⭐').notNull(), // Reaction emoji to track
+    enabled: integer('enabled', { mode: 'boolean' }).default(true).notNull()
+});
+
+// Starboard messages (tracks starred messages)
+const starboardMessages = sqliteTable('starboard_messages', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    originalMessageId: text('original_message_id').notNull().unique(), // Original message ID
+    originalChannelId: text('original_channel_id').notNull(),
+    starboardMessageId: text('starboard_message_id'), // Message ID in starboard channel (null if removed)
+    authorId: text('author_id').notNull(),
+    starCount: integer('star_count').default(0).notNull(),
+    content: text('content'), // Cached content
+    imageUrl: text('image_url'), // First image attachment URL
+    postedAt: integer('posted_at', { mode: 'timestamp_ms' }).notNull()
+}, (table) => ({
+    // Index for leaderboard queries (top starred messages)
+    guildStarCountIdx: index('starboard_guild_starcount_idx').on(table.guildId, table.starCount),
+    // Index for author stats
+    authorGuildIdx: index('starboard_author_guild_idx').on(table.authorId, table.guildId),
+}));
+
+// Reminders (scheduled user notifications)
+const reminders = sqliteTable('reminders', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: text('user_id').notNull(),
+    guildId: text('guild_id'), // null for DM reminders
+    channelId: text('channel_id'), // null for DM reminders
+    message: text('message').notNull(),
+    triggerAt: integer('trigger_at', { mode: 'timestamp_ms' }).notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    active: integer('active', { mode: 'boolean' }).default(true).notNull()
+}, (table) => ({
+    // Index for user reminder list queries
+    userActiveIdx: index('reminders_user_active_idx').on(table.userId, table.active),
+    // Index for scheduler queries (upcoming reminders)
+    triggerIdx: index('reminders_trigger_idx').on(table.triggerAt, table.active),
+    // Index for guild cleanup
+    guildIdx: index('reminders_guild_idx').on(table.guildId, table.active)
+}));
+
 module.exports = {
     guilds,
     users,
@@ -95,5 +209,12 @@ module.exports = {
     bytepodUserSettings,
     bytepodActiveSessions,
     bytepodVoiceStats,
-    bytepodTemplates
+    bytepodTemplates,
+    birthdays,
+    birthdayConfig,
+    bookmarks,
+    autoResponses,
+    starboardConfig,
+    starboardMessages,
+    reminders
 };
