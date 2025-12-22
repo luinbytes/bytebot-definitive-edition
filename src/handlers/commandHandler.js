@@ -57,6 +57,13 @@ module.exports = async (client) => {
     try {
         logger.info(`Started refreshing ${commands.length} application commands (slash + context menus).`);
 
+        // Clear existing commands first to remove orphaned/leftover commands
+        logger.debug('Clearing existing guild commands...');
+        await rest.put(
+            Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
+            { body: [] }
+        );
+
         // Note: Deploying to a specific guild for development speed.
         // In production, use Routes.applicationCommands(clientId) for global deployment.
         const data = await rest.put(
