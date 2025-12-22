@@ -15,7 +15,7 @@ class AutoResponderService {
         this.cacheExpiry = new Map(); // guildId -> expiry timestamp
 
         // Cleanup stale cooldowns every minute
-        setInterval(() => {
+        this.cleanupInterval = setInterval(() => {
             const now = Date.now();
             for (const [key, expiry] of this.cooldowns.entries()) {
                 if (expiry < now) {
@@ -23,6 +23,17 @@ class AutoResponderService {
                 }
             }
         }, 60000);
+    }
+
+    /**
+     * Cleanup method - clears interval timer
+     * Call this when shutting down the service
+     */
+    cleanup() {
+        if (this.cleanupInterval) {
+            clearInterval(this.cleanupInterval);
+            this.cleanupInterval = null;
+        }
     }
 
     /**

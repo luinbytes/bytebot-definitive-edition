@@ -1,4 +1,16 @@
 describe('Reminder System', () => {
+    let serviceInstances = [];
+
+    afterEach(() => {
+        // Clean up all service instances to prevent timer leaks
+        serviceInstances.forEach(service => {
+            if (service && service.cleanup) {
+                service.cleanup();
+            }
+        });
+        serviceInstances = [];
+    });
+
     describe('Service Structure', () => {
         test('reminderService should be properly structured', () => {
             const ReminderService = require('../src/services/reminderService');
@@ -8,6 +20,7 @@ describe('Reminder System', () => {
                 guilds: { fetch: jest.fn() }
             };
             const service = new ReminderService(mockClient);
+            serviceInstances.push(service);
 
             expect(service.client).toBe(mockClient);
             expect(service.activeTimers).toBeInstanceOf(Map);
@@ -25,6 +38,7 @@ describe('Reminder System', () => {
                 users: { fetch: jest.fn() }
             };
             const service = new ReminderService(mockClient);
+            serviceInstances.push(service);
 
             // Mock some timers
             service.activeTimers.set(1, setTimeout(() => {}, 1000));
@@ -41,7 +55,13 @@ describe('Reminder System', () => {
     });
 
     describe('Delay Handling', () => {
-        jest.useFakeTimers();
+        beforeEach(() => {
+            jest.useFakeTimers();
+        });
+
+        afterEach(() => {
+            jest.useRealTimers();
+        });
 
         test('should use setTimeout for short delays', () => {
             const ReminderService = require('../src/services/reminderService');
@@ -50,6 +70,7 @@ describe('Reminder System', () => {
                 users: { fetch: jest.fn() }
             };
             const service = new ReminderService(mockClient);
+            serviceInstances.push(service);
             service.fireReminder = jest.fn();
 
             const shortReminder = {
@@ -72,6 +93,7 @@ describe('Reminder System', () => {
                 users: { fetch: jest.fn() }
             };
             const service = new ReminderService(mockClient);
+            serviceInstances.push(service);
 
             const longReminder = {
                 id: 2,
@@ -85,8 +107,6 @@ describe('Reminder System', () => {
             expect(service.activeTimers.has(2)).toBe(false);
             expect(service.longDelayChecks.has(2)).toBe(true);
         });
-
-        jest.useRealTimers();
     });
 
     describe('Relative Time Formatting', () => {
@@ -97,6 +117,7 @@ describe('Reminder System', () => {
                 users: { fetch: jest.fn() }
             };
             const service = new ReminderService(mockClient);
+            serviceInstances.push(service);
 
             const now = Date.now();
 
