@@ -215,10 +215,15 @@ module.exports = {
 
                 const errorMessage = embeds.error('Error', 'An unexpected error occurred while processing this action.');
 
-                if (interaction.replied || interaction.deferred) {
-                    await interaction.followUp({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral] });
-                } else {
-                    await interaction.reply({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral] });
+                try {
+                    if (interaction.replied || interaction.deferred) {
+                        await interaction.followUp({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral] });
+                    } else {
+                        await interaction.reply({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral] });
+                    }
+                } catch (replyError) {
+                    // Interaction expired or already handled - log but don't crash
+                    logger.debug(`Could not send error response: ${replyError.message}`);
                 }
             }
 
@@ -376,10 +381,15 @@ module.exports = {
 
             const errorMessage = embeds.error('Critical Error', 'An unexpected error occurred while executing this command. The developers have been notified.');
 
-            if (interaction.replied || interaction.deferred) {
-                await interaction.followUp({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral] });
-            } else {
-                await interaction.reply({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral] });
+            try {
+                if (interaction.replied || interaction.deferred) {
+                    await interaction.followUp({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral] });
+                } else {
+                    await interaction.reply({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral] });
+                }
+            } catch (replyError) {
+                // Interaction expired or already handled - log but don't crash
+                logger.debug(`Could not send error response: ${replyError.message}`);
             }
         }
     },
