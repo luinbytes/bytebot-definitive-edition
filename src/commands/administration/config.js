@@ -57,7 +57,7 @@ module.exports = {
                 });
             }
 
-            const embed = embeds.brand(`${interaction.guild.name} Configuration`, '')
+            const embed = embeds.brand(`${interaction.guild.name} Configuration`, null)
                 .addFields(
                     { name: 'Prefix', value: `\`${config.prefix}\``, inline: true },
                     { name: 'Log Channel', value: config.logChannel ? `<#${config.logChannel}>` : 'Not set', inline: true },

@@ -9,12 +9,18 @@ const embeds = {
      * Base embed template with branding
      */
     base: (title, description) => {
-        return new EmbedBuilder()
+        const embed = new EmbedBuilder()
             .setColor(config.brand.color)
             .setTitle(title)
-            .setDescription(description)
             .setTimestamp()
             .setFooter({ text: config.brand.name });
+
+        // Only set description if it has content
+        if (description && description.length > 0) {
+            embed.setDescription(description);
+        }
+
+        return embed;
     },
 
     /**
