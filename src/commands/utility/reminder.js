@@ -123,8 +123,8 @@ async function handleRemindMe(interaction, client) {
             guildId: null,
             channelId: null,
             message: message,
-            triggerAt: parsedTime.timestamp,
-            createdAt: Date.now(),
+            triggerAt: new Date(parsedTime.timestamp),
+            createdAt: new Date(),
             active: true
         }).returning().get();
 
@@ -218,8 +218,8 @@ async function handleRemindHere(interaction, client) {
             guildId: interaction.guild.id,
             channelId: interaction.channel.id,
             message: message,
-            triggerAt: parsedTime.timestamp,
-            createdAt: Date.now(),
+            triggerAt: new Date(parsedTime.timestamp),
+            createdAt: new Date(),
             active: true
         }).returning().get();
 
