@@ -8,9 +8,11 @@ const { sql, eq, and } = require('drizzle-orm');
 
 // Track processed interactions to prevent duplicates
 const processedInteractions = new Set();
-setInterval(() => {
+const cleanupInterval = setInterval(() => {
     processedInteractions.clear(); // Clear every minute to prevent memory leak
 }, 60000);
+// Allow Jest to exit cleanly
+if (cleanupInterval.unref) cleanupInterval.unref();
 
 module.exports = {
     name: Events.InteractionCreate,
