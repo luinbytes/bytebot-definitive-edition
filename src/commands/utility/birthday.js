@@ -103,17 +103,34 @@ module.exports = {
             leapYearWarning = '\n\n⚠️ **Leap year birthday!** You\'ll be celebrated on February 28th in non-leap years.';
         }
 
-        // Insert or update birthday
-        await db.insert(birthdays).values({
-            userId: interaction.user.id,
-            guildId: interaction.guild.id,
-            month,
-            day,
-            createdAt: new Date()
-        }).onConflictDoUpdate({
-            target: [birthdays.userId, birthdays.guildId],
-            set: { month, day }
-        });
+        // Check if birthday already exists for this user in this guild
+        const existingBirthday = await db.select().from(birthdays).where(
+            and(
+                eq(birthdays.userId, interaction.user.id),
+                eq(birthdays.guildId, interaction.guild.id)
+            )
+        ).get();
+
+        if (existingBirthday) {
+            // Update existing birthday
+            await db.update(birthdays)
+                .set({ month, day })
+                .where(
+                    and(
+                        eq(birthdays.userId, interaction.user.id),
+                        eq(birthdays.guildId, interaction.guild.id)
+                    )
+                );
+        } else {
+            // Insert new birthday
+            await db.insert(birthdays).values({
+                userId: interaction.user.id,
+                guildId: interaction.guild.id,
+                month,
+                day,
+                createdAt: new Date()
+            });
+        }
 
         const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
             'July', 'August', 'September', 'October', 'November', 'December'];
