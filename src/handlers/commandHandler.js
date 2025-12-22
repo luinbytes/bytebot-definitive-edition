@@ -116,11 +116,20 @@ module.exports = async (client) => {
             logger.warn('  4. Invalid GUILD_ID or CLIENT_ID in .env');
             logger.warn('\nBot will continue without commands. Check your .env configuration.');
         } else {
-            logger.errorContext('Command registration failed', error, {
-                guildId: process.env.GUILD_ID,
-                clientId: process.env.CLIENT_ID,
-                commandCount: commands.length
-            });
+            // Discord API errors have specific structure
+            if (error.code) {
+                logger.error(`Discord API Error ${error.code}: ${error.message}`);
+                if (error.rawError?.errors) {
+                    logger.error('Validation Errors:');
+                    logger.error(JSON.stringify(error.rawError.errors, null, 2));
+                }
+            } else {
+                logger.errorContext('Command registration failed', error, {
+                    guildId: process.env.GUILD_ID,
+                    clientId: process.env.CLIENT_ID,
+                    commandCount: commands.length
+                });
+            }
             logger.warn('Commands may not be available. Check Discord Developer Portal or use --deploy flag.');
         }
     }
