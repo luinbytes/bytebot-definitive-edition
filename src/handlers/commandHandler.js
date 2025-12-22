@@ -57,7 +57,23 @@ module.exports = async (client) => {
     try {
         logger.info(`Started refreshing ${commands.length} application commands (slash + context menus).`);
 
-        // Clear existing commands first to remove orphaned/leftover commands
+        // Clear existing global commands first (in case any were registered globally)
+        logger.debug('Clearing existing global commands...');
+        try {
+            await rest.put(
+                Routes.applicationCommands(process.env.CLIENT_ID),
+                { body: [] }
+            );
+            logger.debug('Successfully cleared existing global commands');
+        } catch (clearGlobalError) {
+            logger.debug(`Could not clear global commands: ${clearGlobalError.message}`);
+            // This is okay - there might not be any global commands
+        }
+
+        // Small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Clear existing guild commands
         logger.debug('Clearing existing guild commands...');
         try {
             await rest.put(
@@ -66,7 +82,7 @@ module.exports = async (client) => {
             );
             logger.debug('Successfully cleared existing guild commands');
         } catch (clearError) {
-            logger.error(`Error clearing commands: ${clearError.message}`);
+            logger.error(`Error clearing guild commands: ${clearError.message}`);
             // Continue anyway - maybe there were no commands to clear
         }
 
