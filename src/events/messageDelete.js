@@ -19,5 +19,14 @@ module.exports = {
             // Don't crash on bookmark update failures, just log
             logger.error(`Failed to mark bookmarks as deleted for message ${message.id}: ${error}`);
         }
+
+        // Handle starboard message deletions
+        if (client.starboardService && message.guild) {
+            try {
+                await client.starboardService.handleMessageDelete(message);
+            } catch (error) {
+                logger.error(`Failed to handle starboard message deletion for ${message.id}: ${error}`);
+            }
+        }
     }
 };

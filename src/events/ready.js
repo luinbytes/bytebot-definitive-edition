@@ -162,6 +162,15 @@ module.exports = {
             logger.error(`Failed to initialize auto-responder service: ${e}`);
         }
 
+        // --- Initialize Starboard Service ---
+        try {
+            const StarboardService = require('../services/starboardService');
+            client.starboardService = new StarboardService(client);
+            logger.success('Starboard service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize starboard service: ${e}`);
+        }
+
         // --- Rich Presence Rotation ---
         let i = 0;
         setInterval(() => {
