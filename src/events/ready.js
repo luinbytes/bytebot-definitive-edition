@@ -157,6 +157,6 @@ module.exports = {
                 status: 'online',
             });
             i = ++i % activities.length;
-        }, 10_000);
+        }, 3_600_000); // 1 hour
     },
 };
