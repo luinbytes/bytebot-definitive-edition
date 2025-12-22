@@ -91,10 +91,20 @@ module.exports = async (client) => {
 
         // Note: Deploying to a specific guild for development speed.
         // In production, use Routes.applicationCommands(clientId) for global deployment.
-        const data = await rest.put(
-            Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
-            { body: commands },
-        );
+        logger.debug(`Registering ${commands.length} commands to Discord...`);
+
+        // Add timeout wrapper to prevent hanging
+        const registerWithTimeout = Promise.race([
+            rest.put(
+                Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
+                { body: commands },
+            ),
+            new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Command registration timed out after 30 seconds')), 30000)
+            )
+        ]);
+
+        const data = await registerWithTimeout;
 
         logger.success(`Successfully reloaded ${data.length} application commands.`);
     } catch (error) {

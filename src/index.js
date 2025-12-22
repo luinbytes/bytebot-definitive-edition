@@ -30,6 +30,38 @@ process.on('uncaughtException', (err) => {
     logger.error(`Uncaught Exception: ${err}`);
 });
 
+// Graceful shutdown handlers
+const shutdown = async (signal) => {
+    logger.info(`Received ${signal} signal, shutting down gracefully...`);
+
+    try {
+        // Cleanup services
+        if (client.reminderService && client.reminderService.cleanup) {
+            await client.reminderService.cleanup();
+        }
+        if (client.birthdayService && client.birthdayService.cleanup) {
+            await client.birthdayService.cleanup();
+        }
+        if (client.autoResponderService && client.autoResponderService.cleanup) {
+            await client.autoResponderService.cleanup();
+        }
+        if (client.starboardService && client.starboardService.cleanup) {
+            await client.starboardService.cleanup();
+        }
+
+        // Destroy Discord client
+        client.destroy();
+        logger.success('Bot shutdown complete');
+        process.exit(0);
+    } catch (error) {
+        logger.error(`Error during shutdown: ${error.message}`);
+        process.exit(1);
+    }
+};
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+
 (async () => {
     try {
         // Load Handlers

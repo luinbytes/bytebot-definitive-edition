@@ -60,38 +60,53 @@ function formatError(err) {
 }
 
 const logger = {
-    info: (msg) => console.log(`${chalk.gray(`[${timestamp()}]`)} ${chalk.blue('[INFO]')} ${msg}`),
-    success: (msg) => console.log(`${chalk.gray(`[${timestamp()}]`)} ${chalk.green('[SUCCESS]')} ${msg}`),
-    warn: (msg) => console.log(`${chalk.gray(`[${timestamp()}]`)} ${chalk.yellow('[WARN]')} ${msg}`),
-    error: (msg) => {
+    info: (msg, module = null) => {
+        const moduleTag = module ? chalk.cyan(`[${module}]`) + ' ' : '';
+        console.log(`${chalk.gray(`[${timestamp()}]`)} ${chalk.blue('[INFO]')} ${moduleTag}${msg}`);
+    },
+    success: (msg, module = null) => {
+        const moduleTag = module ? chalk.cyan(`[${module}]`) + ' ' : '';
+        console.log(`${chalk.gray(`[${timestamp()}]`)} ${chalk.green('[SUCCESS]')} ${moduleTag}${msg}`);
+    },
+    warn: (msg, module = null) => {
+        const moduleTag = module ? chalk.cyan(`[${module}]`) + ' ' : '';
+        console.log(`${chalk.gray(`[${timestamp()}]`)} ${chalk.yellow('[WARN]')} ${moduleTag}${msg}`);
+    },
+    error: (msg, module = null) => {
+        const moduleTag = module ? chalk.cyan(`[${module}]`) + ' ' : '';
         // If it's an Error object, format it nicely with full details
         const formatted = msg instanceof Error ? formatError(msg) : msg;
-        console.log(`${chalk.gray(`[${timestamp()}]`)} ${chalk.red('[ERROR]')} ${formatted}`);
+        console.log(`${chalk.gray(`[${timestamp()}]`)} ${chalk.red('[ERROR]')} ${moduleTag}${formatted}`);
     },
-    debug: (msg) => console.log(`${chalk.gray(`[${timestamp()}]`)} ${chalk.magenta('[DEBUG]')} ${msg}`),
+    debug: (msg, module = null) => {
+        const moduleTag = module ? chalk.cyan(`[${module}]`) + ' ' : '';
+        console.log(`${chalk.gray(`[${timestamp()}]`)} ${chalk.magenta('[DEBUG]')} ${moduleTag}${msg}`);
+    },
 
     /**
      * Log an error with additional context
      * @param {string} context - Description of where/what failed
      * @param {Error} error - The error object
      * @param {Object} details - Optional additional details to log
+     * @param {string} module - Optional module tag
      */
-    errorContext: (context, error, details = {}) => {
-        console.log(`${chalk.gray(`[${timestamp()}]`)} ${chalk.red('[ERROR]')} ${chalk.bold(context)}`);
+    errorContext: (context, error, details = {}, module = null) => {
+        const moduleTag = module ? chalk.cyan(`[${module}]`) + ' ' : '';
+        console.log(`${chalk.gray(`[${timestamp()}]`)} ${chalk.red('[ERROR]')} ${moduleTag}${chalk.bold(context)}`);
 
         // Log any additional details
         if (Object.keys(details).length > 0) {
-            console.log(`${chalk.gray(`[${timestamp()}]`)} ${chalk.red('[ERROR]')}   Context Details:`);
+            console.log(`${chalk.gray(`[${timestamp()}]`)} ${chalk.red('[ERROR]')} ${moduleTag}  Context Details:`);
             for (const [key, value] of Object.entries(details)) {
                 const formatted = typeof value === 'object' ? JSON.stringify(value) : value;
-                console.log(`${chalk.gray(`[${timestamp()}]`)} ${chalk.red('[ERROR]')}     ${key}: ${formatted}`);
+                console.log(`${chalk.gray(`[${timestamp()}]`)} ${chalk.red('[ERROR]')} ${moduleTag}    ${key}: ${formatted}`);
             }
         }
 
         // Log the full error
         if (error) {
             const formatted = error instanceof Error ? formatError(error) : error;
-            console.log(`${chalk.gray(`[${timestamp()}]`)} ${chalk.red('[ERROR]')} ${formatted}`);
+            console.log(`${chalk.gray(`[${timestamp()}]`)} ${chalk.red('[ERROR]')} ${moduleTag}${formatted}`);
         }
     }
 };
