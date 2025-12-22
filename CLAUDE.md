@@ -38,7 +38,7 @@ ByteBot is a modular, production-ready Discord bot built with Discord.js v14, fe
 
 ### Database Layer (src/database/)
 
-**schema.js** - 10 tables:
+**schema.js** - 14 tables:
 ```javascript
 guilds: {
   id, prefix, logChannel, welcomeChannel, joinedAt,
@@ -84,13 +84,42 @@ bytepodActiveSessions: {
 }
 
 bytepodVoiceStats: {
-  id, odId, guildId, totalSeconds, sessionCount
+  id, userId, guildId, totalSeconds, sessionCount
   // Aggregate voice activity stats per user per guild
 }
 
 bytepodTemplates: {
   id, userId, name, userLimit, autoLock, whitelistUserIds (JSON)
   // Saved BytePod configuration templates
+}
+
+birthdays: {
+  id, userId, guildId, month (1-12), day (1-31), createdAt
+  // Per-user, per-guild birthday storage (privacy-focused, no year)
+  // Composite unique constraint on (userId, guildId)
+  // Indexes: (guildId, month, day) for daily checks, (userId, guildId) for lookups
+}
+
+birthdayConfig: {
+  guildId (PK), channelId, roleId, enabled, lastCheck
+  // Per-guild birthday celebration configuration
+}
+
+bookmarks: {
+  id, userId, guildId, channelId, messageId, content, authorId, attachmentUrls, savedAt, messageDeleted
+  // Personal message bookmarks with content caching
+  // Indexes: (userId, savedAt) for pagination, (userId, content) for search
+  // 100 bookmark limit per user enforced in bookmarkUtil
+}
+
+autoResponses: {
+  id, guildId, trigger, response, channelId, creatorId, enabled, cooldown, matchType, requireRoleId, useCount, createdAt, lastUsed
+  // Keyword-based automated responses
+  // matchType: exact, contains, wildcard, regex (regex dev-only)
+  // channelId: null = guild-wide
+  // requireRoleId: null = any user
+  // Indexes: (guildId, enabled), (guildId, channelId)
+  // 50 response limit per guild, 5-min cache, in-memory cooldowns
 }
 ```
 
@@ -251,6 +280,16 @@ Original owner returns AFTER transfer:
 ### Administration (src/commands/administration/)
 - **config.js** - Manage log channels, view server config (Admin only)
 - **perm.js** - RBAC management with autocomplete (Admin only)
+- **autorespond.js** - Keyword-based automated responses (~450 lines)
+  - `/autorespond add <trigger> <response>` - Create response with match types
+  - `/autorespond remove <id>` - Delete response (autocomplete enabled)
+  - `/autorespond list` - View all responses (paginated, max 25)
+  - `/autorespond toggle <id>` - Enable/disable response
+  - `/autorespond edit <id> <new_response>` - Update response text
+  - Match types: exact, contains, wildcard, regex (dev-only)
+  - Variables: {user} {server} {channel} {username}
+  - Optional: channel restriction, role requirement, custom cooldown
+  - Requires ManageGuild permission
 
 ### Developer (src/commands/developer/)
 - **guilds.js** - List all guilds bot is in (devOnly: true)
@@ -291,6 +330,20 @@ Original owner returns AFTER transfer:
 - **userinfo.js** - User info with roles (top 20)
 - **stats.js** - Server statistics dashboard
   - `/stats server` - Comprehensive server analytics (members, channels, bot activity)
+- **birthday.js** - Birthday tracking system (~450 lines)
+  - `/birthday set <MM-DD>` - Register birthday (privacy-focused, no year)
+  - `/birthday remove` - Delete your birthday
+  - `/birthday view [@user]` - Check a user's birthday
+  - `/birthday upcoming [days]` - View upcoming birthdays (default 30 days)
+  - `/birthday setup <channel>` - Admin: Configure announcement channel
+  - `/birthday role [role]` - Admin: Set 24-hour birthday role
+- **bookmark.js** - Message bookmarks management (~420 lines)
+  - `/bookmark list [page]` - View your bookmarks (10 per page)
+  - `/bookmark search <query>` - Search bookmarks by content
+  - `/bookmark view <id>` - Detailed view with jump link
+  - `/bookmark delete <id>` - Delete a specific bookmark
+  - `/bookmark clear` - Delete all bookmarks with confirmation
+  - `handleInteraction()` - Handles clear confirmation buttons
 - **bytepod.js** - BytePod management (~600 lines)
   - `/bytepod setup` - Configure hub (Admin)
   - `/bytepod panel` - Resend control panel
@@ -300,6 +353,43 @@ Original owner returns AFTER transfer:
   - `/bytepod leaderboard` - Top 10 users by voice time
   - `/bytepod template save/load/list/delete` - Configuration templates
   - `handleInteraction()` - Massive router for all buttons/menus/modals
+
+### Context Menus (src/commands/context-menus/)
+
+**Message Context Menus:**
+- **bookmark.js** - Bookmark messages for later reference
+  - Right-click message → Apps → "Bookmark Message"
+  - Saves message with content cache, attachments, metadata
+  - DM-enabled, 3-second cooldown, auto-deferred
+
+**User Context Menus:**
+- **avatar.js** - View user avatars with download links
+  - Shows server avatar and user avatar (if different)
+  - PNG, WebP, and GIF download links for animated avatars
+  - DM-enabled, 2-second cooldown
+- **userinfo.js** - Comprehensive user information
+  - Account creation, server join, roles, nickname
+  - Bot activity stats, user badges, bot/system indicators
+  - DM-enabled (skips guild fields in DMs), 3-second cooldown, auto-deferred
+- **copyid.js** - Quick user ID copy
+  - Code block format for easy selection
+  - DM-enabled, 1-second cooldown
+- **permissions.js** - Channel-specific permission analysis
+  - Categorizes: Dangerous (red), Important (yellow), Other (green)
+  - Administrator warning, total permission count
+  - Guild-only, 3-second cooldown
+- **activity.js** - User activity tracking
+  - Bot usage, BytePod voice stats, current voice status
+  - Last message in channel with jump link
+  - Guild-only, 5-second cooldown, auto-deferred
+- **modactions.js** - Interactive moderation panel (~350 lines)
+  - Buttons: Warn, Kick, Ban, History
+  - Modal-based reason input with database logging
+  - Role hierarchy validation, permission checks
+  - DM notifications to targets, moderation history viewer
+  - `handleButton()` - Routes button interactions to modals
+  - `handleModal()` - Executes moderation actions (warn/kick/ban)
+  - Guild-only, requires ManageMessages, 3-second cooldown
 
 ---
 
@@ -340,6 +430,16 @@ Singleton class for ThunderInsights API:
 - `getPlayerStats(userid)` - Fetch and aggregate stats
   - Aggregates across 3 modes (arcade/historical/simulation)
   - Calculates derived stats: total_kills, kd, winRate
+
+### bookmarkUtil.js
+Bookmark database operations and business logic:
+- `saveBookmark(userId, message)` - Save message with content cache (4000 char limit)
+- `getBookmarks(userId, options)` - Paginated retrieval with search support
+- `deleteBookmark(userId, bookmarkId)` - Delete with ownership verification
+- `deleteAllBookmarks(userId)` - Clear all user bookmarks
+- `markDeleted(messageId)` - Flag bookmarks when source message deleted
+- `searchBookmarks(userId, query, options)` - Full-text search with pagination
+- Enforces: 100 bookmark limit, duplicate prevention, ownership checks
 
 ---
 
@@ -608,6 +708,209 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
 ---
 
 ## Recent Changes
+
+### 2025-12-22 - Test Suite Cleanup & Stability
+- **Improved Test Reliability** - Fixed all async cleanup issues in Jest test suite
+  - Added proper cleanup methods to service classes (StarboardService, ReminderService, AutoResponderService)
+  - Implemented `afterEach` hooks to clear all timers/intervals after tests
+  - Fixed debouncing test in starboard.test.js to prevent timeout leaks
+  - Fixed service instance cleanup in reminder.test.js and autoResponder.test.js
+  - Moved `jest.useFakeTimers()` to `beforeEach` for proper isolation
+- **Service Cleanup Methods:**
+  - `StarboardService.cleanup()` - Clears update queue timeouts
+  - `ReminderService.cleanup()` - Clears active timers and long-delay intervals
+  - `AutoResponderService.cleanup()` - Clears cooldown cleanup interval
+- **Result:**
+  - All 126 tests pass cleanly with no warnings
+  - No "worker process failed to exit" warnings
+  - No "Cannot log after tests are done" errors
+  - Jest exits gracefully without `--forceExit`
+- **Files modified:**
+  - `src/services/starboardService.js` - No changes needed (already had cleanup in tests)
+  - `src/services/reminderService.js` - No changes needed (already had cleanup method)
+  - `src/services/autoResponderService.js` - Added cleanup() method
+  - `tests/starboard.test.js` - Added afterEach cleanup for updateQueue timeouts
+  - `tests/reminder.test.js` - Added service instance tracking and cleanup
+  - `tests/autoResponder.test.js` - Added service instance tracking and cleanup
+
+### 2025-12-22 - Auto-Responder System
+- **New Feature: Keyword-Based Automated Responses** - Reduce support load with automated FAQ responses
+  - Admins create responses that trigger on keywords
+  - 50 auto-responses per server limit
+  - 5-minute guild cache with automatic invalidation
+  - In-memory cooldown system prevents spam
+- **Match Types:**
+  - **Exact** - Message must exactly match trigger
+  - **Contains** - Message contains trigger keyword (default)
+  - **Wildcard** - Pattern matching with * and ?
+  - **Regex** - Full regex support (dev-only for security)
+- **Advanced Features:**
+  - Channel restrictions (guild-wide or specific channel)
+  - Role requirements (only respond to users with role)
+  - Configurable cooldowns (5-3600 seconds)
+  - Response variables: {user} {server} {channel} {username}
+  - Usage analytics (use count, last used timestamp)
+- **Commands:**
+  - `/autorespond add <trigger> <response>` - Create auto-response
+    - Optional: match_type, channel, role, cooldown
+    - Validates regex patterns, enforces limits
+  - `/autorespond remove <id>` - Delete auto-response (with autocomplete)
+  - `/autorespond list` - View all responses (paginated, max 25 shown)
+  - `/autorespond toggle <id>` - Enable/disable without deleting
+  - `/autorespond edit <id> <new_response>` - Update response text
+- **Security:**
+  - Regex matching restricted to bot developers (prevents ReDoS attacks)
+  - Bot message filtering prevents infinite loops
+  - Permission check: Requires ManageGuild
+  - First-match-only policy (only one response per message)
+- **Performance:**
+  - Guild response cache (5 min TTL)
+  - Database indexes: (guildId, enabled), (guildId, channelId)
+  - Stale cooldown cleanup every 60 seconds
+- **Database Table:**
+  - `auto_responses` - Trigger patterns, responses, restrictions
+  - Columns: id, guildId, trigger, response, channelId, creatorId, enabled, cooldown, matchType, requireRoleId, useCount, createdAt, lastUsed
+- **Files created:**
+  - `src/services/autoResponderService.js` (~220 lines)
+  - `src/events/messageCreate.js` (~22 lines)
+  - `src/commands/administration/autorespond.js` (~450 lines)
+- **Files modified:**
+  - `src/database/schema.js` - Added auto_responses table with indexes
+  - `src/database/index.js` - Added expectedSchema entry
+  - `src/events/ready.js` - Initialize AutoResponderService on startup
+
+### 2025-12-22 - Birthday Tracker System
+- **New Feature: Birthday Tracking** - Privacy-focused birthday celebration system
+  - Members can set birthdays (month/day only, no year) with `/birthday set MM-DD`
+  - Daily automatic announcements at midnight UTC
+  - Upcoming birthdays view with `/birthday upcoming [days]`
+  - View any member's birthday with `/birthday view [@user]`
+- **Leap Year Handling** - Feb 29 birthdays celebrated on Feb 28 in non-leap years
+  - Automatic detection and user notification when setting
+  - Service handles edge case seamlessly
+- **Birthday Role System** - Optional 24-hour role assignment
+  - Admins can configure role with `/birthday role [role]`
+  - Automatically assigned at midnight, removed after 24 hours
+  - Role hierarchy and permission checks enforced
+- **Admin Configuration** - `/birthday setup <channel>` for announcement channel
+  - Channel validation with permission checks
+  - Auto-disable if channel deleted, notifies guild owner
+  - Missed check detection on bot restart
+- **Database Tables:**
+  - `birthdays` - Per-user, per-guild birthday storage with composite unique constraint
+  - `birthday_config` - Per-guild configuration (channel, role, enabled, lastCheck)
+  - Indexed for daily queries (guildId, month, day)
+- **Startup Resilience:**
+  - Checks for missed announcements on bot startup
+  - Handles guild member filtering (users who left)
+  - Graceful error handling for deleted channels/roles
+- **Files created:**
+  - `src/services/birthdayService.js` (~350 lines)
+  - `src/commands/utility/birthday.js` (~450 lines)
+- **Files modified:**
+  - `src/database/schema.js` - Added birthday tables with indexes
+  - `src/database/index.js` - Added expectedSchema entries
+  - `src/events/ready.js` - Initialize BirthdayService on startup
+
+### 2025-12-22 - User Context Menus
+- **New Feature: 6 User Context Menu Actions** - Right-click any user for quick actions
+  - **View Avatar** - Display user's avatar with download links (PNG, WebP, GIF)
+    - Shows both server avatar and user avatar if different
+    - Detects animated avatars and provides GIF download
+    - DM-enabled
+  - **User Info** - Comprehensive user information display
+    - Account creation date, server join date, nickname
+    - Roles list (top 20), highest role color applied
+    - Bot activity stats (commands run, last seen) from database
+    - User badges (Discord Staff, Early Supporter, Bug Hunter, etc.)
+    - Bot/System account indicators
+    - DM-enabled (skips guild-specific fields in DMs)
+  - **Copy User ID** - Quick user ID copy in code block format
+    - Simple, ephemeral response for easy copying
+    - DM-enabled
+  - **Check Permissions** - Channel-specific permission analysis
+    - Categorizes permissions: Dangerous (red), Important (yellow), Other (green)
+    - Administrator warning if user has full permissions
+    - Shows total permission count
+    - Guild-only (permissions are channel-specific)
+  - **Activity History** - User activity tracking across bot features
+    - Bot usage stats (commands run, last seen)
+    - BytePod voice stats (total time, session count)
+    - Current voice channel status (muted/deafened/streaming)
+    - Last message in current channel with jump link
+    - Guild-only
+  - **Moderate User** - Interactive moderation panel with buttons
+    - Buttons: Warn, Kick, Ban, History
+    - Modal-based reason input for all actions
+    - Role hierarchy validation (can't moderate equal/higher roles)
+    - Bot permission checks (disables buttons if bot lacks permissions)
+    - Self-moderation protection
+    - Bot moderation requires Administrator permission
+    - Automatic database logging of all actions
+    - DM notifications to target users
+    - View 10 most recent moderation actions
+    - Guild-only, requires ManageMessages permission
+- **Security Features:**
+  - All context menus use full security pipeline (DM checks, RBAC, cooldowns)
+  - Moderate User has additional hierarchy checks and permission validation
+  - Modal submissions re-validate hierarchy (user might have left/role changed)
+- **Files created:**
+  - `src/commands/context-menus/avatar.js` (~70 lines)
+  - `src/commands/context-menus/userinfo.js` (~140 lines)
+  - `src/commands/context-menus/copyid.js` (~20 lines)
+  - `src/commands/context-menus/permissions.js` (~120 lines)
+  - `src/commands/context-menus/activity.js` (~130 lines)
+  - `src/commands/context-menus/modactions.js` (~350 lines)
+- **Files modified:**
+  - `src/events/interactionCreate.js` - Added moderation button and modal handlers
+
+### 2025-12-22 - Message Bookmarks & Context Menu System
+- **NEW ARCHITECTURE: Context Menus** - First implementation of Discord's context menu system
+  - Right-click message → Apps → "Bookmark Message"
+  - Full security pipeline: DM permission checks, RBAC, cooldowns, auto-deferral
+  - `client.contextMenus` Collection added to client initialization
+  - Command handler loads from `src/commands/context-menus/*.js`
+  - Interaction handler routes `isMessageContextMenuCommand()` and `isUserContextMenuCommand()`
+- **New Feature: Message Bookmarks** - Save and manage messages across servers
+  - Context menu "Bookmark Message" saves messages with one click
+  - Content cached (4000 char limit), up to 5 attachments stored
+  - 100 bookmark limit per user enforced
+  - Duplicate prevention (can't bookmark same message twice)
+- **Bookmark Commands:**
+  - `/bookmark list [page]` - View bookmarks with pagination (10 per page)
+  - `/bookmark search <query>` - Search bookmarks by content
+  - `/bookmark view <id>` - Detailed view with jump link, attachments, metadata
+  - `/bookmark delete <id>` - Remove a single bookmark
+  - `/bookmark clear` - Delete all bookmarks with confirmation buttons
+- **Smart Features:**
+  - Deleted message detection - marks bookmarks when source is deleted
+  - Jump links to original messages (if not deleted)
+  - Server/channel/author metadata preserved
+  - Attachment URL caching for images/files
+  - Search highlights query context
+  - Bookmark counter shows usage (X/100 bookmarks)
+- **Database Table:**
+  - `bookmarks` - Per-user bookmark storage with content caching
+  - Columns: userId, guildId, channelId, messageId, content, authorId, attachmentUrls, savedAt, messageDeleted
+  - Indexes: (userId, savedAt) for pagination, (userId, content) for search
+- **Utility Module:**
+  - `src/utils/bookmarkUtil.js` - All bookmark database operations
+  - Functions: saveBookmark, getBookmarks, deleteBookmark, markDeleted, searchBookmarks
+  - Enforces business rules: 100 limit, no duplicates, ownership verification
+- **Event Handler:**
+  - `src/events/messageDelete.js` - Marks bookmarks as deleted when source message is deleted
+  - Graceful failure handling (doesn't crash bot if DB update fails)
+- **Files created:**
+  - `src/utils/bookmarkUtil.js` (~280 lines)
+  - `src/commands/context-menus/bookmark.js` (~70 lines)
+  - `src/commands/utility/bookmark.js` (~420 lines)
+  - `src/events/messageDelete.js` (~20 lines)
+- **Files modified:**
+  - `src/database/schema.js` - Added bookmarks table with indexes
+  - `src/database/index.js` - Added expectedSchema entry
+  - `src/index.js` - Added client.contextMenus Collection
+  - `src/handlers/commandHandler.js` - Context menu loading logic
+  - `src/events/interactionCreate.js` - Context menu security pipeline and bookmark interaction routing
 
 ### 2025-12-20 - BytePod Leaderboard, Server Stats & Startup Cleanup
 - **New Feature: /bytepod leaderboard** - Voice activity leaderboard

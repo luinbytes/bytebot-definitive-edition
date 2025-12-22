@@ -19,7 +19,13 @@ describe('Command Structural Integrity', () => {
             // Check for 'data' property
             expect(command).toHaveProperty('data');
             expect(command.data).toHaveProperty('name');
-            expect(command.data).toHaveProperty('description');
+
+            // Context menus (type 2 or 3) don't have descriptions
+            // Slash commands (type 1 or undefined) do have descriptions
+            const isContextMenu = command.data.type === 2 || command.data.type === 3;
+            if (!isContextMenu) {
+                expect(command.data).toHaveProperty('description');
+            }
 
             // Check for 'execute' function
             expect(command).toHaveProperty('execute');

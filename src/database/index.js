@@ -106,6 +106,77 @@ const expectedSchema = {
         user_limit: 'INTEGER DEFAULT 0',
         auto_lock: 'INTEGER DEFAULT 0',
         whitelist_user_ids: 'TEXT'
+    },
+    birthdays: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        user_id: 'TEXT NOT NULL',
+        guild_id: 'TEXT NOT NULL',
+        month: 'INTEGER NOT NULL',
+        day: 'INTEGER NOT NULL',
+        created_at: 'INTEGER'
+    },
+    birthday_config: {
+        guild_id: 'TEXT PRIMARY KEY',
+        channel_id: 'TEXT NOT NULL',
+        role_id: 'TEXT',
+        enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        last_check: 'INTEGER'
+    },
+    bookmarks: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        user_id: 'TEXT NOT NULL',
+        guild_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        message_id: 'TEXT NOT NULL',
+        content: 'TEXT NOT NULL',
+        author_id: 'TEXT NOT NULL',
+        attachment_urls: 'TEXT',
+        saved_at: 'INTEGER',
+        message_deleted: 'INTEGER DEFAULT 0 NOT NULL'
+    },
+    auto_responses: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        trigger: 'TEXT NOT NULL',
+        response: 'TEXT NOT NULL',
+        channel_id: 'TEXT',
+        creator_id: 'TEXT NOT NULL',
+        enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        cooldown: 'INTEGER DEFAULT 60',
+        match_type: 'TEXT DEFAULT contains NOT NULL',
+        require_role_id: 'TEXT',
+        use_count: 'INTEGER DEFAULT 0',
+        created_at: 'INTEGER',
+        last_used: 'INTEGER'
+    },
+    starboard_config: {
+        guild_id: 'TEXT PRIMARY KEY',
+        channel_id: 'TEXT NOT NULL',
+        threshold: 'INTEGER DEFAULT 5 NOT NULL',
+        emoji: 'TEXT DEFAULT ⭐ NOT NULL',
+        enabled: 'INTEGER DEFAULT 1 NOT NULL'
+    },
+    starboard_messages: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        original_message_id: 'TEXT NOT NULL',
+        original_channel_id: 'TEXT NOT NULL',
+        starboard_message_id: 'TEXT',
+        author_id: 'TEXT NOT NULL',
+        star_count: 'INTEGER DEFAULT 0 NOT NULL',
+        content: 'TEXT',
+        image_url: 'TEXT',
+        posted_at: 'INTEGER NOT NULL'
+    },
+    reminders: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        user_id: 'TEXT NOT NULL',
+        guild_id: 'TEXT',
+        channel_id: 'TEXT',
+        message: 'TEXT NOT NULL',
+        trigger_at: 'INTEGER NOT NULL',
+        created_at: 'INTEGER NOT NULL',
+        active: 'INTEGER DEFAULT 1 NOT NULL'
     }
 };
 

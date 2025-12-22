@@ -1,7 +1,7 @@
 const { Events } = require('discord.js');
 const { db } = require('../database/index');
-const { guilds } = require('../database/schema');
-const { eq } = require('drizzle-orm');
+const { guilds, reminders } = require('../database/schema');
+const { eq, and } = require('drizzle-orm');
 const logger = require('../utils/logger');
 
 module.exports = {
@@ -10,10 +10,29 @@ module.exports = {
         logger.info(`Left or kicked from guild: ${guild.name} (ID: ${guild.id})`);
 
         try {
+            // Cleanup guild data
             await db.delete(guilds).where(eq(guilds.id, guild.id));
             logger.success(`Cleaned up data for guild ${guild.id} from the database.`);
         } catch (error) {
             logger.error(`Failed to clean up data for guild ${guild.id}: ${error}`);
+        }
+
+        // Cleanup active reminders from this guild
+        try {
+            const result = await db.update(reminders)
+                .set({ active: false })
+                .where(and(
+                    eq(reminders.guildId, guild.id),
+                    eq(reminders.active, true)
+                ))
+                .returning()
+                .all();
+
+            if (result.length > 0) {
+                logger.info(`Deactivated ${result.length} reminder(s) for guild ${guild.id}`);
+            }
+        } catch (error) {
+            logger.error(`Failed to cleanup reminders for guild ${guild.id}: ${error}`);
         }
     },
 };

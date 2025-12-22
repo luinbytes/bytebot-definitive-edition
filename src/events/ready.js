@@ -143,6 +143,44 @@ module.exports = {
             logger.error(`Failed to validate BytePod channels on startup: ${e}`);
         }
 
+        // --- Initialize Birthday Service ---
+        try {
+            const BirthdayService = require('../services/birthdayService');
+            client.birthdayService = new BirthdayService(client);
+            client.birthdayService.startDailyCheck();
+            logger.success('Birthday service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize birthday service: ${e}`);
+        }
+
+        // --- Initialize Auto-Responder Service ---
+        try {
+            const AutoResponderService = require('../services/autoResponderService');
+            client.autoResponderService = new AutoResponderService(client);
+            logger.success('Auto-responder service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize auto-responder service: ${e}`);
+        }
+
+        // --- Initialize Starboard Service ---
+        try {
+            const StarboardService = require('../services/starboardService');
+            client.starboardService = new StarboardService(client);
+            logger.success('Starboard service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize starboard service: ${e}`);
+        }
+
+        // --- Initialize Reminder Service ---
+        try {
+            const ReminderService = require('../services/reminderService');
+            client.reminderService = new ReminderService(client);
+            await client.reminderService.loadReminders();
+            logger.success('Reminder service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize reminder service: ${e}`);
+        }
+
         // --- Rich Presence Rotation ---
         let i = 0;
         setInterval(() => {

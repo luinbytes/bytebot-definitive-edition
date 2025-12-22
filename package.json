@@ -6,6 +6,7 @@
   "scripts": {
     "test": "jest",
     "dev": "npm test && node ./src/index.js",
+    "dev:alt": "npm test && node ./src/index.js --dev",
     "db:push": "npx drizzle-kit push",
     "db:generate": "npx drizzle-kit generate"
   },
