@@ -59,20 +59,27 @@ module.exports = async (client) => {
     // Check if we should skip command registration
     const forceRegister = process.argv.includes('--deploy');
 
+    // Sort commands by name to ensure consistent hash (glob returns files in non-deterministic order)
+    const sortedCommands = commands.slice().sort((a, b) => a.name.localeCompare(b.name));
+
     // Calculate hash of all commands to detect changes
     const commandHash = crypto.createHash('sha256')
-        .update(JSON.stringify(commands))
+        .update(JSON.stringify(sortedCommands))
         .digest('hex');
 
     // Load cached hash
     let cachedHash = null;
+    const cachePath = path.resolve(COMMAND_CACHE_FILE);
     try {
         if (fs.existsSync(COMMAND_CACHE_FILE)) {
             const cache = JSON.parse(fs.readFileSync(COMMAND_CACHE_FILE, 'utf8'));
             cachedHash = cache.hash;
+            logger.debug(`Loaded cache from: ${cachePath} (hash: ${cachedHash.substring(0, 12)}...)`);
+        } else {
+            logger.debug(`No cache file found at: ${cachePath}`);
         }
     } catch (err) {
-        logger.debug('Could not load command cache, will register commands');
+        logger.debug(`Could not load command cache: ${err.message}`);
     }
 
     // Only register if commands changed or --deploy flag is passed
@@ -85,6 +92,9 @@ module.exports = async (client) => {
     if (forceRegister) {
         logger.info(`--deploy flag detected, forcing command registration...`);
     } else {
+        if (cachedHash) {
+            logger.debug(`Hash mismatch - Cached: ${cachedHash.substring(0, 12)}... Current: ${commandHash.substring(0, 12)}...`);
+        }
         logger.info(`Command changes detected (hash mismatch), registering...`);
     }
 
@@ -112,7 +122,9 @@ module.exports = async (client) => {
         logger.success(`Successfully registered ${data.length} application commands.`);
 
         // Cache the command hash to avoid unnecessary re-registrations
+        const cachePath = path.resolve(COMMAND_CACHE_FILE);
         fs.writeFileSync(COMMAND_CACHE_FILE, JSON.stringify({ hash: commandHash, timestamp: Date.now() }));
+        logger.debug(`Command cache saved to: ${cachePath}`);
     } catch (error) {
         if (error.message === 'TIMEOUT') {
             logger.error('Command registration timed out after 30 seconds.');
