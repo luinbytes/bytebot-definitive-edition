@@ -148,10 +148,14 @@ class StarboardService {
             if (!starboardMsg) return;
 
             // Update embed with deletion warning
-            const embed = starboardMsg.embeds[0];
-            if (embed) {
-                embed.data.footer = { text: '⚠️ Original message deleted' };
-                await starboardMsg.edit({ embeds: [embed] });
+            const oldEmbed = starboardMsg.embeds[0];
+            if (oldEmbed) {
+                // Create new embed based on old one
+                const { EmbedBuilder } = require('discord.js');
+                const updatedEmbed = EmbedBuilder.from(oldEmbed);
+                updatedEmbed.setFooter({ text: '⚠️ Original message deleted' });
+
+                await starboardMsg.edit({ embeds: [updatedEmbed] });
             }
 
         } catch (error) {
