@@ -57,56 +57,24 @@ module.exports = async (client) => {
     try {
         logger.info(`Started refreshing ${commands.length} application commands (slash + context menus).`);
 
-        // Clear existing global commands first (in case any were registered globally)
-        logger.debug('Clearing existing global commands...');
-        try {
-            await rest.put(
-                Routes.applicationCommands(process.env.CLIENT_ID),
-                { body: [] }
-            );
-            logger.debug('Successfully cleared existing global commands');
-        } catch (clearGlobalError) {
-            logger.debug(`Could not clear global commands: ${clearGlobalError.message}`);
-            // This is okay - there might not be any global commands
-        }
-
-        // Small delay to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // Clear existing guild commands
-        logger.debug('Clearing existing guild commands...');
-        try {
-            await rest.put(
-                Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
-                { body: [] }
-            );
-            logger.debug('Successfully cleared existing guild commands');
-        } catch (clearError) {
-            logger.error(`Error clearing guild commands: ${clearError.message}`);
-            // Continue anyway - maybe there were no commands to clear
-        }
-
-        // Small delay to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
         // Note: Deploying to a specific guild for development speed.
         // In production, use Routes.applicationCommands(clientId) for global deployment.
-        logger.debug(`Registering ${commands.length} commands to Discord...`);
+        logger.debug(`Registering ${commands.length} commands to Discord (this may take a minute)...`);
 
-        // Add timeout wrapper to prevent hanging
+        // Register commands with extended timeout (Discord can be slow with many commands)
         const registerWithTimeout = Promise.race([
             rest.put(
                 Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
                 { body: commands },
             ),
             new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Command registration timed out after 30 seconds')), 30000)
+                setTimeout(() => reject(new Error('Command registration timed out after 60 seconds')), 60000)
             )
         ]);
 
         const data = await registerWithTimeout;
 
-        logger.success(`Successfully reloaded ${data.length} application commands.`);
+        logger.success(`Successfully registered ${data.length} application commands.`);
     } catch (error) {
         logger.error(`Error registering commands: ${error.message}`);
         logger.warn('Commands may not be available. Check Discord Developer Portal for application status.');
