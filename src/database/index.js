@@ -167,6 +167,16 @@ const expectedSchema = {
         content: 'TEXT',
         image_url: 'TEXT',
         posted_at: 'INTEGER NOT NULL'
+    },
+    reminders: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        user_id: 'TEXT NOT NULL',
+        guild_id: 'TEXT',
+        channel_id: 'TEXT',
+        message: 'TEXT NOT NULL',
+        trigger_at: 'INTEGER NOT NULL',
+        created_at: 'INTEGER NOT NULL',
+        active: 'INTEGER DEFAULT 1 NOT NULL'
     }
 };
 
