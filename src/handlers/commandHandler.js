@@ -6,9 +6,11 @@ require('dotenv').config();
 
 module.exports = async (client) => {
     const commands = [];
-    const commandFiles = await glob('src/commands/**/*.js');
 
+    // --- Load Slash Commands ---
+    const commandFiles = await glob('src/commands/**/!(context-menus)/*.js');
     const loadedCommands = [];
+
     for (const file of commandFiles) {
         const filePath = path.resolve(file);
         const command = require(filePath);
@@ -27,21 +29,42 @@ module.exports = async (client) => {
         }
     }
 
-    logger.info(`Loaded ${loadedCommands.length} Commands: ${loadedCommands.join(', ')}`);
+    logger.info(`Loaded ${loadedCommands.length} Slash Commands: ${loadedCommands.join(', ')}`);
+
+    // --- Load Context Menus ---
+    const contextMenuFiles = await glob('src/commands/context-menus/*.js');
+    const loadedContextMenus = [];
+
+    for (const file of contextMenuFiles) {
+        const filePath = path.resolve(file);
+        const menu = require(filePath);
+
+        if ('data' in menu && 'execute' in menu) {
+            client.contextMenus.set(menu.data.name, menu);
+            commands.push(menu.data.toJSON());
+            loadedContextMenus.push(menu.data.name);
+        } else {
+            logger.warn(`The context menu at ${file} is missing a required "data" or "execute" property.`);
+        }
+    }
+
+    if (loadedContextMenus.length > 0) {
+        logger.info(`Loaded ${loadedContextMenus.length} Context Menus: ${loadedContextMenus.join(', ')}`);
+    }
 
     const rest = new REST().setToken(process.env.DISCORD_TOKEN);
 
     try {
-        logger.info(`Started refreshing ${commands.length} application (/) commands.`);
+        logger.info(`Started refreshing ${commands.length} application commands (slash + context menus).`);
 
-        // Note: Deploying to a specific guild for development speed. 
+        // Note: Deploying to a specific guild for development speed.
         // In production, use Routes.applicationCommands(clientId) for global deployment.
         const data = await rest.put(
             Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
             { body: commands },
         );
 
-        logger.success(`Successfully reloaded ${data.length} application (/) commands.`);
+        logger.success(`Successfully reloaded ${data.length} application commands.`);
     } catch (error) {
         logger.error(`Error refreshing commands: ${error}`);
     }

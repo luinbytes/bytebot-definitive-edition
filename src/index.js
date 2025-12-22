@@ -12,6 +12,7 @@ const client = new Client({
 });
 
 client.commands = new Collection();
+client.contextMenus = new Collection();
 client.cooldowns = new Collection();
 
 // Error handling for future-proofing
