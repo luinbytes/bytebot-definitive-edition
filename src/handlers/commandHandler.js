@@ -77,8 +77,15 @@ module.exports = async (client) => {
 
     // Only register if commands changed or --deploy flag is passed
     if (!forceRegister && commandHash === cachedHash) {
-        logger.info(`Commands unchanged (${commands.length} cached), skipping registration. Use --deploy to force.`);
+        logger.success(`✓ Using cached commands (${commands.length} commands, hash: ${commandHash.substring(0, 8)}...)`);
+        logger.info(`Skipping registration - commands unchanged. Use --deploy to force.`);
         return;
+    }
+
+    if (forceRegister) {
+        logger.info(`--deploy flag detected, forcing command registration...`);
+    } else {
+        logger.info(`Command changes detected (hash mismatch), registering...`);
     }
 
     const rest = new REST().setToken(process.env.DISCORD_TOKEN);
