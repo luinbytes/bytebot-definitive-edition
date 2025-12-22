@@ -79,6 +79,62 @@ module.exports = {
             return;
         }
 
+        // Handle Moderation Button Interactions
+        if (interaction.isButton() && interaction.customId.startsWith('mod_')) {
+            const modActionsMenu = client.contextMenus.get('Moderate User');
+            if (modActionsMenu && modActionsMenu.handleButton) {
+                try {
+                    await modActionsMenu.handleButton(interaction, client);
+                } catch (error) {
+                    logger.errorContext('Moderation Button Error', error, {
+                        customId: interaction.customId,
+                        userId: interaction.user?.id,
+                        guildId: interaction.guildId
+                    });
+                    // Attempt to notify user if possible
+                    try {
+                        const errorEmbed = embeds.error('Interaction Failed', 'An error occurred while processing this moderation action.');
+                        if (interaction.replied || interaction.deferred) {
+                            await interaction.followUp({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+                        } else {
+                            await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+                        }
+                    } catch (e) {
+                        logger.error('Failed to send error response to user:', e);
+                    }
+                }
+            }
+            return;
+        }
+
+        // Handle Moderation Modal Submissions
+        if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_')) {
+            const modActionsMenu = client.contextMenus.get('Moderate User');
+            if (modActionsMenu && modActionsMenu.handleModal) {
+                try {
+                    await modActionsMenu.handleModal(interaction, client);
+                } catch (error) {
+                    logger.errorContext('Moderation Modal Error', error, {
+                        customId: interaction.customId,
+                        userId: interaction.user?.id,
+                        guildId: interaction.guildId
+                    });
+                    // Attempt to notify user if possible
+                    try {
+                        const errorEmbed = embeds.error('Action Failed', 'An error occurred while processing this moderation action.');
+                        if (interaction.replied || interaction.deferred) {
+                            await interaction.followUp({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+                        } else {
+                            await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+                        }
+                    } catch (e) {
+                        logger.error('Failed to send error response to user:', e);
+                    }
+                }
+            }
+            return;
+        }
+
         // Handle Context Menu Commands (User & Message)
         if (interaction.isUserContextMenuCommand() || interaction.isMessageContextMenuCommand()) {
             const menu = client.contextMenus.get(interaction.commandName);
