@@ -130,6 +130,28 @@ const bookmarks = sqliteTable('bookmarks', {
     userContentIdx: index('bookmarks_user_content_idx').on(table.userId, table.content),
 }));
 
+// Auto-responder (keyword-based automated responses)
+const autoResponses = sqliteTable('auto_responses', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    trigger: text('trigger').notNull(), // Keyword or pattern
+    response: text('response').notNull(), // Response text (max 2000 chars)
+    channelId: text('channel_id'), // null = guild-wide
+    creatorId: text('creator_id').notNull(),
+    enabled: integer('enabled', { mode: 'boolean' }).default(true).notNull(),
+    cooldown: integer('cooldown').default(60), // Seconds between triggers
+    matchType: text('match_type').default('contains').notNull(), // exact, contains, wildcard, regex
+    requireRoleId: text('require_role_id'), // null = any user
+    useCount: integer('use_count').default(0), // Analytics
+    createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date()),
+    lastUsed: integer('last_used', { mode: 'timestamp' })
+}, (table) => ({
+    // Index for active response lookups
+    guildEnabledIdx: index('autoresponse_guild_enabled_idx').on(table.guildId, table.enabled),
+    // Index for channel-specific responses
+    guildChannelIdx: index('autoresponse_guild_channel_idx').on(table.guildId, table.channelId),
+}));
+
 module.exports = {
     guilds,
     users,
@@ -143,5 +165,6 @@ module.exports = {
     bytepodTemplates,
     birthdays,
     birthdayConfig,
-    bookmarks
+    bookmarks,
+    autoResponses
 };
