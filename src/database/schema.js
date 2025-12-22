@@ -180,6 +180,25 @@ const starboardMessages = sqliteTable('starboard_messages', {
     authorGuildIdx: index('starboard_author_guild_idx').on(table.authorId, table.guildId),
 }));
 
+// Reminders (scheduled user notifications)
+const reminders = sqliteTable('reminders', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: text('user_id').notNull(),
+    guildId: text('guild_id'), // null for DM reminders
+    channelId: text('channel_id'), // null for DM reminders
+    message: text('message').notNull(),
+    triggerAt: integer('trigger_at', { mode: 'timestamp_ms' }).notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    active: integer('active', { mode: 'boolean' }).default(true).notNull()
+}, (table) => ({
+    // Index for user reminder list queries
+    userActiveIdx: index('reminders_user_active_idx').on(table.userId, table.active),
+    // Index for scheduler queries (upcoming reminders)
+    triggerIdx: index('reminders_trigger_idx').on(table.triggerAt, table.active),
+    // Index for guild cleanup
+    guildIdx: index('reminders_guild_idx').on(table.guildId, table.active)
+}));
+
 module.exports = {
     guilds,
     users,
@@ -196,5 +215,6 @@ module.exports = {
     bookmarks,
     autoResponses,
     starboardConfig,
-    starboardMessages
+    starboardMessages,
+    reminders
 };

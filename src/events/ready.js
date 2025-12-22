@@ -171,6 +171,16 @@ module.exports = {
             logger.error(`Failed to initialize starboard service: ${e}`);
         }
 
+        // --- Initialize Reminder Service ---
+        try {
+            const ReminderService = require('../services/reminderService');
+            client.reminderService = new ReminderService(client);
+            await client.reminderService.loadReminders();
+            logger.success('Reminder service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize reminder service: ${e}`);
+        }
+
         // --- Rich Presence Rotation ---
         let i = 0;
         setInterval(() => {
