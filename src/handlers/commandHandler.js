@@ -4,7 +4,7 @@ const logger = require('../utils/logger');
 const { glob } = require('glob');
 const crypto = require('crypto');
 const fs = require('fs');
-require('dotenv').config();
+// Don't load .env here - index.js already loaded the correct environment file
 
 const COMMAND_CACHE_FILE = '.command-cache.json';
 
