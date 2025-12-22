@@ -142,7 +142,11 @@ async function handleRemindMe(interaction, client) {
         await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
 
     } catch (error) {
-        logger.error('Failed to create reminder:', error);
+        logger.errorContext('Failed to create reminder (me)', error, {
+            userId: interaction.user.id,
+            timeInput: timeInput,
+            messageLength: message.length
+        });
         return interaction.reply({
             embeds: [embeds.error('Failed', 'Failed to create reminder. Please try again.')],
             flags: [MessageFlags.Ephemeral]
@@ -233,7 +237,13 @@ async function handleRemindHere(interaction, client) {
         await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
 
     } catch (error) {
-        logger.error('Failed to create reminder:', error);
+        logger.errorContext('Failed to create reminder (here)', error, {
+            userId: interaction.user.id,
+            guildId: interaction.guild.id,
+            channelId: interaction.channel.id,
+            timeInput: timeInput,
+            messageLength: message.length
+        });
         return interaction.reply({
             embeds: [embeds.error('Failed', 'Failed to create reminder. Please try again.')],
             flags: [MessageFlags.Ephemeral]
@@ -287,7 +297,9 @@ async function handleList(interaction, client) {
         await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
 
     } catch (error) {
-        logger.error('Failed to list reminders:', error);
+        logger.errorContext('Failed to list reminders', error, {
+            userId: interaction.user.id
+        });
         return interaction.reply({
             embeds: [embeds.error('Failed', 'Failed to fetch reminders. Please try again.')],
             flags: [MessageFlags.Ephemeral]
@@ -319,7 +331,10 @@ async function handleCancel(interaction, client) {
         await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
 
     } catch (error) {
-        logger.error('Failed to cancel reminder:', error);
+        logger.errorContext('Failed to cancel reminder', error, {
+            userId: interaction.user.id,
+            reminderId: reminderId
+        });
         return interaction.reply({
             embeds: [embeds.error(
                 'Failed to Cancel',
