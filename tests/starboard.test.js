@@ -31,10 +31,20 @@ describe('Starboard System', () => {
     });
 
     describe('Debouncing', () => {
+        let service;
+
+        afterEach(() => {
+            // Clear all pending timeouts to prevent Jest warnings
+            if (service && service.updateQueue) {
+                service.updateQueue.forEach(timeout => clearTimeout(timeout));
+                service.updateQueue.clear();
+            }
+        });
+
         test('should manage update queue correctly', () => {
             const StarboardService = require('../src/services/starboardService');
             const mockClient = { channels: { cache: new Map() } };
-            const service = new StarboardService(mockClient);
+            service = new StarboardService(mockClient);
 
             // Queue update should add to queue
             service.queueStarboardUpdate('msg1');

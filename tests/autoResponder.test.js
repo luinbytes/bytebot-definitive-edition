@@ -1,9 +1,22 @@
 describe('Auto-Responder System', () => {
+    let serviceInstances = [];
+
+    afterEach(() => {
+        // Clean up all service instances to prevent timer leaks
+        serviceInstances.forEach(service => {
+            if (service && service.cleanup) {
+                service.cleanup();
+            }
+        });
+        serviceInstances = [];
+    });
+
     describe('Service Structure', () => {
         test('autoResponderService should be properly structured', () => {
             const AutoResponderService = require('../src/services/autoResponderService');
             const mockClient = {};
             const service = new AutoResponderService(mockClient);
+            serviceInstances.push(service);
 
             expect(service.client).toBe(mockClient);
             expect(service.cooldowns).toBeInstanceOf(Map);
@@ -21,6 +34,7 @@ describe('Auto-Responder System', () => {
         beforeEach(() => {
             const AutoResponderService = require('../src/services/autoResponderService');
             service = new AutoResponderService({});
+            serviceInstances.push(service);
         });
 
         test('exact match should work correctly', () => {
@@ -58,6 +72,7 @@ describe('Auto-Responder System', () => {
         beforeEach(() => {
             const AutoResponderService = require('../src/services/autoResponderService');
             service = new AutoResponderService({});
+            serviceInstances.push(service);
         });
 
         test('should parse user variable', () => {
@@ -124,6 +139,7 @@ describe('Auto-Responder System', () => {
         beforeEach(() => {
             const AutoResponderService = require('../src/services/autoResponderService');
             service = new AutoResponderService({});
+            serviceInstances.push(service);
         });
 
         test('should cache and retrieve responses', () => {

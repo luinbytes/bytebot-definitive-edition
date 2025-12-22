@@ -709,6 +709,30 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
 
 ## Recent Changes
 
+### 2025-12-22 - Test Suite Cleanup & Stability
+- **Improved Test Reliability** - Fixed all async cleanup issues in Jest test suite
+  - Added proper cleanup methods to service classes (StarboardService, ReminderService, AutoResponderService)
+  - Implemented `afterEach` hooks to clear all timers/intervals after tests
+  - Fixed debouncing test in starboard.test.js to prevent timeout leaks
+  - Fixed service instance cleanup in reminder.test.js and autoResponder.test.js
+  - Moved `jest.useFakeTimers()` to `beforeEach` for proper isolation
+- **Service Cleanup Methods:**
+  - `StarboardService.cleanup()` - Clears update queue timeouts
+  - `ReminderService.cleanup()` - Clears active timers and long-delay intervals
+  - `AutoResponderService.cleanup()` - Clears cooldown cleanup interval
+- **Result:**
+  - All 126 tests pass cleanly with no warnings
+  - No "worker process failed to exit" warnings
+  - No "Cannot log after tests are done" errors
+  - Jest exits gracefully without `--forceExit`
+- **Files modified:**
+  - `src/services/starboardService.js` - No changes needed (already had cleanup in tests)
+  - `src/services/reminderService.js` - No changes needed (already had cleanup method)
+  - `src/services/autoResponderService.js` - Added cleanup() method
+  - `tests/starboard.test.js` - Added afterEach cleanup for updateQueue timeouts
+  - `tests/reminder.test.js` - Added service instance tracking and cleanup
+  - `tests/autoResponder.test.js` - Added service instance tracking and cleanup
+
 ### 2025-12-22 - Auto-Responder System
 - **New Feature: Keyword-Based Automated Responses** - Reduce support load with automated FAQ responses
   - Admins create responses that trigger on keywords
