@@ -5,8 +5,6 @@ describe('User Context Menus', () => {
         'avatar',
         'userinfo',
         'copyid',
-        'permissions',
-        'activity',
         'modactions'
     ];
 
@@ -66,34 +64,6 @@ describe('User Context Menus', () => {
 
         test('should be guild-only', () => {
             expect(modactions.data.dm_permission).toBe(false);
-        });
-    });
-
-    describe('permissions context menu', () => {
-        let permissions;
-
-        beforeAll(() => {
-            permissions = require('../src/commands/context-menus/permissions');
-        });
-
-        test('should be guild-only', () => {
-            expect(permissions.data.dm_permission).toBe(false);
-        });
-    });
-
-    describe('activity context menu', () => {
-        let activity;
-
-        beforeAll(() => {
-            activity = require('../src/commands/context-menus/activity');
-        });
-
-        test('should be guild-only', () => {
-            expect(activity.data.dm_permission).toBe(false);
-        });
-
-        test('should use longRunning flag', () => {
-            expect(activity.longRunning).toBe(true);
         });
     });
 
