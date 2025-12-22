@@ -85,20 +85,43 @@ module.exports = async (client) => {
 
     try {
         logger.info(`Registering ${commands.length} application commands to Discord...`);
+        logger.debug(`Guild ID: ${process.env.GUILD_ID}, Client ID: ${process.env.CLIENT_ID}`);
 
         // Note: Deploying to a specific guild for development speed.
         // In production, use Routes.applicationCommands(clientId) for global deployment.
-        const data = await rest.put(
+
+        // Add timeout to prevent infinite hang (30 seconds)
+        const registrationPromise = rest.put(
             Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
             { body: commands },
         );
+
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('TIMEOUT')), 30000)
+        );
+
+        const data = await Promise.race([registrationPromise, timeoutPromise]);
 
         logger.success(`Successfully registered ${data.length} application commands.`);
 
         // Cache the command hash to avoid unnecessary re-registrations
         fs.writeFileSync(COMMAND_CACHE_FILE, JSON.stringify({ hash: commandHash, timestamp: Date.now() }));
     } catch (error) {
-        logger.error(error);
-        logger.warn('Commands may not be available. Check Discord Developer Portal or use --deploy flag.');
+        if (error.message === 'TIMEOUT') {
+            logger.error('Command registration timed out after 30 seconds.');
+            logger.warn('This could indicate:');
+            logger.warn('  1. Network/firewall blocking Discord API');
+            logger.warn('  2. Discord API is down (check https://discordstatus.com)');
+            logger.warn('  3. Rate limit (200 creates/day/guild) - wait 24 hours');
+            logger.warn('  4. Invalid GUILD_ID or CLIENT_ID in .env');
+            logger.warn('\nBot will continue without commands. Check your .env configuration.');
+        } else {
+            logger.errorContext('Command registration failed', error, {
+                guildId: process.env.GUILD_ID,
+                clientId: process.env.CLIENT_ID,
+                commandCount: commands.length
+            });
+            logger.warn('Commands may not be available. Check Discord Developer Portal or use --deploy flag.');
+        }
     }
 };
