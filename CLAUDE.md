@@ -38,7 +38,7 @@ ByteBot is a modular, production-ready Discord bot built with Discord.js v14, fe
 
 ### Database Layer (src/database/)
 
-**schema.js** - 10 tables:
+**schema.js** - 13 tables:
 ```javascript
 guilds: {
   id, prefix, logChannel, welcomeChannel, joinedAt,
@@ -84,13 +84,32 @@ bytepodActiveSessions: {
 }
 
 bytepodVoiceStats: {
-  id, odId, guildId, totalSeconds, sessionCount
+  id, userId, guildId, totalSeconds, sessionCount
   // Aggregate voice activity stats per user per guild
 }
 
 bytepodTemplates: {
   id, userId, name, userLimit, autoLock, whitelistUserIds (JSON)
   // Saved BytePod configuration templates
+}
+
+birthdays: {
+  id, userId, guildId, month (1-12), day (1-31), createdAt
+  // Per-user, per-guild birthday storage (privacy-focused, no year)
+  // Composite unique constraint on (userId, guildId)
+  // Indexes: (guildId, month, day) for daily checks, (userId, guildId) for lookups
+}
+
+birthdayConfig: {
+  guildId (PK), channelId, roleId, enabled, lastCheck
+  // Per-guild birthday celebration configuration
+}
+
+bookmarks: {
+  id, userId, guildId, channelId, messageId, content, authorId, attachmentUrls, savedAt, messageDeleted
+  // Personal message bookmarks with content caching
+  // Indexes: (userId, savedAt) for pagination, (userId, content) for search
+  // 100 bookmark limit per user enforced in bookmarkUtil
 }
 ```
 
@@ -291,6 +310,20 @@ Original owner returns AFTER transfer:
 - **userinfo.js** - User info with roles (top 20)
 - **stats.js** - Server statistics dashboard
   - `/stats server` - Comprehensive server analytics (members, channels, bot activity)
+- **birthday.js** - Birthday tracking system (~450 lines)
+  - `/birthday set <MM-DD>` - Register birthday (privacy-focused, no year)
+  - `/birthday remove` - Delete your birthday
+  - `/birthday view [@user]` - Check a user's birthday
+  - `/birthday upcoming [days]` - View upcoming birthdays (default 30 days)
+  - `/birthday setup <channel>` - Admin: Configure announcement channel
+  - `/birthday role [role]` - Admin: Set 24-hour birthday role
+- **bookmark.js** - Message bookmarks management (~420 lines)
+  - `/bookmark list [page]` - View your bookmarks (10 per page)
+  - `/bookmark search <query>` - Search bookmarks by content
+  - `/bookmark view <id>` - Detailed view with jump link
+  - `/bookmark delete <id>` - Delete a specific bookmark
+  - `/bookmark clear` - Delete all bookmarks with confirmation
+  - `handleInteraction()` - Handles clear confirmation buttons
 - **bytepod.js** - BytePod management (~600 lines)
   - `/bytepod setup` - Configure hub (Admin)
   - `/bytepod panel` - Resend control panel
@@ -300,6 +333,12 @@ Original owner returns AFTER transfer:
   - `/bytepod leaderboard` - Top 10 users by voice time
   - `/bytepod template save/load/list/delete` - Configuration templates
   - `handleInteraction()` - Massive router for all buttons/menus/modals
+
+### Context Menus (src/commands/context-menus/)
+- **bookmark.js** - Message context menu for bookmarking
+  - Right-click message → Apps → "Bookmark Message"
+  - Saves message with content cache, attachments, metadata
+  - DM-enabled, 3-second cooldown, auto-deferred
 
 ---
 
@@ -340,6 +379,16 @@ Singleton class for ThunderInsights API:
 - `getPlayerStats(userid)` - Fetch and aggregate stats
   - Aggregates across 3 modes (arcade/historical/simulation)
   - Calculates derived stats: total_kills, kd, winRate
+
+### bookmarkUtil.js
+Bookmark database operations and business logic:
+- `saveBookmark(userId, message)` - Save message with content cache (4000 char limit)
+- `getBookmarks(userId, options)` - Paginated retrieval with search support
+- `deleteBookmark(userId, bookmarkId)` - Delete with ownership verification
+- `deleteAllBookmarks(userId)` - Clear all user bookmarks
+- `markDeleted(messageId)` - Flag bookmarks when source message deleted
+- `searchBookmarks(userId, query, options)` - Full-text search with pagination
+- Enforces: 100 bookmark limit, duplicate prevention, ownership checks
 
 ---
 
@@ -641,6 +690,54 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
   - `src/database/schema.js` - Added birthday tables with indexes
   - `src/database/index.js` - Added expectedSchema entries
   - `src/events/ready.js` - Initialize BirthdayService on startup
+
+### 2025-12-22 - Message Bookmarks & Context Menu System
+- **NEW ARCHITECTURE: Context Menus** - First implementation of Discord's context menu system
+  - Right-click message → Apps → "Bookmark Message"
+  - Full security pipeline: DM permission checks, RBAC, cooldowns, auto-deferral
+  - `client.contextMenus` Collection added to client initialization
+  - Command handler loads from `src/commands/context-menus/*.js`
+  - Interaction handler routes `isMessageContextMenuCommand()` and `isUserContextMenuCommand()`
+- **New Feature: Message Bookmarks** - Save and manage messages across servers
+  - Context menu "Bookmark Message" saves messages with one click
+  - Content cached (4000 char limit), up to 5 attachments stored
+  - 100 bookmark limit per user enforced
+  - Duplicate prevention (can't bookmark same message twice)
+- **Bookmark Commands:**
+  - `/bookmark list [page]` - View bookmarks with pagination (10 per page)
+  - `/bookmark search <query>` - Search bookmarks by content
+  - `/bookmark view <id>` - Detailed view with jump link, attachments, metadata
+  - `/bookmark delete <id>` - Remove a single bookmark
+  - `/bookmark clear` - Delete all bookmarks with confirmation buttons
+- **Smart Features:**
+  - Deleted message detection - marks bookmarks when source is deleted
+  - Jump links to original messages (if not deleted)
+  - Server/channel/author metadata preserved
+  - Attachment URL caching for images/files
+  - Search highlights query context
+  - Bookmark counter shows usage (X/100 bookmarks)
+- **Database Table:**
+  - `bookmarks` - Per-user bookmark storage with content caching
+  - Columns: userId, guildId, channelId, messageId, content, authorId, attachmentUrls, savedAt, messageDeleted
+  - Indexes: (userId, savedAt) for pagination, (userId, content) for search
+- **Utility Module:**
+  - `src/utils/bookmarkUtil.js` - All bookmark database operations
+  - Functions: saveBookmark, getBookmarks, deleteBookmark, markDeleted, searchBookmarks
+  - Enforces business rules: 100 limit, no duplicates, ownership verification
+- **Event Handler:**
+  - `src/events/messageDelete.js` - Marks bookmarks as deleted when source message is deleted
+  - Graceful failure handling (doesn't crash bot if DB update fails)
+- **Files created:**
+  - `src/utils/bookmarkUtil.js` (~280 lines)
+  - `src/commands/context-menus/bookmark.js` (~70 lines)
+  - `src/commands/utility/bookmark.js` (~420 lines)
+  - `src/events/messageDelete.js` (~20 lines)
+- **Files modified:**
+  - `src/database/schema.js` - Added bookmarks table with indexes
+  - `src/database/index.js` - Added expectedSchema entry
+  - `src/index.js` - Added client.contextMenus Collection
+  - `src/handlers/commandHandler.js` - Context menu loading logic
+  - `src/events/interactionCreate.js` - Context menu security pipeline and bookmark interaction routing
 
 ### 2025-12-20 - BytePod Leaderboard, Server Stats & Startup Cleanup
 - **New Feature: /bytepod leaderboard** - Voice activity leaderboard

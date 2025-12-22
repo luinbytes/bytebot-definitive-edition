@@ -51,6 +51,124 @@ module.exports = {
             return;
         }
 
+        // Handle Bookmark Interactions
+        if ((interaction.isButton()) && interaction.customId.startsWith('bookmark_')) {
+            const command = client.commands.get('bookmark');
+            if (command && command.handleInteraction) {
+                try {
+                    await command.handleInteraction(interaction, client);
+                } catch (error) {
+                    logger.errorContext('Bookmark Interaction Error', error, {
+                        customId: interaction.customId,
+                        userId: interaction.user?.id,
+                        guildId: interaction.guildId
+                    });
+                    // Attempt to notify user if possible
+                    try {
+                        const errorEmbed = embeds.error('Interaction Failed', 'An error occurred while processing this action.');
+                        if (interaction.replied || interaction.deferred) {
+                            await interaction.followUp({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+                        } else {
+                            await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+                        }
+                    } catch (e) {
+                        logger.error('Failed to send error response to user:', e);
+                    }
+                }
+            }
+            return;
+        }
+
+        // Handle Context Menu Commands (User & Message)
+        if (interaction.isUserContextMenuCommand() || interaction.isMessageContextMenuCommand()) {
+            const menu = client.contextMenus.get(interaction.commandName);
+
+            if (!menu) {
+                logger.error(`No context menu matching ${interaction.commandName} was found.`);
+                return;
+            }
+
+            // Same security pipeline as slash commands
+
+            // 1. DM Check
+            const isDM = !interaction.guild;
+            const dmAllowed = menu.data.dm_permission !== false;
+
+            if (isDM && !dmAllowed) {
+                return interaction.reply({
+                    embeds: [embeds.error('Server Only', 'This action can only be used within a server.')],
+                    flags: [MessageFlags.Ephemeral]
+                });
+            }
+
+            // 2. Permission checks (if in guild)
+            if (interaction.guild && menu.permissions) {
+                const { checkUserPermissions } = require('../utils/permissions');
+                const { allowed, error } = await checkUserPermissions(interaction, menu);
+
+                if (!allowed) {
+                    return interaction.reply({
+                        embeds: [error],
+                        flags: [MessageFlags.Ephemeral]
+                    });
+                }
+            }
+
+            // 3. Cooldown (if defined)
+            if (menu.cooldown) {
+                const { cooldowns } = client;
+                if (!cooldowns.has(menu.data.name)) {
+                    cooldowns.set(menu.data.name, new Collection());
+                }
+
+                const now = Date.now();
+                const timestamps = cooldowns.get(menu.data.name);
+                const cooldownAmount = menu.cooldown * 1000;
+
+                if (timestamps.has(interaction.user.id)) {
+                    const expirationTime = timestamps.get(interaction.user.id) + cooldownAmount;
+
+                    if (now < expirationTime) {
+                        const expiredTimestamp = Math.round(expirationTime / 1000);
+                        return interaction.reply({
+                            embeds: [embeds.warn('Cooldown Active', `Please wait, you can use this again <t:${expiredTimestamp}:R>.`)],
+                            flags: [MessageFlags.Ephemeral]
+                        });
+                    }
+                }
+
+                timestamps.set(interaction.user.id, now);
+                setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
+            }
+
+            // 4. Auto-defer if long-running
+            if (menu.longRunning) {
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+            }
+
+            // 5. Execute
+            try {
+                await menu.execute(interaction, client);
+            } catch (error) {
+                logger.errorContext(`Error executing context menu: ${interaction.commandName}`, error, {
+                    menuName: interaction.commandName,
+                    userId: interaction.user.id,
+                    guildId: interaction.guildId,
+                    targetType: interaction.targetType
+                });
+
+                const errorMessage = embeds.error('Error', 'An unexpected error occurred while processing this action.');
+
+                if (interaction.replied || interaction.deferred) {
+                    await interaction.followUp({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral] });
+                } else {
+                    await interaction.reply({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral] });
+                }
+            }
+
+            return;
+        }
+
         if (!interaction.isChatInputCommand()) return;
 
         const command = client.commands.get(interaction.commandName);

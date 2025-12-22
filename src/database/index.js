@@ -121,6 +121,18 @@ const expectedSchema = {
         role_id: 'TEXT',
         enabled: 'INTEGER DEFAULT 1 NOT NULL',
         last_check: 'INTEGER'
+    },
+    bookmarks: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        user_id: 'TEXT NOT NULL',
+        guild_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        message_id: 'TEXT NOT NULL',
+        content: 'TEXT NOT NULL',
+        author_id: 'TEXT NOT NULL',
+        attachment_urls: 'TEXT',
+        saved_at: 'INTEGER',
+        message_deleted: 'INTEGER DEFAULT 0 NOT NULL'
     }
 };
 

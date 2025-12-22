@@ -111,6 +111,25 @@ const birthdayConfig = sqliteTable('birthday_config', {
     lastCheck: integer('last_check', { mode: 'timestamp' }), // Last midnight check
 });
 
+// Message bookmarks (per-user, cross-guild)
+const bookmarks = sqliteTable('bookmarks', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: text('user_id').notNull(),
+    guildId: text('guild_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    messageId: text('message_id').notNull(),
+    content: text('content').notNull(), // Cached message content
+    authorId: text('author_id').notNull(), // Original message author
+    attachmentUrls: text('attachment_urls'), // JSON array of attachment URLs
+    savedAt: integer('saved_at', { mode: 'timestamp' }).default(new Date()),
+    messageDeleted: integer('message_deleted', { mode: 'boolean' }).default(false).notNull()
+}, (table) => ({
+    // Index for user's bookmark list (sorted by saved date)
+    userSavedIdx: index('bookmarks_user_saved_idx').on(table.userId, table.savedAt),
+    // Index for search queries
+    userContentIdx: index('bookmarks_user_content_idx').on(table.userId, table.content),
+}));
+
 module.exports = {
     guilds,
     users,
@@ -123,5 +142,6 @@ module.exports = {
     bytepodVoiceStats,
     bytepodTemplates,
     birthdays,
-    birthdayConfig
+    birthdayConfig,
+    bookmarks
 };
