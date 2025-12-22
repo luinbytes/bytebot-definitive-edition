@@ -1,4 +1,4 @@
-const { sqliteTable, text, integer } = require('drizzle-orm/sqlite-core');
+const { sqliteTable, text, integer, index, unique } = require('drizzle-orm/sqlite-core');
 
 const guilds = sqliteTable('guilds', {
     id: text('id').primaryKey(),
@@ -85,6 +85,32 @@ const bytepodTemplates = sqliteTable('bytepod_templates', {
     whitelistUserIds: text('whitelist_user_ids'), // JSON stringified array
 });
 
+// Birthday tracking (per-user, per-guild)
+const birthdays = sqliteTable('birthdays', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: text('user_id').notNull(),
+    guildId: text('guild_id').notNull(),
+    month: integer('month').notNull(), // 1-12
+    day: integer('day').notNull(),     // 1-31
+    createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date()),
+}, (table) => ({
+    // Composite unique constraint: one birthday per user per guild
+    userGuildUnique: unique().on(table.userId, table.guildId),
+    // Index for daily birthday queries
+    guildMonthDayIdx: index('birthdays_guild_month_day_idx').on(table.guildId, table.month, table.day),
+    // Index for user lookups
+    userGuildIdx: index('birthdays_user_guild_idx').on(table.userId, table.guildId),
+}));
+
+// Birthday announcement configuration (per-guild)
+const birthdayConfig = sqliteTable('birthday_config', {
+    guildId: text('guild_id').primaryKey(),
+    channelId: text('channel_id').notNull(),
+    roleId: text('role_id'), // Optional birthday role
+    enabled: integer('enabled', { mode: 'boolean' }).default(true).notNull(),
+    lastCheck: integer('last_check', { mode: 'timestamp' }), // Last midnight check
+});
+
 module.exports = {
     guilds,
     users,
@@ -95,5 +121,7 @@ module.exports = {
     bytepodUserSettings,
     bytepodActiveSessions,
     bytepodVoiceStats,
-    bytepodTemplates
+    bytepodTemplates,
+    birthdays,
+    birthdayConfig
 };

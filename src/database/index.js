@@ -106,6 +106,21 @@ const expectedSchema = {
         user_limit: 'INTEGER DEFAULT 0',
         auto_lock: 'INTEGER DEFAULT 0',
         whitelist_user_ids: 'TEXT'
+    },
+    birthdays: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        user_id: 'TEXT NOT NULL',
+        guild_id: 'TEXT NOT NULL',
+        month: 'INTEGER NOT NULL',
+        day: 'INTEGER NOT NULL',
+        created_at: 'INTEGER'
+    },
+    birthday_config: {
+        guild_id: 'TEXT PRIMARY KEY',
+        channel_id: 'TEXT NOT NULL',
+        role_id: 'TEXT',
+        enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        last_check: 'INTEGER'
     }
 };
 

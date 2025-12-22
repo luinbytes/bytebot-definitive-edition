@@ -609,6 +609,39 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
 
 ## Recent Changes
 
+### 2025-12-22 - Birthday Tracker System
+- **New Feature: Birthday Tracking** - Privacy-focused birthday celebration system
+  - Members can set birthdays (month/day only, no year) with `/birthday set MM-DD`
+  - Daily automatic announcements at midnight UTC
+  - Upcoming birthdays view with `/birthday upcoming [days]`
+  - View any member's birthday with `/birthday view [@user]`
+- **Leap Year Handling** - Feb 29 birthdays celebrated on Feb 28 in non-leap years
+  - Automatic detection and user notification when setting
+  - Service handles edge case seamlessly
+- **Birthday Role System** - Optional 24-hour role assignment
+  - Admins can configure role with `/birthday role [role]`
+  - Automatically assigned at midnight, removed after 24 hours
+  - Role hierarchy and permission checks enforced
+- **Admin Configuration** - `/birthday setup <channel>` for announcement channel
+  - Channel validation with permission checks
+  - Auto-disable if channel deleted, notifies guild owner
+  - Missed check detection on bot restart
+- **Database Tables:**
+  - `birthdays` - Per-user, per-guild birthday storage with composite unique constraint
+  - `birthday_config` - Per-guild configuration (channel, role, enabled, lastCheck)
+  - Indexed for daily queries (guildId, month, day)
+- **Startup Resilience:**
+  - Checks for missed announcements on bot startup
+  - Handles guild member filtering (users who left)
+  - Graceful error handling for deleted channels/roles
+- **Files created:**
+  - `src/services/birthdayService.js` (~350 lines)
+  - `src/commands/utility/birthday.js` (~450 lines)
+- **Files modified:**
+  - `src/database/schema.js` - Added birthday tables with indexes
+  - `src/database/index.js` - Added expectedSchema entries
+  - `src/events/ready.js` - Initialize BirthdayService on startup
+
 ### 2025-12-20 - BytePod Leaderboard, Server Stats & Startup Cleanup
 - **New Feature: /bytepod leaderboard** - Voice activity leaderboard
   - Shows top 10 users by total voice time in BytePods

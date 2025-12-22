@@ -143,6 +143,16 @@ module.exports = {
             logger.error(`Failed to validate BytePod channels on startup: ${e}`);
         }
 
+        // --- Initialize Birthday Service ---
+        try {
+            const BirthdayService = require('../services/birthdayService');
+            client.birthdayService = new BirthdayService(client);
+            client.birthdayService.startDailyCheck();
+            logger.success('Birthday service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize birthday service: ${e}`);
+        }
+
         // --- Rich Presence Rotation ---
         let i = 0;
         setInterval(() => {
