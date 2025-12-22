@@ -38,7 +38,7 @@ ByteBot is a modular, production-ready Discord bot built with Discord.js v14, fe
 
 ### Database Layer (src/database/)
 
-**schema.js** - 13 tables:
+**schema.js** - 14 tables:
 ```javascript
 guilds: {
   id, prefix, logChannel, welcomeChannel, joinedAt,
@@ -110,6 +110,16 @@ bookmarks: {
   // Personal message bookmarks with content caching
   // Indexes: (userId, savedAt) for pagination, (userId, content) for search
   // 100 bookmark limit per user enforced in bookmarkUtil
+}
+
+autoResponses: {
+  id, guildId, trigger, response, channelId, creatorId, enabled, cooldown, matchType, requireRoleId, useCount, createdAt, lastUsed
+  // Keyword-based automated responses
+  // matchType: exact, contains, wildcard, regex (regex dev-only)
+  // channelId: null = guild-wide
+  // requireRoleId: null = any user
+  // Indexes: (guildId, enabled), (guildId, channelId)
+  // 50 response limit per guild, 5-min cache, in-memory cooldowns
 }
 ```
 
@@ -270,6 +280,16 @@ Original owner returns AFTER transfer:
 ### Administration (src/commands/administration/)
 - **config.js** - Manage log channels, view server config (Admin only)
 - **perm.js** - RBAC management with autocomplete (Admin only)
+- **autorespond.js** - Keyword-based automated responses (~450 lines)
+  - `/autorespond add <trigger> <response>` - Create response with match types
+  - `/autorespond remove <id>` - Delete response (autocomplete enabled)
+  - `/autorespond list` - View all responses (paginated, max 25)
+  - `/autorespond toggle <id>` - Enable/disable response
+  - `/autorespond edit <id> <new_response>` - Update response text
+  - Match types: exact, contains, wildcard, regex (dev-only)
+  - Variables: {user} {server} {channel} {username}
+  - Optional: channel restriction, role requirement, custom cooldown
+  - Requires ManageGuild permission
 
 ### Developer (src/commands/developer/)
 - **guilds.js** - List all guilds bot is in (devOnly: true)
@@ -688,6 +708,52 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
 ---
 
 ## Recent Changes
+
+### 2025-12-22 - Auto-Responder System
+- **New Feature: Keyword-Based Automated Responses** - Reduce support load with automated FAQ responses
+  - Admins create responses that trigger on keywords
+  - 50 auto-responses per server limit
+  - 5-minute guild cache with automatic invalidation
+  - In-memory cooldown system prevents spam
+- **Match Types:**
+  - **Exact** - Message must exactly match trigger
+  - **Contains** - Message contains trigger keyword (default)
+  - **Wildcard** - Pattern matching with * and ?
+  - **Regex** - Full regex support (dev-only for security)
+- **Advanced Features:**
+  - Channel restrictions (guild-wide or specific channel)
+  - Role requirements (only respond to users with role)
+  - Configurable cooldowns (5-3600 seconds)
+  - Response variables: {user} {server} {channel} {username}
+  - Usage analytics (use count, last used timestamp)
+- **Commands:**
+  - `/autorespond add <trigger> <response>` - Create auto-response
+    - Optional: match_type, channel, role, cooldown
+    - Validates regex patterns, enforces limits
+  - `/autorespond remove <id>` - Delete auto-response (with autocomplete)
+  - `/autorespond list` - View all responses (paginated, max 25 shown)
+  - `/autorespond toggle <id>` - Enable/disable without deleting
+  - `/autorespond edit <id> <new_response>` - Update response text
+- **Security:**
+  - Regex matching restricted to bot developers (prevents ReDoS attacks)
+  - Bot message filtering prevents infinite loops
+  - Permission check: Requires ManageGuild
+  - First-match-only policy (only one response per message)
+- **Performance:**
+  - Guild response cache (5 min TTL)
+  - Database indexes: (guildId, enabled), (guildId, channelId)
+  - Stale cooldown cleanup every 60 seconds
+- **Database Table:**
+  - `auto_responses` - Trigger patterns, responses, restrictions
+  - Columns: id, guildId, trigger, response, channelId, creatorId, enabled, cooldown, matchType, requireRoleId, useCount, createdAt, lastUsed
+- **Files created:**
+  - `src/services/autoResponderService.js` (~220 lines)
+  - `src/events/messageCreate.js` (~22 lines)
+  - `src/commands/administration/autorespond.js` (~450 lines)
+- **Files modified:**
+  - `src/database/schema.js` - Added auto_responses table with indexes
+  - `src/database/index.js` - Added expectedSchema entry
+  - `src/events/ready.js` - Initialize AutoResponderService on startup
 
 ### 2025-12-22 - Birthday Tracker System
 - **New Feature: Birthday Tracking** - Privacy-focused birthday celebration system

@@ -133,6 +133,21 @@ const expectedSchema = {
         attachment_urls: 'TEXT',
         saved_at: 'INTEGER',
         message_deleted: 'INTEGER DEFAULT 0 NOT NULL'
+    },
+    auto_responses: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        trigger: 'TEXT NOT NULL',
+        response: 'TEXT NOT NULL',
+        channel_id: 'TEXT',
+        creator_id: 'TEXT NOT NULL',
+        enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        cooldown: 'INTEGER DEFAULT 60',
+        match_type: 'TEXT DEFAULT contains NOT NULL',
+        require_role_id: 'TEXT',
+        use_count: 'INTEGER DEFAULT 0',
+        created_at: 'INTEGER',
+        last_used: 'INTEGER'
     }
 };
 
