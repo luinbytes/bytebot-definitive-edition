@@ -1,6 +1,10 @@
 const { Client, Collection, GatewayIntentBits, Partials } = require('discord.js');
 const logger = require('./utils/logger');
-require('dotenv').config();
+
+// Support --dev flag to use .env.dev instead of .env
+const envFile = process.argv.includes('--dev') ? '.env.dev' : '.env';
+require('dotenv').config({ path: envFile });
+logger.debug(`Loaded environment from: ${envFile}`);
 
 const client = new Client({
     intents: [
