@@ -59,10 +59,19 @@ module.exports = async (client) => {
 
         // Clear existing commands first to remove orphaned/leftover commands
         logger.debug('Clearing existing guild commands...');
-        await rest.put(
-            Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
-            { body: [] }
-        );
+        try {
+            await rest.put(
+                Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
+                { body: [] }
+            );
+            logger.debug('Successfully cleared existing guild commands');
+        } catch (clearError) {
+            logger.error(`Error clearing commands: ${clearError.message}`);
+            // Continue anyway - maybe there were no commands to clear
+        }
+
+        // Small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
         // Note: Deploying to a specific guild for development speed.
         // In production, use Routes.applicationCommands(clientId) for global deployment.
@@ -73,6 +82,7 @@ module.exports = async (client) => {
 
         logger.success(`Successfully reloaded ${data.length} application commands.`);
     } catch (error) {
-        logger.error(`Error refreshing commands: ${error}`);
+        logger.error(`Error registering commands: ${error.message}`);
+        logger.warn('Commands may not be available. Check Discord Developer Portal for application status.');
     }
 };
