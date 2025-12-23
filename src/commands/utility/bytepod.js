@@ -570,7 +570,14 @@ module.exports = {
                 const displayCoOwners = coOwners.filter(id => id !== podData.ownerId);
 
                 const { embeds: e, components } = getControlPanel(channel.id, isLocked, limit, displayWhitelist, displayCoOwners);
-                await msg.edit({ embeds: e, components });
+
+                try {
+                    await msg.edit({ embeds: e, components });
+                } catch (error) {
+                    // Message was deleted or no longer exists - silently fail
+                    if (error.code === 10008 || error.code === 10003) return;
+                    throw error; // Re-throw other errors
+                }
             };
 
             // BUTTONS
