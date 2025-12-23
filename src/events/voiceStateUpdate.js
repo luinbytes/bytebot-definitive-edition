@@ -260,7 +260,8 @@ module.exports = {
 
         // --- JOIN POD TRIGGER (Existing BytePod) ---
         // Handle ownership return / reclaim when someone joins an existing pod
-        if (joinedChannelId && joinedChannelId !== hubId) {
+        // IMPORTANT: Only trigger if user actually moved channels (not just voice state change like mute/screenshare)
+        if (joinedChannelId && joinedChannelId !== hubId && oldState.channelId !== newState.channelId) {
             const podData = await db.select().from(bytepods).where(eq(bytepods.channelId, joinedChannelId)).get();
 
             if (podData) {
@@ -354,7 +355,8 @@ module.exports = {
         }
 
         // --- LEAVE POD TRIGGER ---
-        if (leftChannelId && leftChannelId !== hubId) {
+        // IMPORTANT: Only trigger if user actually moved channels (not just voice state change like mute/screenshare)
+        if (leftChannelId && leftChannelId !== hubId && oldState.channelId !== newState.channelId) {
             logger.debug(`[Voice State] User ${member.id} left channel ${leftChannelId} (joined: ${joinedChannelId || 'none'})`);
 
             // Finalize voice session for the leaving user

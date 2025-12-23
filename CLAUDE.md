@@ -709,6 +709,31 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
 
 ## Recent Changes
 
+### 2025-12-23 - Voice State Change Bug Fix
+- **CRITICAL FIX: Spurious Join/Leave Events** - Fixed BytePod triggering join/leave logic on voice state changes
+  - Root cause: Discord fires `voiceStateUpdate` events for **any** voice state change, not just channel movement:
+    - Starting/stopping screenshare
+    - Starting/stopping camera
+    - Muting/unmuting
+    - Changing streaming status
+  - Bug behavior: When user changed voice state (e.g., started screenshare), both `oldState.channelId` and `newState.channelId` were the SAME channel
+  - Result: Bot triggered BOTH join and leave logic simultaneously at same timestamp
+  - Side effects:
+    - "FALSE LEAVE" warnings in logs every 20 minutes (exactly!)
+    - Users getting briefly disconnected/reconnected when changing voice state
+    - Screenshares cutting out when state changed
+    - Duplicate session tracking (join + leave in same event)
+- **Fix Applied:**
+  - Added `oldState.channelId !== newState.channelId` check to both JOIN and LEAVE triggers
+  - Only process joins/leaves when user **actually moved between channels**
+  - Voice state changes (mute/camera/screenshare) now properly ignored
+- **Files modified:**
+  - `src/events/voiceStateUpdate.js` - Lines 264, 359 - Added channel movement validation
+- **Testing:**
+  - No more false leave warnings
+  - Screenshares remain active when users interact with voice controls
+  - Session tracking only fires on actual channel movement
+
 ### 2025-12-23 - BytePod Panel Update Error Handling
 - **CRITICAL FIX: Panel Update Failures** - Fixed BytePod whitelist/co-owner/kick/limit interactions failing with error 10008
   - Root cause: `updatePanel()` function would fetch panel messages successfully but fail to edit them
