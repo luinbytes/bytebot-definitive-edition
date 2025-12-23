@@ -144,17 +144,17 @@ module.exports = {
         }
 
         if (subdomain === 'panel') {
-            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+            await interaction.deferReply();
             // Check if user owns a pod
             const userPod = await db.select().from(bytepods).where(eq(bytepods.ownerId, interaction.user.id)).get();
             // Also check if they are in the channel?
             if (!userPod) {
-                return interaction.editReply({ embeds: [embeds.error('No Pod Found', 'You do not seem to have an active BytePod.')] });
+                return interaction.editReply({ embeds: [embeds.error('No Pod Found', 'You do not seem to have an active BytePod.')], flags: [MessageFlags.Ephemeral] });
             }
 
             const channel = interaction.guild.channels.cache.get(userPod.channelId);
             if (!channel) {
-                return interaction.editReply({ embeds: [embeds.error('Error', 'Your BytePod channel was not found. It may have been deleted.')] });
+                return interaction.editReply({ embeds: [embeds.error('Error', 'Your BytePod channel was not found. It may have been deleted.')], flags: [MessageFlags.Ephemeral] });
             }
 
             // Get current state
@@ -561,9 +561,21 @@ module.exports = {
 
             // Helper to update specific panel
             const updatePanel = async (messageId) => {
-                if (!messageId) return;
-                const msg = await channel.messages.fetch(messageId).catch(() => null);
-                if (!msg) return;
+                if (!messageId) {
+                    logger.warn(`[BytePod] updatePanel called with no messageId`);
+                    return;
+                }
+
+                logger.debug(`[BytePod] Attempting to update panel ${messageId}`);
+                const msg = await channel.messages.fetch(messageId).catch((err) => {
+                    logger.warn(`[BytePod] Failed to fetch message ${messageId}: ${err.message}`);
+                    return null;
+                });
+
+                if (!msg) {
+                    logger.warn(`[BytePod] Panel message ${messageId} not found`);
+                    return;
+                }
 
                 const { isLocked, limit, whitelist, coOwners } = getPodState(channel);
                 const displayWhitelist = whitelist.filter(id => id !== podData.ownerId);
@@ -573,9 +585,13 @@ module.exports = {
 
                 try {
                     await msg.edit({ embeds: e, components });
+                    logger.debug(`[BytePod] Successfully updated panel ${messageId}`);
                 } catch (error) {
                     // Message was deleted or no longer exists - silently fail
-                    if (error.code === 10008 || error.code === 10003) return;
+                    if (error.code === 10008 || error.code === 10003) {
+                        logger.debug(`[BytePod] Panel message ${messageId} was deleted, skipping update`);
+                        return;
+                    }
                     throw error; // Re-throw other errors
                 }
             };
