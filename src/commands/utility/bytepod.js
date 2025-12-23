@@ -570,7 +570,11 @@ module.exports = {
                 const displayCoOwners = coOwners.filter(id => id !== podData.ownerId);
 
                 const { embeds: e, components } = getControlPanel(channel.id, isLocked, limit, displayWhitelist, displayCoOwners);
-                await msg.edit({ embeds: e, components });
+
+                // Try to edit the panel, but gracefully handle errors (message deleted, ephemeral expired, etc.)
+                await msg.edit({ embeds: e, components }).catch((err) => {
+                    logger.debug(`Could not update panel ${messageId}: ${err.message} (panel may be ephemeral or deleted)`);
+                });
             };
 
             // BUTTONS
