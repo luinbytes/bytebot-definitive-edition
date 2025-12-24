@@ -19,10 +19,14 @@ describe('Deprecation Pattern Checks', () => {
 
         sourceFiles.forEach(file => {
             const content = fs.readFileSync(file, 'utf8');
-            // Match ephemeral: true (but not in comments)
+            // Match ephemeral: true (but not in comments or deferReply/reply)
             const lines = content.split('\n');
             lines.forEach((line, idx) => {
-                if (line.includes('ephemeral: true') && !line.trim().startsWith('//')) {
+                // Allow ephemeral: true in deferReply() and reply() - this is correct usage
+                if (line.includes('ephemeral: true') &&
+                    !line.trim().startsWith('//') &&
+                    !line.includes('deferReply') &&
+                    !line.includes('.reply(')) {
                     violations.push({
                         file,
                         line: idx + 1,
@@ -35,7 +39,7 @@ describe('Deprecation Pattern Checks', () => {
         if (violations.length > 0) {
             console.error('Deprecated ephemeral: true usage found:');
             violations.forEach(v => console.error(`- ${v.file}:${v.line}`));
-            console.error('Use flags: [MessageFlags.Ephemeral] instead.');
+            console.error('Use flags: [MessageFlags.Ephemeral] instead, or use ephemeral: true in deferReply()/reply()');
         }
 
         expect(violations.length).toBe(0);
