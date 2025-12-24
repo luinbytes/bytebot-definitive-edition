@@ -781,6 +781,20 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
 
 ## Recent Changes
 
+### 2025-12-24 - War Thunder Command Timeout Fix
+- **CRITICAL FIX: Interaction Timeout** - Fixed `/warthunder` command exceeding Discord's 3-second interaction window
+  - Root cause: Database query for bound nickname happened before deferring the reply
+  - Fix: Added `longRunning: true` flag to command definition (follows CLAUDE.md conventions)
+  - Security pipeline now auto-defers before execute() runs (lines 154-157 of interactionCreate.js)
+  - Both subcommands (`bind` and `stats`) now use `editReply()` exclusively
+  - Error: `DiscordAPIError[10062]: Unknown interaction` - RESOLVED
+- **Pattern Compliance:**
+  - Follows "Important Flags & Properties" convention (line 568 of CLAUDE.md)
+  - Commands with API calls should use `longRunning: true`, not manual deferral
+  - Cleaner implementation than manual `deferReply()` in each subcommand
+- **Files modified:**
+  - `src/commands/games/warthunder.js` - Added longRunning flag, removed manual deferrals
+
 ### 2025-12-24 - Suggestion System UX Improvements
 - **FIX: Redundant Emoji Usage** - Cleaned up admin response embeds
   - Removed duplicate emojis from DM and admin response titles

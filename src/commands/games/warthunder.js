@@ -24,6 +24,7 @@ module.exports = {
                         .setRequired(true))),
 
     cooldown: 10,
+    longRunning: true,
 
     async execute(interaction) {
         const subcommand = interaction.options.getSubcommand();
@@ -33,7 +34,6 @@ module.exports = {
 
         if (subcommand === 'bind') {
             const nickname = interaction.options.getString('nickname');
-            await interaction.deferReply();
 
             try {
                 // Verify player exists first
@@ -67,14 +67,11 @@ module.exports = {
                 nickname = user?.wtNickname;
 
                 if (!nickname) {
-                    return interaction.reply({
-                        embeds: [embeds.error('No Account Bound', 'Please provide a nickname or bind your account first using `/warthunder bind`.')],
-                        flags: [MessageFlags.Ephemeral]
+                    return interaction.editReply({
+                        embeds: [embeds.error('No Account Bound', 'Please provide a nickname or bind your account first using `/warthunder bind`.')]
                     });
                 }
             }
-
-            await interaction.deferReply();
 
             try {
                 // 1. Search for player
