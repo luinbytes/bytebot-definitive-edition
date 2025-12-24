@@ -51,6 +51,11 @@ module.exports = {
                     .then(rows => rows[0]);
 
                 if (suggestion) {
+                    // Only count votes if suggestion is still pending
+                    if (suggestion.status !== 'pending') {
+                        return;
+                    }
+
                     // Update vote counts
                     const message = reaction.message;
                     const thumbsUp = message.reactions.cache.get('👍');

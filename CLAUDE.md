@@ -781,6 +781,24 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
 
 ## Recent Changes
 
+### 2025-12-24 - Suggestion System UX Improvements
+- **FIX: Redundant Emoji Usage** - Cleaned up admin response embeds
+  - Removed duplicate emojis from DM and admin response titles
+  - Changed from "✅ Suggestion ✅ Approved" to "Suggestion Approved" (embed utility already adds emoji)
+  - Affected: `/suggestion approve`, `/suggestion deny`, `/suggestion implement`
+- **ENHANCEMENT: Ephemeral Admin Responses** - Made all admin actions private
+  - Changed `/suggestion` command to use ephemeral responses
+  - Removed `longRunning: true`, added manual `deferReply({ ephemeral: true })`
+  - Admin actions (approve/deny/implement/view/list) now only visible to command user
+- **FIX: Vote Counting After Review** - Locked voting on reviewed suggestions
+  - Added status check in `messageReactionAdd` and `messageReactionRemove` events
+  - Votes only counted when suggestion status is 'pending'
+  - Prevents vote manipulation after approval/denial/implementation
+- **Files modified:**
+  - `src/commands/administration/suggestion.js` - Ephemeral responses, removed emoji duplication
+  - `src/events/messageReactionAdd.js` - Added status check before vote update
+  - `src/events/messageReactionRemove.js` - Added status check before vote update
+
 ### 2025-12-24 - Manual Command Deployment System
 - **New Feature: /deploy Command** - Bot owner can manually sync slash commands
   - `/deploy <scope>` - Force command registration without restart
