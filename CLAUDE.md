@@ -319,6 +319,13 @@ Original owner returns AFTER transfer:
 ### Developer (src/commands/developer/)
 - **guilds.js** - List all guilds bot is in (devOnly: true)
 - **manageguilds.js** - List and leave guilds via select menu (devOnly: true)
+- **deploy.js** - Manually sync slash commands (devOnly: true)
+  - `/deploy <scope>` - Force command registration/sync
+  - Scope options: Current Guild (instant), Global (1 hour propagation)
+  - Global deployment requires confirmation (safety check)
+  - Useful when adding bot to new servers
+  - Bypasses hash cache and forces re-registration
+  - 10-second cooldown
 
 ### Fun (src/commands/fun/)
 - **8ball.js** - Magic 8-ball (20 responses)
@@ -470,6 +477,15 @@ Bookmark database operations and business logic:
 - `markDeleted(messageId)` - Flag bookmarks when source message deleted
 - `searchBookmarks(userId, query, options)` - Full-text search with pagination
 - Enforces: 100 bookmark limit, duplicate prevention, ownership checks
+
+### commandDeployer.js
+Command registration and deployment utility:
+- `loadCommands()` - Load and hash all slash commands and context menus
+- `deployCommands(scope, guildId)` - Deploy to Discord (guild or global)
+- `getCachedHash()` - Get cached command hash for comparison
+- Used by: `/deploy` command for manual sync, commandHandler.js for startup
+- Handles: Cache management, hash validation, require cache clearing
+- Supports: Guild-scoped (instant) and global (1 hour) deployment
 
 ---
 
@@ -738,6 +754,29 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
 ---
 
 ## Recent Changes
+
+### 2025-12-24 - Manual Command Deployment System
+- **New Feature: /deploy Command** - Bot owner can manually sync slash commands
+  - `/deploy <scope>` - Force command registration without restart
+  - Scope options: Current Guild (instant), Global (1 hour propagation)
+  - Global deployment requires confirmation for safety
+  - Useful when adding bot to new servers
+- **Command Deployer Utility:**
+  - `loadCommands()` - Dynamically loads all commands with hash calculation
+  - `deployCommands(scope, guildId)` - Handles deployment to Discord API
+  - `getCachedHash()` - Cache validation for change detection
+  - Clears require cache to get latest command definitions
+  - Updates `.command-cache.json` after successful deployment
+- **Use Cases:**
+  - Manual sync when joining new servers
+  - Force re-registration after command changes
+  - Switch between guild and global deployment
+  - Bypass automatic hash-based registration
+- **Files created:**
+  - `src/utils/commandDeployer.js` (~160 lines)
+  - `src/commands/developer/deploy.js` (~140 lines)
+- **Files modified:**
+  - `CLAUDE.md` - Added documentation for deploy command and utility
 
 ### 2025-12-24 - Community Suggestion System
 - **New Feature: Suggestion System** - Community-driven idea tracking and voting
