@@ -38,7 +38,7 @@ ByteBot is a modular, production-ready Discord bot built with Discord.js v14, fe
 
 ### Database Layer (src/database/)
 
-**schema.js** - 14 tables:
+**schema.js** - 16 tables:
 ```javascript
 guilds: {
   id, prefix, logChannel, welcomeChannel, joinedAt,
@@ -120,6 +120,20 @@ autoResponses: {
   // requireRoleId: null = any user
   // Indexes: (guildId, enabled), (guildId, channelId)
   // 50 response limit per guild, 5-min cache, in-memory cooldowns
+}
+
+suggestionConfig: {
+  guildId (PK), channelId, reviewRoleId, enabled, allowAnonymous
+  // Per-guild suggestion system configuration
+  // reviewRoleId: null = Admin only
+}
+
+suggestions: {
+  id, guildId, userId, content, messageId, channelId, status, upvotes, downvotes, reviewedBy, reviewedAt, reviewReason, createdAt, anonymous
+  // Community suggestions/feedback system
+  // status: pending, approved, denied, implemented
+  // Votes cached from message reactions
+  // Indexes: (guildId, status), (userId, guildId), (guildId, upvotes)
 }
 ```
 
@@ -290,10 +304,28 @@ Original owner returns AFTER transfer:
   - Variables: {user} {server} {channel} {username}
   - Optional: channel restriction, role requirement, custom cooldown
   - Requires ManageGuild permission
+- **suggestion.js** - Community suggestion management system (~650 lines)
+  - `/suggestion setup <channel> [review_role] [allow_anonymous]` - Configure system (Admin only)
+  - `/suggestion approve <id> [reason]` - Approve a suggestion
+  - `/suggestion deny <id> [reason]` - Deny a suggestion
+  - `/suggestion implement <id> [note]` - Mark as implemented
+  - `/suggestion view <id>` - View detailed suggestion info
+  - `/suggestion list [status] [limit]` - List suggestions by status
+  - `/suggestion leaderboard [limit]` - Top suggestions by votes
+  - Auto-updates message embeds on status changes
+  - DM notifications to suggesters on review
+  - Review permission: Admin or custom review role
 
 ### Developer (src/commands/developer/)
 - **guilds.js** - List all guilds bot is in (devOnly: true)
 - **manageguilds.js** - List and leave guilds via select menu (devOnly: true)
+- **deploy.js** - Manually sync slash commands (devOnly: true)
+  - `/deploy <scope>` - Force command registration/sync
+  - Scope options: Current Guild (instant), Global (1 hour propagation)
+  - Global deployment requires confirmation (safety check)
+  - Useful when adding bot to new servers
+  - Bypasses hash cache and forces re-registration
+  - 10-second cooldown
 
 ### Fun (src/commands/fun/)
 - **8ball.js** - Magic 8-ball (20 responses)
@@ -330,6 +362,11 @@ Original owner returns AFTER transfer:
 - **userinfo.js** - User info with roles (top 20)
 - **stats.js** - Server statistics dashboard
   - `/stats server` - Comprehensive server analytics (members, channels, bot activity)
+- **suggest.js** - Submit community suggestions (~140 lines)
+  - `/suggest <idea> [anonymous]` - Submit suggestion to configured channel
+  - Auto-adds 👍/👎 reactions for voting
+  - Optional anonymous submissions (if enabled by admin)
+  - 60-second cooldown to prevent spam
 - **birthday.js** - Birthday tracking system (~450 lines)
   - `/birthday set <MM-DD>` - Register birthday (privacy-focused, no year)
   - `/birthday remove` - Delete your birthday
@@ -440,6 +477,15 @@ Bookmark database operations and business logic:
 - `markDeleted(messageId)` - Flag bookmarks when source message deleted
 - `searchBookmarks(userId, query, options)` - Full-text search with pagination
 - Enforces: 100 bookmark limit, duplicate prevention, ownership checks
+
+### commandDeployer.js
+Command registration and deployment utility:
+- `loadCommands()` - Load and hash all slash commands and context menus
+- `deployCommands(scope, guildId)` - Deploy to Discord (guild or global)
+- `getCachedHash()` - Get cached command hash for comparison
+- Used by: `/deploy` command for manual sync, commandHandler.js for startup
+- Handles: Cache management, hash validation, require cache clearing
+- Supports: Guild-scoped (instant) and global (1 hour) deployment
 
 ---
 
@@ -670,15 +716,41 @@ DATABASE_URL=sqlite.db (optional, defaults to sqlite.db)
 
 ## Deployment Notes
 
-### Current Setup (Development)
-- Slash commands registered to specific guild (line 40 of commandHandler.js)
-- Uses `Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID)`
-- Instant command updates during development
+### Command-Line Deployment Modes
 
-### Production Deployment
-- Change line 40 to `Routes.applicationCommands(CLIENT_ID)`
-- Removes guild restriction, commands go global
-- Updates take ~1 hour to propagate
+**Development (Default):**
+- Deploys to `GUILD_ID` from .env file only
+- Instant updates for that guild
+- Automatic on bot start if hash changes
+
+**Force Deploy to Development Guild:**
+```bash
+npm start -- --deploy
+```
+- Forces re-registration to `GUILD_ID` even if hash unchanged
+
+**Deploy to All Guilds:**
+```bash
+npm start -- --deploy-all
+```
+- Deploys to every guild the bot is currently in
+- Instant updates for all guilds
+- Useful when adding bot to new servers
+- Shows success/fail for each guild
+
+**Deploy Globally:**
+```bash
+npm start -- --deploy-global
+```
+- Deploys to all guilds via global registration
+- Takes up to 1 hour to propagate
+- Use for production deployment
+- One registration covers all guilds
+
+### In-Bot Deployment
+- `/deploy scope:Current Guild` - Deploy to current guild only (instant)
+- `/deploy scope:Global` - Deploy globally with confirmation (1 hour)
+- Bot owner only, requires existing commands in at least one server
 
 ### Required Intents
 ```javascript
@@ -708,6 +780,87 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
 ---
 
 ## Recent Changes
+
+### 2025-12-24 - Suggestion System UX Improvements
+- **FIX: Redundant Emoji Usage** - Cleaned up admin response embeds
+  - Removed duplicate emojis from DM and admin response titles
+  - Changed from "✅ Suggestion ✅ Approved" to "Suggestion Approved" (embed utility already adds emoji)
+  - Affected: `/suggestion approve`, `/suggestion deny`, `/suggestion implement`
+- **ENHANCEMENT: Ephemeral Admin Responses** - Made all admin actions private
+  - Changed `/suggestion` command to use ephemeral responses
+  - Removed `longRunning: true`, added manual `deferReply({ ephemeral: true })`
+  - Admin actions (approve/deny/implement/view/list) now only visible to command user
+- **FIX: Vote Counting After Review** - Locked voting on reviewed suggestions
+  - Added status check in `messageReactionAdd` and `messageReactionRemove` events
+  - Votes only counted when suggestion status is 'pending'
+  - Prevents vote manipulation after approval/denial/implementation
+- **Files modified:**
+  - `src/commands/administration/suggestion.js` - Ephemeral responses, removed emoji duplication
+  - `src/events/messageReactionAdd.js` - Added status check before vote update
+  - `src/events/messageReactionRemove.js` - Added status check before vote update
+
+### 2025-12-24 - Manual Command Deployment System
+- **New Feature: /deploy Command** - Bot owner can manually sync slash commands
+  - `/deploy <scope>` - Force command registration without restart
+  - Scope options: Current Guild (instant), Global (1 hour propagation)
+  - Global deployment requires confirmation for safety
+  - Useful when adding bot to new servers (if commands exist in at least one server)
+- **Command-Line Deployment Flags:**
+  - `--deploy` - Force deploy to GUILD_ID from .env
+  - `--deploy-all` - Deploy to ALL guilds bot is in (instant, solves new server problem)
+  - `--deploy-global` - Deploy globally (1 hour propagation)
+  - Flags bypass hash cache for forced re-registration
+- **Command Deployer Utility:**
+  - `loadCommands()` - Dynamically loads all commands with hash calculation
+  - `deployCommands(scope, guildId)` - Handles deployment to Discord API
+  - `getCachedHash()` - Cache validation for change detection
+  - Clears require cache to get latest command definitions
+  - Updates `.command-cache.json` after successful deployment
+- **Use Cases:**
+  - `--deploy-all` when adding bot to new servers (primary solution)
+  - `/deploy` for in-bot management (requires commands in at least one server)
+  - `--deploy-global` for production deployment
+  - Force re-registration after command changes
+- **Files created:**
+  - `src/utils/commandDeployer.js` (~160 lines)
+  - `src/commands/developer/deploy.js` (~140 lines)
+- **Files modified:**
+  - `src/handlers/commandHandler.js` - Added --deploy-all and --deploy-global flags
+  - `CLAUDE.md` - Added comprehensive deployment documentation
+
+### 2025-12-24 - Community Suggestion System
+- **New Feature: Suggestion System** - Community-driven idea tracking and voting
+  - Users submit suggestions with `/suggest <idea> [anonymous]`
+  - Auto-posts to designated channel with 👍/👎 reactions for voting
+  - Admin management via `/suggestion` command with full lifecycle tracking
+- **Suggestion Lifecycle:**
+  - **Pending** - Initial state after submission
+  - **Approved** - Admin approves with optional reason
+  - **Denied** - Admin denies with optional reason
+  - **Implemented** - Admin marks as completed with optional note
+- **Admin Commands:**
+  - `/suggestion setup <channel> [review_role] [allow_anonymous]` - Configure system
+  - `/suggestion approve/deny/implement <id> [reason]` - Update status
+  - `/suggestion view <id>` - View detailed info
+  - `/suggestion list [status] [limit]` - Browse suggestions
+  - `/suggestion leaderboard [limit]` - Top voted suggestions
+- **Features:**
+  - Anonymous submissions (optional, admin-configurable)
+  - Custom review role (defaults to Admin permission)
+  - Auto-updates message embeds when status changes
+  - DM notifications to suggesters on review
+  - Vote caching from message reactions
+  - Jump links to original suggestions
+- **Database Tables:**
+  - `suggestion_config` - Per-guild configuration
+  - `suggestions` - Suggestion tracking with votes and status
+  - Indexes: (guildId, status), (userId, guildId), (guildId, upvotes)
+- **Files created:**
+  - `src/commands/utility/suggest.js` (~140 lines)
+  - `src/commands/administration/suggestion.js` (~650 lines)
+- **Files modified:**
+  - `src/database/schema.js` - Added suggestion tables with indexes
+  - `src/database/index.js` - Added expectedSchema entries
 
 ### 2025-12-23 - Voice State Change Bug Fix
 - **CRITICAL FIX: Spurious Join/Leave Events** - Fixed BytePod triggering join/leave logic on voice state changes
