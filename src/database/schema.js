@@ -199,6 +199,40 @@ const reminders = sqliteTable('reminders', {
     guildIdx: index('reminders_guild_idx').on(table.guildId, table.active)
 }));
 
+// Suggestions configuration (per-guild)
+const suggestionConfig = sqliteTable('suggestion_config', {
+    guildId: text('guild_id').primaryKey(),
+    channelId: text('channel_id').notNull(),
+    reviewRoleId: text('review_role_id'), // Role that can approve/deny (null = Admin only)
+    enabled: integer('enabled', { mode: 'boolean' }).default(true).notNull(),
+    allowAnonymous: integer('allow_anonymous', { mode: 'boolean' }).default(false).notNull()
+});
+
+// Suggestions (community ideas/feedback)
+const suggestions = sqliteTable('suggestions', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(), // Suggester
+    content: text('content').notNull(), // Suggestion text (max 2000 chars)
+    messageId: text('message_id').notNull(), // Message ID in suggestion channel
+    channelId: text('channel_id').notNull(), // Suggestion channel ID
+    status: text('status').default('pending').notNull(), // pending, approved, denied, implemented
+    upvotes: integer('upvotes').default(0), // Cached vote count
+    downvotes: integer('downvotes').default(0), // Cached vote count
+    reviewedBy: text('reviewed_by'), // Admin who approved/denied
+    reviewedAt: integer('reviewed_at', { mode: 'timestamp' }), // When admin took action
+    reviewReason: text('review_reason'), // Optional reason for approval/denial
+    createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date()),
+    anonymous: integer('anonymous', { mode: 'boolean' }).default(false).notNull() // Hide suggester name
+}, (table) => ({
+    // Index for guild suggestion list queries
+    guildStatusIdx: index('suggestions_guild_status_idx').on(table.guildId, table.status),
+    // Index for user suggestion list queries
+    userGuildIdx: index('suggestions_user_guild_idx').on(table.userId, table.guildId),
+    // Index for leaderboard queries (top voted)
+    guildUpvotesIdx: index('suggestions_guild_upvotes_idx').on(table.guildId, table.upvotes)
+}));
+
 module.exports = {
     guilds,
     users,
@@ -216,5 +250,7 @@ module.exports = {
     autoResponses,
     starboardConfig,
     starboardMessages,
-    reminders
+    reminders,
+    suggestionConfig,
+    suggestions
 };
