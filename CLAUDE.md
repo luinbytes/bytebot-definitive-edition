@@ -716,15 +716,41 @@ DATABASE_URL=sqlite.db (optional, defaults to sqlite.db)
 
 ## Deployment Notes
 
-### Current Setup (Development)
-- Slash commands registered to specific guild (line 40 of commandHandler.js)
-- Uses `Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID)`
-- Instant command updates during development
+### Command-Line Deployment Modes
 
-### Production Deployment
-- Change line 40 to `Routes.applicationCommands(CLIENT_ID)`
-- Removes guild restriction, commands go global
-- Updates take ~1 hour to propagate
+**Development (Default):**
+- Deploys to `GUILD_ID` from .env file only
+- Instant updates for that guild
+- Automatic on bot start if hash changes
+
+**Force Deploy to Development Guild:**
+```bash
+npm start -- --deploy
+```
+- Forces re-registration to `GUILD_ID` even if hash unchanged
+
+**Deploy to All Guilds:**
+```bash
+npm start -- --deploy-all
+```
+- Deploys to every guild the bot is currently in
+- Instant updates for all guilds
+- Useful when adding bot to new servers
+- Shows success/fail for each guild
+
+**Deploy Globally:**
+```bash
+npm start -- --deploy-global
+```
+- Deploys to all guilds via global registration
+- Takes up to 1 hour to propagate
+- Use for production deployment
+- One registration covers all guilds
+
+### In-Bot Deployment
+- `/deploy scope:Current Guild` - Deploy to current guild only (instant)
+- `/deploy scope:Global` - Deploy globally with confirmation (1 hour)
+- Bot owner only, requires existing commands in at least one server
 
 ### Required Intents
 ```javascript
@@ -760,7 +786,12 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
   - `/deploy <scope>` - Force command registration without restart
   - Scope options: Current Guild (instant), Global (1 hour propagation)
   - Global deployment requires confirmation for safety
-  - Useful when adding bot to new servers
+  - Useful when adding bot to new servers (if commands exist in at least one server)
+- **Command-Line Deployment Flags:**
+  - `--deploy` - Force deploy to GUILD_ID from .env
+  - `--deploy-all` - Deploy to ALL guilds bot is in (instant, solves new server problem)
+  - `--deploy-global` - Deploy globally (1 hour propagation)
+  - Flags bypass hash cache for forced re-registration
 - **Command Deployer Utility:**
   - `loadCommands()` - Dynamically loads all commands with hash calculation
   - `deployCommands(scope, guildId)` - Handles deployment to Discord API
@@ -768,15 +799,16 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
   - Clears require cache to get latest command definitions
   - Updates `.command-cache.json` after successful deployment
 - **Use Cases:**
-  - Manual sync when joining new servers
+  - `--deploy-all` when adding bot to new servers (primary solution)
+  - `/deploy` for in-bot management (requires commands in at least one server)
+  - `--deploy-global` for production deployment
   - Force re-registration after command changes
-  - Switch between guild and global deployment
-  - Bypass automatic hash-based registration
 - **Files created:**
   - `src/utils/commandDeployer.js` (~160 lines)
   - `src/commands/developer/deploy.js` (~140 lines)
 - **Files modified:**
-  - `CLAUDE.md` - Added documentation for deploy command and utility
+  - `src/handlers/commandHandler.js` - Added --deploy-all and --deploy-global flags
+  - `CLAUDE.md` - Added comprehensive deployment documentation
 
 ### 2025-12-24 - Community Suggestion System
 - **New Feature: Suggestion System** - Community-driven idea tracking and voting
