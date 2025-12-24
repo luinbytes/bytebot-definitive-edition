@@ -91,10 +91,17 @@ module.exports = async (client) => {
         return;
     }
 
+    // For --deploy-all, we need to wait until the bot is ready (guilds cache is populated)
+    if (deployAll) {
+        logger.info(`--deploy-all flag detected. Deployment will occur after bot login...`);
+        client.once('ready', async () => {
+            await deployToAllGuilds(client, commands, commandHash);
+        });
+        return;
+    }
+
     if (forceRegister) {
         logger.info(`--deploy flag detected, forcing command registration to ${process.env.GUILD_ID}...`);
-    } else if (deployAll) {
-        logger.info(`--deploy-all flag detected, deploying to all guilds...`);
     } else if (deployGlobal) {
         logger.info(`--deploy-global flag detected, deploying globally...`);
     } else {
@@ -123,35 +130,6 @@ module.exports = async (client) => {
 
             logger.success(`✓ Successfully deployed ${data.length} commands globally`);
             logger.info('Commands will be available in all guilds within 1 hour');
-
-        } else if (deployAll) {
-            // Deploy to all guilds the bot is in
-            const guilds = Array.from(client.guilds.cache.values());
-            logger.info(`Deploying ${commands.length} commands to ${guilds.length} guilds...`);
-
-            let successCount = 0;
-            let failCount = 0;
-
-            for (const guild of guilds) {
-                try {
-                    const registrationPromise = rest.put(
-                        Routes.applicationGuildCommands(process.env.CLIENT_ID, guild.id),
-                        { body: commands }
-                    );
-                    const timeoutPromise = new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error('TIMEOUT')), 30000)
-                    );
-                    await Promise.race([registrationPromise, timeoutPromise]);
-
-                    successCount++;
-                    logger.success(`✓ ${guild.name} (${guild.id})`);
-                } catch (err) {
-                    failCount++;
-                    logger.error(`✗ ${guild.name} (${guild.id}): ${err.message}`);
-                }
-            }
-
-            logger.info(`\nDeployment complete: ${successCount} succeeded, ${failCount} failed`);
 
         } else {
             // Deploy to specific guild (default/development mode)
@@ -202,3 +180,42 @@ module.exports = async (client) => {
         }
     }
 };
+
+/**
+ * Deploy commands to all guilds the bot is in
+ * Called after bot is ready for --deploy-all flag
+ */
+async function deployToAllGuilds(client, commands, commandHash) {
+    const guilds = Array.from(client.guilds.cache.values());
+    logger.info(`Deploying ${commands.length} commands to ${guilds.length} guilds...`);
+
+    const rest = new REST().setToken(process.env.DISCORD_TOKEN);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const guild of guilds) {
+        try {
+            const registrationPromise = rest.put(
+                Routes.applicationGuildCommands(process.env.CLIENT_ID, guild.id),
+                { body: commands }
+            );
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('TIMEOUT')), 30000)
+            );
+            await Promise.race([registrationPromise, timeoutPromise]);
+
+            successCount++;
+            logger.success(`✓ ${guild.name} (${guild.id})`);
+        } catch (err) {
+            failCount++;
+            logger.error(`✗ ${guild.name} (${guild.id}): ${err.message}`);
+        }
+    }
+
+    logger.info(`\nDeployment complete: ${successCount} succeeded, ${failCount} failed`);
+
+    // Cache the command hash
+    const cachePath = path.resolve(COMMAND_CACHE_FILE);
+    fs.writeFileSync(COMMAND_CACHE_FILE, JSON.stringify({ hash: commandHash, timestamp: Date.now() }));
+    logger.debug(`Command cache saved to: ${cachePath}`);
+}
