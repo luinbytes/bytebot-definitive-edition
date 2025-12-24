@@ -19,9 +19,11 @@ module.exports = {
             .setRequired(false)),
 
     cooldown: 60, // 1 minute cooldown to prevent spam
-    longRunning: true,
 
     async execute(interaction) {
+        // Defer reply as ephemeral so confirmation is private
+        await interaction.deferReply({ ephemeral: true });
+
         const idea = interaction.options.getString('idea');
         const anonymous = interaction.options.getBoolean('anonymous') ?? false;
 
@@ -133,7 +135,7 @@ module.exports = {
             .set({ messageId: message.id })
             .where(eq(suggestions.id, suggestion.id));
 
-        // Reply to user
+        // Reply to user (already ephemeral from defer)
         await interaction.editReply({
             embeds: [embeds.success(
                 'Suggestion Submitted',
