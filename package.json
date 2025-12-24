@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "jest",
+    "start": "node ./src/index.js",
     "dev": "npm test && node ./src/index.js",
     "dev:alt": "npm test && node ./src/index.js --dev",
     "db:push": "npx drizzle-kit push",
