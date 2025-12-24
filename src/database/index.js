@@ -177,6 +177,29 @@ const expectedSchema = {
         trigger_at: 'INTEGER NOT NULL',
         created_at: 'INTEGER NOT NULL',
         active: 'INTEGER DEFAULT 1 NOT NULL'
+    },
+    suggestion_config: {
+        guild_id: 'TEXT PRIMARY KEY',
+        channel_id: 'TEXT NOT NULL',
+        review_role_id: 'TEXT',
+        enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        allow_anonymous: 'INTEGER DEFAULT 0 NOT NULL'
+    },
+    suggestions: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        content: 'TEXT NOT NULL',
+        message_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        status: 'TEXT DEFAULT pending NOT NULL',
+        upvotes: 'INTEGER DEFAULT 0',
+        downvotes: 'INTEGER DEFAULT 0',
+        reviewed_by: 'TEXT',
+        reviewed_at: 'INTEGER',
+        review_reason: 'TEXT',
+        created_at: 'INTEGER',
+        anonymous: 'INTEGER DEFAULT 0 NOT NULL'
     }
 };
 

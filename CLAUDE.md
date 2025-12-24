@@ -38,7 +38,7 @@ ByteBot is a modular, production-ready Discord bot built with Discord.js v14, fe
 
 ### Database Layer (src/database/)
 
-**schema.js** - 14 tables:
+**schema.js** - 16 tables:
 ```javascript
 guilds: {
   id, prefix, logChannel, welcomeChannel, joinedAt,
@@ -120,6 +120,20 @@ autoResponses: {
   // requireRoleId: null = any user
   // Indexes: (guildId, enabled), (guildId, channelId)
   // 50 response limit per guild, 5-min cache, in-memory cooldowns
+}
+
+suggestionConfig: {
+  guildId (PK), channelId, reviewRoleId, enabled, allowAnonymous
+  // Per-guild suggestion system configuration
+  // reviewRoleId: null = Admin only
+}
+
+suggestions: {
+  id, guildId, userId, content, messageId, channelId, status, upvotes, downvotes, reviewedBy, reviewedAt, reviewReason, createdAt, anonymous
+  // Community suggestions/feedback system
+  // status: pending, approved, denied, implemented
+  // Votes cached from message reactions
+  // Indexes: (guildId, status), (userId, guildId), (guildId, upvotes)
 }
 ```
 
@@ -290,6 +304,17 @@ Original owner returns AFTER transfer:
   - Variables: {user} {server} {channel} {username}
   - Optional: channel restriction, role requirement, custom cooldown
   - Requires ManageGuild permission
+- **suggestion.js** - Community suggestion management system (~650 lines)
+  - `/suggestion setup <channel> [review_role] [allow_anonymous]` - Configure system (Admin only)
+  - `/suggestion approve <id> [reason]` - Approve a suggestion
+  - `/suggestion deny <id> [reason]` - Deny a suggestion
+  - `/suggestion implement <id> [note]` - Mark as implemented
+  - `/suggestion view <id>` - View detailed suggestion info
+  - `/suggestion list [status] [limit]` - List suggestions by status
+  - `/suggestion leaderboard [limit]` - Top suggestions by votes
+  - Auto-updates message embeds on status changes
+  - DM notifications to suggesters on review
+  - Review permission: Admin or custom review role
 
 ### Developer (src/commands/developer/)
 - **guilds.js** - List all guilds bot is in (devOnly: true)
@@ -330,6 +355,11 @@ Original owner returns AFTER transfer:
 - **userinfo.js** - User info with roles (top 20)
 - **stats.js** - Server statistics dashboard
   - `/stats server` - Comprehensive server analytics (members, channels, bot activity)
+- **suggest.js** - Submit community suggestions (~140 lines)
+  - `/suggest <idea> [anonymous]` - Submit suggestion to configured channel
+  - Auto-adds 👍/👎 reactions for voting
+  - Optional anonymous submissions (if enabled by admin)
+  - 60-second cooldown to prevent spam
 - **birthday.js** - Birthday tracking system (~450 lines)
   - `/birthday set <MM-DD>` - Register birthday (privacy-focused, no year)
   - `/birthday remove` - Delete your birthday
@@ -708,6 +738,40 @@ GatewayIntentBits.GuildVoiceStates // Voice state updates (for BytePods)
 ---
 
 ## Recent Changes
+
+### 2025-12-24 - Community Suggestion System
+- **New Feature: Suggestion System** - Community-driven idea tracking and voting
+  - Users submit suggestions with `/suggest <idea> [anonymous]`
+  - Auto-posts to designated channel with 👍/👎 reactions for voting
+  - Admin management via `/suggestion` command with full lifecycle tracking
+- **Suggestion Lifecycle:**
+  - **Pending** - Initial state after submission
+  - **Approved** - Admin approves with optional reason
+  - **Denied** - Admin denies with optional reason
+  - **Implemented** - Admin marks as completed with optional note
+- **Admin Commands:**
+  - `/suggestion setup <channel> [review_role] [allow_anonymous]` - Configure system
+  - `/suggestion approve/deny/implement <id> [reason]` - Update status
+  - `/suggestion view <id>` - View detailed info
+  - `/suggestion list [status] [limit]` - Browse suggestions
+  - `/suggestion leaderboard [limit]` - Top voted suggestions
+- **Features:**
+  - Anonymous submissions (optional, admin-configurable)
+  - Custom review role (defaults to Admin permission)
+  - Auto-updates message embeds when status changes
+  - DM notifications to suggesters on review
+  - Vote caching from message reactions
+  - Jump links to original suggestions
+- **Database Tables:**
+  - `suggestion_config` - Per-guild configuration
+  - `suggestions` - Suggestion tracking with votes and status
+  - Indexes: (guildId, status), (userId, guildId), (guildId, upvotes)
+- **Files created:**
+  - `src/commands/utility/suggest.js` (~140 lines)
+  - `src/commands/administration/suggestion.js` (~650 lines)
+- **Files modified:**
+  - `src/database/schema.js` - Added suggestion tables with indexes
+  - `src/database/index.js` - Added expectedSchema entries
 
 ### 2025-12-23 - Voice State Change Bug Fix
 - **CRITICAL FIX: Spurious Join/Leave Events** - Fixed BytePod triggering join/leave logic on voice state changes
