@@ -89,9 +89,11 @@ module.exports = {
                     .setMaxValue(25))),
 
     cooldown: 5,
-    longRunning: true,
 
     async execute(interaction) {
+        // Defer reply as ephemeral so admin actions are private
+        await interaction.deferReply({ ephemeral: true });
+
         const subcommand = interaction.options.getSubcommand();
 
         switch (subcommand) {
@@ -278,7 +280,7 @@ module.exports = {
             };
 
             const dmEmbed = embeds[statusColors[newStatus]](
-                `Suggestion ${statusEmojis[newStatus]} ${newStatus.charAt(0).toUpperCase() + newStatus.slice(1)}`,
+                `Suggestion ${newStatus.charAt(0).toUpperCase() + newStatus.slice(1)}`,
                 `Your suggestion in **${interaction.guild.name}** has been ${newStatus}!`
             )
                 .addFields([
@@ -305,7 +307,7 @@ module.exports = {
 
         await interaction.editReply({
             embeds: [embeds.success(
-                `Suggestion ${statusEmojis[newStatus]} ${newStatus.charAt(0).toUpperCase() + newStatus.slice(1)}`,
+                `Suggestion ${newStatus.charAt(0).toUpperCase() + newStatus.slice(1)}`,
                 `Suggestion #${id} has been ${newStatus}.${reason ? `\n\n**Reason:** ${reason}` : ''}`
             )]
         });
