@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { deployCommands } = require('../../utils/commandDeployer');
+const { deployCommands, checkExistingRegistrations } = require('../../utils/commandDeployer');
 const embeds = require('../../utils/embeds');
 
 module.exports = {
@@ -21,6 +21,44 @@ module.exports = {
 
     async execute(interaction) {
         const scope = interaction.options.getString('scope');
+
+        // Check for existing registrations to detect duplicates
+        const existing = await checkExistingRegistrations(interaction.guild.id);
+
+        // Warn about potential duplicates
+        if (existing.hasDuplicates) {
+            const duplicateWarning = embeds.warn(
+                'Duplicate Commands Detected',
+                `⚠️ **Duplicate commands found!**\n\n` +
+                `• **Global commands:** ${existing.global}\n` +
+                `• **Guild commands (${interaction.guild.name}):** ${existing.guild}\n\n` +
+                `**This causes commands to appear twice in Discord.**\n\n` +
+                `**To fix:**\n` +
+                `1. Use \`/clear scope:Both\` to remove all commands\n` +
+                `2. Choose ONE deployment strategy:\n` +
+                `   • Global (production): \`/deploy scope:Global\`\n` +
+                `   • Guild (development): \`/deploy scope:Guild\`\n\n` +
+                `Proceeding with \`${scope}\` deployment will **not** fix duplicates.`
+            );
+
+            await interaction.editReply({ embeds: [duplicateWarning] });
+            return;
+        }
+
+        // Warn if deploying to scope where commands already exist
+        if (scope === 'global' && existing.global > 0) {
+            const warningMsg = embeds.info(
+                'Updating Global Commands',
+                `Found ${existing.global} existing global commands. They will be updated.`
+            );
+            await interaction.editReply({ embeds: [warningMsg] });
+        } else if (scope === 'guild' && existing.guild > 0) {
+            const warningMsg = embeds.info(
+                'Updating Guild Commands',
+                `Found ${existing.guild} existing guild commands. They will be updated.`
+            );
+            await interaction.editReply({ embeds: [warningMsg] });
+        }
 
         // Additional safety check for global deployment
         if (scope === 'global') {
