@@ -233,6 +233,65 @@ const suggestions = sqliteTable('suggestions', {
     guildUpvotesIdx: index('suggestions_guild_upvotes_idx').on(table.guildId, table.upvotes)
 }));
 
+// Activity Streaks (daily engagement tracking)
+const activityStreaks = sqliteTable('activity_streaks', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: text('user_id').notNull(),
+    guildId: text('guild_id').notNull(),
+    currentStreak: integer('current_streak').default(0).notNull(), // Consecutive active days
+    longestStreak: integer('longest_streak').default(0).notNull(), // All-time best streak
+    lastActivityDate: text('last_activity_date'), // YYYY-MM-DD format
+    totalActiveDays: integer('total_active_days').default(0).notNull(),
+    freezesAvailable: integer('freezes_available').default(1).notNull(), // Streak freeze items (1 per month)
+    lastFreezeReset: integer('last_freeze_reset', { mode: 'timestamp' }), // Monthly reset tracker
+    createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date()),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).default(new Date())
+}, (table) => ({
+    // Composite unique constraint: one streak record per user per guild
+    userGuildUnique: unique().on(table.userId, table.guildId),
+    // Index for guild leaderboard queries (current streak)
+    guildCurrentStreakIdx: index('streaks_guild_current_idx').on(table.guildId, table.currentStreak),
+    // Index for longest streak leaderboard
+    guildLongestStreakIdx: index('streaks_guild_longest_idx').on(table.guildId, table.longestStreak),
+    // Index for user lookups
+    userGuildIdx: index('streaks_user_guild_idx').on(table.userId, table.guildId)
+}));
+
+// Activity Achievements (milestone rewards)
+const activityAchievements = sqliteTable('activity_achievements', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: text('user_id').notNull(),
+    guildId: text('guild_id').notNull(),
+    achievementId: text('achievement_id').notNull(), // e.g., "streak_7", "streak_30", "total_100"
+    earnedAt: integer('earned_at', { mode: 'timestamp' }).default(new Date())
+}, (table) => ({
+    // Composite unique constraint: one achievement per user per guild
+    userGuildAchievementUnique: unique().on(table.userId, table.guildId, table.achievementId),
+    // Index for user achievement list
+    userGuildIdx: index('achievements_user_guild_idx').on(table.userId, table.guildId),
+    // Index for achievement type queries
+    achievementIdx: index('achievements_type_idx').on(table.achievementId)
+}));
+
+// Daily Activity Log (tracks activity types per day)
+const activityLogs = sqliteTable('activity_logs', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: text('user_id').notNull(),
+    guildId: text('guild_id').notNull(),
+    activityDate: text('activity_date').notNull(), // YYYY-MM-DD format
+    messageCount: integer('message_count').default(0).notNull(),
+    voiceMinutes: integer('voice_minutes').default(0).notNull(),
+    commandsRun: integer('commands_run').default(0).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).default(new Date())
+}, (table) => ({
+    // Composite unique constraint: one log per user per guild per day
+    userGuildDateUnique: unique().on(table.userId, table.guildId, table.activityDate),
+    // Index for user activity history
+    userGuildDateIdx: index('activity_user_guild_date_idx').on(table.userId, table.guildId, table.activityDate),
+    // Index for daily cleanup queries
+    dateIdx: index('activity_date_idx').on(table.activityDate)
+}));
+
 module.exports = {
     guilds,
     users,
@@ -252,5 +311,8 @@ module.exports = {
     starboardMessages,
     reminders,
     suggestionConfig,
-    suggestions
+    suggestions,
+    activityStreaks,
+    activityAchievements,
+    activityLogs
 };
