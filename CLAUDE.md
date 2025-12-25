@@ -127,7 +127,8 @@ checkUserPermissions():
 |---------|-------------|
 | guilds.js | List all guilds |
 | manageguilds.js | List/leave guilds via select menu |
-| deploy.js | `/deploy <scope>` - Force command sync. Guild(instant) or Global(1hr). 10s cooldown |
+| deploy.js | `/deploy <scope>` - Force command sync. Guild(instant) or Global(1hr). Detects duplicates. 10s cooldown |
+| clear.js | `/clear <scope>` - Clear command registrations (Global/Guild/Both). Fixes duplicates. 10s cooldown |
 
 ### Fun (src/commands/fun/)
 8ball.js (20 responses), coinflip.js, joke.js (official-joke-api), roll.js (2-100 sides)
@@ -304,6 +305,15 @@ RBAC: /perm add → insert DB | User runs cmd → checkUserPermissions() → DB 
 ---
 
 ## Recent Changes
+
+### 2025-12-25 - Duplicate Command Detection & Prevention
+- **NEW:** `/clear <scope>` command to remove duplicate command registrations
+- **ENHANCEMENT:** `/deploy` now detects and prevents duplicate registrations
+- **NEW:** `checkExistingRegistrations()` utility in `commandDeployer.js`
+- **FEATURE:** Auto-detection warns users when both global and guild commands exist
+- **FIX:** Prevents creating duplicates by blocking deployment when duplicates detected
+- **FILES:** `clear.js`, `commandDeployer.js`, `deploy.js`
+- **DOCS:** Added `DUPLICATE_COMMANDS_FIX.md` comprehensive fix guide
 
 ### 2025-12-24 - War Thunder Command Timeout Fix
 - **FIX:** `/warthunder` exceeding 3s timeout. Added `longRunning: true`, removed manual deferrals. Both subcommands use `editReply()`.
