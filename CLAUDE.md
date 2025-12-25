@@ -22,7 +22,7 @@ Discord bot (Discord.js v14) with neon purple branding (#8A2BE2), slash commands
 
 ### Database (src/database/)
 
-**schema.js - 16 tables:**
+**schema.js - 19 tables:**
 | Table | Key Fields | Notes |
 |-------|------------|-------|
 | guilds | id, prefix, logChannel, welcomeChannel, voiceHubChannelId, voiceHubCategoryId | BytePod config |
@@ -41,6 +41,9 @@ Discord bot (Discord.js v14) with neon purple branding (#8A2BE2), slash commands
 | autoResponses | id, guildId, trigger, response, channelId, creatorId, enabled, cooldown, matchType, requireRoleId, useCount, createdAt, lastUsed | 50/guild, 5-min cache |
 | suggestionConfig | guildId(PK), channelId, reviewRoleId, enabled, allowAnonymous | Review role null=Admin only |
 | suggestions | id, guildId, userId, content, messageId, channelId, status, upvotes, downvotes, reviewedBy, reviewedAt, reviewReason, createdAt, anonymous | Status: pending/approved/denied/implemented |
+| activityStreaks | id, userId, guildId, currentStreak, longestStreak, lastActivityDate, totalActiveDays, freezesAvailable, lastFreezeReset | unique(userId,guildId), monthly freeze reset |
+| activityAchievements | id, userId, guildId, achievementId, earnedAt | unique(userId,guildId,achievementId), streak milestones |
+| activityLogs | id, userId, guildId, activityDate, messageCount, voiceMinutes, commandsRun, updatedAt | unique(userId,guildId,activityDate), daily activity tracking |
 
 **index.js:** better-sqlite3 → Drizzle wrapper. `runMigrations()` runs `validateAndFixSchema()` first (auto-heals), then Drizzle migrations.
 
@@ -157,6 +160,7 @@ checkUserPermissions():
 | birthday.js (~450 lines) | `/birthday set/remove/view/upcoming/setup/role` - Privacy-focused (no year), leap year handling, 24hr role |
 | bookmark.js (~420 lines) | `/bookmark list/search/view/delete/clear` - Pagination, jump links, attachment caching |
 | bytepod.js (~600 lines) | `/bytepod setup/panel/preset/stats/leaderboard/template` - Full pod management, `handleInteraction()` routes all components |
+| streak.js (~240 lines) | `/streak view/leaderboard` - View streaks, achievements, leaderboard. Auto-tracks messages/voice/commands, 11 achievements, monthly freeze |
 
 ### Context Menus (src/commands/context-menus/)
 
@@ -197,11 +201,11 @@ checkUserPermissions():
 
 | Event | Purpose |
 |-------|---------|
-| ready.js | Once. Log success, rotating Rich Presence (10s): "Doomscrolling", "Touch Grass", "Existential Dread" |
-| interactionCreate.js | Routes autocomplete, BytePod interactions (customId starts "bytepod_"), executes security pipeline |
-| voiceStateUpdate.js | BytePod create/delete lifecycle |
+| ready.js | Once. Init services (Birthday, Auto-Responder, Starboard, Reminder, Activity Streak), BytePod cleanup, Rich Presence rotation |
+| interactionCreate.js | Routes autocomplete, BytePod interactions, executes security pipeline, tracks command activity for streaks |
+| voiceStateUpdate.js | BytePod create/delete lifecycle, tracks voice activity for streaks |
 | guildCreate.js / guildDelete.js | Auto-register/cleanup guilds table |
-| messageCreate.js | Auto-responder triggers |
+| messageCreate.js | Auto-responder triggers, tracks message activity for streaks |
 | messageDelete.js | Mark bookmarks as deleted |
 | messageReactionAdd/Remove.js | Suggestion vote counting (pending status only) |
 
@@ -249,11 +253,12 @@ RBAC: /perm add → insert DB | User runs cmd → checkUserPermissions() → DB 
 ## File Reference
 
 **Core:** index.js(42), commandHandler.js(48), eventHandler.js(23)
-**Database:** schema.js(57), index.js(16)
-**Events:** interactionCreate.js(175), voiceStateUpdate.js(138), ready.js(27), guildCreate.js(22), guildDelete.js(19)
+**Database:** schema.js(319), index.js(273)
+**Events:** interactionCreate.js(375), voiceStateUpdate.js(500+), ready.js(200), guildCreate.js(22), guildDelete.js(19), messageCreate.js(39)
 **Utils:** embeds.js(61), logger.js(15), permissions.js(51), permissionCheck.js(66), wtService.js(101)
+**Services:** activityStreakService.js(595), birthdayService.js(353), autoResponderService.js, starboardService.js, reminderService.js
 **Components:** bytepodControls.js(94)
-**Commands:** bytepod.js(394)⚠️COMPLEX, perm.js(168), help.js(84)
+**Commands:** bytepod.js(394)⚠️COMPLEX, perm.js(168), help.js(84), streak.js(240)
 
 ---
 
@@ -304,6 +309,15 @@ RBAC: /perm add → insert DB | User runs cmd → checkUserPermissions() → DB 
 ---
 
 ## Recent Changes
+
+### 2025-12-25 - Activity Streak Tracking
+- **NEW:** Daily engagement tracking system with streaks, achievements, and leaderboards
+- **Features:** Auto-tracks messages/voice/commands, 11 achievements (3-365 day milestones), monthly streak freeze (save 1 missed day/month)
+- **Commands:** `/streak view [@user]`, `/streak leaderboard [current|longest]`
+- **Tables:** activityStreaks (current/longest/total days, freeze system), activityAchievements (milestone rewards), activityLogs (daily activity breakdown)
+- **Service:** activityStreakService.js - Daily midnight checks, auto-break/freeze logic, achievement DM notifications
+- **Tracking:** messageCreate.js (messages), interactionCreate.js (commands), voiceStateUpdate.js (voice minutes)
+- **Files:** `activityStreakService.js`, `streak.js`, `schema.js`, `index.js`, `ready.js`, `messageCreate.js`, `interactionCreate.js`, `voiceStateUpdate.js`
 
 ### 2025-12-24 - War Thunder Command Timeout Fix
 - **FIX:** `/warthunder` exceeding 3s timeout. Added `longRunning: true`, removed manual deferrals. Both subcommands use `editReply()`.

@@ -5,7 +5,7 @@ const { bytepodActiveSessions, bytepodVoiceStats, bytepods } = require('../datab
 const { eq, and } = require('drizzle-orm');
 
 // Helper to finalize a stale voice session
-async function finalizeStaleSession(session) {
+async function finalizeStaleSession(session, client) {
     const durationSeconds = Math.floor((Date.now() - session.startTime) / 1000);
 
     // Delete active session
@@ -35,6 +35,23 @@ async function finalizeStaleSession(session) {
         });
     }
 
+    // Track activity streak (convert seconds to minutes)
+    const durationMinutes = Math.floor(durationSeconds / 60);
+    if (durationMinutes > 0 && client?.activityStreakService) {
+        try {
+            await client.activityStreakService.recordActivity(
+                session.userId,
+                session.guildId,
+                'voice',
+                durationMinutes
+            );
+        } catch (error) {
+            const logger = require('../utils/logger');
+            logger.error('Activity streak tracking error:', error);
+            // Don't crash on tracking errors, just log
+        }
+    }
+
     return durationSeconds;
 }
 
@@ -56,7 +73,7 @@ module.exports = {
                     const guild = await client.guilds.fetch(session.guildId).catch(() => null);
                     if (!guild) {
                         // Guild no longer accessible, cleanup session
-                        await finalizeStaleSession(session);
+                        await finalizeStaleSession(session, client);
                         finalized++;
                         continue;
                     }
@@ -64,7 +81,7 @@ module.exports = {
                     const channel = await guild.channels.fetch(session.podId).catch(() => null);
                     if (!channel) {
                         // Channel deleted while bot was offline, finalize session
-                        await finalizeStaleSession(session);
+                        await finalizeStaleSession(session, client);
                         finalized++;
                         continue;
                     }
@@ -72,7 +89,7 @@ module.exports = {
                     const member = channel.members.get(session.userId);
                     if (!member) {
                         // User left while bot was offline, finalize session
-                        await finalizeStaleSession(session);
+                        await finalizeStaleSession(session, client);
                         finalized++;
                     } else {
                         // User is still in channel, session continues
@@ -179,6 +196,16 @@ module.exports = {
             logger.success('Reminder service initialized');
         } catch (e) {
             logger.error(`Failed to initialize reminder service: ${e}`);
+        }
+
+        // --- Initialize Activity Streak Service ---
+        try {
+            const ActivityStreakService = require('../services/activityStreakService');
+            client.activityStreakService = new ActivityStreakService(client);
+            client.activityStreakService.startDailyCheck();
+            logger.success('Activity streak service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize activity streak service: ${e}`);
         }
 
         // --- Rich Presence Rotation ---
