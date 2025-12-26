@@ -144,8 +144,51 @@ function getCachedHash() {
     return null;
 }
 
+/**
+ * Check for existing command registrations and detect duplicates
+ * @param {string} guildId - Guild ID to check (optional)
+ * @returns {Promise<{global: number, guild: number, hasDuplicates: boolean}>}
+ */
+async function checkExistingRegistrations(guildId = null) {
+    try {
+        const rest = new REST().setToken(process.env.DISCORD_TOKEN);
+
+        // Check global commands
+        let globalCount = 0;
+        try {
+            const globalCommands = await rest.get(
+                Routes.applicationCommands(process.env.CLIENT_ID)
+            );
+            globalCount = globalCommands.length;
+        } catch (err) {
+            logger.debug(`Could not fetch global commands: ${err.message}`);
+        }
+
+        // Check guild commands
+        let guildCount = 0;
+        if (guildId) {
+            try {
+                const guildCommands = await rest.get(
+                    Routes.applicationGuildCommands(process.env.CLIENT_ID, guildId)
+                );
+                guildCount = guildCommands.length;
+            } catch (err) {
+                logger.debug(`Could not fetch guild commands: ${err.message}`);
+            }
+        }
+
+        const hasDuplicates = globalCount > 0 && guildCount > 0;
+
+        return { global: globalCount, guild: guildCount, hasDuplicates };
+    } catch (error) {
+        logger.debug(`Error checking registrations: ${error.message}`);
+        return { global: 0, guild: 0, hasDuplicates: false };
+    }
+}
+
 module.exports = {
     loadCommands,
     deployCommands,
-    getCachedHash
+    getCachedHash,
+    checkExistingRegistrations
 };
