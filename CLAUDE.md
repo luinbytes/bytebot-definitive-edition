@@ -122,7 +122,7 @@ checkUserPermissions():
 |---------|-------------|
 | config.js | Manage log channels, view config (Admin) |
 | perm.js | RBAC management with autocomplete (Admin) |
-| welcome.js (~380 lines) | `/welcome setup/message/toggle/embed/test/view` - New member welcome messages. 18 variables: user mentions, server info, join dates (Discord timestamps), account age, member number (1st, 2nd, 3rd). Embed/plain text modes. Requires ManageGuild |
+| welcome.js (~420 lines) | `/welcome setup/message/toggle/embed/variables/test/view` - New member welcome messages. 18 variables: user mentions, server info, join dates (Discord timestamps), account age, member number (1st, 2nd, 3rd). Embed/plain text modes. `/variables` shows full reference guide. Requires ManageGuild |
 | autorespond.js (~450 lines) | `/autorespond add/remove/list/toggle/edit` - Keyword responses. Match types: exact/contains/wildcard/regex(dev-only). Variables: {user}{server}{channel}{username}. Requires ManageGuild |
 | suggestion.js (~650 lines) | `/suggestion setup/approve/deny/implement/view/list/leaderboard` - Community suggestions. DM notifications, auto-embed updates |
 
@@ -318,7 +318,8 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 - **NEW:** Comprehensive welcome message system for new guild members
 - **FEATURES:** 18 variable placeholders (user mentions, server info, join dates, account age, member number)
 - **VARIABLES:** User: `{user}` `{username}` `{tag}` `{displayname}` | Server: `{server}` `{memberCount}` `{memberNumber}` | Dates: `{joinedAt}` `{joinedRelative}` `{joinedFull}` `{createdAt}` `{createdRelative}` `{createdFull}` | Account: `{accountAgeDays}` `{accountAgeMonths}`
-- **COMMANDS:** `/welcome setup/message/toggle/embed/test/view` - Requires ManageGuild permission (RBAC enforced)
+- **COMMANDS:** `/welcome setup/message/toggle/embed/variables/test/view` - Requires ManageGuild permission (RBAC enforced)
+- **UX:** `/welcome variables` shows interactive reference guide with descriptions and examples for all placeholders
 - **MODES:** Branded embed (default) or plain text format
 - **EVENT:** guildMemberAdd.js - Auto-sends on member join, graceful error handling (perms/deleted channel)
 - **DATABASE:** Added `welcomeMessage`, `welcomeEnabled`, `welcomeUseEmbed` to guilds table

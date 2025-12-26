@@ -131,6 +131,10 @@ module.exports = {
                         .setRequired(true)))
         .addSubcommand(subcommand =>
             subcommand
+                .setName('variables')
+                .setDescription('View all available placeholder variables and examples.'))
+        .addSubcommand(subcommand =>
+            subcommand
                 .setName('test')
                 .setDescription('Send a test welcome message to see how it looks.'))
         .addSubcommand(subcommand =>
@@ -170,6 +174,10 @@ module.exports = {
 
                 case 'embed':
                     await handleEmbed(interaction, config);
+                    break;
+
+                case 'variables':
+                    await handleVariables(interaction);
                     break;
 
                 case 'test':
@@ -285,6 +293,59 @@ async function handleEmbed(interaction, config) {
     return interaction.reply({
         embeds: [embeds.success('Welcome Format Updated', `Welcome messages will now be sent as **${formatText}**.`)]
     });
+}
+
+/**
+ * Handle variables subcommand
+ */
+async function handleVariables(interaction) {
+    const embed = embeds.brand('Welcome Message Variables', 'Use these placeholders in your welcome message. Copy and paste them into `/welcome message`.')
+        .addFields(
+            {
+                name: '👤 User Information',
+                value: '`{user}` - Mentions the user (@User)\n' +
+                       '`{username}` - User\'s name without tag (JohnDoe)\n' +
+                       '`{tag}` - Full username with tag (JohnDoe#1234)\n' +
+                       '`{displayname}` - Server nickname or username',
+                inline: false
+            },
+            {
+                name: '🏠 Server Information',
+                value: '`{server}` - Server name\n' +
+                       '`{memberCount}` - Total member count (42)\n' +
+                       '`{memberNumber}` - Member position with ordinal (42nd, 1st, 100th)',
+                inline: false
+            },
+            {
+                name: '📅 Join Dates',
+                value: '`{joinedAt}` - Full date (December 26, 2025)\n' +
+                       '`{joinedRelative}` - Relative time (2 minutes ago)\n' +
+                       '`{joinedFull}` - Discord timestamp with full format',
+                inline: false
+            },
+            {
+                name: '🎂 Account Information',
+                value: '`{createdAt}` - Account creation date (January 1, 2020)\n' +
+                       '`{createdRelative}` - Account age relative (5 years ago)\n' +
+                       '`{createdFull}` - Discord timestamp with full format\n' +
+                       '`{accountAgeDays}` - Account age in days (1826)\n' +
+                       '`{accountAgeMonths}` - Account age in months (60)',
+                inline: false
+            },
+            {
+                name: '💡 Example Message',
+                value: '```Welcome to {server}, {user}! You\'re our {memberNumber} member. Your account was created {createdRelative}.```',
+                inline: false
+            },
+            {
+                name: '📝 Result',
+                value: 'Welcome to ByteBot Server, @JohnDoe! You\'re our 42nd member. Your account was created 5 years ago.',
+                inline: false
+            }
+        )
+        .setFooter({ text: 'Use /welcome message to set your custom message' });
+
+    return interaction.reply({ embeds: [embed] });
 }
 
 /**
