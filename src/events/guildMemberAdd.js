@@ -94,8 +94,11 @@ module.exports = {
 
     async execute(member) {
         try {
+            logger.debug(`Member joined: ${member.user.tag} in ${member.guild.name}`);
+
             // Ignore bot accounts
             if (member.user.bot) {
+                logger.debug(`Ignoring bot: ${member.user.tag}`);
                 return;
             }
 
@@ -105,8 +108,19 @@ module.exports = {
                 .where(eq(guilds.id, member.guild.id));
 
             // Check if welcome messages are enabled and configured
-            if (!config || !config.welcomeEnabled || !config.welcomeChannel) {
-                return; // Welcome messages not configured or disabled
+            if (!config) {
+                logger.debug(`No config found for guild ${member.guild.id}`);
+                return;
+            }
+
+            if (!config.welcomeEnabled) {
+                logger.debug(`Welcome messages disabled for guild ${member.guild.name}`);
+                return;
+            }
+
+            if (!config.welcomeChannel) {
+                logger.debug(`No welcome channel configured for guild ${member.guild.name}`);
+                return;
             }
 
             // Fetch the welcome channel
