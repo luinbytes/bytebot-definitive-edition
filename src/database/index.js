@@ -144,7 +144,7 @@ const expectedSchema = {
         channel_id: 'TEXT NOT NULL',
         enabled: 'INTEGER DEFAULT 1 NOT NULL',
         auto_capture: 'INTEGER DEFAULT 1 NOT NULL',
-        file_types: 'TEXT DEFAULT image,video,audio NOT NULL',
+        file_types: 'TEXT DEFAULT "image,video,audio" NOT NULL',
         max_file_size_mb: 'INTEGER DEFAULT 50 NOT NULL',
         auto_tag_channel: 'INTEGER DEFAULT 1 NOT NULL',
         whitelist_role_ids: 'TEXT',
