@@ -94,6 +94,11 @@ module.exports = {
 
     async execute(member) {
         try {
+            // Ignore bot accounts
+            if (member.user.bot) {
+                return;
+            }
+
             // Fetch guild config
             const [config] = await db.select()
                 .from(guilds)
