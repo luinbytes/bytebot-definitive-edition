@@ -65,7 +65,10 @@ module.exports = {
                     { name: 'Welcome Messages', value: config.welcomeEnabled ? '✅ Enabled' : '❌ Disabled', inline: true }
                 );
 
-            return interaction.reply({ embeds: [embed] });
+            return interaction.reply({
+                embeds: [embed],
+                flags: [MessageFlags.Ephemeral]
+            });
         }
     },
 };

@@ -150,7 +150,10 @@ async function handleSetup(interaction, client) {
             `**Channel:** ${channel}\n**Threshold:** ${threshold} ${emoji}\n**Emoji:** ${emoji}\n\nMessages with ${threshold}+ reactions of ${emoji} will be featured in ${channel}.`
         );
 
-        await interaction.editReply({ embeds: [embed] });
+        await interaction.editReply({
+            embeds: [embed],
+            flags: [MessageFlags.Ephemeral]
+        });
 
     } catch (error) {
         logger.error('Error setting up starboard:', error);
@@ -204,7 +207,10 @@ async function handleConfig(interaction, client) {
         { name: 'Currently Shown', value: currentlyShown.toString(), inline: true }
     );
 
-    await interaction.editReply({ embeds: [embed] });
+    await interaction.editReply({
+        embeds: [embed],
+        flags: [MessageFlags.Ephemeral]
+    });
 }
 
 /**
@@ -245,7 +251,8 @@ async function handleDisable(interaction, client) {
             embeds: [embeds.success(
                 'Starboard Disabled',
                 'The starboard has been disabled. Existing starred messages will remain visible.'
-            )]
+            )],
+            flags: [MessageFlags.Ephemeral]
         });
 
     } catch (error) {
@@ -294,7 +301,8 @@ async function handleEnable(interaction, client) {
             embeds: [embeds.success(
                 'Starboard Enabled',
                 'The starboard has been enabled. Messages will now be tracked.'
-            )]
+            )],
+            flags: [MessageFlags.Ephemeral]
         });
 
     } catch (error) {
