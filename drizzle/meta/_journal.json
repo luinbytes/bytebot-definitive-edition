@@ -22,6 +22,34 @@
       "when": 1766193640583,
       "tag": "0002_tired_harpoon",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1766782542384,
+      "tag": "0003_sweet_mystique",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1766783656539,
+      "tag": "0004_silky_silvermane",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1766783721621,
+      "tag": "0005_numerous_reavers",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1766787810512,
+      "tag": "0006_cheerful_midnight",
+      "breakpoints": true
     }
   ]
 }

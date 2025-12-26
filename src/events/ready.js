@@ -208,6 +208,15 @@ module.exports = {
             logger.error(`Failed to initialize activity streak service: ${e}`);
         }
 
+        // --- Initialize Media Gallery Service ---
+        try {
+            const MediaGalleryService = require('../services/mediaGalleryService');
+            client.mediaGalleryService = new MediaGalleryService(client);
+            logger.success('Media gallery service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize media gallery service: ${e}`);
+        }
+
         // --- Rich Presence Rotation ---
         let i = 0;
         setInterval(() => {

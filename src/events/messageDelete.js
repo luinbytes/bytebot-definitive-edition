@@ -1,6 +1,7 @@
 const { Events } = require('discord.js');
 const logger = require('../utils/logger');
 const bookmarkUtil = require('../utils/bookmarkUtil');
+const mediaUtil = require('../utils/mediaUtil');
 
 module.exports = {
     name: Events.MessageDelete,
@@ -18,6 +19,14 @@ module.exports = {
         } catch (error) {
             // Don't crash on bookmark update failures, just log
             logger.error(`Failed to mark bookmarks as deleted for message ${message.id}: ${error}`);
+        }
+
+        // Mark media items as deleted
+        try {
+            await mediaUtil.markDeleted(message.id);
+        } catch (error) {
+            // Don't crash on media update failures, just log
+            logger.error(`Failed to mark media as deleted for message ${message.id}: ${error}`);
         }
 
         // Handle starboard message deletions
