@@ -5,7 +5,7 @@ const logger = require('../../utils/logger');
 
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName('clear')
+        .setName('unregister')
         .setDescription('Clear slash command registrations (Bot Owner only)')
         .addStringOption(opt => opt
             .setName('scope')
