@@ -36,7 +36,7 @@ function getPodState(channel) {
 }
 
 // Helper to finalize a voice session and update stats
-async function finalizeVoiceSession(session) {
+async function finalizeVoiceSession(session, client) {
     const durationSeconds = Math.floor((Date.now() - session.startTime) / 1000);
 
     // Delete active session
@@ -64,6 +64,22 @@ async function finalizeVoiceSession(session) {
             totalSeconds: durationSeconds,
             sessionCount: 1
         });
+    }
+
+    // Track activity streak (convert seconds to minutes)
+    const durationMinutes = Math.floor(durationSeconds / 60);
+    if (durationMinutes > 0 && client.activityStreakService) {
+        try {
+            await client.activityStreakService.recordActivity(
+                session.userId,
+                session.guildId,
+                'voice',
+                durationMinutes
+            );
+        } catch (error) {
+            logger.error('Activity streak tracking error:', error);
+            // Don't crash on tracking errors, just log
+        }
     }
 
     return durationSeconds;
@@ -368,7 +384,7 @@ module.exports = {
 
             if (session) {
                 try {
-                    await finalizeVoiceSession(session);
+                    await finalizeVoiceSession(session, newState.client);
                 } catch (e) {
                     logger.error(`Failed to finalize voice session: ${e}`);
                 }
@@ -393,7 +409,7 @@ module.exports = {
                         const remainingSessions = await db.select().from(bytepodActiveSessions)
                             .where(eq(bytepodActiveSessions.podId, leftChannelId));
                         for (const s of remainingSessions) {
-                            await finalizeVoiceSession(s);
+                            await finalizeVoiceSession(s, newState.client);
                         }
 
                         // Delete channel and pod record

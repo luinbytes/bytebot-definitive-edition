@@ -200,6 +200,36 @@ const expectedSchema = {
         review_reason: 'TEXT',
         created_at: 'INTEGER',
         anonymous: 'INTEGER DEFAULT 0 NOT NULL'
+    },
+    activity_streaks: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        user_id: 'TEXT NOT NULL',
+        guild_id: 'TEXT NOT NULL',
+        current_streak: 'INTEGER DEFAULT 0 NOT NULL',
+        longest_streak: 'INTEGER DEFAULT 0 NOT NULL',
+        last_activity_date: 'TEXT',
+        total_active_days: 'INTEGER DEFAULT 0 NOT NULL',
+        freezes_available: 'INTEGER DEFAULT 1 NOT NULL',
+        last_freeze_reset: 'INTEGER',
+        created_at: 'INTEGER',
+        updated_at: 'INTEGER'
+    },
+    activity_achievements: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        user_id: 'TEXT NOT NULL',
+        guild_id: 'TEXT NOT NULL',
+        achievement_id: 'TEXT NOT NULL',
+        earned_at: 'INTEGER'
+    },
+    activity_logs: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        user_id: 'TEXT NOT NULL',
+        guild_id: 'TEXT NOT NULL',
+        activity_date: 'TEXT NOT NULL',
+        message_count: 'INTEGER DEFAULT 0 NOT NULL',
+        voice_minutes: 'INTEGER DEFAULT 0 NOT NULL',
+        commands_run: 'INTEGER DEFAULT 0 NOT NULL',
+        updated_at: 'INTEGER'
     }
 };
 
