@@ -221,7 +221,10 @@ async function handleAdd(interaction, client) {
 
     embed.setFooter({ text: `Variables: {user} {server} {channel} {username}` });
 
-    return interaction.editReply({ embeds: [embed] });
+    return interaction.editReply({
+        embeds: [embed],
+        flags: [MessageFlags.Ephemeral]
+    });
 }
 
 /**
@@ -257,7 +260,8 @@ async function handleRemove(interaction, client) {
         embeds: [embeds.success(
             'Auto-Response Deleted',
             `Auto-response #${id} (**${response.trigger}**) has been removed.`
-        )]
+        )],
+        flags: [MessageFlags.Ephemeral]
     });
 }
 
@@ -351,7 +355,8 @@ async function handleToggle(interaction, client) {
         embeds: [embeds.success(
             `Auto-Response ${newState ? 'Enabled' : 'Disabled'}`,
             `Auto-response #${id} (**${response.trigger}**) is now **${newState ? 'enabled' : 'disabled'}**.`
-        )]
+        )],
+        flags: [MessageFlags.Ephemeral]
     });
 }
 
@@ -390,6 +395,7 @@ async function handleEdit(interaction, client) {
         embeds: [embeds.success(
             'Auto-Response Updated',
             `Auto-response #${id} (**${response.trigger}**) has been updated.\n\n**New Response:**\n${newResponse}`
-        )]
+        )],
+        flags: [MessageFlags.Ephemeral]
     });
 }
