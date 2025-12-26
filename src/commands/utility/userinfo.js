@@ -32,6 +32,9 @@ module.exports = {
                 { name: 'Roles', value: roleDisplay.length > 1024 ? roleDisplay.substring(0, 1021) + '...' : roleDisplay, inline: false }
             );
 
-        await interaction.reply({ embeds: [embed] });
+        await interaction.reply({
+            embeds: [embed],
+            flags: [MessageFlags.Ephemeral]
+        });
     },
 };

@@ -314,6 +314,19 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 
 ## Recent Changes
 
+### 2025-12-26 - Ephemeral Response Enhancement
+- **IMPROVEMENT:** Improved bot UX by making appropriate responses ephemeral (only visible to command user)
+- **CHANGES:**
+  - **Administration commands:** All config confirmations now ephemeral (config, welcome, autorespond, starboard, perm)
+  - **Developer tools:** All devOnly commands auto-defer as ephemeral (deploy, unregister, guilds, manageguilds)
+  - **Utility commands:** Personal/info commands now ephemeral (help specific command, ping, userinfo slash)
+  - **Context menus:** Already ephemeral (avatar, userinfo, copyid) ✓
+  - **Bookmarks:** Already fully ephemeral ✓
+  - **Moderation:** Kept public for transparency (ban, kick, warn - accountability)
+  - **Fun commands:** Kept public for social value
+- **RATIONALE:** Reduces channel clutter, protects privacy, maintains transparency where needed
+- **FILES:** `interactionCreate.js` (auto-defer devOnly), all admin/utility command files
+
 ### 2025-12-26 - Welcome Message System
 - **NEW:** Comprehensive welcome message system for new guild members
 - **FEATURES:** 18 variable placeholders (user mentions, server info, join dates, account age, member number)
