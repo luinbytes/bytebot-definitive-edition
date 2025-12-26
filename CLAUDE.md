@@ -131,7 +131,7 @@ checkUserPermissions():
 | guilds.js | List all guilds |
 | manageguilds.js | List/leave guilds via select menu |
 | deploy.js | `/deploy <scope>` - Force command sync. Guild(instant) or Global(1hr). Detects duplicates. 10s cooldown |
-| clear.js | `/clear <scope>` - Clear command registrations (Global/Guild/Both). Fixes duplicates. 10s cooldown |
+| unregister.js | `/unregister <scope>` - Clear command registrations (Global/Guild/Both). Fixes duplicates. 10s cooldown |
 
 ### Fun (src/commands/fun/)
 8ball.js (20 responses), coinflip.js, joke.js (official-joke-api), roll.js (2-100 sides)
@@ -311,6 +311,12 @@ RBAC: /perm add → insert DB | User runs cmd → checkUserPermissions() → DB 
 
 ## Recent Changes
 
+### 2025-12-26 - Duplicate Command Name Fix
+- **FIX:** Resolved Discord API error 50035 (APPLICATION_COMMANDS_DUPLICATE_NAME) caused by two commands named "clear"
+- **BREAKING:** Renamed `/clear` developer command to `/unregister` to avoid conflict with moderation `/clear`
+- **Commands:** Developer command for clearing registrations is now `/unregister <scope>`
+- **Files:** Renamed `clear.js` to `unregister.js` in `src/commands/developer/`
+
 ### 2025-12-25 - Activity Streak Tracking
 - **NEW:** Daily engagement tracking system with streaks, achievements, and leaderboards
 - **Features:** Auto-tracks messages/voice/commands, 11 achievements (3-365 day milestones), monthly streak freeze (save 1 missed day/month)
@@ -319,12 +325,12 @@ RBAC: /perm add → insert DB | User runs cmd → checkUserPermissions() → DB 
 - **Service:** activityStreakService.js - Daily midnight checks, auto-break/freeze logic, achievement DM notifications
 - **Tracking:** messageCreate.js (messages), interactionCreate.js (commands), voiceStateUpdate.js (voice minutes)
 - **Files:** `activityStreakService.js`, `streak.js`, `schema.js`, `index.js`, `ready.js`, `messageCreate.js`, `interactionCreate.js`, `voiceStateUpdate.js`
-- **NEW:** `/clear <scope>` command to remove duplicate command registrations
+- **NEW:** `/unregister <scope>` command to remove duplicate command registrations
 - **ENHANCEMENT:** `/deploy` now detects and prevents duplicate registrations
 - **NEW:** `checkExistingRegistrations()` utility in `commandDeployer.js`
 - **FEATURE:** Auto-detection warns users when both global and guild commands exist
 - **FIX:** Prevents creating duplicates by blocking deployment when duplicates detected
-- **FILES:** `clear.js`, `commandDeployer.js`, `deploy.js`
+- **FILES:** `unregister.js`, `commandDeployer.js`, `deploy.js`
 - **DOCS:** Added `DUPLICATE_COMMANDS_FIX.md` comprehensive fix guide
 
 ### 2025-12-24 - War Thunder Command Timeout Fix
