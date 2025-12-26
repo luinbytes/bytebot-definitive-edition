@@ -474,6 +474,7 @@ class MediaGalleryService {
                 guildId: message.guild.id,
                 channelId: message.channel.id,
                 messageId: message.id,
+                archiveMessageId: archiveResult.archiveMessageId || null,
                 mediaUrl: finalMediaUrl,
                 fileName: attachment.name,
                 fileType: fileType,

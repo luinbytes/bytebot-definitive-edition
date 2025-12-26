@@ -191,6 +191,31 @@ module.exports = {
             }
 
             try {
+                // Get media details for archive deletion
+                const media = await mediaUtil.getMediaById(authorId, mediaId);
+
+                // Delete archive message if it exists
+                if (media?.archiveMessageId) {
+                    try {
+                        const { guilds } = require('../../database/schema');
+                        const guildData = await db.select().from(guilds)
+                            .where(eq(guilds.id, interaction.guild.id))
+                            .get();
+
+                        if (guildData?.mediaArchiveChannelId) {
+                            const archiveChannel = await interaction.guild.channels.fetch(guildData.mediaArchiveChannelId);
+                            if (archiveChannel) {
+                                const archiveMessage = await archiveChannel.messages.fetch(media.archiveMessageId);
+                                await archiveMessage.delete();
+                                logger.debug(`Deleted archive message ${media.archiveMessageId} for media ${mediaId}`);
+                            }
+                        }
+                    } catch (err) {
+                        logger.debug(`Could not delete archive message: ${err.message}`);
+                        // Continue anyway
+                    }
+                }
+
                 // Delete from database
                 const result = await mediaUtil.deleteMedia(authorId, mediaId);
 
@@ -200,7 +225,7 @@ module.exports = {
 
                     // Send ephemeral confirmation
                     await interaction.reply({
-                        embeds: [embeds.success('Media Deleted', 'Your media has been removed from the gallery.')],
+                        embeds: [embeds.success('Media Deleted', 'Your media has been removed from the gallery and archive.')],
                         flags: [MessageFlags.Ephemeral]
                     });
                 } else {
@@ -770,13 +795,35 @@ async function handleDelete(interaction) {
             }
         }
 
+        // Delete archive message if it exists
+        if (media.archiveMessageId) {
+            try {
+                const { guilds } = require('../../database/schema');
+                const guildData = await db.select().from(guilds)
+                    .where(eq(guilds.id, interaction.guild.id))
+                    .get();
+
+                if (guildData?.mediaArchiveChannelId) {
+                    const archiveChannel = await interaction.guild.channels.fetch(guildData.mediaArchiveChannelId);
+                    if (archiveChannel) {
+                        const archiveMessage = await archiveChannel.messages.fetch(media.archiveMessageId);
+                        await archiveMessage.delete();
+                        logger.debug(`Deleted archive message ${media.archiveMessageId} for media ${mediaId}`);
+                    }
+                }
+            } catch (err) {
+                logger.debug(`Could not delete archive message: ${err.message}`);
+                // Continue anyway - we still want to delete from DB
+            }
+        }
+
         // Delete from database
         const result = await mediaUtil.deleteMedia(interaction.user.id, mediaId);
 
         if (result.success) {
             const successEmbed = embeds.success(
                 'Media Deleted',
-                `Successfully deleted **${media.fileName}** (ID: \`${mediaId}\`).\nThe reposted embed has also been removed.`
+                `Successfully deleted **${media.fileName}** (ID: \`${mediaId}\`).\nThe reposted embed and archived file have been removed.`
             );
 
             return interaction.editReply({
