@@ -357,6 +357,21 @@ module.exports = {
         // 7. Execution
         try {
             await command.execute(interaction, client);
+
+            // 8. Activity Streak Tracking (only on successful command execution)
+            if (client.activityStreakService && interaction.guild) {
+                try {
+                    await client.activityStreakService.recordActivity(
+                        interaction.user.id,
+                        interaction.guild.id,
+                        'command',
+                        1
+                    );
+                } catch (trackError) {
+                    logger.error('Activity streak tracking error:', trackError);
+                    // Don't crash on tracking errors, just log
+                }
+            }
         } catch (error) {
             // Build detailed context for debugging
             const subcommand = interaction.options.getSubcommand(false);
