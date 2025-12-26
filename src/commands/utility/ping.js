@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
 
 module.exports = {
@@ -11,6 +11,7 @@ module.exports = {
     async execute(interaction, client) {
         await interaction.reply({
             embeds: [embeds.brand('Pinging...', 'Measuring latency and heartbeat...')],
+            flags: [MessageFlags.Ephemeral]
         });
 
         const sent = await interaction.fetchReply();
