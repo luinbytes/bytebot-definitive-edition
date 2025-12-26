@@ -14,8 +14,8 @@ Discord bot (Discord.js v14) with neon purple branding (#8A2BE2), slash commands
 
 ## Architecture
 
-### Entry Point (src/index.js, lines 1-42)
-1. Create Client (Intents: Guilds, GuildMessages, MessageContent, GuildVoiceStates)
+### Entry Point (src/index.js, lines 1-86)
+1. Create Client (Intents: Guilds, GuildMembers, GuildMessages, MessageContent, GuildVoiceStates, GuildMessageReactions)
 2. Init `client.commands` and `client.cooldowns` Collections
 3. Global error handlers (unhandledRejection, uncaughtException)
 4. Run DB migrations → Load handlers → Login
@@ -306,13 +306,20 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 
 **In-Bot:** `/deploy scope:Guild|Global` (owner only)
 
-**Intents:** Guilds, GuildMessages, MessageContent, GuildVoiceStates
+**Intents:** Guilds, GuildMembers, GuildMessages, MessageContent, GuildVoiceStates, GuildMessageReactions
 
 **Permissions:** Min(SendMessages,EmbedLinks,UseSlashCommands), Mod(BanMembers,KickMembers,ManageMessages,ManageChannels), BytePods(ManageChannels,MoveMembers,Connect)
 
 ---
 
 ## Recent Changes
+
+### 2025-12-26 - Welcome Message System Fix
+- **FIX:** Added missing `GuildMembers` intent required for guildMemberAdd event to fire
+- **CRITICAL:** Welcome messages were not working because Discord wasn't sending member join events
+- **UPDATED:** Added `GatewayIntentBits.GuildMembers` to client intents in src/index.js
+- **DOCS:** Updated CLAUDE.md to reflect all active intents (GuildMembers, GuildMessageReactions)
+- **FILES:** `index.js`, `CLAUDE.md`
 
 ### 2025-12-26 - Welcome Message System
 - **NEW:** Comprehensive welcome message system for new guild members
