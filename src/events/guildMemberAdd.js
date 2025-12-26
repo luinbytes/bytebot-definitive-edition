@@ -63,8 +63,8 @@ function parseWelcomeMessage(message, member, guild) {
         .replace(/{server}/g, guild.name)
         .replace(/{memberCount}/g, guild.memberCount.toString())
         .replace(/{membercount}/g, guild.memberCount.toString())
-        .replace(/{memberOrdinal}/g, getOrdinalSuffix(guild.memberCount))
-        .replace(/{memberordinal}/g, getOrdinalSuffix(guild.memberCount))
+        .replace(/{memberNumber}/g, getOrdinalSuffix(guild.memberCount))
+        .replace(/{membernumber}/g, getOrdinalSuffix(guild.memberCount))
 
         // Join date/time
         .replace(/{joinedAt}/g, joinedAtFormatted)
