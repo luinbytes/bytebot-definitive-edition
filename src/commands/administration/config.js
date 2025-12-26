@@ -61,7 +61,8 @@ module.exports = {
                 .addFields(
                     { name: 'Prefix', value: `\`${config.prefix}\``, inline: true },
                     { name: 'Log Channel', value: config.logChannel ? `<#${config.logChannel}>` : 'Not set', inline: true },
-                    { name: 'Welcome Channel', value: config.welcomeChannel ? `<#${config.welcomeChannel}>` : 'Not set', inline: true }
+                    { name: 'Welcome Channel', value: config.welcomeChannel ? `<#${config.welcomeChannel}>` : 'Not set', inline: true },
+                    { name: 'Welcome Messages', value: config.welcomeEnabled ? '✅ Enabled' : '❌ Disabled', inline: true }
                 );
 
             return interaction.reply({ embeds: [embed] });

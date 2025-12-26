@@ -25,7 +25,7 @@ Discord bot (Discord.js v14) with neon purple branding (#8A2BE2), slash commands
 **schema.js - 19 tables:**
 | Table | Key Fields | Notes |
 |-------|------------|-------|
-| guilds | id, prefix, logChannel, welcomeChannel, voiceHubChannelId, voiceHubCategoryId | BytePod config |
+| guilds | id, prefix, logChannel, welcomeChannel, welcomeMessage, welcomeEnabled, welcomeUseEmbed, voiceHubChannelId, voiceHubCategoryId | Guild config, BytePod, welcome messages |
 | users | id, guildId, commandsRun, lastSeen, wtNickname | WT account binding |
 | moderationLogs | id, guildId, targetId, executorId, action, reason, timestamp | Actions: BAN/KICK/CLEAR/WARN |
 | commandPermissions | id, guildId, commandName, roleId | RBAC overrides |
@@ -122,6 +122,7 @@ checkUserPermissions():
 |---------|-------------|
 | config.js | Manage log channels, view config (Admin) |
 | perm.js | RBAC management with autocomplete (Admin) |
+| welcome.js (~420 lines) | `/welcome setup/message/toggle/embed/variables/test/view` - New member welcome messages. 18 variables: user mentions, server info, join dates (Discord timestamps), account age, member number (1st, 2nd, 3rd). Embed/plain text modes. `/variables` shows full reference guide. Requires ManageGuild |
 | autorespond.js (~450 lines) | `/autorespond add/remove/list/toggle/edit` - Keyword responses. Match types: exact/contains/wildcard/regex(dev-only). Variables: {user}{server}{channel}{username}. Requires ManageGuild |
 | suggestion.js (~650 lines) | `/suggestion setup/approve/deny/implement/view/list/leaderboard` - Community suggestions. DM notifications, auto-embed updates |
 
@@ -206,6 +207,7 @@ checkUserPermissions():
 | interactionCreate.js | Routes autocomplete, BytePod interactions, executes security pipeline, tracks command activity for streaks |
 | voiceStateUpdate.js | BytePod create/delete lifecycle, tracks voice activity for streaks |
 | guildCreate.js / guildDelete.js | Auto-register/cleanup guilds table |
+| guildMemberAdd.js | Welcome message system, 18 variable replacements, embed/plain text modes |
 | messageCreate.js | Auto-responder triggers, tracks message activity for streaks |
 | messageDelete.js | Mark bookmarks as deleted |
 | messageReactionAdd/Remove.js | Suggestion vote counting (pending status only) |
@@ -247,6 +249,7 @@ Command: User → Slash → interactionCreate → Security(8 steps) → execute(
 BytePod Create: Join Hub → voiceStateUpdate → perm check → create channel → apply whitelist → move user → insert DB → control panel
 BytePod Control: Click → interactionCreate → handleInteraction() → validate ownership → execute → update perms → refresh panel
 RBAC: /perm add → insert DB | User runs cmd → checkUserPermissions() → DB overrides? check roles : check code perms
+Welcome: User joins → guildMemberAdd → check enabled+channel → parse variables (18 types) → send embed/plain → error handling (perms/deleted)
 ```
 
 ---
@@ -254,12 +257,12 @@ RBAC: /perm add → insert DB | User runs cmd → checkUserPermissions() → DB 
 ## File Reference
 
 **Core:** index.js(42), commandHandler.js(48), eventHandler.js(23)
-**Database:** schema.js(319), index.js(273)
-**Events:** interactionCreate.js(375), voiceStateUpdate.js(500+), ready.js(200), guildCreate.js(22), guildDelete.js(19), messageCreate.js(39)
+**Database:** schema.js(319), index.js(302)
+**Events:** interactionCreate.js(375), voiceStateUpdate.js(500+), ready.js(200), guildCreate.js(22), guildDelete.js(19), guildMemberAdd.js(125), messageCreate.js(39)
 **Utils:** embeds.js(61), logger.js(15), permissions.js(51), permissionCheck.js(66), wtService.js(101)
 **Services:** activityStreakService.js(595), birthdayService.js(353), autoResponderService.js, starboardService.js, reminderService.js
 **Components:** bytepodControls.js(94)
-**Commands:** bytepod.js(394)⚠️COMPLEX, perm.js(168), help.js(84), streak.js(240)
+**Commands:** bytepod.js(394)⚠️COMPLEX, perm.js(168), welcome.js(380), help.js(84), streak.js(240)
 
 ---
 
@@ -310,6 +313,17 @@ RBAC: /perm add → insert DB | User runs cmd → checkUserPermissions() → DB 
 ---
 
 ## Recent Changes
+
+### 2025-12-26 - Welcome Message System
+- **NEW:** Comprehensive welcome message system for new guild members
+- **FEATURES:** 18 variable placeholders (user mentions, server info, join dates, account age, member number)
+- **VARIABLES:** User: `{user}` `{username}` `{tag}` `{displayname}` | Server: `{server}` `{memberCount}` `{memberNumber}` | Dates: `{joinedAt}` `{joinedRelative}` `{joinedFull}` `{createdAt}` `{createdRelative}` `{createdFull}` | Account: `{accountAgeDays}` `{accountAgeMonths}`
+- **COMMANDS:** `/welcome setup/message/toggle/embed/variables/test/view` - Requires ManageGuild permission (RBAC enforced)
+- **UX:** `/welcome variables` shows interactive reference guide with descriptions and examples for all placeholders
+- **MODES:** Branded embed (default) or plain text format
+- **EVENT:** guildMemberAdd.js - Auto-sends on member join, graceful error handling (perms/deleted channel)
+- **DATABASE:** Added `welcomeMessage`, `welcomeEnabled`, `welcomeUseEmbed` to guilds table
+- **FILES:** `welcome.js`, `guildMemberAdd.js`, `schema.js`, `index.js`, `config.js`
 
 ### 2025-12-26 - Duplicate Command Name Fix
 - **FIX:** Resolved Discord API error 50035 (APPLICATION_COMMANDS_DUPLICATE_NAME) caused by two commands named "clear"

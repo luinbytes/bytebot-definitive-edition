@@ -40,6 +40,9 @@ const expectedSchema = {
         prefix: 'TEXT DEFAULT "!"',
         log_channel: 'TEXT',
         welcome_channel: 'TEXT',
+        welcome_message: 'TEXT',
+        welcome_enabled: 'INTEGER DEFAULT 0',
+        welcome_use_embed: 'INTEGER DEFAULT 1',
         joined_at: 'INTEGER',
         voice_hub_channel_id: 'TEXT',
         voice_hub_category_id: 'TEXT'
