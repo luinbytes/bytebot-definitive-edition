@@ -63,8 +63,8 @@ function parseWelcomeMessage(message, member, guild) {
         .replace(/{server}/g, guild.name)
         .replace(/{memberCount}/g, guild.memberCount.toString())
         .replace(/{membercount}/g, guild.memberCount.toString())
-        .replace(/{memberOrdinal}/g, getOrdinalSuffix(guild.memberCount))
-        .replace(/{memberordinal}/g, getOrdinalSuffix(guild.memberCount))
+        .replace(/{memberNumber}/g, getOrdinalSuffix(guild.memberCount))
+        .replace(/{membernumber}/g, getOrdinalSuffix(guild.memberCount))
 
         // Join date/time
         .replace(/{joinedAt}/g, joinedAtFormatted)
@@ -238,7 +238,7 @@ async function handleMessage(interaction, config) {
         .addFields(
             { name: 'Template', value: `\`\`\`${message}\`\`\``, inline: false },
             { name: 'Preview', value: preview.length > 1024 ? preview.substring(0, 1021) + '...' : preview, inline: false },
-            { name: 'Available Variables', value: '**User:** `{user}` `{username}` `{tag}` `{displayname}`\n**Server:** `{server}` `{memberCount}` `{memberOrdinal}`\n**Dates:** `{joinedAt}` `{joinedRelative}` `{createdAt}` `{accountAgeDays}`', inline: false }
+            { name: 'Available Variables', value: '**User:** `{user}` `{username}` `{tag}` `{displayname}`\n**Server:** `{server}` `{memberCount}` `{memberNumber}`\n**Dates:** `{joinedAt}` `{joinedRelative}` `{createdAt}` `{accountAgeDays}`', inline: false }
         );
 
     return interaction.reply({ embeds: [embed] });
@@ -369,7 +369,7 @@ async function handleView(interaction, config) {
             {
                 name: 'Available Variables',
                 value: '**User:** `{user}` `{username}` `{tag}` `{displayname}`\n' +
-                       '**Server:** `{server}` `{memberCount}` `{memberOrdinal}`\n' +
+                       '**Server:** `{server}` `{memberCount}` `{memberNumber}`\n' +
                        '**Joined:** `{joinedAt}` `{joinedRelative}` `{joinedFull}`\n' +
                        '**Account:** `{createdAt}` `{createdRelative}` `{accountAgeDays}` `{accountAgeMonths}`',
                 inline: false
