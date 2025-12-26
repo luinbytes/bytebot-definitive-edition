@@ -402,13 +402,17 @@ async function archiveMedia(attachmentUrl, fileName, guild) {
             }]
         });
 
-        // Get the new permanent URL
+        // Get the new permanent URL and message ID
         if (archivedMessage.attachments.size === 0) {
             return { success: false, error: 'Failed to upload file to archive' };
         }
 
         const archivedUrl = archivedMessage.attachments.first().url;
-        return { success: true, archivedUrl };
+        return {
+            success: true,
+            archivedUrl,
+            archiveMessageId: archivedMessage.id
+        };
     } catch (error) {
         logger.error(`Failed to archive media: ${error}`);
         return { success: false, error: 'Failed to archive media file' };

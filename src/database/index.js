@@ -158,6 +158,7 @@ const expectedSchema = {
         guild_id: 'TEXT NOT NULL',
         channel_id: 'TEXT NOT NULL',
         message_id: 'TEXT NOT NULL',
+        archive_message_id: 'TEXT',
         media_url: 'TEXT NOT NULL',
         file_name: 'TEXT NOT NULL',
         file_type: 'TEXT NOT NULL',
