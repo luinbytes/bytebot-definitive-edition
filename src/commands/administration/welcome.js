@@ -225,7 +225,8 @@ async function handleSetup(interaction, config) {
         .where(eq(guilds.id, interaction.guild.id));
 
     return interaction.reply({
-        embeds: [embeds.success('Welcome Channel Set', `Welcome messages will be sent to ${channel}.\n\nUse \`/welcome message\` to set a custom message, then \`/welcome toggle\` to enable.`)]
+        embeds: [embeds.success('Welcome Channel Set', `Welcome messages will be sent to ${channel}.\n\nUse \`/welcome message\` to set a custom message, then \`/welcome toggle\` to enable.`)],
+        flags: [MessageFlags.Ephemeral]
     });
 }
 
@@ -249,7 +250,10 @@ async function handleMessage(interaction, config) {
             { name: 'Available Variables', value: '**User:** `{user}` `{username}` `{tag}` `{displayname}`\n**Server:** `{server}` `{memberCount}` `{memberNumber}`\n**Dates:** `{joinedAt}` `{joinedRelative}` `{createdAt}` `{accountAgeDays}`', inline: false }
         );
 
-    return interaction.reply({ embeds: [embed] });
+    return interaction.reply({
+        embeds: [embed],
+        flags: [MessageFlags.Ephemeral]
+    });
 }
 
 /**
@@ -274,7 +278,8 @@ async function handleToggle(interaction, config) {
     const emoji = enabled ? '✅' : '❌';
 
     return interaction.reply({
-        embeds: [embeds.success(`Welcome Messages ${enabled ? 'Enabled' : 'Disabled'}`, `${emoji} Welcome messages are now **${statusText}**.`)]
+        embeds: [embeds.success(`Welcome Messages ${enabled ? 'Enabled' : 'Disabled'}`, `${emoji} Welcome messages are now **${statusText}**.`)],
+        flags: [MessageFlags.Ephemeral]
     });
 }
 
@@ -291,7 +296,8 @@ async function handleEmbed(interaction, config) {
     const formatText = useEmbed ? 'branded embed' : 'plain text';
 
     return interaction.reply({
-        embeds: [embeds.success('Welcome Format Updated', `Welcome messages will now be sent as **${formatText}**.`)]
+        embeds: [embeds.success('Welcome Format Updated', `Welcome messages will now be sent as **${formatText}**.`)],
+        flags: [MessageFlags.Ephemeral]
     });
 }
 
@@ -345,7 +351,10 @@ async function handleVariables(interaction) {
         )
         .setFooter({ text: 'Use /welcome message to set your custom message' });
 
-    return interaction.reply({ embeds: [embed] });
+    return interaction.reply({
+        embeds: [embed],
+        flags: [MessageFlags.Ephemeral]
+    });
 }
 
 /**
@@ -437,5 +446,8 @@ async function handleView(interaction, config) {
             }
         );
 
-    return interaction.reply({ embeds: [embed] });
+    return interaction.reply({
+        embeds: [embed],
+        flags: [MessageFlags.Ephemeral]
+    });
 }
