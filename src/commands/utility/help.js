@@ -45,7 +45,10 @@ module.exports = {
                 embed.addFields({ name: 'Options', value: optionsList });
             }
 
-            return interaction.reply({ embeds: [embed] });
+            return interaction.reply({
+                embeds: [embed],
+                flags: [MessageFlags.Ephemeral]
+            });
         }
 
         // General Help

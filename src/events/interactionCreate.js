@@ -351,7 +351,7 @@ module.exports = {
 
         // 6. Interaction Deferral
         if (command.longRunning) {
-            await interaction.deferReply({ flags: command.data.ephemeral ? [MessageFlags.Ephemeral] : [] });
+            await interaction.deferReply({ flags: (command.data.ephemeral || command.devOnly) ? [MessageFlags.Ephemeral] : [] });
         }
 
         // 7. Execution
