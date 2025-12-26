@@ -20,6 +20,16 @@ module.exports = {
             }
         }
 
+        // Media gallery auto-capture
+        if (client.mediaGalleryService) {
+            try {
+                await client.mediaGalleryService.checkMessage(message);
+            } catch (error) {
+                logger.error('Media gallery auto-capture error:', error);
+                // Don't crash on media capture errors, just log
+            }
+        }
+
         // Activity streak tracking
         if (client.activityStreakService) {
             try {

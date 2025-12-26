@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const logger = require('../../utils/logger');
 
@@ -52,7 +52,7 @@ async function handleView(interaction, client) {
     if (!client.activityStreakService) {
         return interaction.reply({
             embeds: [embeds.error('Service Unavailable', 'The activity streak system is currently unavailable.')],
-            ephemeral: true
+            flags: [MessageFlags.Ephemeral]
         });
     }
 
@@ -156,7 +156,7 @@ async function handleView(interaction, client) {
         logger.error('Error viewing streak:', error);
         await interaction.reply({
             embeds: [embeds.error('Error', 'Failed to fetch streak data. Please try again.')],
-            ephemeral: true
+            flags: [MessageFlags.Ephemeral]
         });
     }
 }
@@ -170,7 +170,7 @@ async function handleLeaderboard(interaction, client) {
     if (!client.activityStreakService) {
         return interaction.reply({
             embeds: [embeds.error('Service Unavailable', 'The activity streak system is currently unavailable.')],
-            ephemeral: true
+            flags: [MessageFlags.Ephemeral]
         });
     }
 
@@ -184,7 +184,7 @@ async function handleLeaderboard(interaction, client) {
         if (leaderboard.length === 0) {
             return interaction.reply({
                 embeds: [embeds.info('No Data', 'No streak data available yet. Start your streak by being active!')],
-                ephemeral: true
+                flags: [MessageFlags.Ephemeral]
             });
         }
 
@@ -223,7 +223,7 @@ async function handleLeaderboard(interaction, client) {
         logger.error('Error showing leaderboard:', error);
         await interaction.reply({
             embeds: [embeds.error('Error', 'Failed to fetch leaderboard. Please try again.')],
-            ephemeral: true
+            flags: [MessageFlags.Ephemeral]
         });
     }
 }

@@ -45,7 +45,8 @@ const expectedSchema = {
         welcome_use_embed: 'INTEGER DEFAULT 1',
         joined_at: 'INTEGER',
         voice_hub_channel_id: 'TEXT',
-        voice_hub_category_id: 'TEXT'
+        voice_hub_category_id: 'TEXT',
+        media_archive_channel_id: 'TEXT'
     },
     users: {
         id: 'TEXT PRIMARY KEY',
@@ -136,6 +137,49 @@ const expectedSchema = {
         attachment_urls: 'TEXT',
         saved_at: 'INTEGER',
         message_deleted: 'INTEGER DEFAULT 0 NOT NULL'
+    },
+    media_gallery_config: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        auto_capture: 'INTEGER DEFAULT 1 NOT NULL',
+        file_types: 'TEXT DEFAULT image,video,audio NOT NULL',
+        max_file_size_mb: 'INTEGER DEFAULT 50 NOT NULL',
+        auto_tag_channel: 'INTEGER DEFAULT 1 NOT NULL',
+        whitelist_role_ids: 'TEXT',
+        created_by: 'TEXT NOT NULL',
+        created_at: 'INTEGER',
+        updated_at: 'INTEGER'
+    },
+    media_items: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        user_id: 'TEXT NOT NULL',
+        guild_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        message_id: 'TEXT NOT NULL',
+        media_url: 'TEXT NOT NULL',
+        file_name: 'TEXT NOT NULL',
+        file_type: 'TEXT NOT NULL',
+        mime_type: 'TEXT',
+        file_size: 'INTEGER',
+        width: 'INTEGER',
+        height: 'INTEGER',
+        duration: 'REAL',
+        description: 'TEXT',
+        content_preview: 'TEXT',
+        author_id: 'TEXT NOT NULL',
+        capture_method: 'TEXT DEFAULT auto NOT NULL',
+        saved_at: 'INTEGER',
+        message_deleted: 'INTEGER DEFAULT 0 NOT NULL',
+        url_expired: 'INTEGER DEFAULT 0 NOT NULL'
+    },
+    media_tags: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        media_id: 'INTEGER NOT NULL',
+        tag: 'TEXT NOT NULL',
+        auto_generated: 'INTEGER DEFAULT 0 NOT NULL',
+        created_at: 'INTEGER'
     },
     auto_responses: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
