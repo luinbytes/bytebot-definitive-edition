@@ -349,6 +349,19 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 
 ## Recent Changes
 
+### 2025-12-28 - Media Gallery Archive Bug Fixes
+- **FIX:** Critical bug where archived media URLs expired when original messages were deleted
+- **BUG #1:** Reposted messages were using `attachment.url` (original) instead of `mediaData.mediaUrl` (archived)
+  - **IMPACT:** When original messages were deleted, even archived media became inaccessible
+  - **FIX:** Updated `buildMediaMessage()` in `mediaGalleryService.js` to use archived URLs from database
+  - **AFFECTED:** Video reposts (line 290-291), image embeds (line 326), audio links (line 328)
+- **BUG #2:** `markDeleted()` unconditionally marked all URLs as expired, including archived ones
+  - **IMPACT:** Archived media (hosted on archive channel messages) incorrectly flagged as expired
+  - **FIX:** Updated `markDeleted()` in `mediaUtil.js` to only expire URLs if `archiveMessageId` is null
+  - **LOGIC:** Archived media has `archiveMessageId` set → URL hosted on archive message → remains valid after original deletion
+- **RESULT:** Archived media (≤25MB) now correctly persists after original message deletion
+- **FILES:** `src/services/mediaGalleryService.js` (lines 290-291, 326, 328), `src/utils/mediaUtil.js` (lines 426-449)
+
 ### 2025-12-26 - Media Gallery System with Persistent Archive
 - **NEW:** Dual-capture media archive system (auto-monitor + manual saves)
 - **FEATURES:** Rich metadata (file type, size, dimensions, MIME type), tag system, descriptions, advanced filtering, full-text search

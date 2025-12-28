@@ -425,12 +425,24 @@ async function archiveMedia(attachmentUrl, fileName, guild) {
  */
 async function markDeleted(messageId) {
     try {
-        await db.update(mediaItems)
-            .set({
-                messageDeleted: true,
-                urlExpired: true // Discord CDN URLs become invalid when message is deleted
-            })
+        // Get all media items for this message
+        const items = await db.select()
+            .from(mediaItems)
             .where(eq(mediaItems.messageId, messageId));
+
+        // Update each item individually
+        for (const item of items) {
+            // Only mark URL as expired if NOT archived
+            // Archived media has archiveMessageId set and URL remains valid
+            const urlExpired = !item.archiveMessageId;
+
+            await db.update(mediaItems)
+                .set({
+                    messageDeleted: true,
+                    urlExpired: urlExpired
+                })
+                .where(eq(mediaItems.id, item.id));
+        }
     } catch (error) {
         logger.error(`Failed to mark media as deleted: ${error}`);
     }
