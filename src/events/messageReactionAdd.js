@@ -30,6 +30,19 @@ module.exports = {
             // Ignore DMs
             if (!reaction.message.guild) return;
 
+            // Track reaction for achievements
+            if (client.activityStreakService) {
+                try {
+                    await client.activityStreakService.recordReaction(
+                        user.id,
+                        reaction.message.guild.id
+                    );
+                } catch (trackError) {
+                    logger.debug('Failed to track reaction for achievements:', trackError);
+                    // Don't crash on tracking errors, just log
+                }
+            }
+
             // Check starboard
             if (client.starboardService) {
                 await client.starboardService.handleReactionAdd(reaction, user);

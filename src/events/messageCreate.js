@@ -33,11 +33,20 @@ module.exports = {
         // Activity streak tracking
         if (client.activityStreakService) {
             try {
+                // Record message activity
                 await client.activityStreakService.recordActivity(
                     message.author.id,
                     message.guild.id,
                     'message',
                     1
+                );
+
+                // Track active hour for time-based achievements
+                const hour = new Date().getUTCHours();
+                await client.activityStreakService.recordActiveHour(
+                    message.author.id,
+                    message.guild.id,
+                    hour
                 );
             } catch (error) {
                 logger.error('Activity streak tracking error:', error);

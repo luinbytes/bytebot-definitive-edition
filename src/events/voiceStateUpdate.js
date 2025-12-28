@@ -244,6 +244,15 @@ module.exports = {
                     originalOwnerId: member.id, // Track original creator for reclaim feature
                 });
 
+                // Track BytePod creation for achievements
+                if (client.activityStreakService) {
+                    try {
+                        await client.activityStreakService.recordBytepodCreation(member.id, guild.id);
+                    } catch (error) {
+                        logger.debug('Failed to track BytePod creation:', error);
+                    }
+                }
+
                 // Start voice session tracking (persisted to DB)
                 await db.insert(bytepodActiveSessions).values({
                     podId: newChannel.id,
@@ -278,6 +287,16 @@ module.exports = {
         // Handle ownership return / reclaim when someone joins an existing pod
         // IMPORTANT: Only trigger if user actually moved channels (not just voice state change like mute/screenshare)
         if (joinedChannelId && joinedChannelId !== hubId && oldState.channelId !== newState.channelId) {
+            // Track channel join for achievements
+            if (client.activityStreakService) {
+                try {
+                    await client.activityStreakService.recordChannelJoin(member.id, member.guild.id);
+                    await client.activityStreakService.startVoiceSession(member.id, member.guild.id, joinedChannelId);
+                } catch (error) {
+                    logger.debug('Failed to track channel join:', error);
+                }
+            }
+
             const podData = await db.select().from(bytepods).where(eq(bytepods.channelId, joinedChannelId)).get();
 
             if (podData) {
@@ -374,6 +393,15 @@ module.exports = {
         // IMPORTANT: Only trigger if user actually moved channels (not just voice state change like mute/screenshare)
         if (leftChannelId && leftChannelId !== hubId && oldState.channelId !== newState.channelId) {
             logger.debug(`[Voice State] User ${member.id} left channel ${leftChannelId} (joined: ${joinedChannelId || 'none'})`);
+
+            // Track voice session end for achievements
+            if (client.activityStreakService) {
+                try {
+                    await client.activityStreakService.endVoiceSession(member.id, member.guild.id, leftChannelId);
+                } catch (error) {
+                    logger.debug('Failed to track voice session end:', error);
+                }
+            }
 
             // Finalize voice session for the leaving user
             const session = await db.select().from(bytepodActiveSessions)

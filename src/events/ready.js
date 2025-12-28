@@ -204,6 +204,18 @@ module.exports = {
             client.activityStreakService = new ActivityStreakService(client);
             client.activityStreakService.startDailyCheck();
             logger.success('Activity streak service initialized');
+
+            // Run orphaned role cleanup on startup
+            await client.activityStreakService.cleanupOrphanedRoles();
+
+            // Schedule daily cleanup (24 hours)
+            setInterval(() => {
+                client.activityStreakService.cleanupOrphanedRoles().catch((error) => {
+                    logger.error('Scheduled role cleanup failed:', error);
+                });
+            }, 86400000); // 24 hours
+
+            logger.success('Achievement role cleanup scheduled');
         } catch (e) {
             logger.error(`Failed to initialize activity streak service: ${e}`);
         }

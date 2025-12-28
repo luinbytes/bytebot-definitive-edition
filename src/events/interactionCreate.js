@@ -247,6 +247,27 @@ module.exports = {
             // 5. Execute
             try {
                 await menu.execute(interaction, client);
+
+                // Track context menu usage for achievements
+                if (client.activityStreakService && interaction.guild) {
+                    try {
+                        await client.activityStreakService.recordActivity(
+                            interaction.user.id,
+                            interaction.guild.id,
+                            'command',
+                            1
+                        );
+
+                        // Track unique command usage for Command Explorer achievement
+                        await client.activityStreakService.recordCommandUsage(
+                            interaction.user.id,
+                            interaction.guild.id,
+                            interaction.commandName
+                        );
+                    } catch (trackError) {
+                        logger.debug('Activity streak tracking error:', trackError);
+                    }
+                }
             } catch (error) {
                 logger.errorContext(`Error executing context menu: ${interaction.commandName}`, error, {
                     menuName: interaction.commandName,
@@ -394,6 +415,13 @@ module.exports = {
                         interaction.guild.id,
                         'command',
                         1
+                    );
+
+                    // Track unique command usage for Command Explorer achievement
+                    await client.activityStreakService.recordCommandUsage(
+                        interaction.user.id,
+                        interaction.guild.id,
+                        interaction.commandName
                     );
                 } catch (trackError) {
                     logger.error('Activity streak tracking error:', trackError);

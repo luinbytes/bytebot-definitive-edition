@@ -57,6 +57,13 @@
       "when": 1766790281184,
       "tag": "0007_petite_silver_fox",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1766885106648,
+      "tag": "0008_spotty_lady_ursula",
+      "breakpoints": true
     }
   ]
 }

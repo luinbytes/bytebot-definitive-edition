@@ -337,6 +337,8 @@ const activityAchievements = sqliteTable('activity_achievements', {
     userId: text('user_id').notNull(),
     guildId: text('guild_id').notNull(),
     achievementId: text('achievement_id').notNull(), // e.g., "streak_7", "streak_30", "total_100"
+    notified: integer('notified', { mode: 'boolean' }).default(false).notNull(), // Has user been DM'd?
+    points: integer('points').default(0).notNull(), // Points value of achievement
     earnedAt: integer('earned_at', { mode: 'timestamp' }).default(new Date())
 }, (table) => ({
     // Composite unique constraint: one achievement per user per guild
@@ -356,6 +358,13 @@ const activityLogs = sqliteTable('activity_logs', {
     messageCount: integer('message_count').default(0).notNull(),
     voiceMinutes: integer('voice_minutes').default(0).notNull(),
     commandsRun: integer('commands_run').default(0).notNull(),
+    reactionsGiven: integer('reactions_given').default(0).notNull(), // Track reactions given
+    channelsJoined: integer('channels_joined').default(0).notNull(), // Track unique voice channels joined
+    bytepodsCreated: integer('bytepods_created').default(0).notNull(), // Track BytePods created
+    uniqueCommandsUsed: text('unique_commands_used'), // JSON array of unique command names
+    activeHours: text('active_hours'), // JSON array of hours (0-23) when user was active
+    firstActivityTime: integer('first_activity_time'), // Unix timestamp of first activity this day
+    lastActivityTime: integer('last_activity_time'), // Unix timestamp of last activity this day
     updatedAt: integer('updated_at', { mode: 'timestamp' }).default(new Date())
 }, (table) => ({
     // Composite unique constraint: one log per user per guild per day
@@ -364,6 +373,86 @@ const activityLogs = sqliteTable('activity_logs', {
     userGuildDateIdx: index('activity_user_guild_date_idx').on(table.userId, table.guildId, table.activityDate),
     // Index for daily cleanup queries
     dateIdx: index('activity_date_idx').on(table.activityDate)
+}));
+
+// Achievement Definitions (metadata for all achievements - core + seasonal)
+const achievementDefinitions = sqliteTable('achievement_definitions', {
+    id: text('id').primaryKey(), // e.g., "message_1000", "streak_365"
+    title: text('title').notNull(),
+    description: text('description').notNull(),
+    emoji: text('emoji').notNull(),
+    category: text('category').notNull(), // streak, total, message, voice, command, special, social, combo, meta, custom
+    rarity: text('rarity').notNull(), // common, uncommon, rare, epic, legendary, mythic
+    checkType: text('check_type').notNull(), // exact, threshold, special, combo, time-based, manual
+    criteria: text('criteria').notNull(), // JSON: {"messageCount": 1000} or {"streak": 7}
+    grantRole: integer('grant_role', { mode: 'boolean' }).default(false).notNull(), // Grant role reward?
+    points: integer('points').default(0).notNull(), // Point value
+    startDate: integer('start_date', { mode: 'timestamp' }), // When achievement becomes available (seasonal)
+    endDate: integer('end_date', { mode: 'timestamp' }), // When achievement expires (seasonal)
+    seasonal: integer('seasonal', { mode: 'boolean' }).default(false).notNull(), // Is time-limited?
+    seasonalEvent: text('seasonal_event'), // halloween, christmas, anniversary, etc.
+    createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date())
+}, (table) => ({
+    // Index for category-based queries
+    categoryIdx: index('achievement_defs_category_idx').on(table.category),
+    // Index for rarity filtering
+    rarityIdx: index('achievement_defs_rarity_idx').on(table.rarity),
+    // Index for seasonal achievement queries
+    seasonalIdx: index('achievement_defs_seasonal_idx').on(table.seasonal, table.startDate, table.endDate)
+}));
+
+// Achievement Role Configuration (per-guild settings for role rewards)
+const achievementRoleConfig = sqliteTable('achievement_role_config', {
+    guildId: text('guild_id').primaryKey(),
+    enabled: integer('enabled', { mode: 'boolean' }).default(true).notNull(), // Enable role rewards
+    rolePrefix: text('role_prefix').default('🏆').notNull(), // Role name prefix
+    useRarityColors: integer('use_rarity_colors', { mode: 'boolean' }).default(true).notNull(), // Color by rarity vs brand color
+    cleanupOrphaned: integer('cleanup_orphaned', { mode: 'boolean' }).default(true).notNull(), // Delete roles with 0 members
+    notifyOnEarn: integer('notify_on_earn', { mode: 'boolean' }).default(true).notNull(), // Send DM notifications
+    createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date()),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).default(new Date())
+});
+
+// Achievement Roles (track dynamically created achievement roles)
+const achievementRoles = sqliteTable('achievement_roles', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    achievementId: text('achievement_id').notNull(), // FK to achievementDefinitions.id
+    guildId: text('guild_id').notNull(),
+    roleId: text('role_id').notNull(), // Discord role ID
+    createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date())
+}, (table) => ({
+    // Composite unique constraint: one role per achievement per guild
+    achievementGuildUnique: unique().on(table.achievementId, table.guildId),
+    // Index for guild role queries
+    guildIdx: index('achievement_roles_guild_idx').on(table.guildId),
+    // Index for achievement lookups
+    achievementIdx: index('achievement_roles_achievement_idx').on(table.achievementId)
+}));
+
+// Custom Achievements (server-created custom achievements)
+const customAchievements = sqliteTable('custom_achievements', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    achievementId: text('achievement_id').notNull(), // custom_guild123_timestamp
+    title: text('title').notNull(),
+    description: text('description').notNull(),
+    emoji: text('emoji').notNull(),
+    category: text('category').default('custom').notNull(),
+    rarity: text('rarity').notNull(), // common, uncommon, rare, epic, legendary, mythic
+    checkType: text('check_type').notNull(), // manual, auto (message/voice/event)
+    criteria: text('criteria'), // JSON for auto-check (null for manual)
+    grantRole: integer('grant_role', { mode: 'boolean' }).default(false).notNull(),
+    points: integer('points').notNull(),
+    createdBy: text('created_by').notNull(), // Admin who created it
+    createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date()),
+    enabled: integer('enabled', { mode: 'boolean' }).default(true).notNull()
+}, (table) => ({
+    // Composite unique constraint: unique achievement ID per guild
+    guildAchievementUnique: unique().on(table.guildId, table.achievementId),
+    // Index for guild custom achievement queries
+    guildIdx: index('custom_achievements_guild_idx').on(table.guildId),
+    // Index for enabled achievements
+    guildEnabledIdx: index('custom_achievements_guild_enabled_idx').on(table.guildId, table.enabled)
 }));
 
 module.exports = {
@@ -391,5 +480,9 @@ module.exports = {
     suggestions,
     activityStreaks,
     activityAchievements,
-    activityLogs
+    activityLogs,
+    achievementDefinitions,
+    achievementRoleConfig,
+    achievementRoles,
+    customAchievements
 };

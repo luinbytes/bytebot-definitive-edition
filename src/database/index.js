@@ -267,6 +267,8 @@ const expectedSchema = {
         user_id: 'TEXT NOT NULL',
         guild_id: 'TEXT NOT NULL',
         achievement_id: 'TEXT NOT NULL',
+        notified: 'INTEGER DEFAULT 0 NOT NULL',
+        points: 'INTEGER DEFAULT 0 NOT NULL',
         earned_at: 'INTEGER'
     },
     activity_logs: {
@@ -277,7 +279,65 @@ const expectedSchema = {
         message_count: 'INTEGER DEFAULT 0 NOT NULL',
         voice_minutes: 'INTEGER DEFAULT 0 NOT NULL',
         commands_run: 'INTEGER DEFAULT 0 NOT NULL',
+        reactions_given: 'INTEGER DEFAULT 0 NOT NULL',
+        channels_joined: 'INTEGER DEFAULT 0 NOT NULL',
+        bytepods_created: 'INTEGER DEFAULT 0 NOT NULL',
+        unique_commands_used: 'TEXT',
+        active_hours: 'TEXT',
+        first_activity_time: 'INTEGER',
+        last_activity_time: 'INTEGER',
         updated_at: 'INTEGER'
+    },
+    achievement_definitions: {
+        id: 'TEXT PRIMARY KEY',
+        title: 'TEXT NOT NULL',
+        description: 'TEXT NOT NULL',
+        emoji: 'TEXT NOT NULL',
+        category: 'TEXT NOT NULL',
+        rarity: 'TEXT NOT NULL',
+        check_type: 'TEXT NOT NULL',
+        criteria: 'TEXT NOT NULL',
+        grant_role: 'INTEGER DEFAULT 0 NOT NULL',
+        points: 'INTEGER DEFAULT 0 NOT NULL',
+        start_date: 'INTEGER',
+        end_date: 'INTEGER',
+        seasonal: 'INTEGER DEFAULT 0 NOT NULL',
+        seasonal_event: 'TEXT',
+        created_at: 'INTEGER'
+    },
+    achievement_role_config: {
+        guild_id: 'TEXT PRIMARY KEY',
+        enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        role_prefix: 'TEXT DEFAULT 🏆 NOT NULL',
+        use_rarity_colors: 'INTEGER DEFAULT 1 NOT NULL',
+        cleanup_orphaned: 'INTEGER DEFAULT 1 NOT NULL',
+        notify_on_earn: 'INTEGER DEFAULT 1 NOT NULL',
+        created_at: 'INTEGER',
+        updated_at: 'INTEGER'
+    },
+    achievement_roles: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        achievement_id: 'TEXT NOT NULL',
+        guild_id: 'TEXT NOT NULL',
+        role_id: 'TEXT NOT NULL',
+        created_at: 'INTEGER'
+    },
+    custom_achievements: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        achievement_id: 'TEXT NOT NULL',
+        title: 'TEXT NOT NULL',
+        description: 'TEXT NOT NULL',
+        emoji: 'TEXT NOT NULL',
+        category: 'TEXT DEFAULT custom NOT NULL',
+        rarity: 'TEXT NOT NULL',
+        check_type: 'TEXT NOT NULL',
+        criteria: 'TEXT',
+        grant_role: 'INTEGER DEFAULT 0 NOT NULL',
+        points: 'INTEGER NOT NULL',
+        created_by: 'TEXT NOT NULL',
+        created_at: 'INTEGER',
+        enabled: 'INTEGER DEFAULT 1 NOT NULL'
     }
 };
 
