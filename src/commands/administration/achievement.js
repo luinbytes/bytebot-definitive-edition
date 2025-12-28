@@ -399,9 +399,9 @@ async function handleCreate(interaction) {
 
         const rarityInput = new TextInputBuilder()
             .setCustomId('achievement_rarity')
-            .setLabel('Rarity (common/uncommon/rare/epic/legendary/mythic)')
+            .setLabel('Rarity')
             .setStyle(TextInputStyle.Short)
-            .setPlaceholder('rare')
+            .setPlaceholder('common/uncommon/rare/epic/legendary/mythic')
             .setRequired(true)
             .setMaxLength(20);
 

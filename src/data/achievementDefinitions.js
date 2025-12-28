@@ -1,28 +1,18 @@
-const Database = require('better-sqlite3');
-const { drizzle } = require('drizzle-orm/better-sqlite3');
-const { achievementDefinitions } = require('../src/database/schema');
-require('dotenv').config();
-
-const sqlite = new Database(process.env.DATABASE_URL || 'sqlite.db');
-const db = drizzle(sqlite);
-
 /**
- * All 82 Core Achievement Definitions
- * Categories: streak (18), total (10), message (10), voice (10), command (8),
- *             special (12), social (8), combo (6), meta (5)
+ * Achievement Definitions Data
  *
- * Rarity Distribution:
- * - Common: 17 achievements
- * - Uncommon: 19 achievements
- * - Rare: 15 achievements
- * - Epic: 13 achievements
- * - Legendary: 11 achievements
- * - Mythic: 7 achievements
+ * All core and seasonal achievement definitions.
+ * Automatically seeded on bot startup if database is empty.
  *
- * Role Rewards: 39/82 achievements grant roles (🏆)
+ * Total: 98 achievements
+ * - Core: 82 achievements (streak, total, message, voice, command, special, social, combo, meta)
+ * - Seasonal: 16 achievements (Halloween, Winter, New Year, Valentine's, Spring, Summer, Fall)
  */
 
-const ACHIEVEMENTS = [
+/**
+ * 82 Core Achievement Definitions
+ */
+const CORE_ACHIEVEMENTS = [
     // ==================== STREAK ACHIEVEMENTS (18) ====================
     {
         id: 'streak_3',
@@ -1087,87 +1077,266 @@ const ACHIEVEMENTS = [
 ];
 
 /**
- * Seed all core achievement definitions into the database
+ * 16 Seasonal Achievement Definitions
  */
-async function seedAchievements() {
-    console.log('🌱 Starting achievement seeding...\n');
+const SEASONAL_ACHIEVEMENTS = [
+    // Halloween Event (October)
+    {
+        id: 'seasonal_halloween_2024',
+        title: 'Spooky Season',
+        description: 'Be active during Halloween month and embrace the spooky vibes!',
+        emoji: '🎃',
+        category: 'seasonal',
+        rarity: 'epic',
+        points: 100,
+        criteria: JSON.stringify({ type: 'seasonal', activeDays: 7 }),
+        grantRole: true,
+        seasonal: true,
+        seasonalEvent: 'Halloween',
+        startDate: '2024-10-01',
+        endDate: '2024-10-31'
+    },
+    {
+        id: 'seasonal_halloween_master',
+        title: 'Halloween Legend',
+        description: 'Be active every day during Halloween month. True dedication to the spooky season!',
+        emoji: '👻',
+        category: 'seasonal',
+        rarity: 'legendary',
+        points: 250,
+        criteria: JSON.stringify({ type: 'seasonal', activeDays: 31 }),
+        grantRole: true,
+        seasonal: true,
+        seasonalEvent: 'Halloween',
+        startDate: '2024-10-01',
+        endDate: '2024-10-31'
+    },
 
-    let inserted = 0;
-    let skipped = 0;
+    // Winter Holidays (December)
+    {
+        id: 'seasonal_winter_wonderland',
+        title: 'Winter Wonderland',
+        description: 'Spread holiday cheer by staying active throughout December!',
+        emoji: '❄️',
+        category: 'seasonal',
+        rarity: 'epic',
+        points: 100,
+        criteria: JSON.stringify({ type: 'seasonal', activeDays: 10 }),
+        grantRole: true,
+        seasonal: true,
+        seasonalEvent: 'Winter Holidays',
+        startDate: '2024-12-01',
+        endDate: '2024-12-31'
+    },
+    {
+        id: 'seasonal_santa_helper',
+        title: 'Santa\'s Helper',
+        description: 'Join 10 voice channels during December - spreading joy everywhere!',
+        emoji: '🎅',
+        category: 'seasonal',
+        rarity: 'rare',
+        points: 75,
+        criteria: JSON.stringify({ type: 'seasonal', channelJoins: 10 }),
+        grantRole: true,
+        seasonal: true,
+        seasonalEvent: 'Winter Holidays',
+        startDate: '2024-12-01',
+        endDate: '2024-12-31'
+    },
+    {
+        id: 'seasonal_gift_giver',
+        title: 'Gift Giver',
+        description: 'Send 100 messages during the holiday season to spread cheer!',
+        emoji: '🎁',
+        category: 'seasonal',
+        rarity: 'uncommon',
+        points: 50,
+        criteria: JSON.stringify({ type: 'seasonal', messages: 100 }),
+        grantRole: false,
+        seasonal: true,
+        seasonalEvent: 'Winter Holidays',
+        startDate: '2024-12-01',
+        endDate: '2024-12-31'
+    },
 
-    for (const achievement of ACHIEVEMENTS) {
-        try {
-            // Check if achievement already exists
-            const existing = sqlite.prepare(
-                'SELECT id FROM achievement_definitions WHERE id = ?'
-            ).get(achievement.id);
+    // New Year's Event (Year-spanning: Dec 26 - Jan 5)
+    {
+        id: 'seasonal_new_year',
+        title: 'New Year, New Me',
+        description: 'Ring in the new year by being active during the new year celebration!',
+        emoji: '🎊',
+        category: 'seasonal',
+        rarity: 'epic',
+        points: 100,
+        criteria: JSON.stringify({ type: 'seasonal', activeDays: 5 }),
+        grantRole: true,
+        seasonal: true,
+        seasonalEvent: 'New Year',
+        startDate: '2024-12-26',
+        endDate: '2025-01-05'
+    },
+    {
+        id: 'seasonal_countdown_champion',
+        title: 'Countdown Champion',
+        description: 'Be active every single day of the new year celebration period!',
+        emoji: '🎆',
+        category: 'seasonal',
+        rarity: 'legendary',
+        points: 200,
+        criteria: JSON.stringify({ type: 'seasonal', activeDays: 11 }),
+        grantRole: true,
+        seasonal: true,
+        seasonalEvent: 'New Year',
+        startDate: '2024-12-26',
+        endDate: '2025-01-05'
+    },
 
-            if (existing) {
-                skipped++;
-                continue;
-            }
+    // Valentine's Day (February 1-14)
+    {
+        id: 'seasonal_valentine',
+        title: 'Spreading Love',
+        description: 'Share the love by being active during Valentine\'s season!',
+        emoji: '💝',
+        category: 'seasonal',
+        rarity: 'rare',
+        points: 75,
+        criteria: JSON.stringify({ type: 'seasonal', activeDays: 7 }),
+        grantRole: true,
+        seasonal: true,
+        seasonalEvent: 'Valentine\'s Day',
+        startDate: '2024-02-01',
+        endDate: '2024-02-14'
+    },
+    {
+        id: 'seasonal_cupid',
+        title: 'Cupid\'s Favorite',
+        description: 'Use 25 reactions during Valentine\'s season to spread love!',
+        emoji: '💘',
+        category: 'seasonal',
+        rarity: 'uncommon',
+        points: 50,
+        criteria: JSON.stringify({ type: 'seasonal', reactions: 25 }),
+        grantRole: false,
+        seasonal: true,
+        seasonalEvent: 'Valentine\'s Day',
+        startDate: '2024-02-01',
+        endDate: '2024-02-14'
+    },
 
-            // Insert achievement
-            sqlite.prepare(`
-                INSERT INTO achievement_definitions (
-                    id, title, description, emoji, category, rarity,
-                    check_type, criteria, grant_role, points, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `).run(
-                achievement.id,
-                achievement.title,
-                achievement.description,
-                achievement.emoji,
-                achievement.category,
-                achievement.rarity,
-                achievement.checkType,
-                achievement.criteria,
-                achievement.grantRole ? 1 : 0,
-                achievement.points,
-                Date.now()
-            );
+    // Spring Event (March 20 - April 20)
+    {
+        id: 'seasonal_spring_bloom',
+        title: 'Spring Has Sprung',
+        description: 'Welcome spring by staying active as nature awakens!',
+        emoji: '🌸',
+        category: 'seasonal',
+        rarity: 'rare',
+        points: 75,
+        criteria: JSON.stringify({ type: 'seasonal', activeDays: 15 }),
+        grantRole: true,
+        seasonal: true,
+        seasonalEvent: 'Spring',
+        startDate: '2024-03-20',
+        endDate: '2024-04-20'
+    },
+    {
+        id: 'seasonal_april_showers',
+        title: 'April Showers',
+        description: 'Be active throughout April to bring May flowers!',
+        emoji: '🌧️',
+        category: 'seasonal',
+        rarity: 'uncommon',
+        points: 50,
+        criteria: JSON.stringify({ type: 'seasonal', activeDays: 10 }),
+        grantRole: false,
+        seasonal: true,
+        seasonalEvent: 'Spring',
+        startDate: '2024-03-20',
+        endDate: '2024-04-20'
+    },
 
-            inserted++;
-        } catch (error) {
-            console.error(`❌ Failed to insert ${achievement.id}:`, error.message);
-        }
+    // Summer Event (June 1 - August 31)
+    {
+        id: 'seasonal_summer_vibes',
+        title: 'Summer Vibes',
+        description: 'Enjoy the summer by staying active throughout the sunny season!',
+        emoji: '☀️',
+        category: 'seasonal',
+        rarity: 'epic',
+        points: 150,
+        criteria: JSON.stringify({ type: 'seasonal', activeDays: 30 }),
+        grantRole: true,
+        seasonal: true,
+        seasonalEvent: 'Summer',
+        startDate: '2024-06-01',
+        endDate: '2024-08-31'
+    },
+    {
+        id: 'seasonal_beach_bum',
+        title: 'Beach Bum',
+        description: 'Spend 50 hours in voice during summer - chillin\' with the crew!',
+        emoji: '🏖️',
+        category: 'seasonal',
+        rarity: 'rare',
+        points: 100,
+        criteria: JSON.stringify({ type: 'seasonal', voiceHours: 50 }),
+        grantRole: true,
+        seasonal: true,
+        seasonalEvent: 'Summer',
+        startDate: '2024-06-01',
+        endDate: '2024-08-31'
+    },
+    {
+        id: 'seasonal_endless_summer',
+        title: 'Endless Summer',
+        description: 'Be active every single day of summer. Ultimate dedication!',
+        emoji: '🌊',
+        category: 'seasonal',
+        rarity: 'mythic',
+        points: 500,
+        criteria: JSON.stringify({ type: 'seasonal', activeDays: 92 }),
+        grantRole: true,
+        seasonal: true,
+        seasonalEvent: 'Summer',
+        startDate: '2024-06-01',
+        endDate: '2024-08-31'
+    },
+
+    // Fall Event (September 1 - November 30)
+    {
+        id: 'seasonal_autumn_leaves',
+        title: 'Autumn Leaves',
+        description: 'Watch the leaves fall while staying active throughout autumn!',
+        emoji: '🍂',
+        category: 'seasonal',
+        rarity: 'rare',
+        points: 75,
+        criteria: JSON.stringify({ type: 'seasonal', activeDays: 20 }),
+        grantRole: true,
+        seasonal: true,
+        seasonalEvent: 'Fall',
+        startDate: '2024-09-01',
+        endDate: '2024-11-30'
+    },
+    {
+        id: 'seasonal_harvest_helper',
+        title: 'Harvest Helper',
+        description: 'Send 500 messages during the harvest season!',
+        emoji: '🎃',
+        category: 'seasonal',
+        rarity: 'uncommon',
+        points: 60,
+        criteria: JSON.stringify({ type: 'seasonal', messages: 500 }),
+        grantRole: false,
+        seasonal: true,
+        seasonalEvent: 'Fall',
+        startDate: '2024-09-01',
+        endDate: '2024-11-30'
     }
+];
 
-    console.log(`\n✅ Seeding complete!`);
-    console.log(`   Inserted: ${inserted} achievements`);
-    console.log(`   Skipped: ${skipped} achievements (already exist)`);
-    console.log(`   Total: ${ACHIEVEMENTS.length} core achievements\n`);
-
-    // Print statistics
-    const stats = {
-        byCategory: {},
-        byRarity: {},
-        roleRewards: ACHIEVEMENTS.filter(a => a.grantRole).length
-    };
-
-    ACHIEVEMENTS.forEach(a => {
-        stats.byCategory[a.category] = (stats.byCategory[a.category] || 0) + 1;
-        stats.byRarity[a.rarity] = (stats.byRarity[a.rarity] || 0) + 1;
-    });
-
-    console.log('📊 Achievement Statistics:');
-    console.log('\n   By Category:');
-    Object.entries(stats.byCategory).forEach(([cat, count]) => {
-        console.log(`      ${cat}: ${count}`);
-    });
-
-    console.log('\n   By Rarity:');
-    Object.entries(stats.byRarity).forEach(([rarity, count]) => {
-        console.log(`      ${rarity}: ${count}`);
-    });
-
-    console.log(`\n   Role Rewards: ${stats.roleRewards}/82 (${Math.round(stats.roleRewards/82*100)}%)\n`);
-
-    sqlite.close();
-}
-
-// Run seeding
-seedAchievements().catch(error => {
-    console.error('❌ Seeding failed:', error);
-    process.exit(1);
-});
+module.exports = {
+    CORE_ACHIEVEMENTS,
+    SEASONAL_ACHIEVEMENTS,
+    ALL_ACHIEVEMENTS: [...CORE_ACHIEVEMENTS, ...SEASONAL_ACHIEVEMENTS]
+};
