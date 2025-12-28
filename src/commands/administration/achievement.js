@@ -1,7 +1,7 @@
-const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
 const { db } = require('../../database');
-const { achievementRoleConfig, achievementRoles } = require('../../database/schema');
-const { eq } = require('drizzle-orm');
+const { achievementRoleConfig, achievementRoles, customAchievements } = require('../../database/schema');
+const { eq, and } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const logger = require('../../utils/logger');
 
@@ -52,7 +52,26 @@ module.exports = {
         .addSubcommand(sub =>
             sub
                 .setName('list_roles')
-                .setDescription('List all achievement roles with member counts')),
+                .setDescription('List all achievement roles with member counts'))
+        .addSubcommand(sub =>
+            sub
+                .setName('create')
+                .setDescription('Create a custom achievement for your server'))
+        .addSubcommand(sub =>
+            sub
+                .setName('award')
+                .setDescription('Manually award an achievement to a user')
+                .addUserOption(opt =>
+                    opt
+                        .setName('user')
+                        .setDescription('User to award achievement to')
+                        .setRequired(true))
+                .addStringOption(opt =>
+                    opt
+                        .setName('achievement')
+                        .setDescription('Achievement to award')
+                        .setRequired(true)
+                        .setAutocomplete(true))),
 
     async execute(interaction, client) {
         const subcommand = interaction.options.getSubcommand();
@@ -65,6 +84,54 @@ module.exports = {
             await handleCleanup(interaction, client);
         } else if (subcommand === 'list_roles') {
             await handleListRoles(interaction);
+        } else if (subcommand === 'create') {
+            await handleCreate(interaction);
+        } else if (subcommand === 'award') {
+            await handleAward(interaction, client);
+        }
+    },
+
+    async autocomplete(interaction, client) {
+        const focusedOption = interaction.options.getFocused(true);
+
+        if (focusedOption.name === 'achievement') {
+            try {
+                if (!client.activityStreakService) {
+                    return interaction.respond([]);
+                }
+
+                const manager = client.activityStreakService.achievementManager;
+                await manager.loadDefinitions();
+
+                // Get all core achievements
+                const allAchievements = Array.from(manager.achievements.values());
+
+                // Add custom achievements for this guild
+                const customAchs = await manager.getCustomAchievements(interaction.guild.id);
+                allAchievements.push(...customAchs);
+
+                // Filter by user input
+                const filtered = allAchievements
+                    .filter(ach => {
+                        const search = focusedOption.value.toLowerCase();
+                        return ach.title.toLowerCase().includes(search) ||
+                               ach.achievementId?.toLowerCase().includes(search) ||
+                               ach.id?.toLowerCase().includes(search) ||
+                               ach.description.toLowerCase().includes(search);
+                    })
+                    .slice(0, 25); // Discord limit
+
+                const choices = filtered.map(ach => ({
+                    name: `${ach.emoji} ${ach.title} (${ach.rarity})`,
+                    value: ach.achievementId || ach.id
+                }));
+
+                await interaction.respond(choices);
+
+            } catch (error) {
+                logger.error('Error in achievement autocomplete:', error);
+                await interaction.respond([]);
+            }
         }
     }
 };
@@ -291,6 +358,172 @@ async function handleListRoles(interaction) {
         logger.error('Error listing achievement roles:', error);
         await interaction.editReply({
             embeds: [embeds.error('List Failed', 'An error occurred while fetching roles.')]
+        });
+    }
+}
+
+/**
+ * Handle create subcommand - show modal for custom achievement creation
+ */
+async function handleCreate(interaction) {
+    try {
+        // Create modal with achievement fields
+        const modal = new ModalBuilder()
+            .setCustomId('achievement_create_modal')
+            .setTitle('Create Custom Achievement');
+
+        // Achievement ID (auto-generated from title, shown in step 2)
+        const titleInput = new TextInputBuilder()
+            .setCustomId('achievement_title')
+            .setLabel('Achievement Title')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('e.g., Server Booster')
+            .setRequired(true)
+            .setMaxLength(100);
+
+        const descriptionInput = new TextInputBuilder()
+            .setCustomId('achievement_description')
+            .setLabel('Description')
+            .setStyle(TextInputStyle.Paragraph)
+            .setPlaceholder('What does this achievement recognize?')
+            .setRequired(true)
+            .setMaxLength(500);
+
+        const emojiInput = new TextInputBuilder()
+            .setCustomId('achievement_emoji')
+            .setLabel('Emoji')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('e.g., 🎉 (single emoji)')
+            .setRequired(true)
+            .setMaxLength(10);
+
+        const rarityInput = new TextInputBuilder()
+            .setCustomId('achievement_rarity')
+            .setLabel('Rarity (common/uncommon/rare/epic/legendary/mythic)')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('rare')
+            .setRequired(true)
+            .setMaxLength(20);
+
+        const pointsInput = new TextInputBuilder()
+            .setCustomId('achievement_points')
+            .setLabel('Points (1-1000)')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('100')
+            .setRequired(true)
+            .setMaxLength(4);
+
+        // Add inputs to action rows
+        modal.addComponents(
+            new ActionRowBuilder().addComponents(titleInput),
+            new ActionRowBuilder().addComponents(descriptionInput),
+            new ActionRowBuilder().addComponents(emojiInput),
+            new ActionRowBuilder().addComponents(rarityInput),
+            new ActionRowBuilder().addComponents(pointsInput)
+        );
+
+        await interaction.showModal(modal);
+
+    } catch (error) {
+        logger.error('Error showing achievement creation modal:', error);
+        await interaction.reply({
+            embeds: [embeds.error('Modal Error', 'Failed to show achievement creation form.')],
+            flags: [MessageFlags.Ephemeral]
+        });
+    }
+}
+
+/**
+ * Handle award subcommand - manually award achievement to user
+ */
+async function handleAward(interaction, client) {
+    try {
+        const targetUser = interaction.options.getUser('user');
+        const achievementId = interaction.options.getString('achievement');
+
+        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
+        if (!client.activityStreakService) {
+            return interaction.editReply({
+                embeds: [embeds.error('Service Unavailable', 'Activity streak service is not initialized.')]
+            });
+        }
+
+        // Verify achievement exists
+        const achievement = await client.activityStreakService.achievementManager.getById(achievementId);
+        if (!achievement) {
+            return interaction.editReply({
+                embeds: [embeds.error('Not Found', `Achievement \`${achievementId}\` does not exist.`)]
+            });
+        }
+
+        // Check if seasonal achievement is active
+        if (achievement.seasonal) {
+            const canAward = await client.activityStreakService.achievementManager.canAward(achievementId);
+            if (!canAward) {
+                return interaction.editReply({
+                    embeds: [embeds.error(
+                        'Seasonal Achievement Inactive',
+                        `**${achievement.title}** is a seasonal achievement that is not currently active.\n\n` +
+                        `**Event:** ${achievement.seasonalEvent}\n` +
+                        `**Active:** ${achievement.startDate} to ${achievement.endDate}\n\n` +
+                        `This achievement can only be awarded during its active period.`
+                    )]
+                });
+            }
+        }
+
+        // Check if user already has the achievement
+        const hasAchievement = await client.activityStreakService.hasAchievement(
+            targetUser.id,
+            interaction.guild.id,
+            achievementId
+        );
+
+        if (hasAchievement) {
+            return interaction.editReply({
+                embeds: [embeds.warn(
+                    'Already Earned',
+                    `${targetUser.username} already has **${achievement.emoji} ${achievement.title}**.`
+                )]
+            });
+        }
+
+        // Award the achievement
+        await client.activityStreakService.awardAchievement(
+            targetUser.id,
+            interaction.guild.id,
+            achievementId
+        );
+
+        const embed = embeds.success(
+            '🏆 Achievement Awarded!',
+            `Successfully awarded **${achievement.emoji} ${achievement.title}** to ${targetUser.username}!`
+        );
+
+        embed.addFields(
+            { name: 'User', value: `<@${targetUser.id}>`, inline: true },
+            { name: 'Achievement', value: achievement.title, inline: true },
+            { name: 'Points', value: `${achievement.points}`, inline: true },
+            { name: 'Rarity', value: achievement.rarity, inline: true }
+        );
+
+        if (achievement.grantRole) {
+            embed.addFields({
+                name: 'Role Reward',
+                value: '✅ Role will be granted automatically',
+                inline: false
+            });
+        }
+
+        await interaction.editReply({ embeds: [embed] });
+
+        logger.success(`${interaction.user.tag} manually awarded ${achievement.title} to ${targetUser.tag} in ${interaction.guild.name}`);
+
+    } catch (error) {
+        logger.error('Error awarding achievement:', error);
+        await interaction.editReply({
+            embeds: [embeds.error('Award Failed', 'An error occurred while awarding the achievement.')]
         });
     }
 }
