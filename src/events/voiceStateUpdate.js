@@ -245,9 +245,9 @@ module.exports = {
                 });
 
                 // Track BytePod creation for achievements
-                if (client.activityStreakService) {
+                if (newState.client.activityStreakService) {
                     try {
-                        await client.activityStreakService.recordBytepodCreation(member.id, guild.id);
+                        await newState.client.activityStreakService.recordBytepodCreation(member.id, guild.id);
                     } catch (error) {
                         logger.debug('Failed to track BytePod creation:', error);
                     }
@@ -288,10 +288,10 @@ module.exports = {
         // IMPORTANT: Only trigger if user actually moved channels (not just voice state change like mute/screenshare)
         if (joinedChannelId && joinedChannelId !== hubId && oldState.channelId !== newState.channelId) {
             // Track channel join for achievements
-            if (client.activityStreakService) {
+            if (newState.client.activityStreakService) {
                 try {
-                    await client.activityStreakService.recordChannelJoin(member.id, member.guild.id);
-                    await client.activityStreakService.startVoiceSession(member.id, member.guild.id, joinedChannelId);
+                    await newState.client.activityStreakService.recordChannelJoin(member.id, member.guild.id);
+                    await newState.client.activityStreakService.startVoiceSession(member.id, member.guild.id, joinedChannelId);
                 } catch (error) {
                     logger.debug('Failed to track channel join:', error);
                 }
@@ -395,9 +395,9 @@ module.exports = {
             logger.debug(`[Voice State] User ${member.id} left channel ${leftChannelId} (joined: ${joinedChannelId || 'none'})`);
 
             // Track voice session end for achievements
-            if (client.activityStreakService) {
+            if (newState.client.activityStreakService) {
                 try {
-                    await client.activityStreakService.endVoiceSession(member.id, member.guild.id, leftChannelId);
+                    await newState.client.activityStreakService.endVoiceSession(member.id, member.guild.id, leftChannelId);
                 } catch (error) {
                     logger.debug('Failed to track voice session end:', error);
                 }
