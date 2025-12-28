@@ -166,56 +166,52 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
             '**Welcome to ByteBot!**\n\n' +
             'A feature-rich Discord bot with moderation, utilities, and unique community engagement systems.\n\n' +
             `📊 **${totalCommands}** commands • **${sortedCategories.length}** categories`
+        )
+        .addFields(
+            {
+                name: '🎯 Key Features',
+                value:
+                    '**🎤 BytePods** - Ephemeral voice channels\n' +
+                    'Create temporary VCs with lock, whitelist, and templates.\n\n' +
+                    '**🏆 Achievement System** - Track engagement\n' +
+                    '87+ achievements with auto-tracking and role rewards.\n\n' +
+                    '**📸 Media Gallery** - Archive server media\n' +
+                    'Auto-capture with persistent archival (500 items/user).\n\n' +
+                    '**🔥 Activity Streaks** - Daily tracking\n' +
+                    'Build streaks with freeze protection and leaderboards.\n\n' +
+                    '**💡 Suggestions** - Community feedback\n' +
+                    'Submit ideas with voting and review workflow.\n\n' +
+                    '**🎂 Birthdays** - Automated celebrations\n' +
+                    'Privacy-focused with daily announcements.',
+                inline: false
+            },
+            {
+                name: '🔧 Also Includes',
+                value:
+                    '• **Moderation** - Ban, kick, warn, audit logs\n' +
+                    '• **Auto-Responders** - Keyword responses\n' +
+                    '• **Bookmarks** - Save messages with search\n' +
+                    '• **Welcome Messages** - Custom greetings\n' +
+                    '• **Permission System** - Role-based access\n' +
+                    '• **War Thunder Stats** - Player statistics',
+                inline: false
+            }
         );
 
-    // Key Features
-    embed.addFields({
-        name: '🎯 Key Features',
-        value:
-            '**🎤 BytePods** - Ephemeral voice channels you control\n' +
-            'Create temporary voice channels with lock, whitelist, co-owner, and template systems. ' +
-            'Automatically deleted when empty.\n\n' +
-            '**🏆 Achievement System** - Track your server engagement\n' +
-            '87+ achievements across 9 categories with automatic tracking, role rewards, and seasonal events. ' +
-            'Earn points through messages, voice activity, and commands.\n\n' +
-            '**📸 Media Gallery** - Archive and organize server media\n' +
-            'Auto-capture channel attachments with persistent archival (survives message deletion). ' +
-            'Tag, search, and manage up to 500 items per user.\n\n' +
-            '**🔥 Activity Streaks** - Daily engagement tracking\n' +
-            'Build streaks through daily activity with monthly freeze protection. ' +
-            'Leaderboards for streaks, achievements, and points.\n\n' +
-            '**💡 Suggestions** - Community feedback system\n' +
-            'Submit ideas with voting, review workflow, and status tracking (pending/approved/implemented).\n\n' +
-            '**🎂 Birthdays** - Automated celebrations\n' +
-            'Privacy-focused (no year required) with daily announcements and 24-hour birthday roles.',
-        inline: false
-    });
-
-    // Additional Features
-    embed.addFields({
-        name: '🔧 Also Includes',
-        value:
-            '• **Moderation** - Ban, kick, warn, audit logs, channel locks\n' +
-            '• **Auto-Responders** - Keyword-based custom responses\n' +
-            '• **Bookmarks** - Save messages with full-text search\n' +
-            '• **Welcome Messages** - Customizable greetings with 18 variables\n' +
-            '• **Permission System** - Role-based command access control\n' +
-            '• **War Thunder Stats** - Player statistics and account binding',
-        inline: false
-    });
-
     // Add category overview
-    const categoryList = sortedCategories.map(categoryName => {
-        const meta = categoryMetadata[categoryName] || { icon: '📁', description: '' };
-        const count = categories[categoryName].length;
-        return `${meta.icon} **${categoryName}** - ${count} command${count !== 1 ? 's' : ''}`;
-    }).join('\n');
+    if (sortedCategories.length > 0) {
+        const categoryList = sortedCategories.map(categoryName => {
+            const meta = categoryMetadata[categoryName] || { icon: '📁', description: '' };
+            const count = categories[categoryName]?.length || 0;
+            return `${meta.icon} **${categoryName}** - ${count} command${count !== 1 ? 's' : ''}`;
+        }).join('\n');
 
-    embed.addFields({
-        name: '📂 Browse Commands by Category',
-        value: categoryList + '\n\n💡 Use the **Next** button below to browse each category',
-        inline: false
-    });
+        embed.addFields({
+            name: '📂 Browse Commands by Category',
+            value: categoryList + '\n\n💡 Use the **Next** button below to browse each category',
+            inline: false
+        });
+    }
 
     embed.setFooter({ text: 'Type /help [command] for detailed command info' });
 
