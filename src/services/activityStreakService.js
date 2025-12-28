@@ -424,6 +424,7 @@ class ActivityStreakService {
 
     /**
      * Process achievements for users who earned them while bot was down
+     * Checks all users with activity data and awards missing achievements
      */
     async processMissedAchievements() {
         try {
@@ -434,11 +435,32 @@ class ActivityStreakService {
                 .from(activityStreaks);
 
             let checkedUsers = 0;
+            let awardsGranted = 0;
 
             for (const streak of allStreaks) {
                 try {
+                    const beforeCount = await db.select()
+                        .from(activityAchievements)
+                        .where(and(
+                            eq(activityAchievements.userId, streak.userId),
+                            eq(activityAchievements.guildId, streak.guildId)
+                        ));
+
                     // Check all achievements for this user
                     await this.checkAllAchievements(streak.userId, streak.guildId);
+
+                    const afterCount = await db.select()
+                        .from(activityAchievements)
+                        .where(and(
+                            eq(activityAchievements.userId, streak.userId),
+                            eq(activityAchievements.guildId, streak.guildId)
+                        ));
+
+                    const newAchievements = afterCount.length - beforeCount.length;
+                    if (newAchievements > 0) {
+                        awardsGranted += newAchievements;
+                    }
+
                     checkedUsers++;
                 } catch (error) {
                     logger.debug(`Error checking achievements for user ${streak.userId}:`, error.message);
@@ -446,11 +468,65 @@ class ActivityStreakService {
             }
 
             if (checkedUsers > 0) {
-                logger.success(`Checked achievements for ${checkedUsers} users on startup`);
+                logger.success(`Checked achievements for ${checkedUsers} users on startup (${awardsGranted} new achievements awarded)`);
             }
 
         } catch (error) {
             logger.error('Error processing missed achievements:', error);
+        }
+    }
+
+    /**
+     * Check all achievements for a specific user
+     * Awards any achievements they've earned but haven't been granted yet
+     *
+     * This method:
+     * 1. Gets user's streak data and activity logs
+     * 2. Checks each achievement category (streak, total, cumulative, combo, meta)
+     * 3. Awards any newly-earned achievements
+     * 4. Sends DM notifications
+     * 5. Grants roles if enabled
+     */
+    async checkAllAchievements(userId, guildId) {
+        try {
+            // Get user's streak data
+            const streakData = await db.select()
+                .from(activityStreaks)
+                .where(and(
+                    eq(activityStreaks.userId, userId),
+                    eq(activityStreaks.guildId, guildId)
+                ))
+                .get();
+
+            if (!streakData) {
+                logger.debug(`No streak data for user ${userId} in guild ${guildId}`);
+                return;
+            }
+
+            // Get user's cumulative activity totals
+            const totals = await this.getUserTotals(userId, guildId);
+
+            // Array to collect achievements to award
+            const toAward = [];
+
+            // Check all achievement categories
+            await this.checkStreakAchievements(userId, guildId, streakData.currentStreak, toAward);
+            await this.checkTotalDaysAchievements(userId, guildId, streakData.totalActiveDays, toAward);
+            await this.checkCumulativeAchievements(userId, guildId, totals, toAward);
+            await this.checkComboAchievements(userId, guildId, streakData.currentStreak, streakData.totalActiveDays, totals, toAward);
+            await this.checkMetaAchievements(userId, guildId, toAward);
+
+            // Award each eligible achievement
+            for (const achievementId of toAward) {
+                await this.awardAchievement(userId, guildId, achievementId);
+            }
+
+            if (toAward.length > 0) {
+                logger.success(`Awarded ${toAward.length} achievements to user ${userId} in guild ${guildId}`);
+            }
+
+        } catch (error) {
+            logger.error(`Error checking all achievements for user ${userId}:`, error);
         }
     }
 
@@ -971,17 +1047,17 @@ class ActivityStreakService {
             // Get activity totals for cumulative/combo checks
             const totals = await this.getUserTotals(userId, guildId);
 
-            // 1. Check streak achievements (exact matches)
-            await this.checkStreakAchievements(currentStreak, toAward);
+            // 1. Check streak achievements (threshold-based)
+            await this.checkStreakAchievements(userId, guildId, currentStreak, toAward);
 
             // 2. Check total days achievements (threshold)
-            await this.checkTotalDaysAchievements(totalDays, toAward);
+            await this.checkTotalDaysAchievements(userId, guildId, totalDays, toAward);
 
             // 3. Check cumulative achievements (messages, voice, commands)
-            await this.checkCumulativeAchievements(totals, toAward);
+            await this.checkCumulativeAchievements(userId, guildId, totals, toAward);
 
             // 4. Check combo achievements (multiple criteria)
-            await this.checkComboAchievements(currentStreak, totalDays, totals, toAward);
+            await this.checkComboAchievements(userId, guildId, currentStreak, totalDays, totals, toAward);
 
             // 5. Check meta achievements (achievement count)
             await this.checkMetaAchievements(userId, guildId, toAward);
@@ -997,46 +1073,67 @@ class ActivityStreakService {
     }
 
     /**
-     * Check streak achievements (exact milestone matches)
+     * Check streak achievements (threshold - award when reached)
+     * Only awards each achievement once by checking if user has already earned it
+     * @param {string} userId - User ID
+     * @param {string} guildId - Guild ID
      * @param {number} currentStreak - Current streak value
      * @param {Array} toAward - Array to push achievement IDs into
      */
-    async checkStreakAchievements(currentStreak, toAward) {
+    async checkStreakAchievements(userId, guildId, currentStreak, toAward) {
         const streakMilestones = [3, 5, 7, 10, 14, 21, 30, 45, 60, 90, 120, 150, 180, 270, 365, 500, 730, 1000];
 
         for (const milestone of streakMilestones) {
-            if (currentStreak === milestone) {
-                toAward.push(`streak_${milestone}`);
+            // Check if user has reached this milestone
+            if (currentStreak >= milestone) {
+                const achievementId = `streak_${milestone}`;
+
+                // Only add if not already earned (prevents duplicates)
+                if (!await this.hasAchievement(userId, guildId, achievementId)) {
+                    toAward.push(achievementId);
+                }
             }
         }
     }
 
     /**
      * Check total days achievements (threshold - award when reached or exceeded)
+     * @param {string} userId - User ID
+     * @param {string} guildId - Guild ID
      * @param {number} totalDays - Total active days
      * @param {Array} toAward - Array to push achievement IDs into
      */
-    async checkTotalDaysAchievements(totalDays, toAward) {
+    async checkTotalDaysAchievements(userId, guildId, totalDays, toAward) {
         const totalMilestones = [30, 50, 100, 150, 250, 365, 500, 750, 1000, 1500];
 
         for (const milestone of totalMilestones) {
-            if (totalDays === milestone) {
-                toAward.push(`total_${milestone}`);
+            if (totalDays >= milestone) {
+                const achievementId = `total_${milestone}`;
+
+                // Only add if not already earned
+                if (!await this.hasAchievement(userId, guildId, achievementId)) {
+                    toAward.push(achievementId);
+                }
             }
         }
     }
 
     /**
      * Check cumulative achievements (messages, voice hours, commands)
+     * @param {string} userId - User ID
+     * @param {string} guildId - Guild ID
      * @param {Object} totals - User activity totals
      * @param {Array} toAward - Array to push achievement IDs into
      */
-    async checkCumulativeAchievements(totals, toAward) {
+    async checkCumulativeAchievements(userId, guildId, totals, toAward) {
         // Message milestones
         const messageMilestones = [100, 500, 1000, 5000, 10000, 25000, 50000, 100000];
         for (const milestone of messageMilestones) {
-            if (totals.totalMessages === milestone) {
-                toAward.push(`message_${milestone}`);
+            if (totals.totalMessages >= milestone) {
+                const achievementId = `message_${milestone}`;
+                if (!await this.hasAchievement(userId, guildId, achievementId)) {
+                    toAward.push(achievementId);
+                }
             }
         }
 
@@ -1044,63 +1141,89 @@ class ActivityStreakService {
         const voiceHours = Math.floor(totals.totalVoiceMinutes / 60);
         const voiceMilestones = [10, 50, 100, 250, 500, 1000, 2500, 5000];
         for (const milestone of voiceMilestones) {
-            if (voiceHours === milestone) {
-                toAward.push(`voice_${milestone}hrs`);
+            if (voiceHours >= milestone) {
+                const achievementId = `voice_${milestone}hrs`;
+                if (!await this.hasAchievement(userId, guildId, achievementId)) {
+                    toAward.push(achievementId);
+                }
             }
         }
 
         // Command milestones
         const commandMilestones = [50, 250, 500, 1000, 2500, 5000, 10000];
         for (const milestone of commandMilestones) {
-            if (totals.totalCommands === milestone) {
-                toAward.push(`command_${milestone}`);
+            if (totals.totalCommands >= milestone) {
+                const achievementId = `command_${milestone}`;
+                if (!await this.hasAchievement(userId, guildId, achievementId)) {
+                    toAward.push(achievementId);
+                }
             }
         }
 
         // BytePod milestones
-        if (totals.totalBytepods === 1) toAward.push('social_bytepod_creator');
-        if (totals.totalBytepods === 50) toAward.push('social_bytepod_host');
-        if (totals.totalBytepods === 200) toAward.push('social_bytepod_master');
+        if (totals.totalBytepods >= 1 && !await this.hasAchievement(userId, guildId, 'social_bytepod_creator')) {
+            toAward.push('social_bytepod_creator');
+        }
+        if (totals.totalBytepods >= 50 && !await this.hasAchievement(userId, guildId, 'social_bytepod_host')) {
+            toAward.push('social_bytepod_host');
+        }
+        if (totals.totalBytepods >= 200 && !await this.hasAchievement(userId, guildId, 'social_bytepod_master')) {
+            toAward.push('social_bytepod_master');
+        }
     }
 
     /**
      * Check combo achievements (multiple criteria must be met)
+     * @param {string} userId - User ID
+     * @param {string} guildId - Guild ID
      * @param {number} currentStreak - Current streak
      * @param {number} totalDays - Total active days
      * @param {Object} totals - User activity totals
      * @param {Array} toAward - Array to push achievement IDs into
      */
-    async checkComboAchievements(currentStreak, totalDays, totals, toAward) {
+    async checkComboAchievements(userId, guildId, currentStreak, totalDays, totals, toAward) {
         const voiceHours = Math.floor(totals.totalVoiceMinutes / 60);
 
         // Balanced User: 1k messages + 100 hours voice + 500 commands
         if (totals.totalMessages >= 1000 && voiceHours >= 100 && totals.totalCommands >= 500) {
-            toAward.push('combo_balanced_user');
+            if (!await this.hasAchievement(userId, guildId, 'combo_balanced_user')) {
+                toAward.push('combo_balanced_user');
+            }
         }
 
         // Super Active: 30-day streak + 100 total days
         if (currentStreak >= 30 && totalDays >= 100) {
-            toAward.push('combo_super_active');
+            if (!await this.hasAchievement(userId, guildId, 'combo_super_active')) {
+                toAward.push('combo_super_active');
+            }
         }
 
         // Ultimate Member: 10k messages + 500 hours voice + 1k commands
         if (totals.totalMessages >= 10000 && voiceHours >= 500 && totals.totalCommands >= 1000) {
-            toAward.push('combo_ultimate_member');
+            if (!await this.hasAchievement(userId, guildId, 'combo_ultimate_member')) {
+                toAward.push('combo_ultimate_member');
+            }
         }
 
         // Triple Threat: 100-day streak + 500 total days + 5k messages
         if (currentStreak >= 100 && totalDays >= 500 && totals.totalMessages >= 5000) {
-            toAward.push('combo_triple_threat');
+            if (!await this.hasAchievement(userId, guildId, 'combo_triple_threat')) {
+                toAward.push('combo_triple_threat');
+            }
         }
 
         // Consistency King: 180-day streak + 365+ total days
         if (currentStreak >= 180 && totalDays >= 365) {
-            toAward.push('combo_consistency_king');
+            if (!await this.hasAchievement(userId, guildId, 'combo_consistency_king')) {
+                toAward.push('combo_consistency_king');
+            }
         }
 
         // Endurance Champion: 1k total days + 50k messages + 1k hours voice
         if (totalDays >= 1000 && totals.totalMessages >= 50000 && voiceHours >= 1000) {
-            toAward.push('combo_endurance_champion');
+            if (!await this.hasAchievement(userId, guildId, 'combo_endurance_champion')) {
+                toAward.push('combo_endurance_champion');
+            }
         }
     }
 
@@ -1122,12 +1245,22 @@ class ActivityStreakService {
 
             const count = achievements.length + toAward.length; // Include pending awards
 
-            // Meta milestones
-            if (count === 10) toAward.push('meta_achievement_hunter');
-            if (count === 25) toAward.push('meta_achievement_master');
-            if (count === 50) toAward.push('meta_achievement_legend');
-            if (count === 75) toAward.push('meta_achievement_god');
-            if (count === 82) toAward.push('meta_completionist');
+            // Meta milestones (threshold-based)
+            if (count >= 10 && !await this.hasAchievement(userId, guildId, 'meta_achievement_hunter')) {
+                toAward.push('meta_achievement_hunter');
+            }
+            if (count >= 25 && !await this.hasAchievement(userId, guildId, 'meta_achievement_master')) {
+                toAward.push('meta_achievement_master');
+            }
+            if (count >= 50 && !await this.hasAchievement(userId, guildId, 'meta_achievement_legend')) {
+                toAward.push('meta_achievement_legend');
+            }
+            if (count >= 75 && !await this.hasAchievement(userId, guildId, 'meta_achievement_god')) {
+                toAward.push('meta_achievement_god');
+            }
+            if (count >= 82 && !await this.hasAchievement(userId, guildId, 'meta_completionist')) {
+                toAward.push('meta_completionist');
+            }
 
         } catch (error) {
             logger.error(`Error checking meta achievements for user ${userId}:`, error);
