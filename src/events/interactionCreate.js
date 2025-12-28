@@ -121,6 +121,34 @@ module.exports = {
             return;
         }
 
+        // Handle Help Button Interactions
+        if ((interaction.isButton()) && interaction.customId.startsWith('help_page_')) {
+            const command = client.commands.get('help');
+            if (command && command.handleInteraction) {
+                try {
+                    await command.handleInteraction(interaction, client);
+                } catch (error) {
+                    logger.errorContext('Help Interaction Error', error, {
+                        customId: interaction.customId,
+                        userId: interaction.user?.id,
+                        guildId: interaction.guildId
+                    });
+                    // Attempt to notify user if possible
+                    try {
+                        const errorEmbed = embeds.error('Interaction Failed', 'An error occurred while loading this page.');
+                        if (interaction.replied || interaction.deferred) {
+                            await interaction.followUp({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+                        } else {
+                            await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+                        }
+                    } catch (e) {
+                        logger.error('Failed to send error response to user:', e);
+                    }
+                }
+            }
+            return;
+        }
+
         // Handle Moderation Button Interactions
         if (interaction.isButton() && interaction.customId.startsWith('mod_')) {
             const modActionsMenu = client.contextMenus.get('Moderate User');
