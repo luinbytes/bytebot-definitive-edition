@@ -459,14 +459,35 @@ async function handleAchievements(interaction, client) {
         // Get all achievements
         let achievements = Array.from(manager.achievements.values());
 
+        // DEBUG: Log count before filters
+        logger.debug(`Loaded ${achievements.length} achievements from database`);
+
+        // If no achievements loaded, show helpful error
+        if (achievements.length === 0) {
+            return interaction.editReply({
+                embeds: [embeds.error(
+                    'No Achievements Found',
+                    'No achievements have been seeded to the database yet.\n\n' +
+                    '**To fix this, run:**\n' +
+                    '```bash\n' +
+                    'node scripts/seed-achievements.js\n' +
+                    'node scripts/seed-seasonal-events.js\n' +
+                    '```\n' +
+                    'Then restart the bot.'
+                )]
+            });
+        }
+
         // Apply category filter
         if (category !== 'all') {
             achievements = achievements.filter(a => a.category === category);
+            logger.debug(`After category filter (${category}): ${achievements.length} achievements`);
         }
 
         // Apply rarity filter
         if (rarity !== 'all') {
             achievements = achievements.filter(a => a.rarity === rarity);
+            logger.debug(`After rarity filter (${rarity}): ${achievements.length} achievements`);
         }
 
         // Apply earned/role filters

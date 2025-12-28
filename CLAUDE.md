@@ -168,8 +168,9 @@ seasonal    → Limited-time events (Halloween, Christmas, Summer, etc.)
 **Core Components:**
 
 1. **AchievementManager Class** (`activityStreakService.js:20-286`)
+   - **Auto-initialization:** Automatically seeds 98 achievements on first run if database is empty
    - Loads definitions from DB with 1-hour cache
-   - Methods: `loadDefinitions()`, `getById()`, `getByCategory()`, `getByRarity()`, `getAllGrantingRoles()`
+   - Methods: `loadDefinitions()`, `seedAchievements()`, `getById()`, `getByCategory()`, `getByRarity()`, `getAllGrantingRoles()`
    - Seasonal validation: `isSeasonalActive()`, `canAward()`, `getActiveSeasonalAchievements()`
    - Custom achievements: `getCustomAchievements(guildId)`
 
@@ -194,6 +195,12 @@ seasonal    → Limited-time events (Halloween, Christmas, Summer, etc.)
        → Insert DB → Send DM notification → Grant role reward (if enabled)
          → Invalidate cache
    ```
+
+5. **Startup Processing:**
+   - **Auto-seeding:** First run detects empty database → seeds 98 achievements (82 core + 16 seasonal)
+   - **Missed achievements:** Every startup runs `processMissedAchievements()` → checks all users
+   - **Bot downtime recovery:** Awards achievements earned while bot was offline
+   - **Daily check:** Midnight UTC → runs streak check + achievement processing for all users
 
 5. **Role Reward System** (`activityStreakService.js:1458-1615`):
    - Dynamic role creation with achievement name
@@ -422,6 +429,9 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 | Errors | 10003 = channel deleted, handle gracefully |
 | Errors | Wrap all DMs in try/catch |
 | Cooldowns | In-memory only, reset on restart |
+| Achievements | Auto-seeds on first run, auto-backfills on every startup |
+| Achievements | Achievement cache is 1-hour, invalidate after creating custom achievements |
+| Achievements | Seasonal achievements validated on award, not on earn (prevents backdating) |
 
 ---
 
@@ -457,6 +467,21 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 
 ## Recent Changes
 
+### 2025-12-28 - Achievement Auto-Initialization
+- **BREAKING:** Removed manual seeding scripts - achievements now auto-seed on first run
+- **NEW:** `src/data/achievementDefinitions.js` - Centralized achievement data file (98 definitions)
+- **AUTO-SEEDING:** AchievementManager detects empty database and auto-seeds 98 achievements on first `loadDefinitions()` call
+- **AUTO-BACKFILL:** `processMissedAchievements()` runs on every bot startup - awards historical achievements to users who earned them while bot was down
+- **RESILIENCE:** Bot downtime no longer causes achievement loss - all missing achievements awarded automatically on restart
+- **ELIMINATED SCRIPTS:** Deleted `seed-achievements.js`, `seed-seasonal-events.js`, `backfill-achievements.js` - now obsolete
+- **SIMPLIFIED WORKFLOW:** `npm start` → Auto-seeds achievements → Auto-backfills all users → Ready
+- **FILES MODIFIED:**
+  - `activityStreakService.js` - Added `seedAchievements()` method to AchievementManager
+  - `achievementDefinitions.js` - Created new data file with CORE_ACHIEVEMENTS, SEASONAL_ACHIEVEMENTS, ALL_ACHIEVEMENTS exports
+  - `CLAUDE.md` - Updated documentation to reflect auto-initialization
+- **USER BENEFIT:** New servers automatically get all achievements, existing users automatically get missing achievements on bot restart
+- **PATTERN ALIGNMENT:** Now matches bot architecture where everything auto-initializes (Birthday service, Auto-responder, BytePod cleanup, etc.)
+
 ### 2025-12-28 - Comprehensive Achievement System
 - **NEW:** Full-featured achievement system with 82 core achievements, seasonal events, custom achievements, and role rewards
 - **ARCHITECTURE:** 9 achievement categories (streak, dedication, social, voice, explorer, special, combo, meta, seasonal) with 6 rarity tiers (common → mythic)
@@ -485,10 +510,11 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
     - `achievements` - Browser with filters (category, rarity, earned status) and pagination (5/page with buttons)
     - `progress` - Visual progress bars for next milestones (streak, total days, messages, voice)
   - **Userinfo integration:** Top 6 achievements + total count/points displayed in `/userinfo`
-- **SCRIPTS:**
-  - `seed-achievements.js` - Seeds 82 core achievements with full definitions
-  - `seed-seasonal-events.js` - Seeds 16 seasonal achievements for annual events
-  - `backfill-achievements.js` - Retroactively awards achievements based on historical data (supports --dry-run)
+- **DATA:**
+  - `src/data/achievementDefinitions.js` - All 98 achievement definitions (82 core + 16 seasonal)
+  - **Auto-initialization:** Automatically seeded on first startup if database is empty
+  - **Auto-backfill:** Bot startup runs `processMissedAchievements()` to award missing achievements
+  - No manual seeding or backfill scripts required - fully automated
 - **TRACKING INTEGRATION:**
   - messageCreate.js - Message count + active hour tracking
   - voiceStateUpdate.js - Voice minutes, channel joins, BytePod creation tracking

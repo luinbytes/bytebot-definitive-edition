@@ -29,6 +29,7 @@ class AchievementManager {
     /**
      * Load achievement definitions from database
      * Includes both core achievements and custom achievements
+     * Auto-seeds achievements on first run if database is empty
      */
     async loadDefinitions() {
         try {
@@ -42,8 +43,18 @@ class AchievementManager {
             logger.debug('Loading achievement definitions from database...');
 
             // Load core achievements from achievementDefinitions table
-            const coreAchievements = await db.select()
+            let coreAchievements = await db.select()
                 .from(achievementDefinitions);
+
+            // Auto-seed if database is empty (first run)
+            if (coreAchievements.length === 0) {
+                logger.info('Achievement database is empty - auto-seeding achievements...');
+                await this.seedAchievements();
+
+                // Reload after seeding
+                coreAchievements = await db.select()
+                    .from(achievementDefinitions);
+            }
 
             // Clear existing cache
             this.achievements.clear();
@@ -86,6 +97,40 @@ class AchievementManager {
 
         } catch (error) {
             logger.error('Failed to load achievement definitions:', error);
+        }
+    }
+
+    /**
+     * Auto-seed achievement definitions into database
+     * Called automatically on first run when database is empty
+     */
+    async seedAchievements() {
+        try {
+            const { ALL_ACHIEVEMENTS } = require('../data/achievementDefinitions');
+
+            logger.info(`Seeding ${ALL_ACHIEVEMENTS.length} achievements...`);
+
+            let inserted = 0;
+
+            for (const achievement of ALL_ACHIEVEMENTS) {
+                try {
+                    await db.insert(achievementDefinitions).values({
+                        ...achievement,
+                        createdAt: new Date()
+                    });
+                    inserted++;
+                } catch (error) {
+                    // Silently skip duplicates (should never happen on first run)
+                    if (!error.message?.includes('UNIQUE constraint')) {
+                        logger.debug(`Skipped ${achievement.id}:`, error.message);
+                    }
+                }
+            }
+
+            logger.success(`✅ Auto-seeded ${inserted} achievements (${ALL_ACHIEVEMENTS.length} total)`);
+
+        } catch (error) {
+            logger.error('Failed to auto-seed achievements:', error);
         }
     }
 
@@ -368,8 +413,44 @@ class ActivityStreakService {
             if (processedCount > 0) {
                 logger.success(`Processed ${processedCount} missed streak check(s)`);
             }
+
+            // Check for achievements that should have been awarded
+            await this.processMissedAchievements();
+
         } catch (error) {
             logger.error('Error checking missed streak days:', error);
+        }
+    }
+
+    /**
+     * Process achievements for users who earned them while bot was down
+     */
+    async processMissedAchievements() {
+        try {
+            logger.info('Checking for achievements earned while bot was offline...');
+
+            // Get all users with activity data
+            const allStreaks = await db.select()
+                .from(activityStreaks);
+
+            let checkedUsers = 0;
+
+            for (const streak of allStreaks) {
+                try {
+                    // Check all achievements for this user
+                    await this.checkAllAchievements(streak.userId, streak.guildId);
+                    checkedUsers++;
+                } catch (error) {
+                    logger.debug(`Error checking achievements for user ${streak.userId}:`, error.message);
+                }
+            }
+
+            if (checkedUsers > 0) {
+                logger.success(`Checked achievements for ${checkedUsers} users on startup`);
+            }
+
+        } catch (error) {
+            logger.error('Error processing missed achievements:', error);
         }
     }
 
