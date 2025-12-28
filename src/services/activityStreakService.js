@@ -47,6 +47,10 @@ class AchievementManager {
                 .from(achievementDefinitions);
 
             // Auto-seed if database is empty OR has missing achievements
+            // Clear require cache to ensure fresh data
+            const achievementPath = require.resolve('../data/achievementDefinitions');
+            delete require.cache[achievementPath];
+
             const { ALL_ACHIEVEMENTS } = require('../data/achievementDefinitions');
             const expectedCount = ALL_ACHIEVEMENTS.length;
 
@@ -116,6 +120,10 @@ class AchievementManager {
      */
     async seedAchievements() {
         try {
+            // Clear require cache to ensure fresh data
+            const achievementPath = require.resolve('../data/achievementDefinitions');
+            delete require.cache[achievementPath];
+
             const { ALL_ACHIEVEMENTS } = require('../data/achievementDefinitions');
 
             logger.info(`Seeding ${ALL_ACHIEVEMENTS.length} achievements...`);
@@ -136,6 +144,12 @@ class AchievementManager {
                     }
                     if (achievement.endDate && typeof achievement.endDate === 'string') {
                         achievementData.endDate = new Date(achievement.endDate);
+                    }
+
+                    // Debug: Check if checkType exists
+                    if (!achievementData.checkType) {
+                        logger.warn(`Achievement ${achievement.id} is missing checkType!`);
+                        logger.debug('Achievement data:', JSON.stringify(achievement, null, 2));
                     }
 
                     await db.insert(achievementDefinitions).values(achievementData);
