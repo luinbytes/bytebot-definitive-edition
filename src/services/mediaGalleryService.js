@@ -287,8 +287,8 @@ class MediaGalleryService {
         if (fileType === 'video') {
             // For videos, use plain text format
             let videoText = message.content
-                ? `**${username}**: ${message.content}\n${attachment.url || mediaData.mediaUrl}`
-                : `**${username}** posted:\n${attachment.url || mediaData.mediaUrl}`;
+                ? `**${username}**: ${message.content}\n${mediaData.mediaUrl}`
+                : `**${username}** posted:\n${mediaData.mediaUrl}`;
 
             videoText += `\n*${sizeMB} MB`;
             if (dimensions) videoText += ` • ${dimensions}`;
@@ -323,9 +323,9 @@ class MediaGalleryService {
             }
 
             if (fileType === 'image') {
-                embed.setImage(attachment.url || mediaData.mediaUrl);
+                embed.setImage(mediaData.mediaUrl);
             } else if (fileType === 'audio') {
-                embed.addFields({ name: '🎵 Audio', value: `[Click to play](${attachment.url || mediaData.mediaUrl})`, inline: false });
+                embed.addFields({ name: '🎵 Audio', value: `[Click to play](${mediaData.mediaUrl})`, inline: false });
             }
 
             // Add description field if exists
