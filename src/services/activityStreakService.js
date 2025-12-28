@@ -46,9 +46,19 @@ class AchievementManager {
             let coreAchievements = await db.select()
                 .from(achievementDefinitions);
 
-            // Auto-seed if database is empty (first run)
+            // Auto-seed if database is empty OR has missing achievements
+            const { ALL_ACHIEVEMENTS } = require('../data/achievementDefinitions');
+            const expectedCount = ALL_ACHIEVEMENTS.length;
+
             if (coreAchievements.length === 0) {
                 logger.info('Achievement database is empty - auto-seeding achievements...');
+                await this.seedAchievements();
+
+                // Reload after seeding
+                coreAchievements = await db.select()
+                    .from(achievementDefinitions);
+            } else if (coreAchievements.length < expectedCount) {
+                logger.info(`Achievement database incomplete (${coreAchievements.length}/${expectedCount}) - inserting missing achievements...`);
                 await this.seedAchievements();
 
                 // Reload after seeding
@@ -114,10 +124,21 @@ class AchievementManager {
 
             for (const achievement of ALL_ACHIEVEMENTS) {
                 try {
-                    await db.insert(achievementDefinitions).values({
+                    // Convert string dates to Date objects for seasonal achievements
+                    const achievementData = {
                         ...achievement,
                         createdAt: new Date()
-                    });
+                    };
+
+                    // Convert startDate/endDate from strings to Date objects if present
+                    if (achievement.startDate && typeof achievement.startDate === 'string') {
+                        achievementData.startDate = new Date(achievement.startDate);
+                    }
+                    if (achievement.endDate && typeof achievement.endDate === 'string') {
+                        achievementData.endDate = new Date(achievement.endDate);
+                    }
+
+                    await db.insert(achievementDefinitions).values(achievementData);
                     inserted++;
                 } catch (error) {
                     // Silently skip duplicates (should never happen on first run)
