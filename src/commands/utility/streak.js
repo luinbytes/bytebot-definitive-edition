@@ -1,6 +1,13 @@
 const { SlashCommandBuilder, MessageFlags, ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const logger = require('../../utils/logger');
+const {
+    getRarityEmoji,
+    getStreakEmoji,
+    createProgressBar,
+    getTierBadge,
+    MILESTONES
+} = require('../../utils/achievementUtils');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -526,14 +533,23 @@ async function handleAchievements(interaction, client) {
                 const earned = earnedIds.has(achievement.id) ? ' ✅' : '';
                 const roleIndicator = achievement.grantRole ? ' 👑' : '';
 
+                // Check if seasonal and active
+                let seasonalIndicator = '';
+                let seasonalInfo = '';
+                if (achievement.seasonal) {
+                    const isActive = manager.isSeasonalActive(achievement);
+                    seasonalIndicator = isActive ? ' 🎃' : ' ⏰';
+                    seasonalInfo = isActive ? '\n🎃 **Seasonal - Active Now!**' : '\n⏰ **Seasonal - Not Available**';
+                }
+
                 embed.addFields({
-                    name: `${achievement.emoji} ${achievement.title}${earned}${roleIndicator}`,
-                    value: `${achievement.description}\n${rarityEmoji} **${achievement.rarity}** • ${achievement.points} pts`,
+                    name: `${achievement.emoji} ${achievement.title}${earned}${roleIndicator}${seasonalIndicator}`,
+                    value: `${achievement.description}\n${rarityEmoji} **${achievement.rarity}** • ${achievement.points} pts${seasonalInfo}`,
                     inline: false
                 });
             }
 
-            embed.setFooter({ text: `Page ${page + 1}/${totalPages} • ✅ = Earned • 👑 = Grants Role` });
+            embed.setFooter({ text: `Page ${page + 1}/${totalPages} • ✅ = Earned • 👑 = Grants Role • 🎃 = Seasonal (Active) • ⏰ = Seasonal (Inactive)` });
             return embed;
         };
 
@@ -637,8 +653,7 @@ async function handleProgress(interaction, client) {
         }
 
         // Find next streak milestone
-        const streakMilestones = [3, 5, 7, 10, 14, 21, 30, 45, 60, 90, 120, 150, 180, 270, 365, 500, 730, 1000];
-        const nextStreak = streakMilestones.find(m => m > streakData.currentStreak) || 1000;
+        const nextStreak = MILESTONES.streak.find(m => m > streakData.currentStreak) || 1000;
         embed.addFields({
             name: '🔥 Next Streak Milestone',
             value: `${createProgressBar(streakData.currentStreak, nextStreak)}\n**${streakData.currentStreak}** / **${nextStreak}** days`,
@@ -646,8 +661,7 @@ async function handleProgress(interaction, client) {
         });
 
         // Find next total days milestone
-        const totalMilestones = [30, 50, 100, 150, 250, 365, 500, 750, 1000, 1500];
-        const nextTotal = totalMilestones.find(m => m > streakData.totalActiveDays) || 1500;
+        const nextTotal = MILESTONES.totalDays.find(m => m > streakData.totalActiveDays) || 1500;
         embed.addFields({
             name: '📅 Next Total Days Milestone',
             value: `${createProgressBar(streakData.totalActiveDays, nextTotal)}\n**${streakData.totalActiveDays}** / **${nextTotal}** days`,
@@ -655,8 +669,7 @@ async function handleProgress(interaction, client) {
         });
 
         // Find next message milestone
-        const messageMilestones = [100, 500, 1000, 5000, 10000, 25000, 50000, 100000];
-        const nextMessage = messageMilestones.find(m => m > totals.totalMessages) || 100000;
+        const nextMessage = MILESTONES.messages.find(m => m > totals.totalMessages) || 100000;
         embed.addFields({
             name: '💬 Next Message Milestone',
             value: `${createProgressBar(totals.totalMessages, nextMessage)}\n**${totals.totalMessages.toLocaleString()}** / **${nextMessage.toLocaleString()}** messages`,
@@ -665,8 +678,7 @@ async function handleProgress(interaction, client) {
 
         // Find next voice milestone
         const voiceHours = Math.floor(totals.totalVoiceMinutes / 60);
-        const voiceMilestones = [10, 50, 100, 250, 500, 1000, 2500, 5000];
-        const nextVoice = voiceMilestones.find(m => m > voiceHours) || 5000;
+        const nextVoice = MILESTONES.voiceHours.find(m => m > voiceHours) || 5000;
         embed.addFields({
             name: '🎤 Next Voice Milestone',
             value: `${createProgressBar(voiceHours, nextVoice)}\n**${voiceHours.toLocaleString()}** / **${nextVoice.toLocaleString()}** hours`,
@@ -696,51 +708,3 @@ async function handleProgress(interaction, client) {
     }
 }
 
-/**
- * Get rarity emoji indicator
- * @param {string} rarity - Achievement rarity
- * @returns {string} - Emoji
- */
-function getRarityEmoji(rarity) {
-    const rarityEmojis = {
-        common: '⚪',
-        uncommon: '🟢',
-        rare: '🔵',
-        epic: '🟣',
-        legendary: '🟠',
-        mythic: '🔴'
-    };
-    return rarityEmojis[rarity] || '⚪';
-}
-
-/**
- * Get emoji based on streak length
- * @param {number} streak - Current streak value
- * @returns {string} - Emoji
- */
-function getStreakEmoji(streak) {
-    if (streak === 0) return '💤';
-    if (streak < 7) return '🔥';
-    if (streak < 30) return '⚡';
-    if (streak < 90) return '💪';
-    if (streak < 365) return '🏆';
-    return '👑';
-}
-
-/**
- * Create progress bar visual
- * @param {number} current - Current value
- * @param {number} target - Target value
- * @param {number} length - Bar length (default 10)
- * @returns {string} - Progress bar
- */
-function createProgressBar(current, target, length = 10) {
-    const percentage = Math.min(current / target, 1);
-    const filled = Math.round(percentage * length);
-    const empty = length - filled;
-
-    const bar = '█'.repeat(filled) + '░'.repeat(empty);
-    const percent = Math.round(percentage * 100);
-
-    return `${bar} ${percent}%`;
-}

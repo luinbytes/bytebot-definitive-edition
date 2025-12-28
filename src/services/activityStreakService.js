@@ -174,6 +174,110 @@ class AchievementManager {
     }
 
     /**
+     * Check if a seasonal achievement is currently active
+     * @param {Object} achievement - Achievement definition
+     * @param {Date} checkDate - Date to check (defaults to now)
+     * @returns {boolean} - True if achievement is active/available
+     */
+    isSeasonalActive(achievement, checkDate = new Date()) {
+        // Non-seasonal achievements are always active
+        if (!achievement.seasonal) {
+            return true;
+        }
+
+        // If no date range specified, treat as inactive
+        if (!achievement.startDate || !achievement.endDate) {
+            logger.warn(`Seasonal achievement ${achievement.id} missing date range`);
+            return false;
+        }
+
+        const now = new Date(checkDate);
+        const start = new Date(achievement.startDate);
+        const end = new Date(achievement.endDate);
+
+        // Handle year-agnostic seasonal events (e.g., Halloween every year)
+        // If endDate < startDate, it means the event spans year boundary (Dec-Jan)
+        if (end < start) {
+            // Year-spanning event (e.g., Dec 20 - Jan 5)
+            const currentYear = now.getFullYear();
+
+            // Create two possible ranges:
+            // 1. Event started last year, ends this year
+            const range1Start = new Date(start);
+            range1Start.setFullYear(currentYear - 1);
+            const range1End = new Date(end);
+            range1End.setFullYear(currentYear);
+
+            // 2. Event starts this year, ends next year
+            const range2Start = new Date(start);
+            range2Start.setFullYear(currentYear);
+            const range2End = new Date(end);
+            range2End.setFullYear(currentYear + 1);
+
+            return (now >= range1Start && now <= range1End) ||
+                   (now >= range2Start && now <= range2End);
+        }
+
+        // Normal date range within same year (year-agnostic)
+        // Match by month/day only, ignoring year
+        const currentYear = now.getFullYear();
+        const eventStart = new Date(start);
+        eventStart.setFullYear(currentYear);
+        const eventEnd = new Date(end);
+        eventEnd.setFullYear(currentYear);
+
+        return now >= eventStart && now <= eventEnd;
+    }
+
+    /**
+     * Get all currently active seasonal achievements
+     * @param {Date} checkDate - Date to check (defaults to now)
+     * @returns {Array} - Active seasonal achievement definitions
+     */
+    async getActiveSeasonalAchievements(checkDate = new Date()) {
+        await this.loadDefinitions();
+
+        return Array.from(this.achievements.values()).filter(achievement => {
+            return achievement.seasonal && this.isSeasonalActive(achievement, checkDate);
+        });
+    }
+
+    /**
+     * Get all seasonal achievements (active or not)
+     * @returns {Array} - All seasonal achievement definitions
+     */
+    async getAllSeasonalAchievements() {
+        await this.loadDefinitions();
+
+        return Array.from(this.achievements.values()).filter(achievement => {
+            return achievement.seasonal === true;
+        });
+    }
+
+    /**
+     * Check if an achievement can be awarded (respects seasonal windows)
+     * @param {string} achievementId - Achievement ID to check
+     * @param {Date} checkDate - Date to check (defaults to now)
+     * @returns {boolean} - True if achievement can currently be awarded
+     */
+    async canAward(achievementId, checkDate = new Date()) {
+        const achievement = await this.getById(achievementId);
+
+        if (!achievement) {
+            logger.warn(`Achievement ${achievementId} not found`);
+            return false;
+        }
+
+        // For seasonal achievements, check if active
+        if (achievement.seasonal) {
+            return this.isSeasonalActive(achievement, checkDate);
+        }
+
+        // Non-seasonal achievements can always be awarded
+        return true;
+    }
+
+    /**
      * Invalidate cache to force reload on next access
      */
     invalidateCache() {
@@ -1055,6 +1159,15 @@ class ActivityStreakService {
             if (!achievement) {
                 logger.warn(`Achievement ${achievementId} not found in definitions`);
                 return;
+            }
+
+            // Validate seasonal achievement can be awarded
+            if (achievement.seasonal) {
+                const canAward = await this.achievementManager.canAward(achievementId);
+                if (!canAward) {
+                    logger.debug(`Seasonal achievement ${achievementId} not currently active, skipping award`);
+                    return;
+                }
             }
 
             // Insert into database

@@ -46,7 +46,7 @@ Discord bot (Discord.js v14) with neon purple branding (#8A2BE2), slash commands
 
 ### Database (src/database/)
 
-**schema.js - 22 tables:**
+**schema.js - 26 tables:**
 | Table | Key Fields | Notes |
 |-------|------------|-------|
 | guilds | id, prefix, logChannel, welcomeChannel, welcomeMessage, welcomeEnabled, welcomeUseEmbed, voiceHubChannelId, voiceHubCategoryId, mediaArchiveChannelId | Guild config, BytePod, welcome messages, media archive |
@@ -69,8 +69,12 @@ Discord bot (Discord.js v14) with neon purple branding (#8A2BE2), slash commands
 | suggestionConfig | guildId(PK), channelId, reviewRoleId, enabled, allowAnonymous | Review role null=Admin only |
 | suggestions | id, guildId, userId, content, messageId, channelId, status, upvotes, downvotes, reviewedBy, reviewedAt, reviewReason, createdAt, anonymous | Status: pending/approved/denied/implemented |
 | activityStreaks | id, userId, guildId, currentStreak, longestStreak, lastActivityDate, totalActiveDays, freezesAvailable, lastFreezeReset | unique(userId,guildId), monthly freeze reset |
-| activityAchievements | id, userId, guildId, achievementId, earnedAt | unique(userId,guildId,achievementId), streak milestones |
-| activityLogs | id, userId, guildId, activityDate, messageCount, voiceMinutes, commandsRun, updatedAt | unique(userId,guildId,activityDate), daily activity tracking |
+| activityAchievements | id, userId, guildId, achievementId, points, notified, earnedAt | unique(userId,guildId,achievementId), auto-tracked + manual awards |
+| activityLogs | id, userId, guildId, activityDate, messageCount, voiceMinutes, commandsRun, bytepodsCreated, channelJoins, reactionsAdded, activeHours, updatedAt | unique(userId,guildId,activityDate), comprehensive daily tracking |
+| achievementDefinitions | id(PK), title, description, emoji, category, rarity, points, criteria(JSON), grantRole, seasonal, seasonalEvent, startDate, endDate, createdAt | 82 core achievements with seasonal support |
+| achievementRoleConfig | guildId(PK), enabled, rolePrefix, useRarityColors, cleanupOrphaned, notifyOnEarn, createdAt, updatedAt | Per-guild role reward settings |
+| achievementRoles | id, guildId, achievementId, roleId, createdAt | Tracks which roles map to achievements, unique(guildId,achievementId) |
+| customAchievements | id, guildId, achievementId, title, description, emoji, category, rarity, points, criteria(JSON), grantRole, enabled, createdBy, createdAt | Guild-specific custom achievements |
 
 **index.js:** better-sqlite3 → Drizzle wrapper. `runMigrations()` runs `validateAndFixSchema()` first (auto-heals), then Drizzle migrations.
 
@@ -140,6 +144,109 @@ checkUserPermissions():
 
 **Key:** Once DB overrides exist, code-defined permissions are IGNORED.
 
+### 4. Achievement System (src/services/activityStreakService.js)
+
+**Architecture:** 82 core achievements + guild custom achievements with automatic tracking, role rewards, and seasonal events.
+
+**Achievement Categories (9 total):**
+```
+streak      → Consecutive day milestones (3-1000 days)
+dedication  → Total active days (30-1500 days)
+social      → Messages, reactions, BytePods
+voice       → Voice hours milestones (10-5000 hrs)
+explorer    → Channel joins, active hours
+special     → Unique achievements (first streak, freeze master, night owl, etc.)
+combo       → Multi-criteria (social butterfly, triple threat)
+meta        → Achievement collecting (25, 50, 75+ achievements)
+seasonal    → Limited-time events (Halloween, Christmas, Summer, etc.)
+```
+
+**Rarity Tiers (6 levels):**
+- common (⚪ 10-25 pts) → uncommon (🟢 50 pts) → rare (🔵 75-100 pts)
+- epic (🟣 150-250 pts) → legendary (🟠 500 pts) → mythic (🔴 1000 pts)
+
+**Core Components:**
+
+1. **AchievementManager Class** (`activityStreakService.js:20-286`)
+   - Loads definitions from DB with 1-hour cache
+   - Methods: `loadDefinitions()`, `getById()`, `getByCategory()`, `getByRarity()`, `getAllGrantingRoles()`
+   - Seasonal validation: `isSeasonalActive()`, `canAward()`, `getActiveSeasonalAchievements()`
+   - Custom achievements: `getCustomAchievements(guildId)`
+
+2. **Activity Tracking** (8 metrics tracked daily in `activityLogs`):
+   - Messages, voice minutes, commands run
+   - BytePods created, channel joins, reactions added
+   - Active hours (hourly tracking)
+   - Tracked via: `messageCreate.js`, `voiceStateUpdate.js`, `interactionCreate.js`, `messageReactionAdd.js`
+
+3. **Achievement Checking** (6 check methods):
+   - `checkStreakAchievements()` - Exact streak milestone matches
+   - `checkTotalDaysAchievements()` - Total active days thresholds
+   - `checkCumulativeAchievements()` - Messages, voice, commands, BytePods
+   - `checkSpecialAchievements()` - Unique conditions (night owl, weekend warrior)
+   - `checkComboAchievements()` - Multi-criteria combinations
+   - `checkMetaAchievements()` - Achievement count milestones
+
+4. **Award Flow:**
+   ```
+   Activity occurs → Tracking method called → checkAllAchievements() runs
+     → calculateEligibleAchievements() → Seasonal validation → awardAchievement()
+       → Insert DB → Send DM notification → Grant role reward (if enabled)
+         → Invalidate cache
+   ```
+
+5. **Role Reward System** (`activityStreakService.js:1458-1615`):
+   - Dynamic role creation with achievement name
+   - Rarity-based colors (or brand purple #8A2BE2)
+   - Configurable prefix (default: 🏆)
+   - Automatic cleanup of orphaned roles (0 members)
+   - Scheduled cleanup runs daily at midnight UTC
+
+6. **Seasonal Achievements:**
+   - Year-agnostic date matching (Oct 1-31 = Halloween every year)
+   - Handles year-spanning events (Dec 26 - Jan 5)
+   - Validation before awarding prevents off-season awards
+   - 16 seasonal achievements defined in `scripts/seed-seasonal-events.js`
+
+7. **Custom Achievements:**
+   - Per-guild custom achievements via modal builder
+   - 5-field modal: title, description, emoji, rarity, points
+   - Auto-generated ID: `custom_{guildId}_{sanitized_title}`
+   - Manual award only (no auto-tracking)
+   - Stored in `customAchievements` table
+
+**Commands:**
+- `/achievement setup/view/cleanup/list_roles` - Admin config (Administrator required)
+- `/achievement create` - Modal builder for custom achievements
+- `/achievement award [user] [achievement]` - Manual award with autocomplete
+- `/streak view/leaderboard/achievements/progress` - User commands
+- Achievements shown in `/userinfo` context menu (top 6 + total count)
+
+**Key Files:**
+- **activityStreakService.js (1700+ lines):** Core service, AchievementManager, tracking, awarding
+- **achievementUtils.js (240 lines):** Shared helpers (emojis, tiers, progress bars, milestones)
+- **achievement.js (525 lines):** Admin command with 6 subcommands + autocomplete
+- **streak.js (700 lines):** User command with 4 subcommands + pagination
+- **seed-achievements.js:** 82 core achievement definitions
+- **seed-seasonal-events.js:** 16 seasonal achievements
+- **backfill-achievements.js:** Retroactive award script for historical data
+
+**Achievement Progression Example:**
+```
+User joins → Creates first streak (special_first_streak +10pts)
+  → 3 days active (streak_3 +25pts)
+    → 7 days active (streak_7 +50pts)
+      → 30 days active (streak_30 +100pts) + role reward granted
+        → 365 days active (streak_365 +500pts, legendary rarity)
+```
+
+**Gotchas:**
+- Achievement cache is 1-hour, invalidate after creating custom achievements
+- Seasonal achievements checked on award, not on earn (prevents backdating)
+- Custom achievements must have unique titles within a guild
+- Role rewards require bot to have ManageRoles permission
+- DM notifications fail silently if user has DMs disabled (logged)
+
 ---
 
 ## Commands
@@ -152,6 +259,7 @@ checkUserPermissions():
 | welcome.js (~420 lines) | `/welcome setup/message/toggle/embed/variables/test/view` - New member welcome messages. 18 variables: user mentions, server info, join dates (Discord timestamps), account age, member number (1st, 2nd, 3rd). Embed/plain text modes. `/variables` shows full reference guide. Requires ManageGuild |
 | autorespond.js (~450 lines) | `/autorespond add/remove/list/toggle/edit` - Keyword responses. Match types: exact/contains/wildcard/regex(dev-only). Variables: {user}{server}{channel}{username}. Requires ManageGuild |
 | suggestion.js (~650 lines) | `/suggestion setup/approve/deny/implement/view/list/leaderboard` - Community suggestions. DM notifications, auto-embed updates |
+| achievement.js (~525 lines) | `/achievement setup/view/cleanup/list_roles/create/award` - Achievement system admin. Role reward config, custom achievement builder (modal), manual awards with autocomplete. Requires Administrator |
 
 ### Developer (src/commands/developer/) - All devOnly
 | Command | Description |
@@ -190,7 +298,7 @@ checkUserPermissions():
 | bookmark.js (~420 lines) | `/bookmark list/search/view/delete/clear` - Pagination, jump links, attachment caching |
 | media.js (~680 lines) | `/media setup/list/delete/search/view/tag/describe` - Full media gallery with auto-capture and manual saves. Rich metadata, tag system, full-text search, detailed views. Setup requires ManageChannels, 500-item limit |
 | bytepod.js (~600 lines) | `/bytepod setup/panel/preset/stats/leaderboard/template` - Full pod management, `handleInteraction()` routes all components |
-| streak.js (~240 lines) | `/streak view/leaderboard` - View streaks, achievements, leaderboard. Auto-tracks messages/voice/commands, 11 achievements, monthly freeze |
+| streak.js (~700 lines) | `/streak view/leaderboard/achievements/progress` - Comprehensive activity tracking. View streaks with rarity/points, 5 leaderboard types (current/longest/achievements/points/rare), achievement browser with filters & pagination (category/rarity/earned status), progress tracking with visual bars for milestones. Auto-tracks 8 metrics, 82+ achievements, monthly freeze system |
 
 ### Context Menus (src/commands/context-menus/)
 
@@ -348,6 +456,67 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 ---
 
 ## Recent Changes
+
+### 2025-12-28 - Comprehensive Achievement System
+- **NEW:** Full-featured achievement system with 82 core achievements, seasonal events, custom achievements, and role rewards
+- **ARCHITECTURE:** 9 achievement categories (streak, dedication, social, voice, explorer, special, combo, meta, seasonal) with 6 rarity tiers (common → mythic)
+- **DATABASE:**
+  - **New tables (4):** achievementDefinitions, achievementRoleConfig, achievementRoles, customAchievements
+  - **Extended tables (2):** activityAchievements (+points, +notified), activityLogs (+7 tracking columns: bytepodsCreated, channelJoins, reactionsAdded, activeHours, etc.)
+- **FEATURES:**
+  - **Automatic tracking:** 8 metrics tracked daily - messages, voice minutes, commands, BytePods created, channel joins, reactions, active hours
+  - **Achievement checking:** 6 check methods (streak, totalDays, cumulative, special, combo, meta) run on daily activity
+  - **Role rewards:** Dynamic role creation with rarity-based colors, configurable prefix, automatic cleanup of 0-member roles
+  - **Seasonal achievements:** Year-agnostic date matching, 16 events (Halloween, Christmas, Valentine's, Spring, Summer, Fall, New Year)
+  - **Custom achievements:** Guild-specific achievements via modal builder, manual award only
+  - **DM notifications:** Users receive DM when earning achievements (respects privacy settings)
+- **COMPONENTS:**
+  - **AchievementManager class:** 1-hour cache, loads definitions from DB, seasonal validation methods (`isSeasonalActive`, `canAward`)
+  - **ActivityStreakService:** Enhanced with 8 tracking methods, 6 checking methods, award flow with seasonal validation
+  - **Utility helpers:** achievementUtils.js with shared functions (emojis, tiers, progress bars, milestones, formatting)
+- **COMMANDS:**
+  - `/achievement setup/view/cleanup/list_roles/create/award` - Admin command (Administrator required)
+    - `create` - Modal builder for custom achievements (5 fields: title, description, emoji, rarity, points)
+    - `award` - Manual award with autocomplete (includes core + custom achievements)
+    - `setup` - Configure role rewards (enabled, prefix, rarity colors, cleanup, notifications)
+  - `/streak view/leaderboard/achievements/progress` - Enhanced user command
+    - `view` - Shows current/longest streak, achievements earned with rarity + points
+    - `leaderboard` - 5 types (current streak, longest streak, achievement count, total points, rarest achievement)
+    - `achievements` - Browser with filters (category, rarity, earned status) and pagination (5/page with buttons)
+    - `progress` - Visual progress bars for next milestones (streak, total days, messages, voice)
+  - **Userinfo integration:** Top 6 achievements + total count/points displayed in `/userinfo`
+- **SCRIPTS:**
+  - `seed-achievements.js` - Seeds 82 core achievements with full definitions
+  - `seed-seasonal-events.js` - Seeds 16 seasonal achievements for annual events
+  - `backfill-achievements.js` - Retroactively awards achievements based on historical data (supports --dry-run)
+- **TRACKING INTEGRATION:**
+  - messageCreate.js - Message count + active hour tracking
+  - voiceStateUpdate.js - Voice minutes, channel joins, BytePod creation tracking
+  - interactionCreate.js - Command tracking + achievement modal routing
+  - messageReactionAdd.js - Reaction tracking
+- **AWARD FLOW:** Activity → Track → Daily check (midnight UTC) → Calculate eligible → Seasonal validation → Award → Insert DB → DM notification → Grant role
+- **FILES:**
+  - `activityStreakService.js` (~1700 lines) - Core service, AchievementManager, tracking, checking, awarding
+  - `achievementUtils.js` (240 lines) - Shared helpers
+  - `achievement.js` (525 lines) - Admin command with 6 subcommands + autocomplete
+  - `streak.js` (700 lines) - User command with 4 subcommands + pagination
+  - `userinfo.js` - Added achievement showcase section
+  - `schema.js` - 4 new tables, 2 extended tables
+  - `interactionCreate.js` - Achievement modal handling
+  - Scripts: seed-achievements.js, seed-seasonal-events.js, backfill-achievements.js
+- **KEY FEATURES:**
+  - Point system (10-1000 pts) with rarity-based scaling
+  - User tier badges (Newcomer → Legend) based on total achievements (0-82+)
+  - Seasonal window enforcement (prevents backdating/off-season awards)
+  - Custom achievement validation (unique titles per guild)
+  - Cache invalidation after custom achievement creation
+  - Role reward cleanup scheduler (daily at midnight UTC)
+  - Graceful error handling (DMs fail silently if user blocks bot)
+- **GOTCHAS:**
+  - Achievement cache is 1-hour, must invalidate after creating custom achievements
+  - Seasonal achievements validated on award, not on earn
+  - Role rewards require bot ManageRoles permission
+  - Custom achievements have auto-generated IDs: `custom_{guildId}_{sanitized_title}`
 
 ### 2025-12-28 - Media Gallery Archive Bug Fixes
 - **FIX:** Critical bug where archived media URLs expired when original messages were deleted

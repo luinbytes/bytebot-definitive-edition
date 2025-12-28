@@ -149,6 +149,115 @@ module.exports = {
             return;
         }
 
+        // Handle Achievement Creation Modal Submission
+        if (interaction.isModalSubmit() && interaction.customId === 'achievement_create_modal') {
+            try {
+                const { db } = require('../database');
+                const { customAchievements } = require('../database/schema');
+                const { and, eq } = require('drizzle-orm');
+
+                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
+                // Extract field values
+                const title = interaction.fields.getTextInputValue('achievement_title').trim();
+                const description = interaction.fields.getTextInputValue('achievement_description').trim();
+                const emoji = interaction.fields.getTextInputValue('achievement_emoji').trim();
+                const rarity = interaction.fields.getTextInputValue('achievement_rarity').trim().toLowerCase();
+                const pointsStr = interaction.fields.getTextInputValue('achievement_points').trim();
+
+                // Validate rarity
+                const validRarities = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
+                if (!validRarities.includes(rarity)) {
+                    return interaction.editReply({
+                        embeds: [embeds.error(
+                            'Invalid Rarity',
+                            `Rarity must be one of: ${validRarities.join(', ')}\n\nYou entered: **${rarity}**`
+                        )]
+                    });
+                }
+
+                // Validate points
+                const points = parseInt(pointsStr);
+                if (isNaN(points) || points < 1 || points > 1000) {
+                    return interaction.editReply({
+                        embeds: [embeds.error('Invalid Points', 'Points must be a number between 1 and 1000.')]
+                    });
+                }
+
+                // Generate achievement ID from title
+                const achievementId = `custom_${interaction.guild.id}_${title.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 50)}`;
+
+                // Check if achievement with this ID already exists
+                const existing = await db.select()
+                    .from(customAchievements)
+                    .where(and(
+                        eq(customAchievements.guildId, interaction.guild.id),
+                        eq(customAchievements.achievementId, achievementId)
+                    ))
+                    .get();
+
+                if (existing) {
+                    return interaction.editReply({
+                        embeds: [embeds.error(
+                            'Already Exists',
+                            `An achievement with a similar title already exists.\n\n**ID:** \`${achievementId}\`\n\nPlease use a different title.`
+                        )]
+                    });
+                }
+
+                // Create the custom achievement
+                await db.insert(customAchievements).values({
+                    guildId: interaction.guild.id,
+                    achievementId,
+                    title,
+                    description,
+                    emoji,
+                    category: 'special',  // Custom achievements are in special category
+                    rarity,
+                    points,
+                    criteria: JSON.stringify({ type: 'manual' }),  // Manual-only by default
+                    grantRole: false,  // No role by default
+                    enabled: true,
+                    createdBy: interaction.user.id,
+                    createdAt: new Date()
+                });
+
+                // Invalidate achievement cache
+                if (client.activityStreakService) {
+                    client.activityStreakService.achievementManager.invalidateCache();
+                }
+
+                const embed = embeds.success(
+                    '✨ Custom Achievement Created!',
+                    `**${emoji} ${title}** has been created for this server!`
+                );
+
+                embed.addFields(
+                    { name: 'ID', value: `\`${achievementId}\``, inline: false },
+                    { name: 'Description', value: description, inline: false },
+                    { name: 'Rarity', value: rarity, inline: true },
+                    { name: 'Points', value: `${points}`, inline: true },
+                    { name: 'Award Method', value: 'Manual only', inline: true }
+                );
+
+                embed.setFooter({ text: 'Use /achievement award to give this achievement to users' });
+
+                await interaction.editReply({ embeds: [embed] });
+
+                logger.success(`Custom achievement "${title}" created in ${interaction.guild.name} by ${interaction.user.tag}`);
+
+            } catch (error) {
+                logger.error('Error creating custom achievement:', error);
+                const errorEmbed = embeds.error('Creation Failed', 'An error occurred while creating the achievement.');
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.editReply({ embeds: [errorEmbed] });
+                } else {
+                    await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+                }
+            }
+            return;
+        }
+
         // Handle Moderation Modal Submissions
         if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_')) {
             const modActionsMenu = client.contextMenus.get('Moderate User');
