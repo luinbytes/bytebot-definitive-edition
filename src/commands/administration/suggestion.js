@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, ChannelType, MessageFlags } = require('discord.js');
 const { db } = require('../../database');
 const { suggestions, suggestionConfig } = require('../../database/schema');
 const { eq, and, desc } = require('drizzle-orm');
@@ -92,7 +92,7 @@ module.exports = {
 
     async execute(interaction) {
         // Defer reply as ephemeral so admin actions are private
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         const subcommand = interaction.options.getSubcommand();
 

@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { db } = require('../../database');
 const { suggestions, suggestionConfig } = require('../../database/schema');
 const { eq } = require('drizzle-orm');
@@ -22,7 +22,7 @@ module.exports = {
 
     async execute(interaction) {
         // Defer reply as ephemeral so confirmation is private
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         const idea = interaction.options.getString('idea');
         const anonymous = interaction.options.getBoolean('anonymous') ?? false;
