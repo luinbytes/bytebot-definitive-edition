@@ -1492,19 +1492,28 @@ class ActivityStreakService {
                 return;
             }
 
-            // Delete from database
-            const deleted = await db.delete(activityAchievements)
+            // Check if achievement exists before deletion
+            const existing = await db.select()
+                .from(activityAchievements)
                 .where(and(
                     eq(activityAchievements.userId, userId),
                     eq(activityAchievements.guildId, guildId),
                     eq(activityAchievements.achievementId, achievementId)
                 ))
-                .returning();
+                .get();
 
-            if (deleted.length === 0) {
+            if (!existing) {
                 logger.warn(`No achievement ${achievementId} found for user ${userId}`);
                 return;
             }
+
+            // Delete from database
+            await db.delete(activityAchievements)
+                .where(and(
+                    eq(activityAchievements.userId, userId),
+                    eq(activityAchievements.guildId, guildId),
+                    eq(activityAchievements.achievementId, achievementId)
+                ));
 
             // Remove role if achievement granted one
             if (achievement.grantRole) {
@@ -1641,7 +1650,8 @@ class ActivityStreakService {
                     achievementDefs.push({
                         ...def,
                         earnedAt: ach.earnedAt,
-                        points: ach.points
+                        points: ach.points || def.points, // Fallback to definition if DB value is null
+                        awardedBy: ach.awardedBy // Track manual awards
                     });
                 }
             }
