@@ -200,7 +200,8 @@ async function handleView(interaction, client) {
                 .map(a => {
                     const rarityEmoji = getRarityEmoji(a.rarity);
                     const roleIndicator = a.grantRole ? ' 👑' : '';
-                    return `${a.emoji} **${a.title}**${roleIndicator} - ${rarityEmoji} ${a.rarity} (${a.points}pts)`;
+                    const manualIndicator = a.awardedBy ? ' ⭐' : ''; // Star for manually awarded
+                    return `${a.emoji} **${a.title}**${roleIndicator}${manualIndicator} - ${rarityEmoji} ${a.rarity} (${a.points}pts)`;
                 })
                 .join('\n');
 
@@ -208,9 +209,11 @@ async function handleView(interaction, client) {
                 ? `\n*...and ${streakData.achievements.length - 10} more*`
                 : '';
 
+            const legend = '\n\n*👑 = Role reward • ⭐ = Manually awarded*';
+
             embed.addFields({
                 name: `🏅 Achievements (${streakData.achievements.length}) • ${totalPoints.toLocaleString()} pts`,
-                value: achievementList + moreText,
+                value: achievementList + moreText + legend,
                 inline: false
             });
         }

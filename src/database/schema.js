@@ -339,6 +339,7 @@ const activityAchievements = sqliteTable('activity_achievements', {
     achievementId: text('achievement_id').notNull(), // e.g., "streak_7", "streak_30", "total_100"
     notified: integer('notified', { mode: 'boolean' }).default(false).notNull(), // Has user been DM'd?
     points: integer('points').default(0).notNull(), // Points value of achievement
+    awardedBy: text('awarded_by'), // null = auto-tracked, userId = manually awarded by admin
     earnedAt: integer('earned_at', { mode: 'timestamp' }).default(new Date())
 }, (table) => ({
     // Composite unique constraint: one achievement per user per guild

@@ -71,6 +71,21 @@ module.exports = {
                         .setName('achievement')
                         .setDescription('Achievement to award')
                         .setRequired(true)
+                        .setAutocomplete(true)))
+        .addSubcommand(sub =>
+            sub
+                .setName('remove')
+                .setDescription('Remove an achievement from a user')
+                .addUserOption(opt =>
+                    opt
+                        .setName('user')
+                        .setDescription('User to remove achievement from')
+                        .setRequired(true))
+                .addStringOption(opt =>
+                    opt
+                        .setName('achievement')
+                        .setDescription('Achievement to remove')
+                        .setRequired(true)
                         .setAutocomplete(true))),
 
     async execute(interaction, client) {
@@ -88,11 +103,14 @@ module.exports = {
             await handleCreate(interaction);
         } else if (subcommand === 'award') {
             await handleAward(interaction, client);
+        } else if (subcommand === 'remove') {
+            await handleRemove(interaction, client);
         }
     },
 
     async autocomplete(interaction, client) {
         const focusedOption = interaction.options.getFocused(true);
+        const subcommand = interaction.options.getSubcommand();
 
         if (focusedOption.name === 'achievement') {
             try {
@@ -103,12 +121,29 @@ module.exports = {
                 const manager = client.activityStreakService.achievementManager;
                 await manager.loadDefinitions();
 
-                // Get all core achievements
-                const allAchievements = Array.from(manager.achievements.values());
+                let allAchievements = Array.from(manager.achievements.values());
 
                 // Add custom achievements for this guild
                 const customAchs = await manager.getCustomAchievements(interaction.guild.id);
                 allAchievements.push(...customAchs);
+
+                // For remove command, only show achievements the user actually has
+                if (subcommand === 'remove') {
+                    const targetUser = interaction.options.getUser('user');
+                    if (targetUser) {
+                        const userAchievements = await db.select()
+                            .from(require('../../database/schema').activityAchievements)
+                            .where(and(
+                                eq(require('../../database/schema').activityAchievements.userId, targetUser.id),
+                                eq(require('../../database/schema').activityAchievements.guildId, interaction.guild.id)
+                            ));
+
+                        const userAchIds = new Set(userAchievements.map(a => a.achievementId));
+                        allAchievements = allAchievements.filter(ach =>
+                            userAchIds.has(ach.achievementId || ach.id)
+                        );
+                    }
+                }
 
                 // Filter by user input
                 const filtered = allAchievements
@@ -489,11 +524,12 @@ async function handleAward(interaction, client) {
             });
         }
 
-        // Award the achievement
+        // Award the achievement (mark as manually awarded by admin)
         await client.activityStreakService.awardAchievement(
             targetUser.id,
             interaction.guild.id,
-            achievementId
+            achievementId,
+            interaction.user.id // Track who manually awarded this
         );
 
         const embed = embeds.success(
@@ -524,6 +560,73 @@ async function handleAward(interaction, client) {
         logger.error('Error awarding achievement:', error);
         await interaction.editReply({
             embeds: [embeds.error('Award Failed', 'An error occurred while awarding the achievement.')]
+        });
+    }
+}
+
+async function handleRemove(interaction, client) {
+    try {
+        const targetUser = interaction.options.getUser('user');
+        const achievementId = interaction.options.getString('achievement');
+
+        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
+        if (!client.activityStreakService) {
+            return interaction.editReply({
+                embeds: [embeds.error('Service Unavailable', 'Activity streak service is not initialized.')]
+            });
+        }
+
+        // Verify achievement exists
+        const achievement = await client.activityStreakService.achievementManager.getById(achievementId);
+        if (!achievement) {
+            return interaction.editReply({
+                embeds: [embeds.error('Not Found', `Achievement \`${achievementId}\` does not exist.`)]
+            });
+        }
+
+        // Check if user has the achievement
+        const hasAchievement = await client.activityStreakService.hasAchievement(
+            targetUser.id,
+            interaction.guild.id,
+            achievementId
+        );
+
+        if (!hasAchievement) {
+            return interaction.editReply({
+                embeds: [embeds.warn(
+                    'Not Found',
+                    `${targetUser.username} does not have **${achievement.emoji} ${achievement.title}**.`
+                )]
+            });
+        }
+
+        // Remove the achievement
+        await client.activityStreakService.removeAchievement(
+            targetUser.id,
+            interaction.guild.id,
+            achievementId
+        );
+
+        const embed = embeds.success(
+            '🗑️ Achievement Removed',
+            `Successfully removed **${achievement.emoji} ${achievement.title}** from ${targetUser.username}.`
+        );
+
+        embed.addFields(
+            { name: 'User', value: `<@${targetUser.id}>`, inline: true },
+            { name: 'Achievement', value: achievement.title, inline: true },
+            { name: 'Points Removed', value: `${achievement.points}`, inline: true }
+        );
+
+        await interaction.editReply({ embeds: [embed] });
+
+        logger.success(`${interaction.user.tag} removed ${achievement.title} from ${targetUser.tag} in ${interaction.guild.name}`);
+
+    } catch (error) {
+        logger.error('Error removing achievement:', error);
+        await interaction.editReply({
+            embeds: [embeds.error('Remove Failed', 'An error occurred while removing the achievement.')]
         });
     }
 }

@@ -269,6 +269,7 @@ const expectedSchema = {
         achievement_id: 'TEXT NOT NULL',
         notified: 'INTEGER DEFAULT 0 NOT NULL',
         points: 'INTEGER DEFAULT 0 NOT NULL',
+        awarded_by: 'TEXT',
         earned_at: 'INTEGER'
     },
     activity_logs: {
