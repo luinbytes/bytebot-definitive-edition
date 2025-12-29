@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, ChannelType, MessageFlags } = require('discord.js');
 const { db } = require('../../database');
 const { birthdays, birthdayConfig } = require('../../database/schema');
 const { eq, and } = require('drizzle-orm');
@@ -48,10 +48,18 @@ module.exports = {
                     .setDescription('Role to assign on birthdays (leave empty to disable)'))),
 
     cooldown: 5,
-    longRunning: true,
+    // Note: Manual defer in execute() based on subcommand (mixed ephemeral/public)
 
     async execute(interaction, client) {
         const subcommand = interaction.options.getSubcommand();
+
+        // Manually defer based on subcommand - some are private, some are public
+        const privateSubcommands = ['set', 'remove', 'view', 'setup', 'role'];
+        if (privateSubcommands.includes(subcommand)) {
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+        } else {
+            await interaction.deferReply();
+        }
 
         switch (subcommand) {
             case 'set':

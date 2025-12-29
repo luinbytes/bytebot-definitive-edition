@@ -139,7 +139,7 @@ async function handleView(interaction, client) {
 
             return interaction.reply({
                 embeds: [noDataEmbed],
-                ephemeral: targetUser.id === interaction.user.id
+                flags: (targetUser.id === interaction.user.id) ? [MessageFlags.Ephemeral] : []
             });
         }
 
@@ -232,7 +232,7 @@ async function handleView(interaction, client) {
 
         await interaction.reply({
             embeds: [embed],
-            ephemeral: targetUser.id === interaction.user.id
+            flags: (targetUser.id === interaction.user.id) ? [MessageFlags.Ephemeral] : []
         });
 
     } catch (error) {
