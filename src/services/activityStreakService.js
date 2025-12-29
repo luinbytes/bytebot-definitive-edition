@@ -1396,7 +1396,7 @@ class ActivityStreakService {
      * @param {string} guildId - Guild ID
      * @param {string} achievementId - Achievement ID
      */
-    async awardAchievement(userId, guildId, achievementId) {
+    async awardAchievement(userId, guildId, achievementId, awardedBy = null) {
         try {
             // Check if already earned
             if (await this.hasAchievement(userId, guildId, achievementId)) {
@@ -1425,6 +1425,7 @@ class ActivityStreakService {
                 guildId,
                 achievementId,
                 points: achievement.points,
+                awardedBy, // null = auto-tracked, userId = manually awarded
                 notified: false,
                 earnedAt: new Date()
             });
@@ -1473,6 +1474,89 @@ class ActivityStreakService {
             logger.success(`🏆 Achievement unlocked: ${achievement.title} for user ${userId}`);
         } catch (error) {
             logger.error(`Error notifying achievement for user ${userId}:`, error);
+        }
+    }
+
+    /**
+     * Remove an achievement from a user
+     * @param {string} userId - User ID
+     * @param {string} guildId - Guild ID
+     * @param {string} achievementId - Achievement ID
+     */
+    async removeAchievement(userId, guildId, achievementId) {
+        try {
+            // Get achievement definition before deletion (for role cleanup)
+            const achievement = await this.achievementManager.getById(achievementId);
+            if (!achievement) {
+                logger.warn(`Achievement ${achievementId} not found in definitions`);
+                return;
+            }
+
+            // Delete from database
+            const deleted = await db.delete(activityAchievements)
+                .where(and(
+                    eq(activityAchievements.userId, userId),
+                    eq(activityAchievements.guildId, guildId),
+                    eq(activityAchievements.achievementId, achievementId)
+                ))
+                .returning();
+
+            if (deleted.length === 0) {
+                logger.warn(`No achievement ${achievementId} found for user ${userId}`);
+                return;
+            }
+
+            // Remove role if achievement granted one
+            if (achievement.grantRole) {
+                await this.removeAchievementRole(userId, guildId, achievement);
+            }
+
+            logger.success(`🗑️ Removed ${achievement.title} from user ${userId}`);
+
+        } catch (error) {
+            logger.error(`Error removing achievement ${achievementId} from user ${userId}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Remove achievement role from user
+     * @param {string} userId - User ID
+     * @param {string} guildId - Guild ID
+     * @param {Object} achievementDef - Achievement definition
+     */
+    async removeAchievementRole(userId, guildId, achievementDef) {
+        try {
+            const guild = await this.client.guilds.fetch(guildId).catch(() => null);
+            if (!guild) return;
+
+            const member = await guild.members.fetch(userId).catch(() => null);
+            if (!member) return;
+
+            // Get role configuration
+            const config = await this.getRoleConfig(guildId);
+            if (!config.enabled) return;
+
+            // Find the achievement role
+            const roleRecord = await db.select()
+                .from(achievementRoles)
+                .where(and(
+                    eq(achievementRoles.guildId, guildId),
+                    eq(achievementRoles.achievementId, achievementDef.id)
+                ))
+                .get();
+
+            if (!roleRecord) return;
+
+            const role = await guild.roles.fetch(roleRecord.roleId).catch(() => null);
+            if (!role) return;
+
+            // Remove role from member
+            await member.roles.remove(role, `Achievement removed: ${achievementDef.title}`);
+            logger.success(`Removed role ${role.name} from ${member.user.tag} in ${guild.name}`);
+
+        } catch (error) {
+            logger.error(`Error removing achievement role for user ${userId}:`, error);
         }
     }
 
