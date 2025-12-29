@@ -51,6 +51,7 @@ module.exports = {
 
     cooldown: 3,
     longRunning: true,
+    ephemeral: true, // All bookmark operations are private
 
     async execute(interaction, client) {
         const subcommand = interaction.options.getSubcommand();
@@ -107,15 +108,13 @@ async function handleList(interaction, userId) {
 
     if (totalCount === 0) {
         return interaction.editReply({
-            embeds: [embeds.info('No Bookmarks', 'You haven\'t saved any bookmarks yet.\n\nTo bookmark a message, right-click it and select **Apps > Bookmark Message**.')],
-            flags: [MessageFlags.Ephemeral]
+            embeds: [embeds.info('No Bookmarks', 'You haven\'t saved any bookmarks yet.\n\nTo bookmark a message, right-click it and select **Apps > Bookmark Message**.')]
         });
     }
 
     if (page > totalPages) {
         return interaction.editReply({
-            embeds: [embeds.error('Invalid Page', `Page ${page} doesn't exist. You have ${totalPages} page(s) of bookmarks.`)],
-            flags: [MessageFlags.Ephemeral]
+            embeds: [embeds.error('Invalid Page', `Page ${page} doesn't exist. You have ${totalPages} page(s) of bookmarks.`)]
         });
     }
 
@@ -151,8 +150,7 @@ async function handleList(interaction, userId) {
     }
 
     return interaction.editReply({
-        embeds: [listEmbed],
-        flags: [MessageFlags.Ephemeral]
+        embeds: [listEmbed]
     });
 }
 
@@ -170,8 +168,7 @@ async function handleSearch(interaction, userId) {
 
     if (searchResults.total === 0) {
         return interaction.editReply({
-            embeds: [embeds.info('No Results', `No bookmarks found matching **"${query}"**.`)],
-            flags: [MessageFlags.Ephemeral]
+            embeds: [embeds.info('No Results', `No bookmarks found matching **"${query}"**.`)]
         });
     }
 
@@ -213,8 +210,7 @@ async function handleSearch(interaction, userId) {
     }
 
     return interaction.editReply({
-        embeds: [searchEmbed],
-        flags: [MessageFlags.Ephemeral]
+        embeds: [searchEmbed]
     });
 }
 
@@ -229,8 +225,7 @@ async function handleView(interaction, userId, client) {
 
     if (!bookmark) {
         return interaction.editReply({
-            embeds: [embeds.error('Bookmark Not Found', `Bookmark #${bookmarkId} doesn't exist or doesn't belong to you.`)],
-            flags: [MessageFlags.Ephemeral]
+            embeds: [embeds.error('Bookmark Not Found', `Bookmark #${bookmarkId} doesn't exist or doesn't belong to you.`)]
         });
     }
 
@@ -281,8 +276,7 @@ async function handleView(interaction, userId, client) {
     }
 
     return interaction.editReply({
-        embeds: [viewEmbed],
-        flags: [MessageFlags.Ephemeral]
+        embeds: [viewEmbed]
     });
 }
 
@@ -297,8 +291,7 @@ async function handleDelete(interaction, userId) {
 
     if (!result.success) {
         return interaction.editReply({
-            embeds: [embeds.error('Delete Failed', result.error)],
-            flags: [MessageFlags.Ephemeral]
+            embeds: [embeds.error('Delete Failed', result.error)]
         });
     }
 
@@ -306,8 +299,7 @@ async function handleDelete(interaction, userId) {
     const count = await bookmarkUtil.getBookmarkCount(userId);
 
     return interaction.editReply({
-        embeds: [embeds.success('Bookmark Deleted', `Bookmark #${bookmarkId} has been removed.\n\nYou now have ${count}/${bookmarkUtil.MAX_BOOKMARKS_PER_USER} bookmarks.`)],
-        flags: [MessageFlags.Ephemeral]
+        embeds: [embeds.success('Bookmark Deleted', `Bookmark #${bookmarkId} has been removed.\n\nYou now have ${count}/${bookmarkUtil.MAX_BOOKMARKS_PER_USER} bookmarks.`)]
     });
 }
 
@@ -319,8 +311,7 @@ async function handleClear(interaction, userId) {
 
     if (count === 0) {
         return interaction.editReply({
-            embeds: [embeds.info('No Bookmarks', 'You have no bookmarks to clear.')],
-            flags: [MessageFlags.Ephemeral]
+            embeds: [embeds.info('No Bookmarks', 'You have no bookmarks to clear.')]
         });
     }
 
@@ -345,8 +336,7 @@ async function handleClear(interaction, userId) {
 
     return interaction.editReply({
         embeds: [confirmEmbed],
-        components: [row],
-        flags: [MessageFlags.Ephemeral]
+        components: [row]
     });
 }
 

@@ -25,6 +25,7 @@ module.exports = {
 
     cooldown: 10,
     longRunning: true,
+    ephemeral: true, // Personal account binding and stats
 
     async execute(interaction) {
         const subcommand = interaction.options.getSubcommand();

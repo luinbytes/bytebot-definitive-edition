@@ -219,7 +219,7 @@ module.exports = {
 
         // --- STATS SUBCOMMAND ---
         if (subdomain === 'stats') {
-            await interaction.deferReply();
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
             const target = interaction.options.getUser('user') ?? interaction.user;
 
             const stats = await db.select().from(bytepodVoiceStats)
