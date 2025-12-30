@@ -26,3 +26,4 @@ sqlite.db.bak
 
 # Claude
 .claude/
+DATABASE_LOGGING_GUIDE.md

@@ -1,6 +1,7 @@
 const { db } = require('../database');
 const { users } = require('../database/schema');
 const { eq, and } = require('drizzle-orm');
+const { dbLog } = require('./dbLogger');
 
 /**
  * Get user's ephemeral preference from database
@@ -9,11 +10,14 @@ const { eq, and } = require('drizzle-orm');
  */
 async function getUserPreference(userId) {
     try {
-        const user = await db
-            .select()
-            .from(users)
-            .where(eq(users.id, userId))
-            .get();
+        const user = await dbLog.select('users',
+            () => db
+                .select()
+                .from(users)
+                .where(eq(users.id, userId))
+                .get(),
+            { userId }
+        );
 
         return user?.ephemeralPreference || 'default';
     } catch (error) {
@@ -91,21 +95,24 @@ async function setUserPreference(userId, guildId, preference) {
 
     try {
         // Use onConflictDoUpdate pattern like the rest of the codebase
-        await db
-            .insert(users)
-            .values({
-                id: userId,
-                guildId: guildId, // Only used if creating new user
-                ephemeralPreference: preference,
-                commandsRun: 0,
-                lastSeen: new Date()
-            })
-            .onConflictDoUpdate({
-                target: users.id,
-                set: {
-                    ephemeralPreference: preference
-                }
-            });
+        await dbLog.insert('users',
+            () => db
+                .insert(users)
+                .values({
+                    id: userId,
+                    guildId: guildId, // Only used if creating new user
+                    ephemeralPreference: preference,
+                    commandsRun: 0,
+                    lastSeen: new Date()
+                })
+                .onConflictDoUpdate({
+                    target: users.id,
+                    set: {
+                        ephemeralPreference: preference
+                    }
+                }),
+            { userId, preference }
+        );
 
         return true;
     } catch (error) {

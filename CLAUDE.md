@@ -299,6 +299,7 @@ User joins → Creates first streak (special_first_streak +10pts)
 | ping.js | Roundtrip + WS heartbeat |
 | serverinfo.js, userinfo.js | Guild/user stats |
 | stats.js | `/stats server` - Members, channels, bot activity, top voice users |
+| avatar.js | `/avatar [user] [private]` - View user/server avatars with download links (PNG/WebP/GIF). DM-enabled, privacy preference support, 2s cooldown |
 | suggest.js (~140 lines) | `/suggest <idea> [anonymous]` - Submit to configured channel, 👍/👎 reactions, 60s cooldown |
 | birthday.js (~450 lines) | `/birthday set/remove/view/upcoming/setup/role` - Privacy-focused (no year), leap year handling, 24hr role |
 | bookmark.js (~420 lines) | `/bookmark list/search/view/delete/clear` - Pagination, jump links, attachment caching |
@@ -466,6 +467,12 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 ---
 
 ## Recent Changes
+
+### 2025-12-30 - Avatar Slash Command & Database Logging
+- **NEW:** `/avatar [user] [private]` slash command - Complements existing context menu with full privacy preference support
+- **FEATURES:** View any user's avatar (defaults to self), server vs user avatar detection, PNG/WebP/GIF download links, DM-enabled
+- **PRIVACY:** Integrated with ephemeralHelper - respects user preferences, supports per-command override via `private` parameter
+- **FILES:** `avatar.js` (utility command), `CLAUDE.md` updated
 
 ### 2025-12-29 - CLAUDE.md Documentation Maintenance
 - **FIX:** Corrected achievement count inconsistencies throughout documentation (98 total: 82 core + 16 seasonal)
