@@ -30,7 +30,7 @@ module.exports = {
                     option
                         .setName('private')
                         .setDescription('Make response visible only to you')
-                        .setRequired(false)))
+                        .setRequired(false))),
 
     async execute(interaction) {
         const subcommand = interaction.options.getSubcommand();
