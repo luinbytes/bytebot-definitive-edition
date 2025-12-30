@@ -169,31 +169,30 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
         )
         .addFields(
             {
-                name: '🎯 Key Features',
+                name: 'Core Features',
                 value:
-                    '**🎤 BytePods** - Ephemeral voice channels\n' +
-                    'Create temporary VCs with lock, whitelist, and templates.\n\n' +
-                    '**🏆 Achievement System** - Track engagement\n' +
-                    '87+ achievements with auto-tracking and role rewards.\n\n' +
-                    '**📸 Media Gallery** - Archive server media\n' +
-                    'Auto-capture with persistent archival (500 items/user).\n\n' +
-                    '**🔥 Activity Streaks** - Daily tracking\n' +
-                    'Build streaks with freeze protection and leaderboards.\n\n' +
-                    '**💡 Suggestions** - Community feedback\n' +
-                    'Submit ideas with voting and review workflow.\n\n' +
-                    '**🎂 Birthdays** - Automated celebrations\n' +
-                    'Privacy-focused with daily announcements.',
+                    '**BytePods** - Ephemeral voice channels with lock/whitelist\n' +
+                    '**Achievement System** - 87+ achievements with role rewards\n' +
+                    '**Media Gallery** - Auto-capture with 500 item limit\n' +
+                    '**Activity Streaks** - Daily tracking with freeze protection',
                 inline: false
             },
             {
-                name: '🔧 Also Includes',
+                name: 'Community Tools',
                 value:
-                    '• **Moderation** - Ban, kick, warn, audit logs\n' +
-                    '• **Auto-Responders** - Keyword responses\n' +
-                    '• **Bookmarks** - Save messages with search\n' +
-                    '• **Welcome Messages** - Custom greetings\n' +
-                    '• **Permission System** - Role-based access\n' +
-                    '• **War Thunder Stats** - Player statistics',
+                    '**Suggestions** - Voting and review workflow\n' +
+                    '**Birthdays** - Privacy-focused celebrations\n' +
+                    '**Bookmarks** - Save messages with search\n' +
+                    '**Auto-Responders** - Keyword triggers',
+                inline: false
+            },
+            {
+                name: 'Additional Features',
+                value:
+                    '**Moderation** - Ban, kick, warn, audit logs\n' +
+                    '**Welcome Messages** - Custom greetings with variables\n' +
+                    '**Permission System** - Role-based command access\n' +
+                    '**War Thunder Stats** - Player statistics integration',
                 inline: false
             }
         );

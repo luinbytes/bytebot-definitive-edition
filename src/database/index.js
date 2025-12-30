@@ -53,7 +53,8 @@ const expectedSchema = {
         guild_id: 'TEXT NOT NULL',
         commands_run: 'INTEGER DEFAULT 0',
         last_seen: 'INTEGER',
-        wt_nickname: 'TEXT'
+        wt_nickname: 'TEXT',
+        ephemeral_preference: 'TEXT DEFAULT "default"'
     },
     moderation_logs: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',

@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, MessageFlags, ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const logger = require('../../utils/logger');
+const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
 const {
     getRarityEmoji,
     getStreakEmoji,
@@ -22,6 +23,11 @@ module.exports = {
                     option
                         .setName('user')
                         .setDescription('User to view (defaults to yourself)')
+                        .setRequired(false))
+                .addBooleanOption(option =>
+                    option
+                        .setName('private')
+                        .setDescription('Make response visible only to you')
                         .setRequired(false)))
         .addSubcommand(subcommand =>
             subcommand
@@ -93,9 +99,15 @@ module.exports = {
                     option
                         .setName('user')
                         .setDescription('User to view (defaults to yourself)')
+                        .setRequired(false))
+                .addBooleanOption(option =>
+                    option
+                        .setName('private')
+                        .setDescription('Make response visible only to you')
                         .setRequired(false))),
     category: 'Utility',
     cooldown: 3,
+    longRunning: true,
 
     async execute(interaction, client) {
         const subcommand = interaction.options.getSubcommand();
@@ -137,9 +149,15 @@ async function handleView(interaction, client) {
                 `${targetUser.id === interaction.user.id ? 'You haven\'t' : `${targetUser.username} hasn't`} recorded any activity yet.\n\nStart your streak by:\n• Sending messages\n• Joining voice channels\n• Running commands`
             );
 
+            const isEphemeral = await shouldBeEphemeral(interaction, {
+                commandDefault: false,
+                userOverride: interaction.options.getBoolean('private'),
+                targetUserId: targetUser.id
+            });
+
             return interaction.reply({
                 embeds: [noDataEmbed],
-                flags: (targetUser.id === interaction.user.id) ? [MessageFlags.Ephemeral] : []
+                flags: isEphemeral ? [MessageFlags.Ephemeral] : []
             });
         }
 
@@ -151,17 +169,17 @@ async function handleView(interaction, client) {
 
         embed.addFields(
             {
-                name: '🔥 Current Streak',
+                name: 'Current Streak',
                 value: `**${streakData.currentStreak}** day${streakData.currentStreak !== 1 ? 's' : ''}`,
                 inline: true
             },
             {
-                name: '🏆 Longest Streak',
+                name: 'Longest Streak',
                 value: `**${streakData.longestStreak}** day${streakData.longestStreak !== 1 ? 's' : ''}`,
                 inline: true
             },
             {
-                name: '📅 Total Active Days',
+                name: 'Total Active Days',
                 value: `**${streakData.totalActiveDays}** day${streakData.totalActiveDays !== 1 ? 's' : ''}`,
                 inline: true
             }
@@ -173,7 +191,7 @@ async function handleView(interaction, client) {
             : '❌ No freezes available';
 
         embed.addFields({
-            name: '🛡️ Streak Freeze',
+            name: 'Streak Freeze',
             value: `${freezeStatus}\n*Resets monthly on the 1st*`,
             inline: false
         });
@@ -185,7 +203,7 @@ async function handleView(interaction, client) {
             const isToday = streakData.lastActivityDate === today;
 
             embed.addFields({
-                name: '📍 Last Active',
+                name: 'Last Active',
                 value: isToday ? '**Today**' : `<t:${Math.floor(lastActive.getTime() / 1000)}:R>`,
                 inline: false
             });
@@ -212,7 +230,7 @@ async function handleView(interaction, client) {
             const legend = '\n\n*👑 = Role reward • ⭐ = Manually awarded*';
 
             embed.addFields({
-                name: `🏅 Achievements (${streakData.achievements.length}) • ${totalPoints.toLocaleString()} pts`,
+                name: `Achievements (${streakData.achievements.length}) • ${totalPoints.toLocaleString()} pts`,
                 value: achievementList + moreText + legend,
                 inline: false
             });
@@ -221,7 +239,7 @@ async function handleView(interaction, client) {
         // Add tips if no achievements yet
         if (!streakData.achievements || streakData.achievements.length === 0) {
             embed.addFields({
-                name: '💡 Tip',
+                name: 'Tip',
                 value: 'Keep up your daily activity to unlock achievements!',
                 inline: false
             });
@@ -230,9 +248,15 @@ async function handleView(interaction, client) {
         embed.setThumbnail(targetUser.displayAvatarURL());
         embed.setFooter({ text: `Keep your streak alive by staying active daily!` });
 
+        const isEphemeral = await shouldBeEphemeral(interaction, {
+            commandDefault: false,
+            userOverride: interaction.options.getBoolean('private'),
+            targetUserId: targetUser.id
+        });
+
         await interaction.reply({
             embeds: [embed],
-            flags: (targetUser.id === interaction.user.id) ? [MessageFlags.Ephemeral] : []
+            flags: isEphemeral ? [MessageFlags.Ephemeral] : []
         });
 
     } catch (error) {

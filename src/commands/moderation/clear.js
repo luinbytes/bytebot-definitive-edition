@@ -19,7 +19,7 @@ module.exports = {
     async execute(interaction) {
         const amount = interaction.options.getInteger('amount');
 
-        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+        await interaction.deferReply(); // Public for transparency
 
         try {
             const deleted = await interaction.channel.bulkDelete(amount, true);

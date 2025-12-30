@@ -20,6 +20,7 @@ const users = sqliteTable('users', {
     commandsRun: integer('commands_run').default(0),
     lastSeen: integer('last_seen', { mode: 'timestamp' }),
     wtNickname: text('wt_nickname'),
+    ephemeralPreference: text('ephemeral_preference').default('default'), // 'always' | 'public' | 'default'
 });
 
 const moderationLogs = sqliteTable('moderation_logs', {

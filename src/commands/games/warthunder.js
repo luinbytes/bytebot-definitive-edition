@@ -2,6 +2,7 @@ const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const wtService = require('../../utils/wtService');
 const embeds = require('../../utils/embeds');
 const logger = require('../../utils/logger');
+const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -13,7 +14,11 @@ module.exports = {
                 .setDescription('Get statistics for a War Thunder player')
                 .addStringOption(option =>
                     option.setName('nickname')
-                        .setDescription('The player\'s nickname (defaults to your bound account)')))
+                        .setDescription('The player\'s nickname (defaults to your bound account)'))
+                .addBooleanOption(option =>
+                    option.setName('private')
+                        .setDescription('Make response visible only to you')
+                        .setRequired(false)))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('bind')
@@ -24,14 +29,30 @@ module.exports = {
                         .setRequired(true))),
 
     cooldown: 10,
-    longRunning: true,
-    ephemeral: true, // Personal account binding and stats
 
     async execute(interaction) {
         const subcommand = interaction.options.getSubcommand();
         const { db } = require('../../database/index');
         const { users } = require('../../database/schema');
         const { eq } = require('drizzle-orm');
+
+        // Manual defer with user preference support
+        if (subcommand === 'bind') {
+            // Bind is always ephemeral (personal account management)
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+        } else if (subcommand === 'stats') {
+            // Stats supports privacy control
+            const nickname = interaction.options.getString('nickname');
+            const isViewingSelf = !nickname; // If no nickname provided, viewing own stats
+
+            const isEphemeral = await shouldBeEphemeral(interaction, {
+                commandDefault: false, // Default public for social/competitive context
+                userOverride: interaction.options.getBoolean('private'),
+                targetUserId: isViewingSelf ? interaction.user.id : null
+            });
+
+            await interaction.deferReply({ flags: isEphemeral ? [MessageFlags.Ephemeral] : [] });
+        }
 
         if (subcommand === 'bind') {
             const nickname = interaction.options.getString('nickname');
