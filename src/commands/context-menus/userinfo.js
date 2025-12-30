@@ -1,5 +1,6 @@
 const { ContextMenuCommandBuilder, ApplicationCommandType, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
+const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
 const { db } = require('../../database');
 const { users } = require('../../database/schema');
 const { eq, and } = require('drizzle-orm');
@@ -11,9 +12,16 @@ module.exports = {
         .setDMPermission(true), // Works in DMs
 
     cooldown: 3,
-    longRunning: true, // Database query
 
     async execute(interaction, client) {
+        // Manual defer with user preference support
+        const targetUser = interaction.targetUser;
+        const isEphemeral = await shouldBeEphemeral(interaction, {
+            commandDefault: true, // Context menu defaults to ephemeral for privacy
+            targetUserId: targetUser.id
+        });
+        await interaction.deferReply({ flags: isEphemeral ? [MessageFlags.Ephemeral] : [] });
+
         const user = interaction.targetUser;
         const member = interaction.targetMember; // null if in DMs
 
@@ -115,7 +123,7 @@ module.exports = {
 
             const badges = flags.map(flag => badgeEmojis[flag] || flag).join('\n');
             embed.addFields({
-                name: '🏅 Badges',
+                name: 'Badges',
                 value: badges,
                 inline: false
             });
@@ -134,8 +142,7 @@ module.exports = {
         }
 
         return interaction.editReply({
-            embeds: [embed],
-            flags: [MessageFlags.Ephemeral]
+            embeds: [embed]
         });
     }
 };

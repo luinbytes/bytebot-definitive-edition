@@ -57,7 +57,7 @@ module.exports = {
         const subcommand = interaction.options.getSubcommand();
         const limit = interaction.options.getInteger('limit') ?? 10;
 
-        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+        await interaction.deferReply(); // Public for transparency
 
         try {
             let logs = [];

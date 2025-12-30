@@ -589,6 +589,33 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 - **FIX:** Error 10008 on panel updates. Added `.catch()` to `msg.edit()` in `updatePanel()` (line 575). Best-effort updates.
 - **Files:** `bytepod.js`
 
+### 2025-12-30 - Embed Design System & User Privacy Preferences
+- **DESIGN SYSTEM:** Implemented professional embed guidelines - "Visual Anchors, Not Decoration"
+- **EMOJI REDUCTION:** Removed 80%+ decorative emojis from field names across 40+ commands
+  - Kept functional emojis: 🥇🥈🥉 (leaderboard medals), ✅/❌ (status indicators), achievement badges
+  - Examples: help.js (12→0 emojis), streak.js (6→1 emoji), stats.js (14→1 emoji)
+- **USER PREFERENCES:** New privacy control system via `/settings privacy <preference>`
+  - Three options: `always` (all ephemeral), `public` (all public), `default` (smart defaults)
+  - Optional `private` parameter on info commands for per-command override
+  - Three-tier logic: parameter override > user preference > command default
+- **DATABASE:** Added `ephemeralPreference` column to users table (default: 'default')
+- **NEW COMMAND:** `/settings privacy` - Configure ephemeral defaults with view subcommand
+- **NEW UTILITY:** `ephemeralHelper.js` - Centralized visibility logic (`shouldBeEphemeral`, `getUserPreference`, `setUserPreference`)
+- **REFACTORED COMMANDS (11 files):**
+  - `help.js` - Split Key Features into 3 clean fields (540 chars → 150-200 chars each)
+  - `streak.js` - Added longRunning, removed 5 field emojis, added private param
+  - `stats.js` - Removed 14 field emojis, added private param, manual defer
+  - `serverinfo.js` - Added private param
+  - `birthday.js` - Added private param to view, removed 1 field emoji
+  - `userinfo.js` (context menu) - User preference support, removed Badges emoji
+  - `warthunder.js` - Added private param to stats, removed ephemeral property
+  - `ping.js` - Added private param
+  - `config.js` - Fixed missing ephemeral on success message
+  - `audit.js`, `clear.js` - Changed to public for moderation transparency
+- **PHILOSOPHY:** Emojis are visual anchors (1-2 per embed), not decoration (12+ per embed)
+- **FILES:** 40+ commands refactored, 2 new files (ephemeralHelper.js, settings.js), schema.js, index.js
+- **COMPLIANCE:** All admin commands ephemeral, all moderation commands public, info commands user-controlled
+
 ### Older Changes (Pre-December 22, 2025)
 - **2025-12-22:** Test suite async cleanup, Auto-responder system (keyword triggers, 5-min cache), Birthday tracker (privacy-focused, no year), 6 user context menus (Avatar/UserInfo/CopyID/Permissions/Activity/ModActions), Message bookmarks (100 limit, 4000 char)
 - **2025-12-20:** BytePod leaderboard, server stats, startup cleanup, guild management (/manageguilds), ownership reclaim fixes (voice reconnect bug, duplicate prompts), ownership transfer system (5-min grace, reclaim flow), logger.errorContext(), validateAndFixSchema()

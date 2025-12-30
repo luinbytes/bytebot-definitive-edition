@@ -36,7 +36,8 @@ module.exports = {
                     .where(eq(guilds.id, interaction.guild.id));
 
                 return interaction.reply({
-                    embeds: [embeds.success('Configuration Updated', `Moderation logs will now be sent to ${channel}.`)]
+                    embeds: [embeds.success('Configuration Updated', `Moderation logs will now be sent to ${channel}.`)],
+                    flags: [MessageFlags.Ephemeral]
                 });
             } catch (error) {
                 logger.error(error);

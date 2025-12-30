@@ -3,6 +3,7 @@ const { db } = require('../../database');
 const { birthdays, birthdayConfig } = require('../../database/schema');
 const { eq, and } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
+const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -23,7 +24,11 @@ module.exports = {
                 .setDescription('View someone\'s birthday')
                 .addUserOption(opt => opt
                     .setName('user')
-                    .setDescription('User to check (defaults to yourself)')))
+                    .setDescription('User to check (defaults to yourself)'))
+                .addBooleanOption(opt => opt
+                    .setName('private')
+                    .setDescription('Make response visible only to you')
+                    .setRequired(false)))
         .addSubcommand(sub =>
             sub.setName('upcoming')
                 .setDescription('View upcoming birthdays in this server')
@@ -54,10 +59,20 @@ module.exports = {
         const subcommand = interaction.options.getSubcommand();
 
         // Manually defer based on subcommand - some are private, some are public
-        const privateSubcommands = ['set', 'remove', 'view', 'setup', 'role'];
-        if (privateSubcommands.includes(subcommand)) {
+        if (subcommand === 'view') {
+            // View supports user preference control
+            const targetUser = interaction.options.getUser('user') || interaction.user;
+            const isEphemeral = await shouldBeEphemeral(interaction, {
+                commandDefault: false,
+                userOverride: interaction.options.getBoolean('private'),
+                targetUserId: targetUser.id
+            });
+            await interaction.deferReply({ flags: isEphemeral ? [MessageFlags.Ephemeral] : [] });
+        } else if (['set', 'remove', 'setup', 'role'].includes(subcommand)) {
+            // Always ephemeral for personal/admin actions
             await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
         } else {
+            // Public for upcoming birthdays (social feature)
             await interaction.deferReply();
         }
 
@@ -219,7 +234,7 @@ module.exports = {
         const daysUntil = Math.ceil((nextBirthday - today) / 86400000);
 
         if (daysUntil === 0) {
-            embed.addFields({ name: '🎉 Today!', value: 'Happy Birthday! 🎂', inline: false });
+            embed.addFields({ name: 'Today!', value: 'Happy Birthday! 🎂', inline: false });
         } else if (daysUntil === 1) {
             embed.addFields({ name: 'Coming Up', value: 'Tomorrow! 🎈', inline: false });
         } else {

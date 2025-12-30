@@ -1,8 +1,9 @@
-const { SlashCommandBuilder, ChannelType } = require('discord.js');
+const { SlashCommandBuilder, ChannelType, MessageFlags } = require('discord.js');
 const { db } = require('../../database');
 const { users, moderationLogs, bytepods, bytepodVoiceStats } = require('../../database/schema');
 const { eq, sql, desc } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
+const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
 
 // Helper to format seconds into human-readable time
 function formatDuration(totalSeconds) {
@@ -24,14 +25,27 @@ module.exports = {
         .setDescription('View server and bot statistics.')
         .addSubcommand(sub =>
             sub.setName('server')
-                .setDescription('View comprehensive server statistics.')),
-
-    longRunning: true, // Auto-defer for DB queries
+                .setDescription('View comprehensive server statistics.')
+                .addBooleanOption(option =>
+                    option
+                        .setName('private')
+                        .setDescription('Make response visible only to you')
+                        .setRequired(false)))
 
     async execute(interaction) {
         const subcommand = interaction.options.getSubcommand();
 
         if (subcommand === 'server') {
+            // Manual defer with ephemeral control
+            const isEphemeral = await shouldBeEphemeral(interaction, {
+                commandDefault: false, // Server stats default to public
+                userOverride: interaction.options.getBoolean('private')
+            });
+
+            await interaction.deferReply({
+                flags: isEphemeral ? [MessageFlags.Ephemeral] : []
+            });
+
             const guild = interaction.guild;
 
             // --- Gather Discord Data ---
@@ -96,33 +110,33 @@ module.exports = {
                 .setThumbnail(guild.iconURL({ dynamic: true, size: 256 }))
                 .addFields(
                     // Row 1: Members & Channels
-                    { name: '👥 Members', value: `${totalMembers.toLocaleString()}`, inline: true },
-                    { name: '💬 Text Channels', value: `${textChannels}`, inline: true },
-                    { name: '🔊 Voice Channels', value: `${voiceChannels}`, inline: true },
+                    { name: 'Members', value: `${totalMembers.toLocaleString()}`, inline: true },
+                    { name: 'Text Channels', value: `${textChannels}`, inline: true },
+                    { name: 'Voice Channels', value: `${voiceChannels}`, inline: true },
 
                     // Row 2: Structure
-                    { name: '📁 Categories', value: `${categories}`, inline: true },
-                    { name: '🎭 Roles', value: `${roles}`, inline: true },
-                    { name: '😀 Emojis', value: `${emojis}`, inline: true },
+                    { name: 'Categories', value: `${categories}`, inline: true },
+                    { name: 'Roles', value: `${roles}`, inline: true },
+                    { name: 'Emojis', value: `${emojis}`, inline: true },
 
                     // Row 3: Security & Boost
-                    { name: '🔒 Verification', value: verificationLevel, inline: true },
-                    { name: '💎 Boost Level', value: `Tier ${boostLevel} (${boostCount} boosts)`, inline: true },
-                    { name: '📅 Created', value: `<t:${Math.floor(guild.createdTimestamp / 1000)}:R>`, inline: true },
+                    { name: 'Verification Level', value: verificationLevel, inline: true },
+                    { name: 'Boost Level', value: `Tier ${boostLevel} (${boostCount} boosts)`, inline: true },
+                    { name: 'Created', value: `<t:${Math.floor(guild.createdTimestamp / 1000)}:R>`, inline: true },
 
                     // Row 4: Bot Activity
-                    { name: '🤖 Commands Run', value: `${totalCommands.toLocaleString()} (${uniqueUsers} users)`, inline: true },
-                    { name: '🛡️ Mod Actions', value: `${totalModActions}`, inline: true },
-                    { name: '🎙️ Active BytePods', value: `${activePodCount}`, inline: true },
+                    { name: 'Commands Run', value: `${totalCommands.toLocaleString()} (${uniqueUsers} users)`, inline: true },
+                    { name: 'Mod Actions', value: `${totalModActions}`, inline: true },
+                    { name: 'Active BytePods', value: `${activePodCount}`, inline: true },
 
                     // Row 5: Voice Leaderboard
-                    { name: '🏆 Top Voice Users', value: topVoiceText, inline: false }
+                    { name: 'Top Voice Users', value: topVoiceText, inline: false }
                 );
 
             // Add server owner
             const owner = await guild.fetchOwner().catch(() => null);
             if (owner) {
-                embed.addFields({ name: '👑 Owner', value: `${owner.user.tag}`, inline: true });
+                embed.addFields({ name: 'Owner', value: `${owner.user.tag}`, inline: true });
             }
 
             return interaction.editReply({ embeds: [embed] });

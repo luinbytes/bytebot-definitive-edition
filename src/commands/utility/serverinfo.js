@@ -1,10 +1,16 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
+const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('serverinfo')
-        .setDescription('Displays information about the server.'),
+        .setDescription('Displays information about the server.')
+        .addBooleanOption(option =>
+            option
+                .setName('private')
+                .setDescription('Make response visible only to you')
+                .setRequired(false)),
 
     async execute(interaction) {
         const { guild } = interaction;
@@ -31,6 +37,14 @@ module.exports = {
             embed.setDescription(guild.description);
         }
 
-        await interaction.reply({ embeds: [embed] });
+        const isEphemeral = await shouldBeEphemeral(interaction, {
+            commandDefault: false, // Server info defaults to public
+            userOverride: interaction.options.getBoolean('private')
+        });
+
+        await interaction.reply({
+            embeds: [embed],
+            flags: isEphemeral ? [MessageFlags.Ephemeral] : []
+        });
     },
 };
