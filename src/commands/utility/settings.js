@@ -67,13 +67,13 @@ async function handlePrivacy(interaction) {
     let description = '';
     switch (preference) {
         case 'always':
-            description = '🔒 All personal command responses will now be **visible only to you**.\n\nYou can still override this per-command using the `private` parameter.';
+            description = '🔒 All personal command responses will now be **visible only to you** (across all servers).\n\nYou can still override this per-command using the `private` parameter.';
             break;
         case 'public':
-            description = '🌐 All personal command responses will now be **public**.\n\nYou can still override this per-command using the `private` parameter.';
+            description = '🌐 All personal command responses will now be **public** (across all servers).\n\nYou can still override this per-command using the `private` parameter.';
             break;
         case 'default':
-            description = '🤖 Command responses will use **smart defaults**:\n\n' +
+            description = '🤖 Command responses will use **smart defaults** (across all servers):\n\n' +
                 '• Viewing your own data → Private\n' +
                 '• Viewing others\' data → Public (social context)\n' +
                 '• Admin/mod commands → Always appropriate visibility\n\n' +
@@ -98,9 +98,9 @@ async function handlePrivacy(interaction) {
  * Handle /settings view subcommand
  */
 async function handleView(interaction) {
-    const preference = await getUserPreference(interaction.user.id, interaction.guildId);
+    const preference = await getUserPreference(interaction.user.id);
 
-    const embed = embeds.brand('Your ByteBot Settings', 'Current configuration for your account')
+    const embed = embeds.brand('Your ByteBot Settings', 'Global settings across all servers')
         .addFields(
             {
                 name: 'Privacy Preference',
@@ -153,13 +153,13 @@ function getPreferenceLabel(preference) {
 function getPreferenceDescription(preference) {
     switch (preference) {
         case 'always':
-            return 'Every command response will be private (ephemeral), visible only to you. ' +
+            return 'Every command response will be private (ephemeral), visible only to you across all servers. ' +
                 'Perfect for users who prefer maximum privacy.';
         case 'public':
-            return 'Every command response will be public, visible to everyone in the channel. ' +
+            return 'Every command response will be public, visible to everyone across all servers. ' +
                 'Great for social interaction and sharing.';
         case 'default':
-            return 'ByteBot intelligently decides visibility based on context:\n' +
+            return 'ByteBot intelligently decides visibility based on context across all servers:\n' +
                 '• **Private** when viewing your own data\n' +
                 '• **Public** when viewing others (social context)\n' +
                 '• Admin/mod commands use appropriate defaults';
