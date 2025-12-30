@@ -3,8 +3,9 @@ const logger = require('../utils/logger');
 const embeds = require('../utils/embeds');
 const config = require('../../config.json');
 const { db } = require('../database/index');
-const { users, commandPermissions } = require('../database/schema');
+const { users, commandPermissions, customAchievements } = require('../database/schema');
 const { sql, eq, and } = require('drizzle-orm');
+const { dbLog } = require('../utils/dbLogger');
 
 // Track processed interactions to prevent duplicates
 const processedInteractions = new Set();
@@ -216,13 +217,16 @@ module.exports = {
                 const achievementId = `custom_${interaction.guild.id}_${title.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 50)}`;
 
                 // Check if achievement with this ID already exists
-                const existing = await db.select()
-                    .from(customAchievements)
-                    .where(and(
-                        eq(customAchievements.guildId, interaction.guild.id),
-                        eq(customAchievements.achievementId, achievementId)
-                    ))
-                    .get();
+                const existing = await dbLog.select('customAchievements',
+                    () => db.select()
+                        .from(customAchievements)
+                        .where(and(
+                            eq(customAchievements.guildId, interaction.guild.id),
+                            eq(customAchievements.achievementId, achievementId)
+                        ))
+                        .get(),
+                    { guildId: interaction.guild.id, achievementId }
+                );
 
                 if (existing) {
                     return interaction.editReply({
@@ -234,21 +238,24 @@ module.exports = {
                 }
 
                 // Create the custom achievement
-                await db.insert(customAchievements).values({
-                    guildId: interaction.guild.id,
-                    achievementId,
-                    title,
-                    description,
-                    emoji,
-                    category: 'special',  // Custom achievements are in special category
-                    rarity,
-                    points,
-                    criteria: JSON.stringify({ type: 'manual' }),  // Manual-only by default
-                    grantRole: false,  // No role by default
-                    enabled: true,
-                    createdBy: interaction.user.id,
-                    createdAt: new Date()
-                });
+                await dbLog.insert('customAchievements',
+                    () => db.insert(customAchievements).values({
+                        guildId: interaction.guild.id,
+                        achievementId,
+                        title,
+                        description,
+                        emoji,
+                        category: 'special',  // Custom achievements are in special category
+                        rarity,
+                        points,
+                        criteria: JSON.stringify({ type: 'manual' }),  // Manual-only by default
+                        grantRole: false,  // No role by default
+                        enabled: true,
+                        createdBy: interaction.user.id,
+                        createdAt: new Date()
+                    }),
+                    { guildId: interaction.guild.id, achievementId, createdBy: interaction.user.id }
+                );
 
                 // Invalidate achievement cache
                 if (client.activityStreakService) {
@@ -516,18 +523,21 @@ module.exports = {
 
         // Update database tracking
         try {
-            await db.insert(users).values({
-                id: interaction.user.id,
-                guildId: interaction.guild?.id ?? 'DM',
-                commandsRun: 1,
-                lastSeen: new Date(),
-            }).onConflictDoUpdate({
-                target: users.id,
-                set: {
-                    commandsRun: sql`${users.commandsRun} + 1`,
+            await dbLog.insert('users',
+                () => db.insert(users).values({
+                    id: interaction.user.id,
+                    guildId: interaction.guild?.id ?? 'DM',
+                    commandsRun: 1,
                     lastSeen: new Date(),
-                },
-            });
+                }).onConflictDoUpdate({
+                    target: users.id,
+                    set: {
+                        commandsRun: sql`${users.commandsRun} + 1`,
+                        lastSeen: new Date(),
+                    },
+                }),
+                { userId: interaction.user.id, commandName: command.data.name }
+            );
         } catch (error) {
             logger.error(`Failed to update user stats: ${error}`);
         }
