@@ -5,15 +5,14 @@ const { eq, and } = require('drizzle-orm');
 /**
  * Get user's ephemeral preference from database
  * @param {string} userId - Discord user ID
- * @param {string} guildId - Discord guild ID
  * @returns {Promise<string>} - User's preference ('always', 'public', or 'default')
  */
-async function getUserPreference(userId, guildId) {
+async function getUserPreference(userId) {
     try {
         const user = await db
             .select()
             .from(users)
-            .where(and(eq(users.id, userId), eq(users.guildId, guildId)))
+            .where(eq(users.id, userId))
             .get();
 
         return user?.ephemeralPreference || 'default';
@@ -62,7 +61,7 @@ async function shouldBeEphemeral(interaction, options = {}) {
     if (userOverride !== null) return userOverride;
 
     // 2. Check user's global preference
-    const userPref = await getUserPreference(interaction.user.id, interaction.guildId);
+    const userPref = await getUserPreference(interaction.user.id);
     if (userPref === 'always') return true;   // Always ephemeral
     if (userPref === 'public') return false;  // Always public
 
@@ -77,9 +76,9 @@ async function shouldBeEphemeral(interaction, options = {}) {
 }
 
 /**
- * Update user's ephemeral preference
+ * Update user's ephemeral preference (global across all guilds)
  * @param {string} userId - Discord user ID
- * @param {string} guildId - Discord guild ID
+ * @param {string} guildId - Discord guild ID (for user creation only)
  * @param {string} preference - New preference ('always' | 'public' | 'default')
  * @returns {Promise<boolean>} - Success status
  */
@@ -91,32 +90,22 @@ async function setUserPreference(userId, guildId, preference) {
     }
 
     try {
-        // Check if user exists
-        const existingUser = await db
-            .select()
-            .from(users)
-            .where(and(eq(users.id, userId), eq(users.guildId, guildId)))
-            .get();
-
-        if (existingUser) {
-            // Update existing user
-            await db
-                .update(users)
-                .set({ ephemeralPreference: preference })
-                .where(and(eq(users.id, userId), eq(users.guildId, guildId)))
-                .run();
-        } else {
-            // Create new user record
-            await db
-                .insert(users)
-                .values({
-                    id: userId,
-                    guildId: guildId,
-                    ephemeralPreference: preference,
-                    commandsRun: 0
-                })
-                .run();
-        }
+        // Use onConflictDoUpdate pattern like the rest of the codebase
+        await db
+            .insert(users)
+            .values({
+                id: userId,
+                guildId: guildId, // Only used if creating new user
+                ephemeralPreference: preference,
+                commandsRun: 0,
+                lastSeen: new Date()
+            })
+            .onConflictDoUpdate({
+                target: users.id,
+                set: {
+                    ephemeralPreference: preference
+                }
+            });
 
         return true;
     } catch (error) {

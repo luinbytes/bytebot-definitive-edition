@@ -160,7 +160,7 @@ async function showHelpPage(interaction, client, pageNumber) {
 function buildOverviewEmbed(client, commands, sortedCategories, categories) {
     const totalCommands = commands.size;
 
-    const embed = embeds.brand('ByteBot Help', 'Your feature-rich Discord companion with neon purple style!')
+    const embed = embeds.brand('ByteBot Help', 'Your feature-rich Discord companion!')
         .setThumbnail(client.user.displayAvatarURL())
         .setDescription(
             '**Welcome to ByteBot!**\n\n' +
@@ -169,30 +169,10 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
         )
         .addFields(
             {
-                name: 'Core Features',
+                name: 'Key Features',
                 value:
-                    '**BytePods** - Ephemeral voice channels with lock/whitelist\n' +
-                    '**Achievement System** - 87+ achievements with role rewards\n' +
-                    '**Media Gallery** - Auto-capture with 500 item limit\n' +
-                    '**Activity Streaks** - Daily tracking with freeze protection',
-                inline: false
-            },
-            {
-                name: 'Community Tools',
-                value:
-                    '**Suggestions** - Voting and review workflow\n' +
-                    '**Birthdays** - Privacy-focused celebrations\n' +
-                    '**Bookmarks** - Save messages with search\n' +
-                    '**Auto-Responders** - Keyword triggers',
-                inline: false
-            },
-            {
-                name: 'Additional Features',
-                value:
-                    '**Moderation** - Ban, kick, warn, audit logs\n' +
-                    '**Welcome Messages** - Custom greetings with variables\n' +
-                    '**Permission System** - Role-based command access\n' +
-                    '**War Thunder Stats** - Player statistics integration',
+                    'BytePods • Achievements • Activity Streaks • Media Gallery\n' +
+                    'Suggestions • Birthdays • Bookmarks • Moderation Tools',
                 inline: false
             }
         );
@@ -241,7 +221,7 @@ function buildCategoryEmbed(categoryName, categoryCommands) {
 
             // Check for subcommands
             const hasSubcommands = cmd.data.options && cmd.data.options.length > 0 &&
-                                   cmd.data.options[0].type === 1; // Type 1 = Subcommand
+                cmd.data.options[0].type === 1; // Type 1 = Subcommand
 
             if (hasSubcommands) {
                 const subcommands = cmd.data.options
