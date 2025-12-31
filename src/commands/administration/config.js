@@ -79,4 +79,6 @@ module.exports = {
             });
         }
     },
+
+    permissions: [PermissionFlagsBits.Administrator]
 };

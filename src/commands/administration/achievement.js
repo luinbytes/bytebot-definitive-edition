@@ -172,7 +172,9 @@ module.exports = {
                 await interaction.respond([]);
             }
         }
-    }
+    },
+
+    permissions: [PermissionFlagsBits.Administrator]
 };
 
 /**
