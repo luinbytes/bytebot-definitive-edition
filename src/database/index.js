@@ -87,7 +87,9 @@ const expectedSchema = {
         guild_id: 'TEXT'
     },
     bytepod_user_settings: {
-        user_id: 'TEXT PRIMARY KEY',
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        user_id: 'TEXT NOT NULL',
+        guild_id: 'TEXT NOT NULL',
         auto_lock: 'INTEGER DEFAULT 0'
     },
     bytepod_active_sessions: {
@@ -107,6 +109,7 @@ const expectedSchema = {
     bytepod_templates: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
         user_id: 'TEXT NOT NULL',
+        guild_id: 'TEXT NOT NULL',
         name: 'TEXT NOT NULL',
         user_limit: 'INTEGER DEFAULT 0',
         auto_lock: 'INTEGER DEFAULT 0',

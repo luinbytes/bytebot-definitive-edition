@@ -211,8 +211,11 @@ module.exports = {
             try {
                 // Fetch User Settings
                 const userSettings = await dbLog.select('bytepodUserSettings',
-                    () => db.select().from(bytepodUserSettings).where(eq(bytepodUserSettings.userId, member.id)).get(),
-                    { userId: member.id }
+                    () => db.select().from(bytepodUserSettings).where(and(
+                        eq(bytepodUserSettings.userId, member.id),
+                        eq(bytepodUserSettings.guildId, guild.id)
+                    )).get(),
+                    { userId: member.id, guildId: guild.id }
                 );
                 const autoLock = userSettings?.autoLock || false;
 
@@ -240,7 +243,10 @@ module.exports = {
 
                 // Apply Auto-Whitelist Presets
                 const presets = await dbLog.select('bytepodAutoWhitelist',
-                    () => db.select().from(bytepodAutoWhitelist).where(eq(bytepodAutoWhitelist.userId, member.id)),
+                    () => db.select().from(bytepodAutoWhitelist).where(and(
+                        eq(bytepodAutoWhitelist.userId, member.id),
+                        eq(bytepodAutoWhitelist.guildId, guild.id)
+                    )),
                     { userId: member.id, guildId: guild.id }
                 );
                 for (const preset of presets) {
