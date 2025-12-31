@@ -347,11 +347,86 @@ const expectedSchema = {
 };
 
 /**
+ * Fix bytepod_user_settings table to use composite primary key
+ * This is a one-time fix for the migration issue
+ */
+function fixBytepodUserSettingsTable() {
+    const logger = require('../utils/logger');
+
+    try {
+        // Check if table exists first
+        if (!tableExists('bytepod_user_settings')) {
+            // Table doesn't exist yet - will be created by migrations
+            return null;
+        }
+
+        // Check if table has old structure (with id column)
+        const tableInfo = sqlite.prepare('PRAGMA table_info(bytepod_user_settings)').all();
+        const hasIdColumn = tableInfo.some(col => col.name === 'id');
+
+        if (!hasIdColumn) {
+            // Table already has composite primary key - nothing to do
+            return null;
+        }
+
+        logger.info('Fixing bytepod_user_settings table structure...', 'Database');
+
+        // Begin transaction
+        sqlite.exec('BEGIN TRANSACTION');
+
+        // Create new table with composite primary key
+        sqlite.exec(`
+            CREATE TABLE bytepod_user_settings_new (
+                user_id TEXT NOT NULL,
+                guild_id TEXT NOT NULL,
+                auto_lock INTEGER DEFAULT 0,
+                PRIMARY KEY (user_id, guild_id)
+            )
+        `);
+
+        // Copy data from old table
+        sqlite.exec(`
+            INSERT INTO bytepod_user_settings_new (user_id, guild_id, auto_lock)
+            SELECT user_id, guild_id, auto_lock
+            FROM bytepod_user_settings
+        `);
+
+        const rowCount = sqlite.prepare('SELECT COUNT(*) as count FROM bytepod_user_settings').get().count;
+
+        // Drop old table and rename new one
+        sqlite.exec('DROP TABLE bytepod_user_settings');
+        sqlite.exec('ALTER TABLE bytepod_user_settings_new RENAME TO bytepod_user_settings');
+
+        // Commit transaction
+        sqlite.exec('COMMIT');
+
+        logger.success(`Fixed bytepod_user_settings table (migrated ${rowCount} rows)`, 'Database');
+        return `Fixed bytepod_user_settings table structure (${rowCount} rows)`;
+
+    } catch (error) {
+        // Rollback on error
+        try {
+            sqlite.exec('ROLLBACK');
+        } catch (e) {
+            // Ignore rollback errors
+        }
+        logger.error(`Failed to fix bytepod_user_settings: ${error.message}`, 'Database');
+        return null;
+    }
+}
+
+/**
  * Validate and fix database schema before running Drizzle migrations
  * This ensures missing columns are added to prevent migration failures
  */
 function validateAndFixSchema() {
     const fixes = [];
+
+    // First, fix the bytepod_user_settings table if needed
+    const tableFixResult = fixBytepodUserSettingsTable();
+    if (tableFixResult) {
+        fixes.push(tableFixResult);
+    }
 
     for (const [tableName, columns] of Object.entries(expectedSchema)) {
         if (!tableExists(tableName)) {
