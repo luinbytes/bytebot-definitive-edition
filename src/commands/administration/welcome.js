@@ -4,6 +4,7 @@ const { guilds } = require('../../database/schema');
 const { eq } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const logger = require('../../utils/logger');
+const { dbLog } = require('../../utils/dbLogger');
 
 /**
  * Get ordinal suffix for a number (1st, 2nd, 3rd, etc.)
@@ -150,7 +151,10 @@ module.exports = {
 
         try {
             // Fetch current config
-            const [config] = await db.select().from(guilds).where(eq(guilds.id, interaction.guild.id));
+            const [config] = await dbLog.select('guilds',
+                () => db.select().from(guilds).where(eq(guilds.id, interaction.guild.id)),
+                { guildId: interaction.guild.id }
+            );
 
             if (!config) {
                 return interaction.reply({
@@ -220,9 +224,12 @@ async function handleSetup(interaction, config) {
         });
     }
 
-    await db.update(guilds)
-        .set({ welcomeChannel: channel.id })
-        .where(eq(guilds.id, interaction.guild.id));
+    await dbLog.update('guilds',
+        () => db.update(guilds)
+            .set({ welcomeChannel: channel.id })
+            .where(eq(guilds.id, interaction.guild.id)),
+        { guildId: interaction.guild.id, welcomeChannel: channel.id }
+    );
 
     return interaction.reply({
         embeds: [embeds.success('Welcome Channel Set', `Welcome messages will be sent to ${channel}.\n\nUse \`/welcome message\` to set a custom message, then \`/welcome toggle\` to enable.`)],
@@ -236,9 +243,12 @@ async function handleSetup(interaction, config) {
 async function handleMessage(interaction, config) {
     const message = interaction.options.getString('text');
 
-    await db.update(guilds)
-        .set({ welcomeMessage: message })
-        .where(eq(guilds.id, interaction.guild.id));
+    await dbLog.update('guilds',
+        () => db.update(guilds)
+            .set({ welcomeMessage: message })
+            .where(eq(guilds.id, interaction.guild.id)),
+        { guildId: interaction.guild.id }
+    );
 
     // Parse the message to show a preview
     const preview = parseWelcomeMessage(message, interaction.member, interaction.guild);
@@ -270,9 +280,12 @@ async function handleToggle(interaction, config) {
         });
     }
 
-    await db.update(guilds)
-        .set({ welcomeEnabled: enabled })
-        .where(eq(guilds.id, interaction.guild.id));
+    await dbLog.update('guilds',
+        () => db.update(guilds)
+            .set({ welcomeEnabled: enabled })
+            .where(eq(guilds.id, interaction.guild.id)),
+        { guildId: interaction.guild.id, welcomeEnabled: enabled }
+    );
 
     const statusText = enabled ? 'enabled' : 'disabled';
     const emoji = enabled ? '✅' : '❌';
@@ -289,9 +302,12 @@ async function handleToggle(interaction, config) {
 async function handleEmbed(interaction, config) {
     const useEmbed = interaction.options.getBoolean('use_embed');
 
-    await db.update(guilds)
-        .set({ welcomeUseEmbed: useEmbed })
-        .where(eq(guilds.id, interaction.guild.id));
+    await dbLog.update('guilds',
+        () => db.update(guilds)
+            .set({ welcomeUseEmbed: useEmbed })
+            .where(eq(guilds.id, interaction.guild.id)),
+        { guildId: interaction.guild.id, welcomeUseEmbed: useEmbed }
+    );
 
     const formatText = useEmbed ? 'branded embed' : 'plain text';
 

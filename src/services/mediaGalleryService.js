@@ -3,6 +3,7 @@ const { mediaGalleryConfig } = require('../database/schema');
 const { eq } = require('drizzle-orm');
 const logger = require('../utils/logger');
 const mediaUtil = require('../utils/mediaUtil');
+const { dbLog } = require('../utils/dbLogger');
 
 class MediaGalleryService {
     constructor(client) {
@@ -245,9 +246,12 @@ class MediaGalleryService {
             const { eq } = require('drizzle-orm');
             const { db } = require('../database/index');
 
-            await db.update(mediaItems)
-                .set({ messageId: repostMessage.id })
-                .where(eq(mediaItems.id, media.id));
+            await dbLog.update('mediaItems',
+                () => db.update(mediaItems)
+                    .set({ messageId: repostMessage.id })
+                    .where(eq(mediaItems.id, media.id)),
+                { mediaId: media.id, messageId: repostMessage.id }
+            );
 
             logger.debug(`📤 Reposted media with tags/description (ID: ${repostMessage.id})`);
         } catch (error) {
@@ -389,9 +393,12 @@ class MediaGalleryService {
             // Update database with new message ID
             const { mediaItems } = require('../database/schema');
             const { eq } = require('drizzle-orm');
-            await db.update(mediaItems)
-                .set({ messageId: repostMessage.id })
-                .where(eq(mediaItems.id, captureResult.media.id));
+            await dbLog.update('mediaItems',
+                () => db.update(mediaItems)
+                    .set({ messageId: repostMessage.id })
+                    .where(eq(mediaItems.id, captureResult.media.id)),
+                { mediaId: captureResult.media.id, messageId: repostMessage.id }
+            );
 
             logger.debug(`📤 Reposted media as embed (ID: ${repostMessage.id})`);
 
@@ -544,10 +551,13 @@ class MediaGalleryService {
 
         // Fetch from DB
         try {
-            const config = await db.select()
-                .from(mediaGalleryConfig)
-                .where(eq(mediaGalleryConfig.channelId, channelId))
-                .get();
+            const config = await dbLog.select('mediaGalleryConfig',
+                () => db.select()
+                    .from(mediaGalleryConfig)
+                    .where(eq(mediaGalleryConfig.channelId, channelId))
+                    .get(),
+                { channelId }
+            );
 
             // Cache for 5 minutes
             if (config) {

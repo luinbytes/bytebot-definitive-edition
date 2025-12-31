@@ -4,6 +4,7 @@ const { achievementRoleConfig, achievementRoles, customAchievements } = require(
 const { eq, and } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const logger = require('../../utils/logger');
+const { dbLog } = require('../../utils/dbLogger');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -131,12 +132,15 @@ module.exports = {
                 if (subcommand === 'remove') {
                     const targetUser = interaction.options.getUser('user');
                     if (targetUser) {
-                        const userAchievements = await db.select()
-                            .from(require('../../database/schema').activityAchievements)
-                            .where(and(
-                                eq(require('../../database/schema').activityAchievements.userId, targetUser.id),
-                                eq(require('../../database/schema').activityAchievements.guildId, interaction.guild.id)
-                            ));
+                        const userAchievements = await dbLog.select('activityAchievements',
+                            () => db.select()
+                                .from(require('../../database/schema').activityAchievements)
+                                .where(and(
+                                    eq(require('../../database/schema').activityAchievements.userId, targetUser.id),
+                                    eq(require('../../database/schema').activityAchievements.guildId, interaction.guild.id)
+                                )),
+                            { userId: targetUser.id, guildId: interaction.guild.id }
+                        );
 
                         const userAchIds = new Set(userAchievements.map(a => a.achievementId));
                         allAchievements = allAchievements.filter(ach =>
@@ -192,10 +196,13 @@ async function handleSetup(interaction) {
         }
 
         // Get existing config
-        const existing = await db.select()
-            .from(achievementRoleConfig)
-            .where(eq(achievementRoleConfig.guildId, interaction.guild.id))
-            .get();
+        const existing = await dbLog.select('achievementRoleConfig',
+            () => db.select()
+                .from(achievementRoleConfig)
+                .where(eq(achievementRoleConfig.guildId, interaction.guild.id))
+                .get(),
+            { guildId: interaction.guild.id }
+        );
 
         // Build update object
         const updates = {
@@ -210,21 +217,27 @@ async function handleSetup(interaction) {
 
         if (existing) {
             // Update existing config
-            await db.update(achievementRoleConfig)
-                .set(updates)
-                .where(eq(achievementRoleConfig.guildId, interaction.guild.id));
+            await dbLog.update('achievementRoleConfig',
+                () => db.update(achievementRoleConfig)
+                    .set(updates)
+                    .where(eq(achievementRoleConfig.guildId, interaction.guild.id)),
+                { guildId: interaction.guild.id, updates: Object.keys(updates) }
+            );
         } else {
             // Create new config with defaults
-            await db.insert(achievementRoleConfig).values({
-                guildId: interaction.guild.id,
-                enabled: enabled ?? true,
-                rolePrefix: prefix ?? '🏆',
-                useRarityColors: useRarityColors ?? true,
-                cleanupOrphaned: cleanupOrphaned ?? true,
-                notifyOnEarn: notifyOnEarn ?? true,
-                createdAt: new Date(),
-                updatedAt: new Date()
-            });
+            await dbLog.insert('achievementRoleConfig',
+                () => db.insert(achievementRoleConfig).values({
+                    guildId: interaction.guild.id,
+                    enabled: enabled ?? true,
+                    rolePrefix: prefix ?? '🏆',
+                    useRarityColors: useRarityColors ?? true,
+                    cleanupOrphaned: cleanupOrphaned ?? true,
+                    notifyOnEarn: notifyOnEarn ?? true,
+                    createdAt: new Date(),
+                    updatedAt: new Date()
+                }),
+                { guildId: interaction.guild.id }
+            );
         }
 
         const embed = embeds.success(
@@ -262,10 +275,13 @@ async function handleSetup(interaction) {
  */
 async function handleView(interaction) {
     try {
-        const config = await db.select()
-            .from(achievementRoleConfig)
-            .where(eq(achievementRoleConfig.guildId, interaction.guild.id))
-            .get();
+        const config = await dbLog.select('achievementRoleConfig',
+            () => db.select()
+                .from(achievementRoleConfig)
+                .where(eq(achievementRoleConfig.guildId, interaction.guild.id))
+                .get(),
+            { guildId: interaction.guild.id }
+        );
 
         const embed = embeds.brand(
             '⚙️ Achievement Role Reward Configuration',
@@ -348,9 +364,12 @@ async function handleListRoles(interaction) {
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
         // Get all achievement roles for this guild
-        const guildRoles = await db.select()
-            .from(achievementRoles)
-            .where(eq(achievementRoles.guildId, interaction.guild.id));
+        const guildRoles = await dbLog.select('achievementRoles',
+            () => db.select()
+                .from(achievementRoles)
+                .where(eq(achievementRoles.guildId, interaction.guild.id)),
+            { guildId: interaction.guild.id }
+        );
 
         if (guildRoles.length === 0) {
             return interaction.editReply({

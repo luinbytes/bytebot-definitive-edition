@@ -12,6 +12,7 @@ const { eq, and, desc } = require('drizzle-orm');
 const { PermissionFlagsBits } = require('discord.js');
 const logger = require('../utils/logger');
 const embeds = require('../utils/embeds');
+const { dbLog } = require('../utils/dbLogger');
 
 /**
  * Achievement Manager - Loads and caches achievement definitions from database
@@ -43,8 +44,11 @@ class AchievementManager {
             logger.debug('Loading achievement definitions from database...');
 
             // Load core achievements from achievementDefinitions table
-            let coreAchievements = await db.select()
-                .from(achievementDefinitions);
+            let coreAchievements = await dbLog.select('achievementDefinitions',
+                () => db.select()
+                    .from(achievementDefinitions),
+                {}
+            );
 
             // Auto-seed if database is empty OR has missing achievements
             // Clear require cache to ensure fresh data
@@ -59,15 +63,21 @@ class AchievementManager {
                 await this.seedAchievements();
 
                 // Reload after seeding
-                coreAchievements = await db.select()
-                    .from(achievementDefinitions);
+                coreAchievements = await dbLog.select('achievementDefinitions',
+                    () => db.select()
+                        .from(achievementDefinitions),
+                    { operation: 'reload after empty seed' }
+                );
             } else if (coreAchievements.length < expectedCount) {
                 logger.info(`Achievement database incomplete (${coreAchievements.length}/${expectedCount}) - inserting missing achievements...`);
                 await this.seedAchievements();
 
                 // Reload after seeding
-                coreAchievements = await db.select()
-                    .from(achievementDefinitions);
+                coreAchievements = await dbLog.select('achievementDefinitions',
+                    () => db.select()
+                        .from(achievementDefinitions),
+                    { operation: 'reload after incomplete seed' }
+                );
             }
 
             // Clear existing cache
@@ -152,7 +162,10 @@ class AchievementManager {
                         logger.debug('Achievement data:', JSON.stringify(achievement, null, 2));
                     }
 
-                    await db.insert(achievementDefinitions).values(achievementData);
+                    await dbLog.insert('achievementDefinitions',
+                        () => db.insert(achievementDefinitions).values(achievementData),
+                        { achievementId: achievement.id }
+                    );
                     inserted++;
                 } catch (error) {
                     // Silently skip duplicates (should never happen on first run)
@@ -226,12 +239,15 @@ class AchievementManager {
      */
     async getCustomAchievements(guildId) {
         try {
-            const custom = await db.select()
-                .from(customAchievements)
-                .where(and(
-                    eq(customAchievements.guildId, guildId),
-                    eq(customAchievements.enabled, true)
-                ));
+            const custom = await dbLog.select('customAchievements',
+                () => db.select()
+                    .from(customAchievements)
+                    .where(and(
+                        eq(customAchievements.guildId, guildId),
+                        eq(customAchievements.enabled, true)
+                    )),
+                { guildId }
+            );
 
             return custom.map(ach => {
                 // Parse JSON criteria
@@ -407,8 +423,11 @@ class ActivityStreakService {
      */
     async checkMissedDays() {
         try {
-            const allStreaks = await db.select()
-                .from(activityStreaks);
+            const allStreaks = await dbLog.select('activityStreaks',
+                () => db.select()
+                    .from(activityStreaks),
+                { operation: 'checkMissedDays' }
+            );
 
             const today = this.getTodayDateString();
             const yesterday = this.getYesterdayDateString();
@@ -431,15 +450,18 @@ class ActivityStreakService {
                     } else if (daysSinceActivity > 1 && streak.freezesAvailable > 0) {
                         // Auto-use freeze for missed days
                         logger.info(`Auto-using freeze for user ${streak.userId} in guild ${streak.guildId}`);
-                        await db.update(activityStreaks)
-                            .set({
-                                freezesAvailable: streak.freezesAvailable - 1,
-                                updatedAt: new Date()
-                            })
-                            .where(and(
-                                eq(activityStreaks.userId, streak.userId),
-                                eq(activityStreaks.guildId, streak.guildId)
-                            ));
+                        await dbLog.update('activityStreaks',
+                            () => db.update(activityStreaks)
+                                .set({
+                                    freezesAvailable: streak.freezesAvailable - 1,
+                                    updatedAt: new Date()
+                                })
+                                .where(and(
+                                    eq(activityStreaks.userId, streak.userId),
+                                    eq(activityStreaks.guildId, streak.guildId)
+                                )),
+                            { userId: streak.userId, guildId: streak.guildId, operation: 'auto-freeze' }
+                        );
                         processedCount++;
                     }
                 }
@@ -466,30 +488,39 @@ class ActivityStreakService {
             logger.info('Checking for achievements earned while bot was offline...');
 
             // Get all users with activity data
-            const allStreaks = await db.select()
-                .from(activityStreaks);
+            const allStreaks = await dbLog.select('activityStreaks',
+                () => db.select()
+                    .from(activityStreaks),
+                { operation: 'processMissedAchievements' }
+            );
 
             let checkedUsers = 0;
             let awardsGranted = 0;
 
             for (const streak of allStreaks) {
                 try {
-                    const beforeCount = await db.select()
-                        .from(activityAchievements)
-                        .where(and(
-                            eq(activityAchievements.userId, streak.userId),
-                            eq(activityAchievements.guildId, streak.guildId)
-                        ));
+                    const beforeCount = await dbLog.select('activityAchievements',
+                        () => db.select()
+                            .from(activityAchievements)
+                            .where(and(
+                                eq(activityAchievements.userId, streak.userId),
+                                eq(activityAchievements.guildId, streak.guildId)
+                            )),
+                        { userId: streak.userId, guildId: streak.guildId, operation: 'before' }
+                    );
 
                     // Check all achievements for this user
                     await this.checkAllAchievements(streak.userId, streak.guildId);
 
-                    const afterCount = await db.select()
-                        .from(activityAchievements)
-                        .where(and(
-                            eq(activityAchievements.userId, streak.userId),
-                            eq(activityAchievements.guildId, streak.guildId)
-                        ));
+                    const afterCount = await dbLog.select('activityAchievements',
+                        () => db.select()
+                            .from(activityAchievements)
+                            .where(and(
+                                eq(activityAchievements.userId, streak.userId),
+                                eq(activityAchievements.guildId, streak.guildId)
+                            )),
+                        { userId: streak.userId, guildId: streak.guildId, operation: 'after' }
+                    );
 
                     const newAchievements = afterCount.length - beforeCount.length;
                     if (newAchievements > 0) {
@@ -525,13 +556,16 @@ class ActivityStreakService {
     async checkAllAchievements(userId, guildId) {
         try {
             // Get user's streak data
-            const streakData = await db.select()
-                .from(activityStreaks)
-                .where(and(
-                    eq(activityStreaks.userId, userId),
-                    eq(activityStreaks.guildId, guildId)
-                ))
-                .get();
+            const streakData = await dbLog.select('activityStreaks',
+                () => db.select()
+                    .from(activityStreaks)
+                    .where(and(
+                        eq(activityStreaks.userId, userId),
+                        eq(activityStreaks.guildId, guildId)
+                    ))
+                    .get(),
+                { userId, guildId }
+            );
 
             if (!streakData) {
                 logger.debug(`No streak data for user ${userId} in guild ${guildId}`);
@@ -572,8 +606,11 @@ class ActivityStreakService {
         logger.info('Running daily activity streak check...');
 
         try {
-            const allStreaks = await db.select()
-                .from(activityStreaks);
+            const allStreaks = await dbLog.select('activityStreaks',
+                () => db.select()
+                    .from(activityStreaks),
+                { operation: 'processDailyStreaks' }
+            );
 
             const today = this.getTodayDateString();
             const yesterday = this.getYesterdayDateString();
@@ -597,15 +634,18 @@ class ActivityStreakService {
                     if (streak.freezesAvailable > 0) {
                         // Auto-use freeze
                         logger.debug(`Auto-using freeze for user ${streak.userId} in guild ${streak.guildId}`);
-                        await db.update(activityStreaks)
-                            .set({
-                                freezesAvailable: streak.freezesAvailable - 1,
-                                updatedAt: new Date()
-                            })
-                            .where(and(
-                                eq(activityStreaks.userId, streak.userId),
-                                eq(activityStreaks.guildId, streak.guildId)
-                            ));
+                        await dbLog.update('activityStreaks',
+                            () => db.update(activityStreaks)
+                                .set({
+                                    freezesAvailable: streak.freezesAvailable - 1,
+                                    updatedAt: new Date()
+                                })
+                                .where(and(
+                                    eq(activityStreaks.userId, streak.userId),
+                                    eq(activityStreaks.guildId, streak.guildId)
+                                )),
+                            { userId: streak.userId, guildId: streak.guildId, operation: 'daily-auto-freeze' }
+                        );
                         updatedCount++;
                     } else {
                         // Break streak
@@ -636,14 +676,17 @@ class ActivityStreakService {
             const today = this.getTodayDateString();
 
             // Update activity log for today
-            const existingLog = await db.select()
-                .from(activityLogs)
-                .where(and(
-                    eq(activityLogs.userId, userId),
-                    eq(activityLogs.guildId, guildId),
-                    eq(activityLogs.activityDate, today)
-                ))
-                .get();
+            const existingLog = await dbLog.select('activityLogs',
+                () => db.select()
+                    .from(activityLogs)
+                    .where(and(
+                        eq(activityLogs.userId, userId),
+                        eq(activityLogs.guildId, guildId),
+                        eq(activityLogs.activityDate, today)
+                    ))
+                    .get(),
+                { userId, guildId, activityDate: today }
+            );
 
             if (existingLog) {
                 // Update existing log
@@ -652,13 +695,16 @@ class ActivityStreakService {
                 if (activityType === 'voice') updates.voiceMinutes = existingLog.voiceMinutes + value;
                 if (activityType === 'command') updates.commandsRun = existingLog.commandsRun + value;
 
-                await db.update(activityLogs)
-                    .set(updates)
-                    .where(and(
-                        eq(activityLogs.userId, userId),
-                        eq(activityLogs.guildId, guildId),
-                        eq(activityLogs.activityDate, today)
-                    ));
+                await dbLog.update('activityLogs',
+                    () => db.update(activityLogs)
+                        .set(updates)
+                        .where(and(
+                            eq(activityLogs.userId, userId),
+                            eq(activityLogs.guildId, guildId),
+                            eq(activityLogs.activityDate, today)
+                        )),
+                    { userId, guildId, activityDate: today, activityType }
+                );
             } else {
                 // Create new log
                 const logData = {
@@ -671,7 +717,10 @@ class ActivityStreakService {
                     updatedAt: new Date()
                 };
 
-                await db.insert(activityLogs).values(logData);
+                await dbLog.insert('activityLogs',
+                    () => db.insert(activityLogs).values(logData),
+                    { userId, guildId, activityDate: today, activityType }
+                );
             }
 
             // Update streak
@@ -692,16 +741,19 @@ class ActivityStreakService {
             const today = this.getTodayDateString();
             const log = await this.getOrCreateTodayLog(userId, guildId, today);
 
-            await db.update(activityLogs)
-                .set({
-                    reactionsGiven: log.reactionsGiven + 1,
-                    updatedAt: new Date()
-                })
-                .where(and(
-                    eq(activityLogs.userId, userId),
-                    eq(activityLogs.guildId, guildId),
-                    eq(activityLogs.activityDate, today)
-                ));
+            await dbLog.update('activityLogs',
+                () => db.update(activityLogs)
+                    .set({
+                        reactionsGiven: log.reactionsGiven + 1,
+                        updatedAt: new Date()
+                    })
+                    .where(and(
+                        eq(activityLogs.userId, userId),
+                        eq(activityLogs.guildId, guildId),
+                        eq(activityLogs.activityDate, today)
+                    )),
+                { userId, guildId, activityDate: today, operation: 'reaction' }
+            );
 
             // Update streak
             await this.updateStreak(userId, guildId, today);
@@ -721,16 +773,19 @@ class ActivityStreakService {
             const today = this.getTodayDateString();
             const log = await this.getOrCreateTodayLog(userId, guildId, today);
 
-            await db.update(activityLogs)
-                .set({
-                    channelsJoined: log.channelsJoined + 1,
-                    updatedAt: new Date()
-                })
-                .where(and(
-                    eq(activityLogs.userId, userId),
-                    eq(activityLogs.guildId, guildId),
-                    eq(activityLogs.activityDate, today)
-                ));
+            await dbLog.update('activityLogs',
+                () => db.update(activityLogs)
+                    .set({
+                        channelsJoined: log.channelsJoined + 1,
+                        updatedAt: new Date()
+                    })
+                    .where(and(
+                        eq(activityLogs.userId, userId),
+                        eq(activityLogs.guildId, guildId),
+                        eq(activityLogs.activityDate, today)
+                    )),
+                { userId, guildId, activityDate: today, operation: 'channelJoin' }
+            );
 
             // Update streak
             await this.updateStreak(userId, guildId, today);
@@ -750,29 +805,35 @@ class ActivityStreakService {
             const today = this.getTodayDateString();
             const log = await this.getOrCreateTodayLog(userId, guildId, today);
 
-            await db.update(activityLogs)
-                .set({
-                    bytepodsCreated: log.bytepodsCreated + 1,
-                    updatedAt: new Date()
-                })
-                .where(and(
-                    eq(activityLogs.userId, userId),
-                    eq(activityLogs.guildId, guildId),
-                    eq(activityLogs.activityDate, today)
-                ));
+            await dbLog.update('activityLogs',
+                () => db.update(activityLogs)
+                    .set({
+                        bytepodsCreated: log.bytepodsCreated + 1,
+                        updatedAt: new Date()
+                    })
+                    .where(and(
+                        eq(activityLogs.userId, userId),
+                        eq(activityLogs.guildId, guildId),
+                        eq(activityLogs.activityDate, today)
+                    )),
+                { userId, guildId, activityDate: today, operation: 'bytepod' }
+            );
 
             // Update streak
             await this.updateStreak(userId, guildId, today);
 
             // Check for BytePod achievements
             const totals = await this.getUserTotals(userId, guildId);
-            const streakData = await db.select()
-                .from(activityStreaks)
-                .where(and(
-                    eq(activityStreaks.userId, userId),
-                    eq(activityStreaks.guildId, guildId)
-                ))
-                .get();
+            const streakData = await dbLog.select('activityStreaks',
+                () => db.select()
+                    .from(activityStreaks)
+                    .where(and(
+                        eq(activityStreaks.userId, userId),
+                        eq(activityStreaks.guildId, guildId)
+                    ))
+                    .get(),
+                { userId, guildId }
+            );
 
             if (streakData) {
                 await this.checkAndAwardAchievements(
@@ -814,17 +875,20 @@ class ActivityStreakService {
                 uniqueCommands.push(commandName);
             }
 
-            await db.update(activityLogs)
-                .set({
-                    commandsRun: log.commandsRun + 1,
-                    uniqueCommandsUsed: JSON.stringify(uniqueCommands),
-                    updatedAt: new Date()
-                })
-                .where(and(
-                    eq(activityLogs.userId, userId),
-                    eq(activityLogs.guildId, guildId),
-                    eq(activityLogs.activityDate, today)
-                ));
+            await dbLog.update('activityLogs',
+                () => db.update(activityLogs)
+                    .set({
+                        commandsRun: log.commandsRun + 1,
+                        uniqueCommandsUsed: JSON.stringify(uniqueCommands),
+                        updatedAt: new Date()
+                    })
+                    .where(and(
+                        eq(activityLogs.userId, userId),
+                        eq(activityLogs.guildId, guildId),
+                        eq(activityLogs.activityDate, today)
+                    )),
+                { userId, guildId, activityDate: today, commandName }
+            );
 
             // Update streak
             await this.updateStreak(userId, guildId, today);
@@ -865,18 +929,21 @@ class ActivityStreakService {
             const firstTime = log.firstActivityTime || now;
             const lastTime = now;
 
-            await db.update(activityLogs)
-                .set({
-                    activeHours: JSON.stringify(activeHours),
-                    firstActivityTime: firstTime,
-                    lastActivityTime: lastTime,
-                    updatedAt: new Date()
-                })
-                .where(and(
-                    eq(activityLogs.userId, userId),
-                    eq(activityLogs.guildId, guildId),
-                    eq(activityLogs.activityDate, today)
-                ));
+            await dbLog.update('activityLogs',
+                () => db.update(activityLogs)
+                    .set({
+                        activeHours: JSON.stringify(activeHours),
+                        firstActivityTime: firstTime,
+                        lastActivityTime: lastTime,
+                        updatedAt: new Date()
+                    })
+                    .where(and(
+                        eq(activityLogs.userId, userId),
+                        eq(activityLogs.guildId, guildId),
+                        eq(activityLogs.activityDate, today)
+                    )),
+                { userId, guildId, activityDate: today, hour }
+            );
 
         } catch (error) {
             logger.error(`Error recording active hour for user ${userId}:`, error);
@@ -926,14 +993,17 @@ class ActivityStreakService {
      */
     async getOrCreateTodayLog(userId, guildId, today) {
         try {
-            const existingLog = await db.select()
-                .from(activityLogs)
-                .where(and(
-                    eq(activityLogs.userId, userId),
-                    eq(activityLogs.guildId, guildId),
-                    eq(activityLogs.activityDate, today)
-                ))
-                .get();
+            const existingLog = await dbLog.select('activityLogs',
+                () => db.select()
+                    .from(activityLogs)
+                    .where(and(
+                        eq(activityLogs.userId, userId),
+                        eq(activityLogs.guildId, guildId),
+                        eq(activityLogs.activityDate, today)
+                    ))
+                    .get(),
+                { userId, guildId, activityDate: today }
+            );
 
             if (existingLog) {
                 return existingLog;
@@ -957,7 +1027,10 @@ class ActivityStreakService {
                 updatedAt: new Date()
             };
 
-            await db.insert(activityLogs).values(newLog);
+            await dbLog.insert('activityLogs',
+                () => db.insert(activityLogs).values(newLog),
+                { userId, guildId, activityDate: today }
+            );
 
             return newLog;
 
@@ -975,28 +1048,34 @@ class ActivityStreakService {
      */
     async updateStreak(userId, guildId, today) {
         try {
-            const existing = await db.select()
-                .from(activityStreaks)
-                .where(and(
-                    eq(activityStreaks.userId, userId),
-                    eq(activityStreaks.guildId, guildId)
-                ))
-                .get();
+            const existing = await dbLog.select('activityStreaks',
+                () => db.select()
+                    .from(activityStreaks)
+                    .where(and(
+                        eq(activityStreaks.userId, userId),
+                        eq(activityStreaks.guildId, guildId)
+                    ))
+                    .get(),
+                { userId, guildId }
+            );
 
             if (!existing) {
                 // Create new streak record
-                await db.insert(activityStreaks).values({
-                    userId,
-                    guildId,
-                    currentStreak: 1,
-                    longestStreak: 1,
-                    lastActivityDate: today,
-                    totalActiveDays: 1,
-                    freezesAvailable: 1,
-                    lastFreezeReset: new Date(),
-                    createdAt: new Date(),
-                    updatedAt: new Date()
-                });
+                await dbLog.insert('activityStreaks',
+                    () => db.insert(activityStreaks).values({
+                        userId,
+                        guildId,
+                        currentStreak: 1,
+                        longestStreak: 1,
+                        lastActivityDate: today,
+                        totalActiveDays: 1,
+                        freezesAvailable: 1,
+                        lastFreezeReset: new Date(),
+                        createdAt: new Date(),
+                        updatedAt: new Date()
+                    }),
+                    { userId, guildId, operation: 'newStreak' }
+                );
 
                 // Award first achievement
                 await this.checkAndAwardAchievements(userId, guildId, 1, 1);
@@ -1023,18 +1102,21 @@ class ActivityStreakService {
 
             const newLongest = Math.max(existing.longestStreak, newStreak);
 
-            await db.update(activityStreaks)
-                .set({
-                    currentStreak: newStreak,
-                    longestStreak: newLongest,
-                    lastActivityDate: today,
-                    totalActiveDays: newTotalDays,
-                    updatedAt: new Date()
-                })
-                .where(and(
-                    eq(activityStreaks.userId, userId),
-                    eq(activityStreaks.guildId, guildId)
-                ));
+            await dbLog.update('activityStreaks',
+                () => db.update(activityStreaks)
+                    .set({
+                        currentStreak: newStreak,
+                        longestStreak: newLongest,
+                        lastActivityDate: today,
+                        totalActiveDays: newTotalDays,
+                        updatedAt: new Date()
+                    })
+                    .where(and(
+                        eq(activityStreaks.userId, userId),
+                        eq(activityStreaks.guildId, guildId)
+                    )),
+                { userId, guildId, newStreak, newTotalDays }
+            );
 
             // Check for achievements
             await this.checkAndAwardAchievements(userId, guildId, newStreak, newTotalDays);
@@ -1051,15 +1133,18 @@ class ActivityStreakService {
      */
     async breakStreak(userId, guildId) {
         try {
-            await db.update(activityStreaks)
-                .set({
-                    currentStreak: 0,
-                    updatedAt: new Date()
-                })
-                .where(and(
-                    eq(activityStreaks.userId, userId),
-                    eq(activityStreaks.guildId, guildId)
-                ));
+            await dbLog.update('activityStreaks',
+                () => db.update(activityStreaks)
+                    .set({
+                        currentStreak: 0,
+                        updatedAt: new Date()
+                    })
+                    .where(and(
+                        eq(activityStreaks.userId, userId),
+                        eq(activityStreaks.guildId, guildId)
+                    )),
+                { userId, guildId, operation: 'breakStreak' }
+            );
 
             logger.debug(`Streak broken for user ${userId} in guild ${guildId}`);
         } catch (error) {
@@ -1271,12 +1356,15 @@ class ActivityStreakService {
     async checkMetaAchievements(userId, guildId, toAward) {
         try {
             // Get current achievement count
-            const achievements = await db.select()
-                .from(activityAchievements)
-                .where(and(
-                    eq(activityAchievements.userId, userId),
-                    eq(activityAchievements.guildId, guildId)
-                ));
+            const achievements = await dbLog.select('activityAchievements',
+                () => db.select()
+                    .from(activityAchievements)
+                    .where(and(
+                        eq(activityAchievements.userId, userId),
+                        eq(activityAchievements.guildId, guildId)
+                    )),
+                { userId, guildId, operation: 'metaCheck' }
+            );
 
             const count = achievements.length + toAward.length; // Include pending awards
 
@@ -1310,12 +1398,15 @@ class ActivityStreakService {
      */
     async getUserTotals(userId, guildId) {
         try {
-            const logs = await db.select()
-                .from(activityLogs)
-                .where(and(
-                    eq(activityLogs.userId, userId),
-                    eq(activityLogs.guildId, guildId)
-                ));
+            const logs = await dbLog.select('activityLogs',
+                () => db.select()
+                    .from(activityLogs)
+                    .where(and(
+                        eq(activityLogs.userId, userId),
+                        eq(activityLogs.guildId, guildId)
+                    )),
+                { userId, guildId }
+            );
 
             const totals = {
                 totalMessages: 0,
@@ -1374,14 +1465,17 @@ class ActivityStreakService {
      */
     async hasAchievement(userId, guildId, achievementId) {
         try {
-            const existing = await db.select()
-                .from(activityAchievements)
-                .where(and(
-                    eq(activityAchievements.userId, userId),
-                    eq(activityAchievements.guildId, guildId),
-                    eq(activityAchievements.achievementId, achievementId)
-                ))
-                .get();
+            const existing = await dbLog.select('activityAchievements',
+                () => db.select()
+                    .from(activityAchievements)
+                    .where(and(
+                        eq(activityAchievements.userId, userId),
+                        eq(activityAchievements.guildId, guildId),
+                        eq(activityAchievements.achievementId, achievementId)
+                    ))
+                    .get(),
+                { userId, guildId, achievementId }
+            );
 
             return !!existing;
         } catch (error) {
@@ -1420,15 +1514,18 @@ class ActivityStreakService {
             }
 
             // Insert into database
-            await db.insert(activityAchievements).values({
-                userId,
-                guildId,
-                achievementId,
-                points: achievement.points,
-                awardedBy, // null = auto-tracked, userId = manually awarded
-                notified: false,
-                earnedAt: new Date()
-            });
+            await dbLog.insert('activityAchievements',
+                () => db.insert(activityAchievements).values({
+                    userId,
+                    guildId,
+                    achievementId,
+                    points: achievement.points,
+                    awardedBy, // null = auto-tracked, userId = manually awarded
+                    notified: false,
+                    earnedAt: new Date()
+                }),
+                { userId, guildId, achievementId, points: achievement.points }
+            );
 
             // Send DM notification
             await this.notifyAchievement(userId, guildId, achievementId);
@@ -1493,14 +1590,17 @@ class ActivityStreakService {
             }
 
             // Check if achievement exists before deletion
-            const existing = await db.select()
-                .from(activityAchievements)
-                .where(and(
-                    eq(activityAchievements.userId, userId),
-                    eq(activityAchievements.guildId, guildId),
-                    eq(activityAchievements.achievementId, achievementId)
-                ))
-                .get();
+            const existing = await dbLog.select('activityAchievements',
+                () => db.select()
+                    .from(activityAchievements)
+                    .where(and(
+                        eq(activityAchievements.userId, userId),
+                        eq(activityAchievements.guildId, guildId),
+                        eq(activityAchievements.achievementId, achievementId)
+                    ))
+                    .get(),
+                { userId, guildId, achievementId }
+            );
 
             if (!existing) {
                 logger.warn(`No achievement ${achievementId} found for user ${userId}`);
@@ -1508,12 +1608,15 @@ class ActivityStreakService {
             }
 
             // Delete from database
-            await db.delete(activityAchievements)
-                .where(and(
-                    eq(activityAchievements.userId, userId),
-                    eq(activityAchievements.guildId, guildId),
-                    eq(activityAchievements.achievementId, achievementId)
-                ));
+            await dbLog.delete('activityAchievements',
+                () => db.delete(activityAchievements)
+                    .where(and(
+                        eq(activityAchievements.userId, userId),
+                        eq(activityAchievements.guildId, guildId),
+                        eq(activityAchievements.achievementId, achievementId)
+                    )),
+                { userId, guildId, achievementId }
+            );
 
             // Remove role if achievement granted one
             if (achievement.grantRole) {
@@ -1547,13 +1650,16 @@ class ActivityStreakService {
             if (!config.enabled) return;
 
             // Find the achievement role
-            const roleRecord = await db.select()
-                .from(achievementRoles)
-                .where(and(
-                    eq(achievementRoles.guildId, guildId),
-                    eq(achievementRoles.achievementId, achievementDef.id)
-                ))
-                .get();
+            const roleRecord = await dbLog.select('achievementRoles',
+                () => db.select()
+                    .from(achievementRoles)
+                    .where(and(
+                        eq(achievementRoles.guildId, guildId),
+                        eq(achievementRoles.achievementId, achievementDef.id)
+                    ))
+                    .get(),
+                { guildId, achievementId: achievementDef.id }
+            );
 
             if (!roleRecord) return;
 
@@ -1582,8 +1688,11 @@ class ActivityStreakService {
                 return;
             }
 
-            const allStreaks = await db.select()
-                .from(activityStreaks);
+            const allStreaks = await dbLog.select('activityStreaks',
+                () => db.select()
+                    .from(activityStreaks),
+                { operation: 'resetMonthlyFreezes' }
+            );
 
             let resetCount = 0;
 
@@ -1592,16 +1701,19 @@ class ActivityStreakService {
                 const lastReset = streak.lastFreezeReset ? new Date(streak.lastFreezeReset) : null;
 
                 if (!lastReset || lastReset < firstOfMonth) {
-                    await db.update(activityStreaks)
-                        .set({
-                            freezesAvailable: 1,
-                            lastFreezeReset: now,
-                            updatedAt: now
-                        })
-                        .where(and(
-                            eq(activityStreaks.userId, streak.userId),
-                            eq(activityStreaks.guildId, streak.guildId)
-                        ));
+                    await dbLog.update('activityStreaks',
+                        () => db.update(activityStreaks)
+                            .set({
+                                freezesAvailable: 1,
+                                lastFreezeReset: now,
+                                updatedAt: now
+                            })
+                            .where(and(
+                                eq(activityStreaks.userId, streak.userId),
+                                eq(activityStreaks.guildId, streak.guildId)
+                            )),
+                        { userId: streak.userId, guildId: streak.guildId, operation: 'freezeReset' }
+                    );
                     resetCount++;
                 }
             }
@@ -1622,25 +1734,31 @@ class ActivityStreakService {
      */
     async getUserStreak(userId, guildId) {
         try {
-            const streak = await db.select()
-                .from(activityStreaks)
-                .where(and(
-                    eq(activityStreaks.userId, userId),
-                    eq(activityStreaks.guildId, guildId)
-                ))
-                .get();
+            const streak = await dbLog.select('activityStreaks',
+                () => db.select()
+                    .from(activityStreaks)
+                    .where(and(
+                        eq(activityStreaks.userId, userId),
+                        eq(activityStreaks.guildId, guildId)
+                    ))
+                    .get(),
+                { userId, guildId }
+            );
 
             if (!streak) {
                 return null;
             }
 
             // Get achievements
-            const achievements = await db.select()
-                .from(activityAchievements)
-                .where(and(
-                    eq(activityAchievements.userId, userId),
-                    eq(activityAchievements.guildId, guildId)
-                ));
+            const achievements = await dbLog.select('activityAchievements',
+                () => db.select()
+                    .from(activityAchievements)
+                    .where(and(
+                        eq(activityAchievements.userId, userId),
+                        eq(activityAchievements.guildId, guildId)
+                    )),
+                { userId, guildId }
+            );
 
             // Load achievement definitions
             const achievementDefs = [];
@@ -1677,11 +1795,14 @@ class ActivityStreakService {
         try {
             const orderColumn = type === 'longest' ? activityStreaks.longestStreak : activityStreaks.currentStreak;
 
-            const results = await db.select()
-                .from(activityStreaks)
-                .where(eq(activityStreaks.guildId, guildId))
-                .orderBy(desc(orderColumn))
-                .limit(limit);
+            const results = await dbLog.select('activityStreaks',
+                () => db.select()
+                    .from(activityStreaks)
+                    .where(eq(activityStreaks.guildId, guildId))
+                    .orderBy(desc(orderColumn))
+                    .limit(limit),
+                { guildId, type, limit }
+            );
 
             return results.filter(r => (type === 'longest' ? r.longestStreak : r.currentStreak) > 0);
         } catch (error) {
@@ -1749,13 +1870,16 @@ class ActivityStreakService {
     async getOrCreateAchievementRole(guild, achievementDef, config) {
         try {
             // Check if role already exists in database
-            const existingRole = await db.select()
-                .from(achievementRoles)
-                .where(and(
-                    eq(achievementRoles.achievementId, achievementDef.id),
-                    eq(achievementRoles.guildId, guild.id)
-                ))
-                .get();
+            const existingRole = await dbLog.select('achievementRoles',
+                () => db.select()
+                    .from(achievementRoles)
+                    .where(and(
+                        eq(achievementRoles.achievementId, achievementDef.id),
+                        eq(achievementRoles.guildId, guild.id)
+                    ))
+                    .get(),
+                { achievementId: achievementDef.id, guildId: guild.id }
+            );
 
             // If exists and role is still in Discord, return it
             if (existingRole) {
@@ -1764,8 +1888,11 @@ class ActivityStreakService {
                     return role;
                 } else {
                     // Role was deleted from Discord, clean up DB
-                    await db.delete(achievementRoles)
-                        .where(eq(achievementRoles.id, existingRole.id));
+                    await dbLog.delete('achievementRoles',
+                        () => db.delete(achievementRoles)
+                            .where(eq(achievementRoles.id, existingRole.id)),
+                        { id: existingRole.id, achievementId: achievementDef.id }
+                    );
                     logger.debug(`Cleaned up orphaned role record for achievement ${achievementDef.id}`);
                 }
             }
@@ -1785,12 +1912,15 @@ class ActivityStreakService {
             });
 
             // Store in database
-            await db.insert(achievementRoles).values({
-                achievementId: achievementDef.id,
-                guildId: guild.id,
-                roleId: newRole.id,
-                createdAt: new Date()
-            });
+            await dbLog.insert('achievementRoles',
+                () => db.insert(achievementRoles).values({
+                    achievementId: achievementDef.id,
+                    guildId: guild.id,
+                    roleId: newRole.id,
+                    createdAt: new Date()
+                }),
+                { achievementId: achievementDef.id, guildId: guild.id, roleId: newRole.id }
+            );
 
             logger.success(`Created achievement role: ${roleName} in ${guild.name}`);
             return newRole;
@@ -1815,10 +1945,13 @@ class ActivityStreakService {
             }
 
             // Get guild role config
-            const config = await db.select()
-                .from(achievementRoleConfig)
-                .where(eq(achievementRoleConfig.guildId, guildId))
-                .get();
+            const config = await dbLog.select('achievementRoleConfig',
+                () => db.select()
+                    .from(achievementRoleConfig)
+                    .where(eq(achievementRoleConfig.guildId, guildId))
+                    .get(),
+                { guildId }
+            );
 
             // Default config if not set
             const roleConfig = config || {
@@ -1891,9 +2024,12 @@ class ActivityStreakService {
             logger.info('Starting orphaned achievement role cleanup...');
 
             // Get all guilds with cleanup enabled
-            const guildsWithCleanup = await db.select()
-                .from(achievementRoleConfig)
-                .where(eq(achievementRoleConfig.cleanupOrphaned, true));
+            const guildsWithCleanup = await dbLog.select('achievementRoleConfig',
+                () => db.select()
+                    .from(achievementRoleConfig)
+                    .where(eq(achievementRoleConfig.cleanupOrphaned, true)),
+                { operation: 'cleanupOrphanedRoles' }
+            );
 
             let totalCleaned = 0;
             let totalDeleted = 0;
@@ -1908,17 +2044,23 @@ class ActivityStreakService {
                     }
 
                     // Get all achievement roles for this guild
-                    const guildRoles = await db.select()
-                        .from(achievementRoles)
-                        .where(eq(achievementRoles.guildId, guild.id));
+                    const guildRoles = await dbLog.select('achievementRoles',
+                        () => db.select()
+                            .from(achievementRoles)
+                            .where(eq(achievementRoles.guildId, guild.id)),
+                        { guildId: guild.id }
+                    );
 
                     for (const roleRecord of guildRoles) {
                         const discordRole = guild.roles.cache.get(roleRecord.roleId);
 
                         // If role deleted from Discord, clean up DB
                         if (!discordRole) {
-                            await db.delete(achievementRoles)
-                                .where(eq(achievementRoles.id, roleRecord.id));
+                            await dbLog.delete('achievementRoles',
+                                () => db.delete(achievementRoles)
+                                    .where(eq(achievementRoles.id, roleRecord.id)),
+                                { id: roleRecord.id, achievementId: roleRecord.achievementId }
+                            );
 
                             logger.debug(`Cleaned up orphaned role record for ${roleRecord.achievementId} in ${guild.name}`);
                             totalCleaned++;
@@ -1933,8 +2075,11 @@ class ActivityStreakService {
                             });
 
                             // Delete from DB
-                            await db.delete(achievementRoles)
-                                .where(eq(achievementRoles.id, roleRecord.id));
+                            await dbLog.delete('achievementRoles',
+                                () => db.delete(achievementRoles)
+                                    .where(eq(achievementRoles.id, roleRecord.id)),
+                                { id: roleRecord.id, achievementId: roleRecord.achievementId, operation: '0members' }
+                            );
 
                             logger.debug(`Deleted unused role ${discordRole.name} in ${guild.name}`);
                             totalDeleted++;

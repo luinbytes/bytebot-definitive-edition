@@ -3,6 +3,7 @@ const { reminders } = require('../database/schema');
 const { eq, and, lte } = require('drizzle-orm');
 const embeds = require('../utils/embeds');
 const logger = require('../utils/logger');
+const { dbLog } = require('../utils/dbLogger');
 
 // Max safe timeout for setTimeout (24.8 days in ms)
 const MAX_SAFE_TIMEOUT = 2147483647;
@@ -38,10 +39,13 @@ class ReminderService {
             const now = Date.now();
 
             // Get all active reminders
-            const activeReminders = await db.select()
-                .from(reminders)
-                .where(eq(reminders.active, true))
-                .all();
+            const activeReminders = await dbLog.select('reminders',
+                () => db.select()
+                    .from(reminders)
+                    .where(eq(reminders.active, true))
+                    .all(),
+                { active: true }
+            );
 
             logger.info(`Loading ${activeReminders.length} active reminders`);
 
@@ -55,9 +59,12 @@ class ReminderService {
                     } else {
                         // Too old, mark as missed
                         logger.warn(`Reminder ${reminder.id} missed by ${Math.round((now - reminder.triggerAt) / 60000)}min, marking inactive`);
-                        await db.update(reminders)
-                            .set({ active: false })
-                            .where(eq(reminders.id, reminder.id));
+                        await dbLog.update('reminders',
+                            () => db.update(reminders)
+                                .set({ active: false })
+                                .where(eq(reminders.id, reminder.id)),
+                            { reminderId: reminder.id, operation: 'markMissed' }
+                        );
                     }
                 } else {
                     // Future reminder, schedule it
@@ -117,14 +124,17 @@ class ReminderService {
     async fireReminder(reminderId) {
         try {
             // Atomic check-and-mark (prevents duplicate fires in sharded environments)
-            const result = await db.update(reminders)
-                .set({ active: false })
-                .where(and(
-                    eq(reminders.id, reminderId),
-                    eq(reminders.active, true)
-                ))
-                .returning()
-                .all();
+            const result = await dbLog.update('reminders',
+                () => db.update(reminders)
+                    .set({ active: false })
+                    .where(and(
+                        eq(reminders.id, reminderId),
+                        eq(reminders.active, true)
+                    ))
+                    .returning()
+                    .all(),
+                { reminderId, operation: 'fire' }
+            );
 
             if (result.length === 0) {
                 // Already fired by another instance or cancelled
@@ -241,15 +251,18 @@ class ReminderService {
     async cancelReminder(reminderId, userId) {
         try {
             // Atomic check and update
-            const result = await db.update(reminders)
-                .set({ active: false })
-                .where(and(
-                    eq(reminders.id, reminderId),
-                    eq(reminders.userId, userId),
-                    eq(reminders.active, true)
-                ))
-                .returning()
-                .all();
+            const result = await dbLog.update('reminders',
+                () => db.update(reminders)
+                    .set({ active: false })
+                    .where(and(
+                        eq(reminders.id, reminderId),
+                        eq(reminders.userId, userId),
+                        eq(reminders.active, true)
+                    ))
+                    .returning()
+                    .all(),
+                { reminderId, userId, operation: 'cancel' }
+            );
 
             if (result.length === 0) {
                 throw new Error('Reminder not found or already inactive');

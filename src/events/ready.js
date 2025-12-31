@@ -3,36 +3,49 @@ const logger = require('../utils/logger');
 const { db } = require('../database');
 const { bytepodActiveSessions, bytepodVoiceStats, bytepods } = require('../database/schema');
 const { eq, and } = require('drizzle-orm');
+const { dbLog } = require('../utils/dbLogger');
 
 // Helper to finalize a stale voice session
 async function finalizeStaleSession(session, client) {
     const durationSeconds = Math.floor((Date.now() - session.startTime) / 1000);
 
     // Delete active session
-    await db.delete(bytepodActiveSessions)
-        .where(eq(bytepodActiveSessions.id, session.id));
+    await dbLog.delete('bytepodActiveSessions',
+        () => db.delete(bytepodActiveSessions)
+            .where(eq(bytepodActiveSessions.id, session.id)),
+        { sessionId: session.id, userId: session.userId, guildId: session.guildId }
+    );
 
     // Upsert aggregate stats
-    const existing = await db.select().from(bytepodVoiceStats)
-        .where(and(
-            eq(bytepodVoiceStats.userId, session.userId),
-            eq(bytepodVoiceStats.guildId, session.guildId)
-        )).get();
+    const existing = await dbLog.select('bytepodVoiceStats',
+        () => db.select().from(bytepodVoiceStats)
+            .where(and(
+                eq(bytepodVoiceStats.userId, session.userId),
+                eq(bytepodVoiceStats.guildId, session.guildId)
+            )).get(),
+        { userId: session.userId, guildId: session.guildId }
+    );
 
     if (existing) {
-        await db.update(bytepodVoiceStats)
-            .set({
-                totalSeconds: existing.totalSeconds + durationSeconds,
-                sessionCount: existing.sessionCount + 1
-            })
-            .where(eq(bytepodVoiceStats.id, existing.id));
+        await dbLog.update('bytepodVoiceStats',
+            () => db.update(bytepodVoiceStats)
+                .set({
+                    totalSeconds: existing.totalSeconds + durationSeconds,
+                    sessionCount: existing.sessionCount + 1
+                })
+                .where(eq(bytepodVoiceStats.id, existing.id)),
+            { userId: session.userId, guildId: session.guildId, durationSeconds }
+        );
     } else {
-        await db.insert(bytepodVoiceStats).values({
-            userId: session.userId,
-            guildId: session.guildId,
-            totalSeconds: durationSeconds,
-            sessionCount: 1
-        });
+        await dbLog.insert('bytepodVoiceStats',
+            () => db.insert(bytepodVoiceStats).values({
+                userId: session.userId,
+                guildId: session.guildId,
+                totalSeconds: durationSeconds,
+                sessionCount: 1
+            }),
+            { userId: session.userId, guildId: session.guildId, durationSeconds }
+        );
     }
 
     // Track activity streak (convert seconds to minutes)
@@ -64,7 +77,10 @@ module.exports = {
 
         // --- Validate Active BytePod Sessions (Restart Resilience) ---
         try {
-            const activeSessions = await db.select().from(bytepodActiveSessions);
+            const activeSessions = await dbLog.select('bytepodActiveSessions',
+                () => db.select().from(bytepodActiveSessions),
+                { operation: 'startupValidation' }
+            );
             let finalized = 0;
             let continued = 0;
 
@@ -98,8 +114,11 @@ module.exports = {
                 } catch (e) {
                     logger.error(`Session validation error for session ${session.id}: ${e}`);
                     // On error, cleanup the session to prevent orphans
-                    await db.delete(bytepodActiveSessions)
-                        .where(eq(bytepodActiveSessions.id, session.id));
+                    await dbLog.delete('bytepodActiveSessions',
+                        () => db.delete(bytepodActiveSessions)
+                            .where(eq(bytepodActiveSessions.id, session.id)),
+                        { sessionId: session.id, operation: 'cleanupError' }
+                    );
                 }
             }
 
@@ -112,7 +131,10 @@ module.exports = {
 
         // --- Validate BytePod Channels (Cleanup orphans & empty pods) ---
         try {
-            const allPods = await db.select().from(bytepods);
+            const allPods = await dbLog.select('bytepods',
+                () => db.select().from(bytepods),
+                { operation: 'startupCleanup' }
+            );
             let deleted = 0;
             let orphaned = 0;
             let active = 0;
@@ -122,7 +144,10 @@ module.exports = {
                     const guild = await client.guilds.fetch(pod.guildId).catch(() => null);
                     if (!guild) {
                         // Guild no longer accessible, remove DB record
-                        await db.delete(bytepods).where(eq(bytepods.channelId, pod.channelId));
+                        await dbLog.delete('bytepods',
+                            () => db.delete(bytepods).where(eq(bytepods.channelId, pod.channelId)),
+                            { podId: pod.channelId, guildId: pod.guildId, operation: 'orphanedGuild' }
+                        );
                         orphaned++;
                         continue;
                     }
@@ -130,7 +155,10 @@ module.exports = {
                     const channel = await guild.channels.fetch(pod.channelId).catch(() => null);
                     if (!channel) {
                         // Channel was deleted while bot was offline, cleanup DB
-                        await db.delete(bytepods).where(eq(bytepods.channelId, pod.channelId));
+                        await dbLog.delete('bytepods',
+                            () => db.delete(bytepods).where(eq(bytepods.channelId, pod.channelId)),
+                            { podId: pod.channelId, guildId: pod.guildId, operation: 'orphanedChannel' }
+                        );
                         orphaned++;
                         continue;
                     }
@@ -139,7 +167,10 @@ module.exports = {
                     if (channel.members.size === 0) {
                         // Empty pod, delete it
                         await channel.delete('BytePod cleanup: Empty on bot restart').catch(() => null);
-                        await db.delete(bytepods).where(eq(bytepods.channelId, pod.channelId));
+                        await dbLog.delete('bytepods',
+                            () => db.delete(bytepods).where(eq(bytepods.channelId, pod.channelId)),
+                            { podId: pod.channelId, guildId: pod.guildId, operation: 'emptyPod' }
+                        );
                         deleted++;
                     } else {
                         // Pod has members, keep it
@@ -148,7 +179,10 @@ module.exports = {
                 } catch (e) {
                     logger.error(`BytePod cleanup error for ${pod.channelId}: ${e.message}`);
                     // On error, try to cleanup the DB record to prevent permanent orphans
-                    await db.delete(bytepods).where(eq(bytepods.channelId, pod.channelId)).catch(() => { });
+                    await dbLog.delete('bytepods',
+                        () => db.delete(bytepods).where(eq(bytepods.channelId, pod.channelId)).catch(() => { }),
+                        { podId: pod.channelId, operation: 'cleanupError' }
+                    );
                     orphaned++;
                 }
             }

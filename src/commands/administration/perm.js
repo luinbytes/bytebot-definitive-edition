@@ -4,6 +4,7 @@ const { commandPermissions } = require('../../database/schema');
 const embeds = require('../../utils/embeds');
 const logger = require('../../utils/logger');
 const { eq, and } = require('drizzle-orm');
+const { dbLog } = require('../../utils/dbLogger');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -81,12 +82,15 @@ module.exports = {
 
             if (subcommand === 'add') {
                 // Check if exists
-                const existing = await db.select().from(commandPermissions)
-                    .where(and(
-                        eq(commandPermissions.guildId, interaction.guild.id),
-                        eq(commandPermissions.commandName, commandName),
-                        eq(commandPermissions.roleId, role.id)
-                    ));
+                const existing = await dbLog.select('commandPermissions',
+                    () => db.select().from(commandPermissions)
+                        .where(and(
+                            eq(commandPermissions.guildId, interaction.guild.id),
+                            eq(commandPermissions.commandName, commandName),
+                            eq(commandPermissions.roleId, role.id)
+                        )),
+                    { guildId: interaction.guild.id, commandName, roleId: role.id }
+                );
 
                 if (existing.length > 0) {
                     return interaction.editReply({
@@ -94,23 +98,29 @@ module.exports = {
                     });
                 }
 
-                await db.insert(commandPermissions).values({
-                    guildId: interaction.guild.id,
-                    commandName: commandName,
-                    roleId: role.id
-                });
+                await dbLog.insert('commandPermissions',
+                    () => db.insert(commandPermissions).values({
+                        guildId: interaction.guild.id,
+                        commandName: commandName,
+                        roleId: role.id
+                    }),
+                    { guildId: interaction.guild.id, commandName, roleId: role.id }
+                );
 
                 return interaction.editReply({
                     embeds: [embeds.success('Permission Added', `Role ${role} can now use \`/${commandName}\`.`)]
                 });
 
             } else if (subcommand === 'remove') {
-                const deleted = await db.delete(commandPermissions)
-                    .where(and(
-                        eq(commandPermissions.guildId, interaction.guild.id),
-                        eq(commandPermissions.commandName, commandName),
-                        eq(commandPermissions.roleId, role.id)
-                    )).returning();
+                const deleted = await dbLog.delete('commandPermissions',
+                    () => db.delete(commandPermissions)
+                        .where(and(
+                            eq(commandPermissions.guildId, interaction.guild.id),
+                            eq(commandPermissions.commandName, commandName),
+                            eq(commandPermissions.roleId, role.id)
+                        )).returning(),
+                    { guildId: interaction.guild.id, commandName, roleId: role.id }
+                );
 
                 if (deleted.length === 0) {
                     return interaction.editReply({
@@ -123,19 +133,25 @@ module.exports = {
                 });
 
             } else if (subcommand === 'reset') {
-                await db.delete(commandPermissions)
-                    .where(and(
-                        eq(commandPermissions.guildId, interaction.guild.id),
-                        eq(commandPermissions.commandName, commandName)
-                    ));
+                await dbLog.delete('commandPermissions',
+                    () => db.delete(commandPermissions)
+                        .where(and(
+                            eq(commandPermissions.guildId, interaction.guild.id),
+                            eq(commandPermissions.commandName, commandName)
+                        )),
+                    { guildId: interaction.guild.id, commandName }
+                );
 
                 return interaction.editReply({
                     embeds: [embeds.success('Permissions Reset', `Custom permissions for \`/${commandName}\` have been cleared. Default bot permissions apply.`)]
                 });
 
             } else if (subcommand === 'list') {
-                const perms = await db.select().from(commandPermissions)
-                    .where(eq(commandPermissions.guildId, interaction.guild.id));
+                const perms = await dbLog.select('commandPermissions',
+                    () => db.select().from(commandPermissions)
+                        .where(eq(commandPermissions.guildId, interaction.guild.id)),
+                    { guildId: interaction.guild.id }
+                );
 
                 if (perms.length === 0) {
                     return interaction.editReply({

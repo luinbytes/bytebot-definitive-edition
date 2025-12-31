@@ -3,6 +3,7 @@ const { db } = require('../../database');
 const { suggestions, suggestionConfig } = require('../../database/schema');
 const { eq, and, desc } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
+const { dbLog } = require('../../utils/dbLogger');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -163,23 +164,29 @@ module.exports = {
 
         if (existing) {
             // Update existing config
-            await db.update(suggestionConfig)
-                .set({
-                    channelId: channel.id,
-                    reviewRoleId: reviewRole?.id || null,
-                    allowAnonymous: allowAnonymous,
-                    enabled: true
-                })
-                .where(eq(suggestionConfig.guildId, interaction.guild.id));
+            await dbLog.update('suggestionConfig',
+                () => db.update(suggestionConfig)
+                    .set({
+                        channelId: channel.id,
+                        reviewRoleId: reviewRole?.id || null,
+                        allowAnonymous: allowAnonymous,
+                        enabled: true
+                    })
+                    .where(eq(suggestionConfig.guildId, interaction.guild.id)),
+                { guildId: interaction.guild.id, channelId: channel.id }
+            );
         } else {
             // Create new config
-            await db.insert(suggestionConfig).values({
-                guildId: interaction.guild.id,
-                channelId: channel.id,
-                reviewRoleId: reviewRole?.id || null,
-                enabled: true,
-                allowAnonymous: allowAnonymous
-            });
+            await dbLog.insert('suggestionConfig',
+                () => db.insert(suggestionConfig).values({
+                    guildId: interaction.guild.id,
+                    channelId: channel.id,
+                    reviewRoleId: reviewRole?.id || null,
+                    enabled: true,
+                    allowAnonymous: allowAnonymous
+                }),
+                { guildId: interaction.guild.id, channelId: channel.id }
+            );
         }
 
         const setupEmbed = embeds.success(
@@ -253,14 +260,17 @@ module.exports = {
         }
 
         // Update suggestion status
-        await db.update(suggestions)
-            .set({
-                status: newStatus,
-                reviewedBy: interaction.user.id,
-                reviewedAt: new Date(),
-                reviewReason: reason
-            })
-            .where(eq(suggestions.id, id));
+        await dbLog.update('suggestions',
+            () => db.update(suggestions)
+                .set({
+                    status: newStatus,
+                    reviewedBy: interaction.user.id,
+                    reviewedAt: new Date(),
+                    reviewReason: reason
+                })
+                .where(eq(suggestions.id, id)),
+            { suggestionId: id, newStatus, reviewedBy: interaction.user.id }
+        );
 
         // Update the suggestion message
         await this.updateSuggestionMessage(interaction.guild, suggestion, newStatus, reason);
@@ -522,9 +532,12 @@ module.exports = {
             const downvotes = thumbsDown ? thumbsDown.count - 1 : 0;
 
             // Update vote counts in database
-            await db.update(suggestions)
-                .set({ upvotes, downvotes })
-                .where(eq(suggestions.id, suggestion.id));
+            await dbLog.update('suggestions',
+                () => db.update(suggestions)
+                    .set({ upvotes, downvotes })
+                    .where(eq(suggestions.id, suggestion.id)),
+                { suggestionId: suggestion.id, upvotes, downvotes }
+            );
 
             const updatedEmbed = embeds.base(
                 `Suggestion #${suggestion.id}`,

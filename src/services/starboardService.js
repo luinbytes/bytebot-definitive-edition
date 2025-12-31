@@ -3,6 +3,7 @@ const { starboardConfig, starboardMessages } = require('../database/schema');
 const { eq, and } = require('drizzle-orm');
 const embeds = require('../utils/embeds');
 const logger = require('../utils/logger');
+const { dbLog } = require('../utils/dbLogger');
 
 /**
  * StarboardService - Handles message starring and starboard management
@@ -29,10 +30,13 @@ class StarboardService {
             return this.configCache.get(guildId);
         }
 
-        const config = await db.select()
-            .from(starboardConfig)
-            .where(eq(starboardConfig.guildId, guildId))
-            .get();
+        const config = await dbLog.select('starboardConfig',
+            () => db.select()
+                .from(starboardConfig)
+                .where(eq(starboardConfig.guildId, guildId))
+                .get(),
+            { guildId }
+        );
 
         if (config) {
             this.configCache.set(guildId, config);
@@ -97,10 +101,13 @@ class StarboardService {
             if (!config || !config.enabled) return;
 
             // Find starboard entry
-            const entry = await db.select()
-                .from(starboardMessages)
-                .where(eq(starboardMessages.originalMessageId, message.id))
-                .get();
+            const entry = await dbLog.select('starboardMessages',
+                () => db.select()
+                    .from(starboardMessages)
+                    .where(eq(starboardMessages.originalMessageId, message.id))
+                    .get(),
+                { messageId: message.id, guildId: message.guild.id }
+            );
 
             if (!entry) return;
 
@@ -113,9 +120,12 @@ class StarboardService {
             }
 
             // Update DB (set star count to 0, remove starboard message ID)
-            await db.update(starboardMessages)
-                .set({ starCount: 0, starboardMessageId: null })
-                .where(eq(starboardMessages.id, entry.id));
+            await dbLog.update('starboardMessages',
+                () => db.update(starboardMessages)
+                    .set({ starCount: 0, starboardMessageId: null })
+                    .where(eq(starboardMessages.id, entry.id)),
+                { entryId: entry.id, messageId: message.id, operation: 'clearReactions' }
+            );
 
             logger.info(`Removed message ${message.id} from starboard (all reactions cleared)`);
 
@@ -130,10 +140,13 @@ class StarboardService {
     async handleMessageDelete(message) {
         try {
             // Check if message is in starboard
-            const entry = await db.select()
-                .from(starboardMessages)
-                .where(eq(starboardMessages.originalMessageId, message.id))
-                .get();
+            const entry = await dbLog.select('starboardMessages',
+                () => db.select()
+                    .from(starboardMessages)
+                    .where(eq(starboardMessages.originalMessageId, message.id))
+                    .get(),
+                { messageId: message.id, guildId: message.guild.id }
+            );
 
             if (!entry || !entry.starboardMessageId) return;
 
@@ -219,18 +232,24 @@ class StarboardService {
             const starCount = await this.countValidStars(message, config.emoji);
 
             // Check if already in DB
-            let entry = await db.select()
-                .from(starboardMessages)
-                .where(eq(starboardMessages.originalMessageId, messageId))
-                .get();
+            let entry = await dbLog.select('starboardMessages',
+                () => db.select()
+                    .from(starboardMessages)
+                    .where(eq(starboardMessages.originalMessageId, messageId))
+                    .get(),
+                { messageId, guildId: message.guild.id }
+            );
 
             // If star count >= threshold
             if (starCount >= config.threshold) {
                 if (entry) {
                     // Update existing entry
-                    await db.update(starboardMessages)
-                        .set({ starCount: starCount })
-                        .where(eq(starboardMessages.id, entry.id));
+                    await dbLog.update('starboardMessages',
+                        () => db.update(starboardMessages)
+                            .set({ starCount: starCount })
+                            .where(eq(starboardMessages.id, entry.id)),
+                        { entryId: entry.id, messageId, starCount, operation: 'updateCount' }
+                    );
 
                     // If already posted, edit
                     if (entry.starboardMessageId) {
@@ -239,9 +258,12 @@ class StarboardService {
                         // Was previously removed, re-post
                         const starboardMsgId = await this.postToStarboard(message, starCount, config);
                         if (starboardMsgId) {
-                            await db.update(starboardMessages)
-                                .set({ starboardMessageId: starboardMsgId })
-                                .where(eq(starboardMessages.id, entry.id));
+                            await dbLog.update('starboardMessages',
+                                () => db.update(starboardMessages)
+                                    .set({ starboardMessageId: starboardMsgId })
+                                    .where(eq(starboardMessages.id, entry.id)),
+                                { entryId: entry.id, messageId, starboardMsgId, operation: 'repost' }
+                            );
                         }
                     }
                 } else {
@@ -250,17 +272,20 @@ class StarboardService {
                     if (starboardMsgId) {
                         // Insert to DB
                         const firstImage = message.attachments.find(att => att.contentType?.startsWith('image/'));
-                        await db.insert(starboardMessages).values({
-                            guildId: message.guild.id,
-                            originalMessageId: message.id,
-                            originalChannelId: message.channel.id,
-                            starboardMessageId: starboardMsgId,
-                            authorId: message.author.id,
-                            starCount: starCount,
-                            content: message.content || null,
-                            imageUrl: firstImage?.url || null,
-                            postedAt: Date.now()
-                        });
+                        await dbLog.insert('starboardMessages',
+                            () => db.insert(starboardMessages).values({
+                                guildId: message.guild.id,
+                                originalMessageId: message.id,
+                                originalChannelId: message.channel.id,
+                                starboardMessageId: starboardMsgId,
+                                authorId: message.author.id,
+                                starCount: starCount,
+                                content: message.content || null,
+                                imageUrl: firstImage?.url || null,
+                                postedAt: Date.now()
+                            }),
+                            { guildId: message.guild.id, messageId: message.id, starCount, starboardMsgId }
+                        );
                     }
                 }
             } else {
@@ -273,9 +298,12 @@ class StarboardService {
                     }
 
                     // Update DB (keep entry but clear starboard message ID)
-                    await db.update(starboardMessages)
-                        .set({ starCount: starCount, starboardMessageId: null })
-                        .where(eq(starboardMessages.id, entry.id));
+                    await dbLog.update('starboardMessages',
+                        () => db.update(starboardMessages)
+                            .set({ starCount: starCount, starboardMessageId: null })
+                            .where(eq(starboardMessages.id, entry.id)),
+                        { entryId: entry.id, messageId, starCount, operation: 'removeBelowThreshold' }
+                    );
                 }
             }
 
@@ -314,9 +342,12 @@ class StarboardService {
 
             if (!starboardChannel) {
                 // Channel deleted, disable starboard
-                await db.update(starboardConfig)
-                    .set({ enabled: false })
-                    .where(eq(starboardConfig.guildId, message.guild.id));
+                await dbLog.update('starboardConfig',
+                    () => db.update(starboardConfig)
+                        .set({ enabled: false })
+                        .where(eq(starboardConfig.guildId, message.guild.id)),
+                    { guildId: message.guild.id, operation: 'disableChannelDeleted' }
+                );
 
                 this.invalidateCache(message.guild.id);
 
@@ -371,9 +402,12 @@ class StarboardService {
                 const newMsgId = await this.postToStarboard(message, starCount, config);
                 if (newMsgId) {
                     // Update DB with new message ID
-                    await db.update(starboardMessages)
-                        .set({ starboardMessageId: newMsgId })
-                        .where(eq(starboardMessages.originalMessageId, message.id));
+                    await dbLog.update('starboardMessages',
+                        () => db.update(starboardMessages)
+                            .set({ starboardMessageId: newMsgId })
+                            .where(eq(starboardMessages.originalMessageId, message.id)),
+                        { messageId: message.id, starboardMsgId: newMsgId, operation: 'recreateDeleted' }
+                    );
                 }
                 return;
             }

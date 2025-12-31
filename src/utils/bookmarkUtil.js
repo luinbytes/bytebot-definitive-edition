@@ -2,6 +2,7 @@ const { db } = require('../database/index');
 const { bookmarks } = require('../database/schema');
 const { eq, and, desc, like, or } = require('drizzle-orm');
 const logger = require('./logger');
+const { dbLog } = require('./dbLogger');
 
 /**
  * Bookmark Utility - Handles all bookmark database operations

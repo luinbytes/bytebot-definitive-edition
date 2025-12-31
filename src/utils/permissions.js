@@ -3,6 +3,7 @@ const { db } = require('../database/index');
 const { commandPermissions } = require('../database/schema');
 const { eq, and } = require('drizzle-orm');
 const embeds = require('./embeds');
+const { dbLog } = require('./dbLogger');
 
 /**
  * Checks if a user has permission to execute a command.
@@ -14,10 +15,13 @@ const embeds = require('./embeds');
  */
 async function checkUserPermissions(interaction, command) {
     // 1. Check for custom permission overrides in the database
-    const overrides = await db.select().from(commandPermissions).where(and(
-        eq(commandPermissions.guildId, interaction.guild.id),
-        eq(commandPermissions.commandName, command.data.name)
-    ));
+    const overrides = await dbLog.select('commandPermissions',
+        () => db.select().from(commandPermissions).where(and(
+            eq(commandPermissions.guildId, interaction.guild.id),
+            eq(commandPermissions.commandName, command.data.name)
+        )),
+        { guildId: interaction.guild.id, commandName: command.data.name }
+    );
 
     if (overrides.length > 0) {
         // Custom permissions exist: Allow if user has ANY allowed role or is Admin
