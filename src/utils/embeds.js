@@ -1,5 +1,5 @@
 const { EmbedBuilder } = require('discord.js');
-const config = require('../../config.json');
+const config = require('./config');
 
 /**
  * Centrally managed embed creator to ensure brand consistency.

@@ -269,7 +269,7 @@ class MediaGalleryService {
      */
     buildMediaMessage(mediaData, attachment, message, authorId) {
         const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-        const configData = require('../../config.json');
+        const configData = require('../utils/config');
 
         const fileType = this.categorizeFileType(attachment.contentType || mediaData.mimeType);
         const sizeMB = ((attachment.size || mediaData.fileSize) / (1024 * 1024)).toFixed(2);

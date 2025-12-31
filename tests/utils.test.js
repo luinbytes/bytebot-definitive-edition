@@ -1,5 +1,5 @@
 const embeds = require('../src/utils/embeds');
-const config = require('../config.json');
+const config = require('../src/utils/config');
 
 describe('Embed Utility Framework', () => {
     test('base embed should have brand color and footer', () => {

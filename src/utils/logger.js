@@ -2,13 +2,8 @@ const chalk = require('chalk');
 const fs = require('fs');
 const path = require('path');
 
-// Load config
-let config;
-try {
-    config = require('../../config.json');
-} catch (e) {
-    config = { logging: { console: true, file: false, database: true, logDirectory: 'logs' } };
-}
+// Load config with local overrides
+const config = require('./config');
 
 // Ensure logs directory exists
 const logDir = path.join(process.cwd(), config.logging?.logDirectory || 'logs');

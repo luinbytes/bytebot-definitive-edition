@@ -1,7 +1,7 @@
 const { Events, Collection, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const logger = require('../utils/logger');
 const embeds = require('../utils/embeds');
-const config = require('../../config.json');
+const config = require('../utils/config');
 const { db } = require('../database/index');
 const { users, commandPermissions, customAchievements } = require('../database/schema');
 const { sql, eq, and } = require('drizzle-orm');
