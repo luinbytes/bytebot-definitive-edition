@@ -2,6 +2,7 @@ const { db } = require('../database');
 const { autoResponses } = require('../database/schema');
 const { eq, and, sql } = require('drizzle-orm');
 const logger = require('../utils/logger');
+const { dbLog } = require('../utils/dbLogger');
 
 /**
  * Auto-Responder Service
@@ -45,13 +46,16 @@ class AutoResponderService {
         let responses = this.getCachedResponses(message.guild.id);
 
         if (!responses) {
-            responses = await db.select()
-                .from(autoResponses)
-                .where(and(
-                    eq(autoResponses.guildId, message.guild.id),
-                    eq(autoResponses.enabled, true)
-                ))
-                .all();
+            responses = await dbLog.select('autoResponses',
+                () => db.select()
+                    .from(autoResponses)
+                    .where(and(
+                        eq(autoResponses.guildId, message.guild.id),
+                        eq(autoResponses.enabled, true)
+                    ))
+                    .all(),
+                { guildId: message.guild.id }
+            );
 
             this.cacheResponses(message.guild.id, responses);
         }
@@ -97,12 +101,15 @@ class AutoResponderService {
                 this.cooldowns.set(cooldownKey, now + (response.cooldown * 1000));
 
                 // Update stats
-                await db.update(autoResponses)
-                    .set({
-                        useCount: sql`${autoResponses.useCount} + 1`,
-                        lastUsed: new Date()
-                    })
-                    .where(eq(autoResponses.id, response.id));
+                await dbLog.update('autoResponses',
+                    () => db.update(autoResponses)
+                        .set({
+                            useCount: sql`${autoResponses.useCount} + 1`,
+                            lastUsed: new Date()
+                        })
+                        .where(eq(autoResponses.id, response.id)),
+                    { responseId: response.id, guildId: message.guild.id }
+                );
 
                 logger.debug(`Auto-response triggered: "${response.trigger}" in ${message.guild.name}`);
 

@@ -4,6 +4,7 @@ const { guilds } = require('../database/schema');
 const { eq } = require('drizzle-orm');
 const embeds = require('../utils/embeds');
 const logger = require('../utils/logger');
+const { dbLog } = require('../utils/dbLogger');
 
 /**
  * Get ordinal suffix for a number (1st, 2nd, 3rd, etc.)
@@ -95,9 +96,12 @@ module.exports = {
     async execute(member) {
         try {
             // Fetch guild config
-            const [config] = await db.select()
-                .from(guilds)
-                .where(eq(guilds.id, member.guild.id));
+            const [config] = await dbLog.select('guilds',
+                () => db.select()
+                    .from(guilds)
+                    .where(eq(guilds.id, member.guild.id)),
+                { guildId: member.guild.id }
+            );
 
             // Check if welcome messages are enabled and configured
             if (!config || !config.welcomeEnabled || !config.welcomeChannel) {

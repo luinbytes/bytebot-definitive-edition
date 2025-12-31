@@ -54,14 +54,18 @@ module.exports = {
                 const { suggestions } = require('../database/schema');
                 const { eq } = require('drizzle-orm');
                 const embeds = require('../utils/embeds');
+                const { dbLog } = require('../utils/dbLogger');
 
                 // Check if this message is a suggestion
-                const suggestion = await db
-                    .select()
-                    .from(suggestions)
-                    .where(eq(suggestions.messageId, reaction.message.id))
-                    .limit(1)
-                    .then(rows => rows[0]);
+                const suggestion = await dbLog.select('suggestions',
+                    () => db
+                        .select()
+                        .from(suggestions)
+                        .where(eq(suggestions.messageId, reaction.message.id))
+                        .limit(1)
+                        .then(rows => rows[0]),
+                    { messageId: reaction.message.id, guildId: reaction.message.guild.id }
+                );
 
                 if (suggestion) {
                     // Only count votes if suggestion is still pending
@@ -77,9 +81,12 @@ module.exports = {
                     const upvotes = thumbsUp ? thumbsUp.count - 1 : 0; // -1 for bot's reaction
                     const downvotes = thumbsDown ? thumbsDown.count - 1 : 0;
 
-                    await db.update(suggestions)
-                        .set({ upvotes, downvotes })
-                        .where(eq(suggestions.id, suggestion.id));
+                    await dbLog.update('suggestions',
+                        () => db.update(suggestions)
+                            .set({ upvotes, downvotes })
+                            .where(eq(suggestions.id, suggestion.id)),
+                        { suggestionId: suggestion.id, upvotes, downvotes, operation: 'updateVotes' }
+                    );
 
                     // Update the embed
                     const statusEmojis = {

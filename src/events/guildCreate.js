@@ -2,6 +2,7 @@ const { Events } = require('discord.js');
 const { db } = require('../database/index');
 const { guilds } = require('../database/schema');
 const logger = require('../utils/logger');
+const { dbLog } = require('../utils/dbLogger');
 
 module.exports = {
     name: Events.GuildCreate,
@@ -9,10 +10,13 @@ module.exports = {
         logger.info(`Joined new guild: ${guild.name} (ID: ${guild.id})`);
 
         try {
-            await db.insert(guilds).values({
-                id: guild.id,
-                joinedAt: new Date(),
-            }).onConflictDoNothing();
+            await dbLog.insert('guilds',
+                () => db.insert(guilds).values({
+                    id: guild.id,
+                    joinedAt: new Date(),
+                }).onConflictDoNothing(),
+                { guildId: guild.id }
+            );
 
             logger.success(`Registered guild ${guild.id} in the database.`);
         } catch (error) {

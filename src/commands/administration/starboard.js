@@ -3,6 +3,7 @@ const { db } = require('../../database');
 const { starboardConfig, starboardMessages } = require('../../database/schema');
 const { eq, desc } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
+const { dbLog } = require('../../utils/dbLogger');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -114,30 +115,39 @@ async function handleSetup(interaction, client) {
 
     try {
         // Check if config exists
-        const existingConfig = await db.select()
-            .from(starboardConfig)
-            .where(eq(starboardConfig.guildId, interaction.guild.id))
-            .get();
+        const existingConfig = await dbLog.select('starboardConfig',
+            () => db.select()
+                .from(starboardConfig)
+                .where(eq(starboardConfig.guildId, interaction.guild.id))
+                .get(),
+            { guildId: interaction.guild.id }
+        );
 
         if (existingConfig) {
             // Update existing config
-            await db.update(starboardConfig)
-                .set({
+            await dbLog.update('starboardConfig',
+                () => db.update(starboardConfig)
+                    .set({
+                        channelId: channel.id,
+                        threshold: threshold,
+                        emoji: emoji,
+                        enabled: true
+                    })
+                    .where(eq(starboardConfig.guildId, interaction.guild.id)),
+                { guildId: interaction.guild.id, channelId: channel.id, threshold }
+            );
+        } else {
+            // Insert new config
+            await dbLog.insert('starboardConfig',
+                () => db.insert(starboardConfig).values({
+                    guildId: interaction.guild.id,
                     channelId: channel.id,
                     threshold: threshold,
                     emoji: emoji,
                     enabled: true
-                })
-                .where(eq(starboardConfig.guildId, interaction.guild.id));
-        } else {
-            // Insert new config
-            await db.insert(starboardConfig).values({
-                guildId: interaction.guild.id,
-                channelId: channel.id,
-                threshold: threshold,
-                emoji: emoji,
-                enabled: true
-            });
+                }),
+                { guildId: interaction.guild.id, channelId: channel.id, threshold }
+            );
         }
 
         // Invalidate cache
@@ -167,9 +177,12 @@ async function handleSetup(interaction, client) {
  * Handle /starboard config
  */
 async function handleConfig(interaction, client) {
-    const config = await db.select()
-        .from(starboardConfig)
-        .where(eq(starboardConfig.guildId, interaction.guild.id))
+    const config = await dbLog.select('starboardConfig',
+        () => db.select()
+            .from(starboardConfig)
+            .where(eq(starboardConfig.guildId, interaction.guild.id)),
+        { guildId: interaction.guild.id }
+    )
         .get();
 
     if (!config) {
@@ -194,10 +207,13 @@ async function handleConfig(interaction, client) {
     );
 
     // Get stats
-    const stats = await db.select()
-        .from(starboardMessages)
-        .where(eq(starboardMessages.guildId, interaction.guild.id))
-        .all();
+    const stats = await dbLog.select('starboardMessages',
+        () => db.select()
+            .from(starboardMessages)
+            .where(eq(starboardMessages.guildId, interaction.guild.id))
+            .all(),
+        { guildId: interaction.guild.id }
+    );
 
     const totalStarred = stats.length;
     const currentlyShown = stats.filter(s => s.starboardMessageId !== null).length;
@@ -217,10 +233,13 @@ async function handleConfig(interaction, client) {
  * Handle /starboard disable
  */
 async function handleDisable(interaction, client) {
-    const config = await db.select()
-        .from(starboardConfig)
-        .where(eq(starboardConfig.guildId, interaction.guild.id))
-        .get();
+    const config = await dbLog.select('starboardConfig',
+        () => db.select()
+            .from(starboardConfig)
+            .where(eq(starboardConfig.guildId, interaction.guild.id))
+            .get(),
+        { guildId: interaction.guild.id }
+    );
 
     if (!config) {
         return interaction.editReply({
@@ -238,9 +257,12 @@ async function handleDisable(interaction, client) {
     }
 
     try {
-        await db.update(starboardConfig)
-            .set({ enabled: false })
-            .where(eq(starboardConfig.guildId, interaction.guild.id));
+        await dbLog.update('starboardConfig',
+            () => db.update(starboardConfig)
+                .set({ enabled: false })
+                .where(eq(starboardConfig.guildId, interaction.guild.id)),
+            { guildId: interaction.guild.id, enabled: false }
+        );
 
         // Invalidate cache
         if (client.starboardService) {
@@ -267,10 +289,13 @@ async function handleDisable(interaction, client) {
  * Handle /starboard enable
  */
 async function handleEnable(interaction, client) {
-    const config = await db.select()
-        .from(starboardConfig)
-        .where(eq(starboardConfig.guildId, interaction.guild.id))
-        .get();
+    const config = await dbLog.select('starboardConfig',
+        () => db.select()
+            .from(starboardConfig)
+            .where(eq(starboardConfig.guildId, interaction.guild.id))
+            .get(),
+        { guildId: interaction.guild.id }
+    );
 
     if (!config) {
         return interaction.editReply({
@@ -288,9 +313,12 @@ async function handleEnable(interaction, client) {
     }
 
     try {
-        await db.update(starboardConfig)
-            .set({ enabled: true })
-            .where(eq(starboardConfig.guildId, interaction.guild.id));
+        await dbLog.update('starboardConfig',
+            () => db.update(starboardConfig)
+                .set({ enabled: true })
+                .where(eq(starboardConfig.guildId, interaction.guild.id)),
+            { guildId: interaction.guild.id, enabled: true }
+        );
 
         // Invalidate cache
         if (client.starboardService) {
@@ -319,10 +347,13 @@ async function handleEnable(interaction, client) {
 async function handleTop(interaction, client) {
     const limit = interaction.options.getInteger('limit') || 10;
 
-    const config = await db.select()
-        .from(starboardConfig)
-        .where(eq(starboardConfig.guildId, interaction.guild.id))
-        .get();
+    const config = await dbLog.select('starboardConfig',
+        () => db.select()
+            .from(starboardConfig)
+            .where(eq(starboardConfig.guildId, interaction.guild.id))
+            .get(),
+        { guildId: interaction.guild.id }
+    );
 
     if (!config) {
         return interaction.editReply({
@@ -334,12 +365,15 @@ async function handleTop(interaction, client) {
     }
 
     // Get top starred messages
-    const topMessages = await db.select()
-        .from(starboardMessages)
-        .where(eq(starboardMessages.guildId, interaction.guild.id))
-        .orderBy(desc(starboardMessages.starCount))
-        .limit(limit)
-        .all();
+    const topMessages = await dbLog.select('starboardMessages',
+        () => db.select()
+            .from(starboardMessages)
+            .where(eq(starboardMessages.guildId, interaction.guild.id))
+            .orderBy(desc(starboardMessages.starCount))
+            .limit(limit)
+            .all(),
+        { guildId: interaction.guild.id, limit }
+    );
 
     if (topMessages.length === 0) {
         return interaction.editReply({

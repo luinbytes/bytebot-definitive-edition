@@ -4,6 +4,7 @@ const { db } = require('../../database');
 const { autoResponses } = require('../../database/schema');
 const { eq, and, count } = require('drizzle-orm');
 const config = require('../../../config.json');
+const { dbLog } = require('../../utils/dbLogger');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -119,12 +120,15 @@ module.exports = {
 
         if (focusedOption.name === 'id') {
             // Get guild's auto-responses
-            const responses = await db.select()
-                .from(autoResponses)
-                .where(eq(autoResponses.guildId, interaction.guild.id))
-                .orderBy(autoResponses.trigger)
-                .limit(25)
-                .all();
+            const responses = await dbLog.select('autoResponses',
+                () => db.select()
+                    .from(autoResponses)
+                    .where(eq(autoResponses.guildId, interaction.guild.id))
+                    .orderBy(autoResponses.trigger)
+                    .limit(25)
+                    .all(),
+                { guildId: interaction.guild.id }
+            );
 
             const choices = responses.map(r => ({
                 name: `#${r.id} - ${r.trigger} ${r.enabled ? '✅' : '❌'}`,
@@ -148,10 +152,13 @@ async function handleAdd(interaction, client) {
     const cooldown = interaction.options.getInteger('cooldown') || 60;
 
     // Check limit (50 per guild)
-    const countResult = await db.select({ count: count() })
-        .from(autoResponses)
-        .where(eq(autoResponses.guildId, interaction.guild.id))
-        .get();
+    const countResult = await dbLog.select('autoResponses',
+        () => db.select({ count: count() })
+            .from(autoResponses)
+            .where(eq(autoResponses.guildId, interaction.guild.id))
+            .get(),
+        { guildId: interaction.guild.id, operation: 'count' }
+    );
 
     if (countResult.count >= 50) {
         return interaction.editReply({
@@ -186,20 +193,23 @@ async function handleAdd(interaction, client) {
     }
 
     // Insert
-    const result = await db.insert(autoResponses).values({
-        guildId: interaction.guild.id,
-        trigger,
-        response,
-        channelId: channel?.id || null,
-        creatorId: interaction.user.id,
-        enabled: true,
-        cooldown,
-        matchType,
-        requireRoleId: role?.id || null,
-        useCount: 0,
-        createdAt: new Date(),
-        lastUsed: null
-    }).returning();
+    const result = await dbLog.insert('autoResponses',
+        () => db.insert(autoResponses).values({
+            guildId: interaction.guild.id,
+            trigger,
+            response,
+            channelId: channel?.id || null,
+            creatorId: interaction.user.id,
+            enabled: true,
+            cooldown,
+            matchType,
+            requireRoleId: role?.id || null,
+            useCount: 0,
+            createdAt: new Date(),
+            lastUsed: null
+        }).returning(),
+        { guildId: interaction.guild.id, trigger, matchType }
+    );
 
     // Invalidate cache
     client.autoResponderService.invalidateCache(interaction.guild.id);
@@ -234,13 +244,16 @@ async function handleRemove(interaction, client) {
     const id = interaction.options.getInteger('id');
 
     // Get response
-    const response = await db.select()
-        .from(autoResponses)
-        .where(and(
-            eq(autoResponses.id, id),
-            eq(autoResponses.guildId, interaction.guild.id)
-        ))
-        .get();
+    const response = await dbLog.select('autoResponses',
+        () => db.select()
+            .from(autoResponses)
+            .where(and(
+                eq(autoResponses.id, id),
+                eq(autoResponses.guildId, interaction.guild.id)
+            ))
+            .get(),
+        { id, guildId: interaction.guild.id }
+    );
 
     if (!response) {
         return interaction.editReply({
@@ -250,8 +263,11 @@ async function handleRemove(interaction, client) {
     }
 
     // Delete
-    await db.delete(autoResponses)
-        .where(eq(autoResponses.id, id));
+    await dbLog.delete('autoResponses',
+        () => db.delete(autoResponses)
+            .where(eq(autoResponses.id, id)),
+        { id, guildId: interaction.guild.id }
+    );
 
     // Invalidate cache
     client.autoResponderService.invalidateCache(interaction.guild.id);
@@ -269,11 +285,14 @@ async function handleRemove(interaction, client) {
  * /autorespond list
  */
 async function handleList(interaction) {
-    const responses = await db.select()
-        .from(autoResponses)
-        .where(eq(autoResponses.guildId, interaction.guild.id))
-        .orderBy(autoResponses.id)
-        .all();
+    const responses = await dbLog.select('autoResponses',
+        () => db.select()
+            .from(autoResponses)
+            .where(eq(autoResponses.guildId, interaction.guild.id))
+            .orderBy(autoResponses.id)
+            .all(),
+        { guildId: interaction.guild.id }
+    );
 
     if (responses.length === 0) {
         return interaction.editReply({
@@ -327,13 +346,16 @@ async function handleToggle(interaction, client) {
     const id = interaction.options.getInteger('id');
 
     // Get response
-    const response = await db.select()
-        .from(autoResponses)
-        .where(and(
-            eq(autoResponses.id, id),
-            eq(autoResponses.guildId, interaction.guild.id)
-        ))
-        .get();
+    const response = await dbLog.select('autoResponses',
+        () => db.select()
+            .from(autoResponses)
+            .where(and(
+                eq(autoResponses.id, id),
+                eq(autoResponses.guildId, interaction.guild.id)
+            ))
+            .get(),
+        { id, guildId: interaction.guild.id }
+    );
 
     if (!response) {
         return interaction.editReply({
@@ -344,9 +366,12 @@ async function handleToggle(interaction, client) {
 
     // Toggle
     const newState = !response.enabled;
-    await db.update(autoResponses)
-        .set({ enabled: newState })
-        .where(eq(autoResponses.id, id));
+    await dbLog.update('autoResponses',
+        () => db.update(autoResponses)
+            .set({ enabled: newState })
+            .where(eq(autoResponses.id, id)),
+        { id, guildId: interaction.guild.id, newState }
+    );
 
     // Invalidate cache
     client.autoResponderService.invalidateCache(interaction.guild.id);
@@ -368,13 +393,16 @@ async function handleEdit(interaction, client) {
     const newResponse = interaction.options.getString('new_response');
 
     // Get response
-    const response = await db.select()
-        .from(autoResponses)
-        .where(and(
-            eq(autoResponses.id, id),
-            eq(autoResponses.guildId, interaction.guild.id)
-        ))
-        .get();
+    const response = await dbLog.select('autoResponses',
+        () => db.select()
+            .from(autoResponses)
+            .where(and(
+                eq(autoResponses.id, id),
+                eq(autoResponses.guildId, interaction.guild.id)
+            ))
+            .get(),
+        { id, guildId: interaction.guild.id }
+    );
 
     if (!response) {
         return interaction.editReply({
@@ -384,9 +412,12 @@ async function handleEdit(interaction, client) {
     }
 
     // Update
-    await db.update(autoResponses)
-        .set({ response: newResponse })
-        .where(eq(autoResponses.id, id));
+    await dbLog.update('autoResponses',
+        () => db.update(autoResponses)
+            .set({ response: newResponse })
+            .where(eq(autoResponses.id, id)),
+        { id, guildId: interaction.guild.id }
+    );
 
     // Invalidate cache
     client.autoResponderService.invalidateCache(interaction.guild.id);

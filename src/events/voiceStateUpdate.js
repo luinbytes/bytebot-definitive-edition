@@ -6,6 +6,7 @@ const logger = require('../utils/logger');
 const embeds = require('../utils/embeds');
 const { checkBotPermissions } = require('../utils/permissionCheck');
 const { getControlPanel } = require('../components/bytepodControls');
+const { dbLog } = require('../utils/dbLogger');
 
 // Helper to get pod state (lock status, whitelist, etc.)
 function getPodState(channel) {
@@ -40,30 +41,42 @@ async function finalizeVoiceSession(session, client) {
     const durationSeconds = Math.floor((Date.now() - session.startTime) / 1000);
 
     // Delete active session
-    await db.delete(bytepodActiveSessions)
-        .where(eq(bytepodActiveSessions.id, session.id));
+    await dbLog.delete('bytepodActiveSessions',
+        () => db.delete(bytepodActiveSessions)
+            .where(eq(bytepodActiveSessions.id, session.id)),
+        { sessionId: session.id, userId: session.userId, guildId: session.guildId }
+    );
 
     // Upsert aggregate stats
-    const existing = await db.select().from(bytepodVoiceStats)
-        .where(and(
-            eq(bytepodVoiceStats.userId, session.userId),
-            eq(bytepodVoiceStats.guildId, session.guildId)
-        )).get();
+    const existing = await dbLog.select('bytepodVoiceStats',
+        () => db.select().from(bytepodVoiceStats)
+            .where(and(
+                eq(bytepodVoiceStats.userId, session.userId),
+                eq(bytepodVoiceStats.guildId, session.guildId)
+            )).get(),
+        { userId: session.userId, guildId: session.guildId }
+    );
 
     if (existing) {
-        await db.update(bytepodVoiceStats)
-            .set({
-                totalSeconds: existing.totalSeconds + durationSeconds,
-                sessionCount: existing.sessionCount + 1
-            })
-            .where(eq(bytepodVoiceStats.id, existing.id));
+        await dbLog.update('bytepodVoiceStats',
+            () => db.update(bytepodVoiceStats)
+                .set({
+                    totalSeconds: existing.totalSeconds + durationSeconds,
+                    sessionCount: existing.sessionCount + 1
+                })
+                .where(eq(bytepodVoiceStats.id, existing.id)),
+            { userId: session.userId, guildId: session.guildId, durationSeconds }
+        );
     } else {
-        await db.insert(bytepodVoiceStats).values({
-            userId: session.userId,
-            guildId: session.guildId,
-            totalSeconds: durationSeconds,
-            sessionCount: 1
-        });
+        await dbLog.insert('bytepodVoiceStats',
+            () => db.insert(bytepodVoiceStats).values({
+                userId: session.userId,
+                guildId: session.guildId,
+                totalSeconds: durationSeconds,
+                sessionCount: 1
+            }),
+            { userId: session.userId, guildId: session.guildId, durationSeconds }
+        );
     }
 
     // Track activity streak (convert seconds to minutes)
@@ -100,13 +113,16 @@ async function transferOwnership(channel, podData, newOwnerId, client) {
     try {
         logger.debug(`[Transfer] Step 1: Updating database for ${channel.id}`);
         // Update database (keep originalOwnerId unchanged - creator can always reclaim)
-        await db.update(bytepods)
-            .set({
-                ownerId: newOwnerId,
-                ownerLeftAt: null,
-                reclaimRequestPending: false // Clear any pending reclaim requests
-            })
-            .where(eq(bytepods.channelId, channel.id));
+        await dbLog.update('bytepods',
+            () => db.update(bytepods)
+                .set({
+                    ownerId: newOwnerId,
+                    ownerLeftAt: null,
+                    reclaimRequestPending: false // Clear any pending reclaim requests
+                })
+                .where(eq(bytepods.channelId, channel.id)),
+            { podId: channel.id, oldOwnerId, newOwnerId, operation: 'transferOwnership' }
+        );
 
         logger.debug(`[Transfer] Step 2: Removing old owner permissions`);
         // Remove ManageChannels from old owner (if still in server)
@@ -169,7 +185,10 @@ module.exports = {
         if (member.user.bot) return;
 
         // DB Fetch
-        const guildData = await db.select().from(guilds).where(eq(guilds.id, guild.id)).get();
+        const guildData = await dbLog.select('guilds',
+            () => db.select().from(guilds).where(eq(guilds.id, guild.id)).get(),
+            { guildId: guild.id }
+        );
         if (!guildData || !guildData.voiceHubChannelId) {
             return;
         }
@@ -191,7 +210,10 @@ module.exports = {
 
             try {
                 // Fetch User Settings
-                const userSettings = await db.select().from(bytepodUserSettings).where(eq(bytepodUserSettings.userId, member.id)).get();
+                const userSettings = await dbLog.select('bytepodUserSettings',
+                    () => db.select().from(bytepodUserSettings).where(eq(bytepodUserSettings.userId, member.id)).get(),
+                    { userId: member.id }
+                );
                 const autoLock = userSettings?.autoLock || false;
 
                 // Determine Category
@@ -217,7 +239,10 @@ module.exports = {
                 });
 
                 // Apply Auto-Whitelist Presets
-                const presets = await db.select().from(bytepodAutoWhitelist).where(eq(bytepodAutoWhitelist.userId, member.id));
+                const presets = await dbLog.select('bytepodAutoWhitelist',
+                    () => db.select().from(bytepodAutoWhitelist).where(eq(bytepodAutoWhitelist.userId, member.id)),
+                    { userId: member.id, guildId: guild.id }
+                );
                 for (const preset of presets) {
                     try {
                         const targetMember = await guild.members.fetch(preset.targetUserId).catch(() => null);
@@ -237,12 +262,15 @@ module.exports = {
                 await member.voice.setChannel(newChannel);
 
                 // DB Insert - BytePod record
-                await db.insert(bytepods).values({
-                    channelId: newChannel.id,
-                    guildId: guild.id,
-                    ownerId: member.id,
-                    originalOwnerId: member.id, // Track original creator for reclaim feature
-                });
+                await dbLog.insert('bytepods',
+                    () => db.insert(bytepods).values({
+                        channelId: newChannel.id,
+                        guildId: guild.id,
+                        ownerId: member.id,
+                        originalOwnerId: member.id, // Track original creator for reclaim feature
+                    }),
+                    { podId: newChannel.id, guildId: guild.id, userId: member.id }
+                );
 
                 // Track BytePod creation for achievements
                 if (newState.client.activityStreakService) {
@@ -254,12 +282,15 @@ module.exports = {
                 }
 
                 // Start voice session tracking (persisted to DB)
-                await db.insert(bytepodActiveSessions).values({
-                    podId: newChannel.id,
-                    userId: member.id,
-                    guildId: guild.id,
-                    startTime: Date.now()
-                });
+                await dbLog.insert('bytepodActiveSessions',
+                    () => db.insert(bytepodActiveSessions).values({
+                        podId: newChannel.id,
+                        userId: member.id,
+                        guildId: guild.id,
+                        startTime: Date.now()
+                    }),
+                    { podId: newChannel.id, userId: member.id, guildId: guild.id }
+                );
 
                 // Send Welcome Message
                 await newChannel.send({
@@ -297,7 +328,10 @@ module.exports = {
                 }
             }
 
-            const podData = await db.select().from(bytepods).where(eq(bytepods.channelId, joinedChannelId)).get();
+            const podData = await dbLog.select('bytepods',
+                () => db.select().from(bytepods).where(eq(bytepods.channelId, joinedChannelId)).get(),
+                { podId: joinedChannelId, guildId: guild.id }
+            );
 
             if (podData) {
                 logger.debug(`[Voice State] User ${member.id} joined BytePod ${joinedChannelId} (owner: ${podData.ownerId}, originalOwner: ${podData.originalOwnerId})`);
@@ -314,9 +348,12 @@ module.exports = {
                     }
 
                     // Clear ownerLeftAt in DB
-                    await db.update(bytepods)
-                        .set({ ownerLeftAt: null })
-                        .where(eq(bytepods.channelId, joinedChannelId));
+                    await dbLog.update('bytepods',
+                        () => db.update(bytepods)
+                            .set({ ownerLeftAt: null })
+                            .where(eq(bytepods.channelId, joinedChannelId)),
+                        { podId: joinedChannelId, userId: member.id, operation: 'ownerReturned' }
+                    );
 
                     // Notify channel
                     try {
@@ -353,9 +390,12 @@ module.exports = {
                         });
 
                         // Mark request as pending to prevent duplicate prompts
-                        await db.update(bytepods)
-                            .set({ reclaimRequestPending: true })
-                            .where(eq(bytepods.channelId, joinedChannelId));
+                        await dbLog.update('bytepods',
+                            () => db.update(bytepods)
+                                .set({ reclaimRequestPending: true })
+                                .where(eq(bytepods.channelId, joinedChannelId)),
+                            { podId: joinedChannelId, userId: member.id, operation: 'reclaimRequest' }
+                        );
 
                         logger.info(`Sent ownership reclaim prompt to ${member.id} for pod ${joinedChannelId}`);
                     } catch (e) {
@@ -365,26 +405,35 @@ module.exports = {
                 // Case 3: Backfill originalOwnerId for old pods that don't have it set
                 else if (!podData.originalOwnerId && podData.ownerId === member.id) {
                     // Current owner joining their own pod but originalOwnerId is null - backfill it
-                    await db.update(bytepods)
-                        .set({ originalOwnerId: member.id })
-                        .where(eq(bytepods.channelId, joinedChannelId));
+                    await dbLog.update('bytepods',
+                        () => db.update(bytepods)
+                            .set({ originalOwnerId: member.id })
+                            .where(eq(bytepods.channelId, joinedChannelId)),
+                        { podId: joinedChannelId, userId: member.id, operation: 'backfillOriginalOwner' }
+                    );
                     logger.info(`Backfilled originalOwnerId for pod ${joinedChannelId}`);
                 }
 
                 // Start voice session for this user
-                const existingSession = await db.select().from(bytepodActiveSessions)
-                    .where(and(
-                        eq(bytepodActiveSessions.podId, joinedChannelId),
-                        eq(bytepodActiveSessions.userId, member.id)
-                    )).get();
+                const existingSession = await dbLog.select('bytepodActiveSessions',
+                    () => db.select().from(bytepodActiveSessions)
+                        .where(and(
+                            eq(bytepodActiveSessions.podId, joinedChannelId),
+                            eq(bytepodActiveSessions.userId, member.id)
+                        )).get(),
+                    { podId: joinedChannelId, userId: member.id }
+                );
 
                 if (!existingSession) {
-                    await db.insert(bytepodActiveSessions).values({
-                        podId: joinedChannelId,
-                        userId: member.id,
-                        guildId: guild.id,
-                        startTime: Date.now()
-                    });
+                    await dbLog.insert('bytepodActiveSessions',
+                        () => db.insert(bytepodActiveSessions).values({
+                            podId: joinedChannelId,
+                            userId: member.id,
+                            guildId: guild.id,
+                            startTime: Date.now()
+                        }),
+                        { podId: joinedChannelId, userId: member.id, guildId: guild.id }
+                    );
                 }
             }
         }
@@ -404,11 +453,14 @@ module.exports = {
             }
 
             // Finalize voice session for the leaving user
-            const session = await db.select().from(bytepodActiveSessions)
-                .where(and(
-                    eq(bytepodActiveSessions.podId, leftChannelId),
-                    eq(bytepodActiveSessions.userId, member.id)
-                )).get();
+            const session = await dbLog.select('bytepodActiveSessions',
+                () => db.select().from(bytepodActiveSessions)
+                    .where(and(
+                        eq(bytepodActiveSessions.podId, leftChannelId),
+                        eq(bytepodActiveSessions.userId, member.id)
+                    )).get(),
+                { podId: leftChannelId, userId: member.id }
+            );
 
             if (session) {
                 try {
@@ -419,7 +471,10 @@ module.exports = {
             }
 
             // Check if it's a BytePod
-            const podData = await db.select().from(bytepods).where(eq(bytepods.channelId, leftChannelId)).get();
+            const podData = await dbLog.select('bytepods',
+                () => db.select().from(bytepods).where(eq(bytepods.channelId, leftChannelId)).get(),
+                { podId: leftChannelId, guildId: guild.id }
+            );
 
             if (podData) {
                 const channel = oldState.channel || await guild.channels.fetch(leftChannelId).catch(() => null);
@@ -434,20 +489,32 @@ module.exports = {
 
                     try {
                         // Finalize any remaining sessions
-                        const remainingSessions = await db.select().from(bytepodActiveSessions)
-                            .where(eq(bytepodActiveSessions.podId, leftChannelId));
+                        const remainingSessions = await dbLog.select('bytepodActiveSessions',
+                            () => db.select().from(bytepodActiveSessions)
+                                .where(eq(bytepodActiveSessions.podId, leftChannelId)),
+                            { podId: leftChannelId, operation: 'finalCleanup' }
+                        );
                         for (const s of remainingSessions) {
                             await finalizeVoiceSession(s, newState.client);
                         }
 
                         // Delete channel and pod record
                         await channel.delete();
-                        await db.delete(bytepods).where(eq(bytepods.channelId, leftChannelId));
+                        await dbLog.delete('bytepods',
+                            () => db.delete(bytepods).where(eq(bytepods.channelId, leftChannelId)),
+                            { podId: leftChannelId, guildId: guild.id, operation: 'deletePod' }
+                        );
                     } catch (error) {
                         logger.error(`Failed to cleanup BytePod ${leftChannelId}: ${error}`);
                         if (error.code === 10003) {
-                            await db.delete(bytepods).where(eq(bytepods.channelId, leftChannelId));
-                            await db.delete(bytepodActiveSessions).where(eq(bytepodActiveSessions.podId, leftChannelId));
+                            await dbLog.delete('bytepods',
+                                () => db.delete(bytepods).where(eq(bytepods.channelId, leftChannelId)),
+                                { podId: leftChannelId, operation: 'cleanupError' }
+                            );
+                            await dbLog.delete('bytepodActiveSessions',
+                                () => db.delete(bytepodActiveSessions).where(eq(bytepodActiveSessions.podId, leftChannelId)),
+                                { podId: leftChannelId, operation: 'cleanupError' }
+                            );
                         }
                     }
                 } else if (channel && channel.members.size > 0 && podData.ownerId === member.id) {
@@ -470,9 +537,12 @@ module.exports = {
                     logger.debug(`Remaining members: ${Array.from(freshChannel.members.keys()).join(', ')}`);
 
                     // Mark owner as left in DB
-                    await db.update(bytepods)
-                        .set({ ownerLeftAt: Date.now() })
-                        .where(eq(bytepods.channelId, leftChannelId));
+                    await dbLog.update('bytepods',
+                        () => db.update(bytepods)
+                            .set({ ownerLeftAt: Date.now() })
+                            .where(eq(bytepods.channelId, leftChannelId)),
+                        { podId: leftChannelId, userId: member.id, operation: 'ownerLeft' }
+                    );
 
                     // Schedule transfer after 5 minutes
                     const timeoutId = setTimeout(async () => {
@@ -482,7 +552,10 @@ module.exports = {
                             logger.debug(`[Transfer Timeout] Checking pod ${leftChannelId} for transfer`);
 
                             // Re-fetch pod data and channel state
-                            const currentPodData = await db.select().from(bytepods).where(eq(bytepods.channelId, leftChannelId)).get();
+                            const currentPodData = await dbLog.select('bytepods',
+                                () => db.select().from(bytepods).where(eq(bytepods.channelId, leftChannelId)).get(),
+                                { podId: leftChannelId, operation: 'transferTimeoutCheck' }
+                            );
                             if (!currentPodData || !currentPodData.ownerLeftAt) {
                                 logger.debug(`[Transfer Timeout] Skipping - pod deleted or owner returned (ownerLeftAt: ${currentPodData?.ownerLeftAt})`);
                                 return;
@@ -499,9 +572,12 @@ module.exports = {
                                 logger.warn(`[Transfer Timeout] Owner ${currentPodData.ownerId} is back in channel ${leftChannelId}, cancelling transfer`);
                                 logger.debug(`[Transfer Timeout] Channel members: ${Array.from(currentChannel.members.keys()).join(', ')}`);
                                 // Clear ownerLeftAt since they're back
-                                await db.update(bytepods)
-                                    .set({ ownerLeftAt: null })
-                                    .where(eq(bytepods.channelId, leftChannelId));
+                                await dbLog.update('bytepods',
+                                    () => db.update(bytepods)
+                                        .set({ ownerLeftAt: null })
+                                        .where(eq(bytepods.channelId, leftChannelId)),
+                                    { podId: leftChannelId, operation: 'cancelTransferOwnerReturned' }
+                                );
                                 return;
                             }
 
@@ -513,9 +589,12 @@ module.exports = {
                             } else {
                                 // No eligible members found (only old owner or bots remain)
                                 // Clear the ownerLeftAt since owner is still the only eligible person
-                                await db.update(bytepods)
-                                    .set({ ownerLeftAt: null })
-                                    .where(eq(bytepods.channelId, leftChannelId));
+                                await dbLog.update('bytepods',
+                                    () => db.update(bytepods)
+                                        .set({ ownerLeftAt: null })
+                                        .where(eq(bytepods.channelId, leftChannelId)),
+                                    { podId: leftChannelId, operation: 'cancelTransferNoEligibleOwner' }
+                                );
                                 logger.debug(`[Transfer Timeout] No eligible new owner found - only old owner or bots remain`);
                             }
                         } catch (error) {

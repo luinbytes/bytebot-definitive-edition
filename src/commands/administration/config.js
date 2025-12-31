@@ -4,6 +4,7 @@ const { guilds } = require('../../database/schema');
 const { eq } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const logger = require('../../utils/logger');
+const { dbLog } = require('../../utils/dbLogger');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -31,9 +32,12 @@ module.exports = {
             const channel = interaction.options.getChannel('channel');
 
             try {
-                await db.update(guilds)
-                    .set({ logChannel: channel.id })
-                    .where(eq(guilds.id, interaction.guild.id));
+                await dbLog.update('guilds',
+                    () => db.update(guilds)
+                        .set({ logChannel: channel.id })
+                        .where(eq(guilds.id, interaction.guild.id)),
+                    { guildId: interaction.guild.id, logChannel: channel.id }
+                );
 
                 return interaction.reply({
                     embeds: [embeds.success('Configuration Updated', `Moderation logs will now be sent to ${channel}.`)],
@@ -49,7 +53,10 @@ module.exports = {
         }
 
         if (subcommand === 'view') {
-            const [config] = await db.select().from(guilds).where(eq(guilds.id, interaction.guild.id));
+            const [config] = await dbLog.select('guilds',
+                () => db.select().from(guilds).where(eq(guilds.id, interaction.guild.id)),
+                { guildId: interaction.guild.id }
+            );
 
             if (!config) {
                 return interaction.reply({

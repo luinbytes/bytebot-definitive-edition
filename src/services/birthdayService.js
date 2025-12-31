@@ -3,6 +3,7 @@ const { birthdays, birthdayConfig } = require('../database/schema');
 const { eq, and, or } = require('drizzle-orm');
 const logger = require('../utils/logger');
 const embeds = require('../utils/embeds');
+const { dbLog } = require('../utils/dbLogger');
 
 class BirthdayService {
     constructor(client) {
@@ -43,9 +44,12 @@ class BirthdayService {
      */
     async checkMissedBirthdays() {
         try {
-            const configs = await db.select()
-                .from(birthdayConfig)
-                .where(eq(birthdayConfig.enabled, 1));
+            const configs = await dbLog.select('birthdayConfig',
+                () => db.select()
+                    .from(birthdayConfig)
+                    .where(eq(birthdayConfig.enabled, 1)),
+                { enabled: 1 }
+            );
 
             const yesterdayMidnight = new Date();
             yesterdayMidnight.setUTCHours(0, 0, 0, 0);
@@ -76,9 +80,12 @@ class BirthdayService {
         logger.info('Running daily birthday check...');
 
         try {
-            const configs = await db.select()
-                .from(birthdayConfig)
-                .where(eq(birthdayConfig.enabled, 1));
+            const configs = await dbLog.select('birthdayConfig',
+                () => db.select()
+                    .from(birthdayConfig)
+                    .where(eq(birthdayConfig.enabled, 1)),
+                { enabled: 1 }
+            );
 
             let totalAnnouncements = 0;
 
@@ -101,10 +108,13 @@ class BirthdayService {
     async checkBirthdaysForGuild(guildId) {
         try {
             // Get config
-            const config = await db.select()
-                .from(birthdayConfig)
-                .where(eq(birthdayConfig.guildId, guildId))
-                .get();
+            const config = await dbLog.select('birthdayConfig',
+                () => db.select()
+                    .from(birthdayConfig)
+                    .where(eq(birthdayConfig.guildId, guildId))
+                    .get(),
+                { guildId }
+            );
 
             if (!config || !config.enabled) {
                 return false;
@@ -125,32 +135,41 @@ class BirthdayService {
 
             if (month === 2 && day === 28 && !isLeapYear) {
                 // Non-leap year Feb 28: check for both Feb 28 AND Feb 29 birthdays
-                birthdayQuery = await db.select()
-                    .from(birthdays)
-                    .where(and(
-                        eq(birthdays.guildId, guildId),
-                        eq(birthdays.month, 2),
-                        or(
-                            eq(birthdays.day, 28),
-                            eq(birthdays.day, 29)
-                        )
-                    ));
+                birthdayQuery = await dbLog.select('birthdays',
+                    () => db.select()
+                        .from(birthdays)
+                        .where(and(
+                            eq(birthdays.guildId, guildId),
+                            eq(birthdays.month, 2),
+                            or(
+                                eq(birthdays.day, 28),
+                                eq(birthdays.day, 29)
+                            )
+                        )),
+                    { guildId, month: 2, day: '28+29' }
+                );
             } else {
                 // Normal day
-                birthdayQuery = await db.select()
-                    .from(birthdays)
-                    .where(and(
-                        eq(birthdays.guildId, guildId),
-                        eq(birthdays.month, month),
-                        eq(birthdays.day, day)
-                    ));
+                birthdayQuery = await dbLog.select('birthdays',
+                    () => db.select()
+                        .from(birthdays)
+                        .where(and(
+                            eq(birthdays.guildId, guildId),
+                            eq(birthdays.month, month),
+                            eq(birthdays.day, day)
+                        )),
+                    { guildId, month, day }
+                );
             }
 
             if (birthdayQuery.length === 0) {
                 // No birthdays today
-                await db.update(birthdayConfig)
-                    .set({ lastCheck: new Date() })
-                    .where(eq(birthdayConfig.guildId, guildId));
+                await dbLog.update('birthdayConfig',
+                    () => db.update(birthdayConfig)
+                        .set({ lastCheck: new Date() })
+                        .where(eq(birthdayConfig.guildId, guildId)),
+                    { guildId, operation: 'noBirthdays' }
+                );
                 return false;
             }
 
@@ -173,9 +192,12 @@ class BirthdayService {
 
             if (validMembers.length === 0) {
                 logger.debug(`No valid birthday members in guild ${guild.name}`);
-                await db.update(birthdayConfig)
-                    .set({ lastCheck: new Date() })
-                    .where(eq(birthdayConfig.guildId, guildId));
+                await dbLog.update('birthdayConfig',
+                    () => db.update(birthdayConfig)
+                        .set({ lastCheck: new Date() })
+                        .where(eq(birthdayConfig.guildId, guildId)),
+                    { guildId, operation: 'noValidMembers' }
+                );
                 return false;
             }
 
@@ -184,9 +206,12 @@ class BirthdayService {
 
             if (!channel) {
                 // Channel deleted, disable system
-                await db.update(birthdayConfig)
-                    .set({ enabled: 0 })
-                    .where(eq(birthdayConfig.guildId, guildId));
+                await dbLog.update('birthdayConfig',
+                    () => db.update(birthdayConfig)
+                        .set({ enabled: 0 })
+                        .where(eq(birthdayConfig.guildId, guildId)),
+                    { guildId, operation: 'channelDeleted' }
+                );
 
                 // Notify owner
                 const owner = await guild.fetchOwner().catch(() => null);
@@ -250,9 +275,12 @@ class BirthdayService {
             }
 
             // Update lastCheck
-            await db.update(birthdayConfig)
-                .set({ lastCheck: new Date() })
-                .where(eq(birthdayConfig.guildId, guildId));
+            await dbLog.update('birthdayConfig',
+                () => db.update(birthdayConfig)
+                    .set({ lastCheck: new Date() })
+                    .where(eq(birthdayConfig.guildId, guildId)),
+                { guildId, operation: 'success' }
+            );
 
             return true;
 
@@ -310,13 +338,16 @@ class BirthdayService {
             const month = checkDate.getUTCMonth() + 1;
             const day = checkDate.getUTCDate();
 
-            const birthdayList = await db.select()
-                .from(birthdays)
-                .where(and(
-                    eq(birthdays.guildId, guildId),
-                    eq(birthdays.month, month),
-                    eq(birthdays.day, day)
-                ));
+            const birthdayList = await dbLog.select('birthdays',
+                () => db.select()
+                    .from(birthdays)
+                    .where(and(
+                        eq(birthdays.guildId, guildId),
+                        eq(birthdays.month, month),
+                        eq(birthdays.day, day)
+                    )),
+                { guildId, month, day }
+            );
 
             for (const birthday of birthdayList) {
                 upcoming.push({
