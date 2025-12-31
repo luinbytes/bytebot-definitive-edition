@@ -653,8 +653,9 @@ module.exports = {
                         Connect: isLocked ? null : false
                     });
 
-                    // Update the message after deferring
-                    const { isLocked: newLock, limit, whitelist, coOwners } = getPodState(channel);
+                    // Calculate new state directly (cache may not have updated yet)
+                    const newLock = !isLocked;
+                    const { limit, whitelist, coOwners } = getPodState(channel);
                     const displayWhitelist = whitelist.filter(id => id !== podData.ownerId);
                     const displayCoOwners = coOwners.filter(id => id !== podData.ownerId);
                     const { embeds: e, components } = getControlPanel(channel.id, newLock, limit, displayWhitelist, displayCoOwners);
@@ -773,7 +774,8 @@ module.exports = {
                     : `Removed: ${modified.join(', ')}`;
 
                 await interaction.editReply({ content: msg || 'No valid users selected.' });
-                await updatePanel(targetPanelId);
+                // Small delay to allow permission cache to update
+                setTimeout(() => updatePanel(targetPanelId), 100);
             }
 
             if (customId.startsWith('bytepod_coowner_select')) {
@@ -784,7 +786,8 @@ module.exports = {
                 try {
                     await channel.permissionOverwrites.edit(targetId, { ManageChannels: true, MoveMembers: true, Connect: true });
                     await interaction.editReply({ content: `<@${targetId}> is now a Co-Owner.` });
-                    await updatePanel(targetPanelId);
+                    // Small delay to allow permission cache to update
+                    setTimeout(() => updatePanel(targetPanelId), 100);
                 } catch (e) {
                     if (e.code === 10003) return interaction.editReply({ content: 'Channel deleted.' });
                     throw e;
@@ -804,7 +807,8 @@ module.exports = {
                         await channel.permissionOverwrites.edit(targetId, { Connect: false });
                     } catch (e) { }
                     await interaction.editReply({ content: `Kicked and blocked <@${targetId}>.` });
-                    await updatePanel(targetPanelId);
+                    // Small delay to allow permission cache to update
+                    setTimeout(() => updatePanel(targetPanelId), 100);
                 } else {
                     await interaction.editReply({ content: `User is not in the voice channel.` });
                 }
@@ -821,7 +825,8 @@ module.exports = {
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
                 await channel.setUserLimit(limit);
                 await interaction.editReply({ content: `Limit set to ${limit}.` });
-                await updatePanel(targetPanelId);
+                // Small delay to allow cache to update
+                setTimeout(() => updatePanel(targetPanelId), 100);
             }
 
         } catch (error) {

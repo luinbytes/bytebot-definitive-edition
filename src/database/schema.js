@@ -1,4 +1,4 @@
-const { sqliteTable, text, integer, real, index, unique } = require('drizzle-orm/sqlite-core');
+const { sqliteTable, text, integer, real, index, unique, primaryKey } = require('drizzle-orm/sqlite-core');
 
 const guilds = sqliteTable('guilds', {
     id: text('id').primaryKey(),
@@ -58,13 +58,12 @@ const bytepodAutoWhitelist = sqliteTable('bytepod_autowhitelist', {
 });
 
 const bytepodUserSettings = sqliteTable('bytepod_user_settings', {
-    id: integer('id').primaryKey({ autoIncrement: true }),
     userId: text('user_id').notNull(),
     guildId: text('guild_id').notNull(),
     autoLock: integer('auto_lock', { mode: 'boolean' }).default(false),
 }, (table) => ({
-    // Composite unique constraint: one setting per user per guild
-    userGuildUnique: unique().on(table.userId, table.guildId),
+    // Composite primary key: one setting per user per guild
+    pk: primaryKey({ columns: [table.userId, table.guildId] }),
 }));
 
 // Active voice sessions (persisted - survives bot restarts)
