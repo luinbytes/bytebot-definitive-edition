@@ -304,7 +304,7 @@ User joins → Creates first streak (special_first_streak +10pts)
 | birthday.js (~450 lines) | `/birthday set/remove/view/upcoming/setup/role` - Privacy-focused (no year), leap year handling, 24hr role |
 | bookmark.js (~420 lines) | `/bookmark list/search/view/delete/clear` - Pagination, jump links, attachment caching |
 | media.js (~680 lines) | `/media setup/list/delete/search/view/tag/describe` - Full media gallery with auto-capture and manual saves. Rich metadata, tag system, full-text search, detailed views. Setup requires ManageChannels, 500-item limit |
-| bytepod.js (~600 lines) | `/bytepod setup/panel/preset/stats/leaderboard/template` - Full pod management, `handleInteraction()` routes all components |
+| bytepod.js (~600 lines) | `/bytepod setup/disable/panel/preset/stats/leaderboard/template` - Full pod management, `handleInteraction()` routes all components. `setup` configures hub channel, `disable` turns off BytePods |
 | streak.js (~700 lines) | `/streak view/leaderboard/achievements/progress` - Comprehensive activity tracking. View streaks with rarity/points, 5 leaderboard types (current/longest/achievements/points/rare), achievement browser with filters & pagination (category/rarity/earned status), progress tracking with visual bars for milestones. Auto-tracks 8 metrics, 82+ achievements, monthly freeze system |
 
 ### Context Menus (src/commands/context-menus/)
@@ -467,6 +467,13 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 ---
 
 ## Recent Changes
+
+### 2025-12-31 - BytePod Disable Command
+- **NEW:** `/bytepod disable` command - Allows administrators to turn off BytePod creation
+- **FEATURES:** Checks if BytePods are configured, clears `voiceHubChannelId` and `voiceHubCategoryId` from database, provides informative feedback
+- **BEHAVIOR:** Existing BytePods remain active until members leave, re-enable anytime with `/bytepod setup`
+- **PERMISSIONS:** Requires Administrator permission (same as setup)
+- **FILES:** `bytepod.js`, `CLAUDE.md` updated
 
 ### 2025-12-30 - Avatar Slash Command & Database Logging
 - **NEW:** `/avatar [user] [private]` slash command - Complements existing context menu with full privacy preference support
