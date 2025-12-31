@@ -13,5 +13,11 @@
         "error": "#ED4245",
         "warning": "#FEE75C",
         "white": "#FFFFFF"
+    },
+    "logging": {
+        "console": true,
+        "file": true,
+        "database": true,
+        "logDirectory": "logs"
     }
 }

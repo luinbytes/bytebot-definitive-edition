@@ -391,24 +391,45 @@ const runMigrations = async () => {
     // First, validate and fix schema to prevent Drizzle migration failures
     const logger = require('../utils/logger');
 
+    // Load config to check database logging setting
+    let config;
+    try {
+        config = require('../../config.json');
+    } catch (e) {
+        config = { logging: { database: true } };
+    }
+
+    const dbLoggingEnabled = config.logging?.database !== false;
+
     try {
         const fixes = validateAndFixSchema();
         if (fixes.length > 0) {
-            logger.info('Database schema fixes applied:');
-            fixes.forEach(fix => logger.info(`  → ${fix}`));
+            if (dbLoggingEnabled) {
+                logger.info('Database schema fixes applied:', 'Database');
+                fixes.forEach(fix => logger.info(`  → ${fix}`, 'Database'));
+            }
         } else {
-            logger.debug('Database schema is up to date');
+            if (dbLoggingEnabled) {
+                logger.debug('Database schema is up to date', 'Database');
+            }
         }
     } catch (error) {
-        logger.error(`Schema validation error: ${error.message}`);
+        if (dbLoggingEnabled) {
+            logger.error(`Schema validation error: ${error.message}`, 'Database');
+        }
     }
 
     // Now run Drizzle migrations (should work since schema is fixed)
     try {
         await migrate(db, { migrationsFolder: './drizzle' });
+        if (dbLoggingEnabled) {
+            logger.info('Database migrations completed successfully', 'Database');
+        }
     } catch (error) {
         // If Drizzle migration still fails, log but don't crash - we've already fixed the schema
-        logger.warn(`Drizzle migration warning (schema should be fixed): ${error.message}`);
+        if (dbLoggingEnabled) {
+            logger.warn(`Drizzle migration warning (schema should be fixed): ${error.message}`, 'Database');
+        }
     }
 };
 
