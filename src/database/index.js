@@ -384,14 +384,17 @@ function fixBytepodUserSettingsTable() {
             )
         `);
 
-        // Copy data from old table
+        // Copy data from old table (skip rows with NULL user_id or guild_id)
         sqlite.exec(`
             INSERT INTO bytepod_user_settings_new (user_id, guild_id, auto_lock)
             SELECT user_id, guild_id, auto_lock
             FROM bytepod_user_settings
+            WHERE user_id IS NOT NULL AND guild_id IS NOT NULL
         `);
 
-        const rowCount = sqlite.prepare('SELECT COUNT(*) as count FROM bytepod_user_settings').get().count;
+        const totalRows = sqlite.prepare('SELECT COUNT(*) as count FROM bytepod_user_settings').get().count;
+        const copiedRows = sqlite.prepare('SELECT COUNT(*) as count FROM bytepod_user_settings_new').get().count;
+        const skippedRows = totalRows - copiedRows;
 
         // Drop old table and rename new one
         sqlite.exec('DROP TABLE bytepod_user_settings');
@@ -400,8 +403,12 @@ function fixBytepodUserSettingsTable() {
         // Commit transaction
         sqlite.exec('COMMIT');
 
-        logger.success(`Fixed bytepod_user_settings table (migrated ${rowCount} rows)`, 'Database');
-        return `Fixed bytepod_user_settings table structure (${rowCount} rows)`;
+        const message = skippedRows > 0
+            ? `Fixed bytepod_user_settings table (migrated ${copiedRows} rows, skipped ${skippedRows} invalid rows)`
+            : `Fixed bytepod_user_settings table (migrated ${copiedRows} rows)`;
+
+        logger.success(message, 'Database');
+        return `Fixed bytepod_user_settings table structure (${copiedRows} rows${skippedRows > 0 ? `, ${skippedRows} skipped` : ''})`;
 
     } catch (error) {
         // Rollback on error
