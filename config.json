@@ -17,7 +17,7 @@
     "logging": {
         "console": true,
         "file": true,
-        "database": true,
+        "database": false,
         "logDirectory": "logs"
     }
 }
