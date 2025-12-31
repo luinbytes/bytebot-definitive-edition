@@ -87,10 +87,10 @@ const expectedSchema = {
         guild_id: 'TEXT'
     },
     bytepod_user_settings: {
-        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
         user_id: 'TEXT NOT NULL',
         guild_id: 'TEXT NOT NULL',
         auto_lock: 'INTEGER DEFAULT 0'
+        // Note: Composite primary key (user_id, guild_id) - handled by Drizzle migrations
     },
     bytepod_active_sessions: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
