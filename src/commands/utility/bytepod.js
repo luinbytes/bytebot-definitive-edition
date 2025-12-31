@@ -65,6 +65,9 @@ module.exports = {
                         .setDescription('The category where new BytePods will be created')
                         .addChannelTypes(ChannelType.GuildCategory)))
         .addSubcommand(sub =>
+            sub.setName('disable')
+                .setDescription('Disable BytePods for this server (Admin Only).'))
+        .addSubcommand(sub =>
             sub.setName('panel')
                 .setDescription('Resend the control panel for your current BytePod.'))
         .addSubcommandGroup(group =>
@@ -141,6 +144,36 @@ module.exports = {
             });
 
             return interaction.editReply({ embeds: [embeds.success('Setup Complete', `BytePod Hub set to ${channel}. New pods will be created in ${category ? category : 'the same category as the Hub'}.`)] });
+        }
+
+        if (subdomain === 'disable') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+                return interaction.reply({ embeds: [embeds.error('Permission Denied', 'Only Administrators can use this command.')], flags: [MessageFlags.Ephemeral] });
+            }
+
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
+            // Check if BytePods are currently configured
+            const guildData = await db.select().from(guilds).where(eq(guilds.id, interaction.guild.id)).get();
+
+            if (!guildData || !guildData.voiceHubChannelId) {
+                return interaction.editReply({ embeds: [embeds.warn('Not Configured', 'BytePods are not currently enabled for this server.')] });
+            }
+
+            // Disable BytePods by clearing the hub channel and category
+            await db.update(guilds)
+                .set({
+                    voiceHubChannelId: null,
+                    voiceHubCategoryId: null
+                })
+                .where(eq(guilds.id, interaction.guild.id));
+
+            return interaction.editReply({
+                embeds: [embeds.success(
+                    'BytePods Disabled',
+                    'BytePod creation has been disabled. Existing BytePods will remain active until members leave.\n\nTo re-enable, use `/bytepod setup` again.'
+                )]
+            });
         }
 
         if (subdomain === 'panel') {
