@@ -58,9 +58,14 @@ const bytepodAutoWhitelist = sqliteTable('bytepod_autowhitelist', {
 });
 
 const bytepodUserSettings = sqliteTable('bytepod_user_settings', {
-    userId: text('user_id').primaryKey(),
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: text('user_id').notNull(),
+    guildId: text('guild_id').notNull(),
     autoLock: integer('auto_lock', { mode: 'boolean' }).default(false),
-});
+}, (table) => ({
+    // Composite unique constraint: one setting per user per guild
+    userGuildUnique: unique().on(table.userId, table.guildId),
+}));
 
 // Active voice sessions (persisted - survives bot restarts)
 const bytepodActiveSessions = sqliteTable('bytepod_active_sessions', {
@@ -84,11 +89,15 @@ const bytepodVoiceStats = sqliteTable('bytepod_voice_stats', {
 const bytepodTemplates = sqliteTable('bytepod_templates', {
     id: integer('id').primaryKey({ autoIncrement: true }),
     userId: text('user_id').notNull(),
+    guildId: text('guild_id').notNull(),
     name: text('name').notNull(),
     userLimit: integer('user_limit').default(0),
     autoLock: integer('auto_lock', { mode: 'boolean' }).default(false),
     whitelistUserIds: text('whitelist_user_ids'), // JSON stringified array
-});
+}, (table) => ({
+    // Composite unique constraint: one template name per user per guild
+    userGuildNameUnique: unique().on(table.userId, table.guildId, table.name),
+}));
 
 // Birthday tracking (per-user, per-guild)
 const birthdays = sqliteTable('birthdays', {

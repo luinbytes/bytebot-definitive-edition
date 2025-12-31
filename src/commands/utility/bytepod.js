@@ -209,6 +209,7 @@ module.exports = {
                 const existing = await db.select().from(bytepodAutoWhitelist)
                     .where(and(
                         eq(bytepodAutoWhitelist.userId, interaction.user.id),
+                        eq(bytepodAutoWhitelist.guildId, interaction.guild.id),
                         eq(bytepodAutoWhitelist.targetUserId, target.id)
                     )).get();
 
@@ -216,6 +217,7 @@ module.exports = {
 
                 await db.insert(bytepodAutoWhitelist).values({
                     userId: interaction.user.id,
+                    guildId: interaction.guild.id,
                     targetUserId: target.id
                 });
                 return interaction.editReply({ embeds: [embeds.success('Preset Added', `Added ${target} to your auto-whitelist.`)] });
@@ -226,13 +228,18 @@ module.exports = {
                 await db.delete(bytepodAutoWhitelist)
                     .where(and(
                         eq(bytepodAutoWhitelist.userId, interaction.user.id),
+                        eq(bytepodAutoWhitelist.guildId, interaction.guild.id),
                         eq(bytepodAutoWhitelist.targetUserId, target.id)
                     ));
                 return interaction.editReply({ embeds: [embeds.success('Preset Removed', `Removed ${target} from your auto-whitelist.`)] });
             }
             if (subdomain === 'list') {
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-                const presets = await db.select().from(bytepodAutoWhitelist).where(eq(bytepodAutoWhitelist.userId, interaction.user.id));
+                const presets = await db.select().from(bytepodAutoWhitelist)
+                    .where(and(
+                        eq(bytepodAutoWhitelist.userId, interaction.user.id),
+                        eq(bytepodAutoWhitelist.guildId, interaction.guild.id)
+                    ));
                 const names = presets.map(p => `<@${p.targetUserId}>`).join(', ') || 'No users.';
                 return interaction.editReply({ embeds: [embeds.info('Auto-Whitelist Presets', names)] });
             }
@@ -241,9 +248,10 @@ module.exports = {
                 const enabled = interaction.options.getBoolean('enabled');
                 await db.insert(bytepodUserSettings).values({
                     userId: interaction.user.id,
+                    guildId: interaction.guild.id,
                     autoLock: enabled
                 }).onConflictDoUpdate({
-                    target: bytepodUserSettings.userId,
+                    target: [bytepodUserSettings.userId, bytepodUserSettings.guildId],
                     set: { autoLock: enabled }
                 });
                 return interaction.editReply({ embeds: [embeds.success('Settings Updated', `Auto-Lock is now **${enabled ? 'Enabled' : 'Disabled'}**.`)] });
@@ -336,6 +344,7 @@ module.exports = {
                 const existing = await db.select().from(bytepodTemplates)
                     .where(and(
                         eq(bytepodTemplates.userId, interaction.user.id),
+                        eq(bytepodTemplates.guildId, interaction.guild.id),
                         eq(bytepodTemplates.name, templateName)
                     )).get();
 
@@ -353,6 +362,7 @@ module.exports = {
                     // Create new
                     await db.insert(bytepodTemplates).values({
                         userId: interaction.user.id,
+                        guildId: interaction.guild.id,
                         name: templateName,
                         userLimit: limit,
                         autoLock: isLocked,
@@ -381,6 +391,7 @@ module.exports = {
                 const template = await db.select().from(bytepodTemplates)
                     .where(and(
                         eq(bytepodTemplates.userId, interaction.user.id),
+                        eq(bytepodTemplates.guildId, interaction.guild.id),
                         eq(bytepodTemplates.name, templateName)
                     )).get();
 
@@ -410,7 +421,10 @@ module.exports = {
             if (subdomain === 'list') {
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
                 const templates = await db.select().from(bytepodTemplates)
-                    .where(eq(bytepodTemplates.userId, interaction.user.id));
+                    .where(and(
+                        eq(bytepodTemplates.userId, interaction.user.id),
+                        eq(bytepodTemplates.guildId, interaction.guild.id)
+                    ));
 
                 if (templates.length === 0) {
                     return interaction.editReply({ embeds: [embeds.brand('Your Templates', 'You have no saved templates.')] });
@@ -431,6 +445,7 @@ module.exports = {
                 const result = await db.delete(bytepodTemplates)
                     .where(and(
                         eq(bytepodTemplates.userId, interaction.user.id),
+                        eq(bytepodTemplates.guildId, interaction.guild.id),
                         eq(bytepodTemplates.name, templateName)
                     ));
 
