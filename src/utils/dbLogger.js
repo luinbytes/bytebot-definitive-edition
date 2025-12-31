@@ -1,12 +1,7 @@
 const logger = require('./logger');
 
-// Load config to check database logging setting
-let config;
-try {
-    config = require('../../config.json');
-} catch (e) {
-    config = { logging: { database: true } };
-}
+// Load config with local overrides
+const config = require('./config');
 
 /**
  * Database Logger Wrapper

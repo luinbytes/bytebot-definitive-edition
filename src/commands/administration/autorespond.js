@@ -3,7 +3,7 @@ const embeds = require('../../utils/embeds');
 const { db } = require('../../database');
 const { autoResponses } = require('../../database/schema');
 const { eq, and, count } = require('drizzle-orm');
-const config = require('../../../config.json');
+const config = require('../../utils/config');
 const { dbLog } = require('../../utils/dbLogger');
 
 module.exports = {

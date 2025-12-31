@@ -390,14 +390,7 @@ function validateAndFixSchema() {
 const runMigrations = async () => {
     // First, validate and fix schema to prevent Drizzle migration failures
     const logger = require('../utils/logger');
-
-    // Load config to check database logging setting
-    let config;
-    try {
-        config = require('../../config.json');
-    } catch (e) {
-        config = { logging: { database: true } };
-    }
+    const config = require('../utils/config');
 
     const dbLoggingEnabled = config.logging?.database !== false;
 

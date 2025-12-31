@@ -1,1 +1,6 @@
+# Line endings
 * text=auto eol=lf
+
+# Config file merge strategy (union combines non-conflicting changes)
+# Note: Use config.local.json for personal settings to avoid conflicts
+config.json merge=union
