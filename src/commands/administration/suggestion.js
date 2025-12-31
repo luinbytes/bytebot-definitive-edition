@@ -571,5 +571,7 @@ module.exports = {
         } catch (error) {
             // Message might be deleted, that's okay
         }
-    }
+    },
+
+    permissions: [PermissionFlagsBits.ManageGuild]
 };

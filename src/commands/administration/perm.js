@@ -181,5 +181,7 @@ module.exports = {
                 embeds: [embeds.error('Database Error', 'Failed to update permissions.')]
             });
         }
-    }
+    },
+
+    permissions: [PermissionFlagsBits.Administrator]
 };
