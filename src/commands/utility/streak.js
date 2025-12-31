@@ -107,7 +107,6 @@ module.exports = {
                         .setRequired(false))),
     category: 'Utility',
     cooldown: 3,
-    longRunning: true,
 
     async execute(interaction, client) {
         const subcommand = interaction.options.getSubcommand();
@@ -138,6 +137,16 @@ async function handleView(interaction, client) {
     }
 
     try {
+        // Determine ephemeral preference and defer
+        const isEphemeral = await shouldBeEphemeral(interaction, {
+            commandDefault: false,
+            userOverride: interaction.options.getBoolean('private'),
+            targetUserId: targetUser.id
+        });
+
+        await interaction.deferReply({
+            flags: isEphemeral ? [MessageFlags.Ephemeral] : []
+        });
         const streakData = await client.activityStreakService.getUserStreak(
             targetUser.id,
             interaction.guild.id
@@ -149,15 +158,8 @@ async function handleView(interaction, client) {
                 `${targetUser.id === interaction.user.id ? 'You haven\'t' : `${targetUser.username} hasn't`} recorded any activity yet.\n\nStart your streak by:\n• Sending messages\n• Joining voice channels\n• Running commands`
             );
 
-            const isEphemeral = await shouldBeEphemeral(interaction, {
-                commandDefault: false,
-                userOverride: interaction.options.getBoolean('private'),
-                targetUserId: targetUser.id
-            });
-
-            return interaction.reply({
-                embeds: [noDataEmbed],
-                flags: isEphemeral ? [MessageFlags.Ephemeral] : []
+            return interaction.editReply({
+                embeds: [noDataEmbed]
             });
         }
 
@@ -248,22 +250,14 @@ async function handleView(interaction, client) {
         embed.setThumbnail(targetUser.displayAvatarURL());
         embed.setFooter({ text: `Keep your streak alive by staying active daily!` });
 
-        const isEphemeral = await shouldBeEphemeral(interaction, {
-            commandDefault: false,
-            userOverride: interaction.options.getBoolean('private'),
-            targetUserId: targetUser.id
-        });
-
-        await interaction.reply({
-            embeds: [embed],
-            flags: isEphemeral ? [MessageFlags.Ephemeral] : []
+        await interaction.editReply({
+            embeds: [embed]
         });
 
     } catch (error) {
         logger.error('Error viewing streak:', error);
-        await interaction.reply({
-            embeds: [embeds.error('Error', 'Failed to fetch streak data. Please try again.')],
-            flags: [MessageFlags.Ephemeral]
+        await interaction.editReply({
+            embeds: [embeds.error('Error', 'Failed to fetch streak data. Please try again.')]
         });
     }
 }
@@ -282,6 +276,9 @@ async function handleLeaderboard(interaction, client) {
     }
 
     try {
+        // Defer reply (public since leaderboards are meant to be shared)
+        await interaction.deferReply();
+
         // Handle achievement-based leaderboards
         if (type === 'achievements' || type === 'points' || type === 'rare') {
             return await handleAchievementLeaderboard(interaction, client, type);
@@ -295,9 +292,8 @@ async function handleLeaderboard(interaction, client) {
         );
 
         if (leaderboard.length === 0) {
-            return interaction.reply({
-                embeds: [embeds.info('No Data', 'No streak data available yet. Start your streak by being active!')],
-                flags: [MessageFlags.Ephemeral]
+            return interaction.editReply({
+                embeds: [embeds.info('No Data', 'No streak data available yet. Start your streak by being active!')]
             });
         }
 
@@ -328,15 +324,14 @@ async function handleLeaderboard(interaction, client) {
         embed.setFooter({ text: `Keep up your daily activity to climb the ranks!` });
         embed.setTimestamp();
 
-        await interaction.reply({
+        await interaction.editReply({
             embeds: [embed]
         });
 
     } catch (error) {
         logger.error('Error showing leaderboard:', error);
-        await interaction.reply({
-            embeds: [embeds.error('Error', 'Failed to fetch leaderboard. Please try again.')],
-            flags: [MessageFlags.Ephemeral]
+        await interaction.editReply({
+            embeds: [embeds.error('Error', 'Failed to fetch leaderboard. Please try again.')]
         });
     }
 }
@@ -350,7 +345,7 @@ async function handleAchievementLeaderboard(interaction, client, type) {
         const { activityAchievements, achievementDefinitions } = require('../../database/schema');
         const { eq, sql } = require('drizzle-orm');
 
-        await interaction.deferReply();
+        // Note: Already deferred in handleLeaderboard()
 
         if (type === 'achievements' || type === 'points') {
             // Query: Get top 10 users by achievement count or points
