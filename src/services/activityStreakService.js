@@ -819,30 +819,8 @@ class ActivityStreakService {
                 { userId, guildId, activityDate: today, operation: 'bytepod' }
             );
 
-            // Update streak
+            // Update streak (now checks achievements for cumulative values)
             await this.updateStreak(userId, guildId, today);
-
-            // Check for BytePod achievements
-            const totals = await this.getUserTotals(userId, guildId);
-            const streakData = await dbLog.select('activityStreaks',
-                () => db.select()
-                    .from(activityStreaks)
-                    .where(and(
-                        eq(activityStreaks.userId, userId),
-                        eq(activityStreaks.guildId, guildId)
-                    ))
-                    .get(),
-                { userId, guildId }
-            );
-
-            if (streakData) {
-                await this.checkAndAwardAchievements(
-                    userId,
-                    guildId,
-                    streakData.currentStreak,
-                    streakData.totalActiveDays
-                );
-            }
 
         } catch (error) {
             logger.error(`Error recording BytePod creation for user ${userId}:`, error);
@@ -1082,8 +1060,16 @@ class ActivityStreakService {
                 return;
             }
 
-            // If already active today, skip
+            // If already active today, streak doesn't change but we still check cumulative achievements
             if (existing.lastActivityDate === today) {
+                // Streak and total days haven't changed, but cumulative values (messages, voice, commands)
+                // may have increased, so check for achievements that depend on cumulative totals
+                await this.checkAndAwardAchievements(
+                    userId,
+                    guildId,
+                    existing.currentStreak,
+                    existing.totalActiveDays
+                );
                 return;
             }
 

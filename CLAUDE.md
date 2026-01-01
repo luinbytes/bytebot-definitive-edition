@@ -50,7 +50,7 @@ Discord bot (Discord.js v14) with neon purple branding (#8A2BE2), slash commands
 | Table | Key Fields | Notes |
 |-------|------------|-------|
 | guilds | id, prefix, logChannel, welcomeChannel, welcomeMessage, welcomeEnabled, welcomeUseEmbed, voiceHubChannelId, voiceHubCategoryId, mediaArchiveChannelId | Guild config, BytePod, welcome messages, media archive |
-| users | id, guildId, commandsRun, lastSeen, wtNickname | WT account binding |
+| users | id, guildId, commandsRun, lastSeen, wtNickname, ephemeralPreference | WT account binding, global privacy settings ('always'/'public'/'default') |
 | moderationLogs | id, guildId, targetId, executorId, action, reason, timestamp | Actions: BAN/KICK/CLEAR/WARN |
 | commandPermissions | id, guildId, commandName, roleId | RBAC overrides |
 | bytepods | channelId(PK), guildId, ownerId, originalOwnerId, ownerLeftAt, reclaimRequestPending, createdAt | Ephemeral VC tracking |
@@ -306,6 +306,7 @@ User joins → Creates first streak (special_first_streak +10pts)
 | media.js (~680 lines) | `/media setup/list/delete/search/view/tag/describe` - Full media gallery with auto-capture and manual saves. Rich metadata, tag system, full-text search, detailed views. Setup requires ManageChannels, 500-item limit |
 | bytepod.js (~600 lines) | `/bytepod setup/disable/panel/preset/stats/leaderboard/template` - Full pod management, `handleInteraction()` routes all components. `setup` configures hub channel, `disable` turns off BytePods |
 | streak.js (~700 lines) | `/streak view/leaderboard/achievements/progress` - Comprehensive activity tracking. View streaks with rarity/points, 5 leaderboard types (current/longest/achievements/points/rare), achievement browser with filters & pagination (category/rarity/earned status), progress tracking with visual bars for milestones. Auto-tracks 8 metrics, 82+ achievements, monthly freeze system |
+| settings.js (~170 lines) | `/settings privacy/view` - Global user privacy preferences. Controls ephemeral defaults across all guilds (always private/always public/smart defaults). Optional `private` param available on info commands for per-command override |
 
 ### Context Menus (src/commands/context-menus/)
 
@@ -333,6 +334,7 @@ User joins → Creates first streak (special_first_streak +10pts)
 | logger.js | Colored console: info(blue), success(green), warn(yellow), error(red), debug(magenta) |
 | permissions.js | `checkUserPermissions()` - RBAC logic |
 | permissionCheck.js | `checkBotPermissions()` - BytePod validator (ManageChannels,MoveMembers,Connect) |
+| ephemeralHelper.js | Privacy system: `shouldBeEphemeral()`, `getUserPreference()`, `setUserPreference()` - 3-tier logic (parameter > user pref > command default) |
 | wtService.js | Singleton for ThunderInsights: `searchPlayer()`, `getPlayerStats()` |
 | bookmarkUtil.js | `saveBookmark/getBookmarks/deleteBookmark/deleteAllBookmarks/markDeleted/searchBookmarks` - 100 limit, duplicate prevention |
 | mediaUtil.js | `saveMedia/getMedia/searchMedia/getMediaById/deleteMedia/addTag/removeTag/updateDescription/getMediaCount/markDeleted/getOrCreateArchiveChannel/archiveMedia` - 500 limit, tag management, filtering, persistent archival |
@@ -409,7 +411,7 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 **Database:** schema.js(319), index.js(302)
 **Data:** achievementDefinitions.js(1700+)
 **Events:** interactionCreate.js(375), voiceStateUpdate.js(500+), ready.js(200), guildCreate.js(22), guildDelete.js(19), guildMemberAdd.js(125), messageCreate.js(39)
-**Utils:** embeds.js(61), logger.js(15), permissions.js(51), permissionCheck.js(66), wtService.js(101)
+**Utils:** embeds.js(61), logger.js(15), permissions.js(51), permissionCheck.js(66), ephemeralHelper.js(129), wtService.js(101)
 **Services:** activityStreakService.js(595), birthdayService.js(353), autoResponderService.js, starboardService.js, reminderService.js, mediaGalleryService.js(200)
 **Components:** bytepodControls.js(94)
 **Commands:** bytepod.js(394)⚠️COMPLEX, perm.js(168), welcome.js(380), media.js(680), help.js(84), streak.js(240)
@@ -468,6 +470,24 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 
 ## Recent Changes
 
+### 2026-01-01 - CLAUDE.md Maintenance & 40k Character Limit
+- **DOCS:** Added 40k character limit constraint to Agent Instructions (currently 37.3k/93% capacity)
+- **UPDATE:** Added missing `/settings` command to Utility table, ephemeralHelper.js to Utils section
+- **UPDATE:** Added ephemeralPreference to users table schema documentation
+- **CLEANUP:** Condensed older changelog entries (Dec 22-26) to save 5k+ characters while preserving key info
+- **FILES:** `CLAUDE.md`
+
+### 2026-01-01 - Achievement Instant Award Fix
+- **CRITICAL FIX:** Cumulative achievements (messages, voice, commands, reactions, etc.) now award INSTANTLY when threshold is hit, not delayed until next day or restart
+- **ROOT CAUSE:** `updateStreak()` was returning early for same-day activities (line 1086), skipping achievement checks entirely
+- **AFFECTED:** Message achievements (message_100+), voice achievements (voice_10hrs+), command achievements (command_50+), combo achievements, meta achievements - all were delayed
+- **NOT AFFECTED:** Streak/total day achievements (only check on day change), BytePod achievements (had workaround)
+- **FIX:** Modified `updateStreak()` to check cumulative/combo/meta achievements even when user already active today (lines 1086-1095)
+- **CLEANUP:** Removed redundant BytePod achievement workaround code (previously lines 825-845)
+- **IMPACT:** All cumulative achievements now fire in real-time as thresholds are crossed
+- **DISCOVERED:** Special achievements (checkType:'special') are defined but not implemented - 18 achievements with no check method exist
+- **FILES:** `activityStreakService.js` (achievement checking logic), `CLAUDE.md` updated
+
 ### 2025-12-31 - BytePod Disable Command
 - **NEW:** `/bytepod disable` command - Allows administrators to turn off BytePod creation
 - **FEATURES:** Checks if BytePods are configured, clears `voiceHubChannelId` and `voiceHubCategoryId` from database, provides informative feedback
@@ -522,86 +542,21 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 - **SECURITY:** ManageChannels for setup, ownership verification, 3s cooldown
 - **FILES:** mediaUtil.js, mediaGalleryService.js, media.js(1000), save-media.js, schema.js, ready.js, messageCreate.js, messageDelete.js, interactionCreate.js
 
-### 2025-12-26 - Welcome Message System Fix
-- **FIX:** Added missing `GuildMembers` intent required for guildMemberAdd event to fire
-- **CRITICAL:** Welcome messages were not working because Discord wasn't sending member join events
-- **UPDATED:** Added `GatewayIntentBits.GuildMembers` to client intents in src/index.js
-- **DOCS:** Updated CLAUDE.md to reflect all active intents (GuildMembers, GuildMessageReactions)
-- **FILES:** `index.js`, `CLAUDE.md`
-### 2025-12-26 - Ephemeral Response Enhancement
-- **IMPROVEMENT:** Improved bot UX by making appropriate responses ephemeral (only visible to command user)
-- **CHANGES:**
-  - **Administration commands:** All config confirmations now ephemeral (config, welcome, autorespond, starboard, perm)
-  - **Developer tools:** All devOnly commands auto-defer as ephemeral (deploy, unregister, guilds, manageguilds)
-  - **Utility commands:** Personal/info commands now ephemeral (help specific command, ping, userinfo slash)
-  - **Context menus:** Already ephemeral (avatar, userinfo, copyid) ✓
-  - **Bookmarks:** Already fully ephemeral ✓
-  - **Moderation:** Kept public for transparency (ban, kick, warn - accountability)
-  - **Fun commands:** Kept public for social value
-- **RATIONALE:** Reduces channel clutter, protects privacy, maintains transparency where needed
-- **FILES:** `interactionCreate.js` (auto-defer devOnly), all admin/utility command files
+### 2025-12-26 - Welcome System, Ephemeral UX, Duplicate Command Fix
+- **NEW:** Welcome message system with 18 variables, embed/plain modes (`/welcome`, guildMemberAdd.js)
+- **FIX:** Added GuildMembers intent for welcome events to fire
+- **UX:** Made admin/dev commands ephemeral, kept moderation public for transparency
+- **FIX:** Renamed dev `/clear` to `/unregister` (conflict with moderation clear)
 
-### 2025-12-26 - Welcome Message System
-- **NEW:** Comprehensive welcome message system for new guild members
-- **FEATURES:** 18 variable placeholders (user mentions, server info, join dates, account age, member number)
-- **VARIABLES:** User: `{user}` `{username}` `{tag}` `{displayname}` | Server: `{server}` `{memberCount}` `{memberNumber}` | Dates: `{joinedAt}` `{joinedRelative}` `{joinedFull}` `{createdAt}` `{createdRelative}` `{createdFull}` | Account: `{accountAgeDays}` `{accountAgeMonths}`
-- **COMMANDS:** `/welcome setup/message/toggle/embed/variables/test/view` - Requires ManageGuild permission (RBAC enforced)
-- **UX:** `/welcome variables` shows interactive reference guide with descriptions and examples for all placeholders
-- **MODES:** Branded embed (default) or plain text format
-- **EVENT:** guildMemberAdd.js - Auto-sends on member join, graceful error handling (perms/deleted channel)
-- **DATABASE:** Added `welcomeMessage`, `welcomeEnabled`, `welcomeUseEmbed` to guilds table
-- **FILES:** `welcome.js`, `guildMemberAdd.js`, `schema.js`, `index.js`, `config.js`
+### 2025-12-25 - Activity Streak System
+- **NEW:** Daily engagement tracking, streaks, 11 achievements (3-365 day milestones), monthly freeze
+- **TABLES:** activityStreaks, activityAchievements, activityLogs
+- **TRACKING:** messageCreate, interactionCreate, voiceStateUpdate
 
-### 2025-12-26 - Duplicate Command Name Fix
-- **FIX:** Resolved Discord API error 50035 (APPLICATION_COMMANDS_DUPLICATE_NAME) caused by two commands named "clear"
-- **BREAKING:** Renamed `/clear` developer command to `/unregister` to avoid conflict with moderation `/clear`
-- **Commands:** Developer command for clearing registrations is now `/unregister <scope>`
-- **Files:** Renamed `clear.js` to `unregister.js` in `src/commands/developer/`
-
-### 2025-12-25 - Activity Streak Tracking
-- **NEW:** Daily engagement tracking system with streaks, achievements, and leaderboards
-- **Features:** Auto-tracks messages/voice/commands, 11 achievements (3-365 day milestones), monthly streak freeze (save 1 missed day/month)
-- **Commands:** `/streak view [@user]`, `/streak leaderboard [current|longest]`
-- **Tables:** activityStreaks (current/longest/total days, freeze system), activityAchievements (milestone rewards), activityLogs (daily activity breakdown)
-- **Service:** activityStreakService.js - Daily midnight checks, auto-break/freeze logic, achievement DM notifications
-- **Tracking:** messageCreate.js (messages), interactionCreate.js (commands), voiceStateUpdate.js (voice minutes)
-- **Files:** `activityStreakService.js`, `streak.js`, `schema.js`, `index.js`, `ready.js`, `messageCreate.js`, `interactionCreate.js`, `voiceStateUpdate.js`
-- **NEW:** `/unregister <scope>` command to remove duplicate command registrations
-- **ENHANCEMENT:** `/deploy` now detects and prevents duplicate registrations
-- **NEW:** `checkExistingRegistrations()` utility in `commandDeployer.js`
-- **FEATURE:** Auto-detection warns users when both global and guild commands exist
-- **FIX:** Prevents creating duplicates by blocking deployment when duplicates detected
-- **FILES:** `unregister.js`, `commandDeployer.js`, `deploy.js`
-- **DOCS:** Added `DUPLICATE_COMMANDS_FIX.md` comprehensive fix guide
-
-### 2025-12-24 - War Thunder Command Timeout Fix
-- **FIX:** `/warthunder` exceeding 3s timeout. Added `longRunning: true`, removed manual deferrals. Both subcommands use `editReply()`.
-- **Files:** `src/commands/games/warthunder.js`
-
-### 2025-12-24 - Suggestion System UX
-- **FIX:** Redundant emojis in DM/admin embeds
-- **ENHANCEMENT:** Ephemeral admin responses (manual deferReply)
-- **FIX:** Vote counting locked after review (status check in reaction events)
-- **Files:** `suggestion.js`, `messageReactionAdd.js`, `messageReactionRemove.js`
-
-### 2025-12-24 - Manual Command Deployment
-- **NEW:** `/deploy <scope>` command, `--deploy`/`--deploy-all`/`--deploy-global` CLI flags
-- **NEW:** `commandDeployer.js` utility with hash caching
-- **Files:** `commandDeployer.js`, `deploy.js`, `commandHandler.js`
-
-### 2025-12-24 - Suggestion System
-- **NEW:** `/suggest <idea> [anonymous]` user command, `/suggestion` admin management
-- **Features:** Lifecycle (pending→approved/denied/implemented), voting, DM notifications, leaderboard
-- **Tables:** suggestion_config, suggestions
-- **Files:** `suggest.js`, `suggestion.js`, `schema.js`, `index.js`
-
-### 2025-12-23 - Voice State Bug Fix
-- **FIX:** Spurious join/leave on mute/camera/screenshare. Added `oldState.channelId !== newState.channelId` check.
-- **Files:** `voiceStateUpdate.js` lines 264, 359
-
-### 2025-12-23 - Panel Update Error Handling
-- **FIX:** Error 10008 on panel updates. Added `.catch()` to `msg.edit()` in `updatePanel()` (line 575). Best-effort updates.
-- **Files:** `bytepod.js`
+### 2025-12-24 - Suggestion System & Deployment
+- **NEW:** `/suggest` + `/suggestion` admin - voting, lifecycle, DM notifications
+- **NEW:** `/deploy` command with duplicate detection, CLI flags (--deploy/--deploy-all/--deploy-global)
+- **FIX:** `/warthunder` timeout (added longRunning:true)
 
 ### 2025-12-30 - Embed Design System & User Privacy Preferences
 - **DESIGN SYSTEM:** Implemented professional embed guidelines - "Visual Anchors, Not Decoration"
@@ -630,15 +585,23 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 - **FILES:** 40+ commands refactored, 2 new files (ephemeralHelper.js, settings.js), schema.js, index.js
 - **COMPLIANCE:** All admin commands ephemeral, all moderation commands public, info commands user-controlled
 
-### Older Changes (Pre-December 22, 2025)
-- **2025-12-22:** Test suite async cleanup, Auto-responder system (keyword triggers, 5-min cache), Birthday tracker (privacy-focused, no year), 6 user context menus (Avatar/UserInfo/CopyID/Permissions/Activity/ModActions), Message bookmarks (100 limit, 4000 char)
-- **2025-12-20:** BytePod leaderboard, server stats, startup cleanup, guild management (/manageguilds), ownership reclaim fixes (voice reconnect bug, duplicate prompts), ownership transfer system (5-min grace, reclaim flow), logger.errorContext(), validateAndFixSchema()
-- **2025-12-19:** Voice stats tracking (persistent sessions), BytePod templates, audit system, timeout prevention (deferReply/editReply)
-- **Initial:** CLAUDE.md documentation created
+### 2025-12-22 - Core Systems
+- **NEW:** Auto-responder (keyword triggers, 5-min cache), Birthday system (privacy-focused), Bookmarks (100 limit)
+- **NEW:** 6 user context menus (Avatar/UserInfo/CopyID/Permissions/Activity/ModActions)
+
+### Pre-December 2025
+- **2025-12-20:** BytePod ownership transfer (5-min grace), leaderboard, stats, validateAndFixSchema()
+- **2025-12-19:** Voice stats tracking, BytePod templates, audit system
+- **Initial:** CLAUDE.md created, core bot architecture established
 
 ---
 
 ## Agent Instructions
+
+**CRITICAL CONSTRAINTS:**
+- **MAXIMUM FILE SIZE:** CLAUDE.md must not exceed 40,000 characters. Current size: ~37,300 chars (93% capacity).
+- Keep documentation concise, technical, and focused on non-obvious patterns.
+- Archive old changelog entries when approaching limit (keep last 3-6 months detailed).
 
 **WHEN CHANGING:**
 1. Update "Recent Changes" with date
