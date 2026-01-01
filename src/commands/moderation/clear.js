@@ -21,9 +21,8 @@ module.exports = {
     async execute(interaction) {
         const amount = interaction.options.getInteger('amount');
 
-        await interaction.deferReply(); // Public for transparency
-
         try {
+            // Delete messages first (before replying to avoid deleting our own reply)
             const deleted = await interaction.channel.bulkDelete(amount, true);
 
             // Log to database
@@ -36,14 +35,24 @@ module.exports = {
                 timestamp: new Date()
             });
 
-            await interaction.editReply({
+            // Reply AFTER deletion to avoid our reply being caught in bulkDelete
+            await interaction.reply({
                 embeds: [embeds.success('Messages Cleared', `Successfully deleted **${deleted.size}** messages.`)]
             });
         } catch (error) {
             logger.error(error);
-            await interaction.editReply({
-                embeds: [embeds.error('Error', 'An error occurred while trying to clear messages. Note: Messages older than 14 days cannot be bulk deleted.')]
-            });
+
+            // Check if we've already replied (shouldn't happen in this flow)
+            if (interaction.deferred || interaction.replied) {
+                await interaction.editReply({
+                    embeds: [embeds.error('Error', 'An error occurred while trying to clear messages. Note: Messages older than 14 days cannot be bulk deleted.')]
+                });
+            } else {
+                await interaction.reply({
+                    embeds: [embeds.error('Error', 'An error occurred while trying to clear messages. Note: Messages older than 14 days cannot be bulk deleted.')],
+                    flags: [MessageFlags.Ephemeral]
+                });
+            }
         }
     },
 };

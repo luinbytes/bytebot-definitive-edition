@@ -472,6 +472,16 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 
 ## Recent Changes
 
+### 2026-01-01 - Clear Command Race Condition Fix
+- **BUG FIX:** Fixed DiscordAPIError[10008] "Unknown Message" error in `/clear` command
+- **ROOT CAUSE:** Deferred reply was being deleted by the bulk delete operation, then command tried to edit the deleted message
+- **SOLUTION:** Reply AFTER deletion instead of deferring before deletion
+- **CHANGES:**
+  - Removed `deferReply()` (was creating a message that got deleted)
+  - Moved `reply()` to after `bulkDelete()` completes
+  - Added fallback error handling for both reply states (deferred/not deferred)
+- **FILES:** `src/commands/moderation/clear.js`
+
 ### 2026-01-01 - Permission Error Message UX Improvement
 - **UX FIX:** Permission denied errors now show human-readable permission names instead of numeric flag values
 - **BEFORE:** "You need the following permissions: `1099511627776`"
