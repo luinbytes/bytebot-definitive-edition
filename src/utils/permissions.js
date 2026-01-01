@@ -6,11 +6,30 @@ const embeds = require('./embeds');
 const { dbLog } = require('./dbLogger');
 
 /**
+ * Converts permission flags to human-readable names
+ * @param {bigint[]} permissions - Array of permission flags
+ * @returns {string[]} Array of permission names
+ */
+function getPermissionNames(permissions) {
+    const names = [];
+    for (const permission of permissions) {
+        // Find the matching permission name from PermissionFlagsBits
+        const entry = Object.entries(PermissionFlagsBits).find(([_, value]) => value === permission);
+        if (entry) {
+            names.push(entry[0]);
+        } else {
+            names.push(permission.toString());
+        }
+    }
+    return names;
+}
+
+/**
  * Checks if a user has permission to execute a command.
  * Priority: Database Overrides > Default Command Permissions.
- * 
- * @param {import('discord.js').Interaction} interaction 
- * @param {object} command 
+ *
+ * @param {import('discord.js').Interaction} interaction
+ * @param {object} command
  * @returns {Promise<{ allowed: boolean, error?: any }>}
  */
 async function checkUserPermissions(interaction, command) {
@@ -42,9 +61,10 @@ async function checkUserPermissions(interaction, command) {
     // 2. Fallback to default code-defined permissions
     if (command.permissions && command.permissions.length > 0) {
         if (!interaction.member.permissions.has(command.permissions)) {
+            const permissionNames = getPermissionNames(command.permissions);
             return {
                 allowed: false,
-                error: embeds.error('Insufficient Permissions', `You need the following permissions: \`${command.permissions.join(', ')}\``)
+                error: embeds.error('Insufficient Permissions', `You need the following permissions: \`${permissionNames.join(', ')}\``)
             };
         }
     }

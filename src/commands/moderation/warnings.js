@@ -11,7 +11,10 @@ module.exports = {
         .setDescription('View a user\'s moderation history.')
         .addUserOption(option =>
             option.setName('target')
-                .setDescription('The user to check')),
+                .setDescription('The user to check'))
+        .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+
+    permissions: [PermissionFlagsBits.ModerateMembers],
 
     async execute(interaction) {
         const target = interaction.options.getUser('target') ?? interaction.user;

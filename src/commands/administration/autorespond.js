@@ -10,6 +10,7 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('autorespond')
         .setDescription('Manage automated keyword responses')
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
         .setDMPermission(false)
         .addSubcommand(subcommand =>
             subcommand

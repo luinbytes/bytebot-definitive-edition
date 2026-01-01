@@ -8,6 +8,8 @@ module.exports = {
         .setDescription('Locks the current channel.')
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
 
+    permissions: [PermissionFlagsBits.ManageChannels],
+
     async execute(interaction) {
         try {
             await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {

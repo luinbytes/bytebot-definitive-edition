@@ -141,7 +141,8 @@ module.exports = {
         .addSubcommand(subcommand =>
             subcommand
                 .setName('view')
-                .setDescription('View current welcome message configuration.')),
+                .setDescription('View current welcome message configuration.'))
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
     permissions: [PermissionFlagsBits.ManageGuild],
     cooldown: 3,

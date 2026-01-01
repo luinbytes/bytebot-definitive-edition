@@ -17,6 +17,8 @@ module.exports = {
                 .setDescription('The reason for kicking'))
         .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers),
 
+    permissions: [PermissionFlagsBits.KickMembers],
+
     async execute(interaction) {
         const target = interaction.options.getMember('target');
         const reason = interaction.options.getString('reason') ?? 'No reason provided';
