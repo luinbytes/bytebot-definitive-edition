@@ -87,7 +87,8 @@ module.exports = {
                     .setName('limit')
                     .setDescription('Number of suggestions to show (default: 10)')
                     .setMinValue(1)
-                    .setMaxValue(25))),
+                    .setMaxValue(25)))
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
     cooldown: 5,
 

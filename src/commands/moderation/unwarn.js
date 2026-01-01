@@ -17,7 +17,9 @@ module.exports = {
             option.setName('id')
                 .setDescription('The Warning ID to remove')
                 .setRequired(true))
-        .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers), // Match warn permission
+        .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+
+    permissions: [PermissionFlagsBits.ModerateMembers],
 
     async execute(interaction) {
         const target = interaction.options.getUser('target');

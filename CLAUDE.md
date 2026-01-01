@@ -367,7 +367,8 @@ User joins → Creates first streak (special_first_streak +10pts)
 ### Adding Commands
 1. Create `src/commands/[category]/name.js`
 2. Export: `data` (SlashCommandBuilder), `execute` (async), optional: `cooldown`, `devOnly`, `longRunning`, `permissions`, `autocomplete`
-3. Category auto-assigned from folder, auto-registered
+3. **CRITICAL:** If using `.setDefaultMemberPermissions()`, MUST also export `permissions: [...]` array with matching flags for runtime enforcement
+4. Category auto-assigned from folder, auto-registered
 
 ### Adding Events
 1. Create `src/events/name.js`
@@ -428,6 +429,7 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 | BytePod | Owner can't be kicked, can't whitelist self, filtered from lists |
 | RBAC | DB overrides exist → code permissions IGNORED |
 | RBAC | Administrator always bypasses |
+| Permissions | **CRITICAL:** `.setDefaultMemberPermissions()` is UI-only. MUST export `permissions: [...]` array for runtime checks |
 | Database | **CRITICAL:** Adding columns to schema.js? MUST also update `expectedSchema` in database/index.js or auto-migration fails |
 | Errors | 10003 = channel deleted, handle gracefully |
 | Errors | Wrap all DMs in try/catch |
@@ -469,6 +471,30 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 ---
 
 ## Recent Changes
+
+### 2026-01-01 - Permission Error Message UX Improvement
+- **UX FIX:** Permission denied errors now show human-readable permission names instead of numeric flag values
+- **BEFORE:** "You need the following permissions: `1099511627776`"
+- **AFTER:** "You need the following permissions: `ModerateMembers`"
+- **IMPLEMENTATION:** Added `getPermissionNames()` helper function to convert BigInt flags to string names
+- **FILES:** `src/utils/permissions.js` (lines 8-25, 64)
+
+### 2026-01-01 - CRITICAL Permission System Security Fix
+- **CRITICAL FIX:** Fixed severe security vulnerability allowing unauthorized users to execute moderation and administration commands
+- **ROOT CAUSE:** Commands used `.setDefaultMemberPermissions()` (Discord UI restriction only) but lacked `permissions` property for runtime enforcement
+- **VULNERABILITY:** Security pipeline's `checkUserPermissions()` defaults to `allowed: true` when `command.permissions` is undefined (permissions.js:43,52)
+- **AFFECTED COMMANDS (11 total):**
+  - **Moderation (8):** warn, unwarn, warnings, kick, ban, clear, lock, unlock - ALL completely unprotected at runtime
+  - **Administration (3):** autorespond, suggestion, welcome - Had runtime enforcement but missing UI restriction (poor UX)
+- **FIXES:**
+  - Added `permissions: [PermissionFlagsBits.*]` property to all 8 moderation commands for runtime enforcement
+  - Fixed unwarn.js permission mismatch (KickMembers → ModerateMembers to match warn.js)
+  - Added `.setDefaultMemberPermissions()` to 3 administration commands for UI restriction
+  - warnings.js had ZERO protection (no UI or runtime checks) - added both layers
+- **VERIFICATION:** Confirmed utility commands (bytepod, media, birthday) use correct subcommand-level permission checks, developer commands use `devOnly: true`
+- **DOCUMENTATION:** Updated CLAUDE.md with critical warnings in Development Patterns and Gotchas sections
+- **SEVERITY:** HIGH - Any user could warn, kick, ban, and perform other moderation actions without permissions before fix
+- **FILES:** warn.js, unwarn.js, warnings.js, kick.js, ban.js, clear.js, lock.js, unlock.js, autorespond.js, suggestion.js, welcome.js, CLAUDE.md
 
 ### 2026-01-01 - CLAUDE.md Maintenance & 40k Character Limit
 - **DOCS:** Added 40k character limit constraint to Agent Instructions (currently 37.3k/93% capacity)

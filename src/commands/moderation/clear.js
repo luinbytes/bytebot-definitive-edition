@@ -16,6 +16,8 @@ module.exports = {
                 .setMaxValue(100))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
 
+    permissions: [PermissionFlagsBits.ManageMessages],
+
     async execute(interaction) {
         const amount = interaction.options.getInteger('amount');
 
