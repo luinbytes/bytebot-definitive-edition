@@ -172,7 +172,10 @@ const mediaItems = sqliteTable('media_items', {
     channelId: text('channel_id').notNull(),
     messageId: text('message_id').notNull(),
     archiveMessageId: text('archive_message_id'), // Message ID in archive channel (for deletion)
-    mediaUrl: text('media_url').notNull(), // Discord CDN URL
+    localFilePath: text('local_file_path'), // Relative path from MEDIA_STORAGE_PATH (e.g., 'guilds/123/456/789.jpg')
+    storageMethod: text('storage_method').default('discord').notNull(), // 'discord' (legacy archive) or 'local' (filesystem)
+    fileHash: text('file_hash'), // SHA256 hash for deduplication
+    mediaUrl: text('media_url').notNull(), // Discord CDN URL or local HTTP URL
     fileName: text('file_name').notNull(),
     fileType: text('file_type').notNull(), // Category: image/video/audio/document
     mimeType: text('mime_type'),
@@ -195,7 +198,9 @@ const mediaItems = sqliteTable('media_items', {
     // Index for file type filtering
     userTypeIdx: index('media_user_type_idx').on(table.userId, table.fileType),
     // Index for channel filtering
-    userChannelIdx: index('media_user_channel_idx').on(table.userId, table.channelId)
+    userChannelIdx: index('media_user_channel_idx').on(table.userId, table.channelId),
+    // Index for deduplication lookups (fileHash + guild)
+    fileHashGuildIdx: index('media_file_hash_guild_idx').on(table.fileHash, table.guildId)
 }));
 
 // Media Gallery - Tag system (many-to-many)

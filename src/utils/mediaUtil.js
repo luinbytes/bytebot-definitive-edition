@@ -374,24 +374,88 @@ async function getMediaCount(userId) {
 }
 
 /**
- * Archive media file to guild's archive channel
+ * Archive media file to guild's archive channel OR local filesystem
  * @param {string} attachmentUrl - Original Discord CDN URL
  * @param {string} fileName - File name
  * @param {Guild} guild - Discord guild object
- * @returns {Promise<Object>} { success: boolean, archivedUrl?: string, error?: string }
+ * @param {string} userId - User ID (for local storage)
+ * @param {number} mediaId - Media ID (for local storage)
+ * @returns {Promise<Object>} { success: boolean, url?: string, storageMethod?: string, localFilePath?: string, fileHash?: string, archiveMessageId?: string, error?: string }
  */
-async function archiveMedia(attachmentUrl, fileName, guild) {
+async function archiveMedia(attachmentUrl, fileName, guild, userId = null, mediaId = null) {
     try {
-        // Get or create archive channel
+        const config = require('../../config.json');
+        const storageMethod = config.media?.storageMethod || 'discord';
+
+        // Download the file (required for both methods)
+        const axios = require('axios');
+        const response = await axios.get(attachmentUrl, {
+            responseType: 'arraybuffer',
+            timeout: 30000 // 30s timeout
+        });
+        const buffer = Buffer.from(response.data);
+
+        // LOCAL FILESYSTEM STORAGE
+        if (storageMethod === 'local') {
+            const { calculateHash, saveToFilesystem } = require('./fileStorageUtil');
+            const { generateMediaUrl } = require('../server/mediaServer');
+            const path = require('path');
+
+            // Calculate file hash for deduplication
+            const fileHash = calculateHash(buffer);
+
+            // Check for duplicate in same guild (different users can save same file)
+            const duplicate = await db.select().from(mediaItems)
+                .where(and(
+                    eq(mediaItems.guildId, guild.id),
+                    eq(mediaItems.fileHash, fileHash),
+                    eq(mediaItems.storageMethod, 'local')
+                ))
+                .get();
+
+            if (duplicate && duplicate.localFilePath) {
+                logger.debug(`Deduplication: File hash ${fileHash.substring(0, 8)} already exists, reusing storage`);
+
+                // Generate new URL for this mediaId but reuse file
+                const url = generateMediaUrl(mediaId, guild.id, fileName);
+
+                return {
+                    success: true,
+                    url,
+                    storageMethod: 'local',
+                    localFilePath: duplicate.localFilePath, // Reuse existing file
+                    fileHash,
+                    archiveMessageId: null
+                };
+            }
+
+            // Save to filesystem (new file)
+            const extension = path.extname(fileName).substring(1) || 'bin';
+            const saveResult = await saveToFilesystem(buffer, guild.id, userId, mediaId, extension);
+
+            if (!saveResult.success) {
+                logger.warn(`Local storage failed: ${saveResult.error}. Falling back to Discord.`);
+                // Fall through to Discord method below
+            } else {
+                const url = generateMediaUrl(mediaId, guild.id, fileName);
+                logger.success(`Saved to local storage: ${saveResult.filePath} (${(saveResult.size / 1024).toFixed(2)}KB)`);
+
+                return {
+                    success: true,
+                    url,
+                    storageMethod: 'local',
+                    localFilePath: saveResult.filePath,
+                    fileHash,
+                    archiveMessageId: null
+                };
+            }
+        }
+
+        // DISCORD ARCHIVE CHANNEL STORAGE (default/fallback)
         const { success, channel, error } = await getOrCreateArchiveChannel(guild);
         if (!success) {
             return { success: false, error };
         }
-
-        // Download the file
-        const axios = require('axios');
-        const response = await axios.get(attachmentUrl, { responseType: 'arraybuffer' });
-        const buffer = Buffer.from(response.data);
 
         // Re-upload to archive channel
         const archivedMessage = await channel.send({
@@ -410,8 +474,11 @@ async function archiveMedia(attachmentUrl, fileName, guild) {
         const archivedUrl = archivedMessage.attachments.first().url;
         return {
             success: true,
-            archivedUrl,
-            archiveMessageId: archivedMessage.id
+            url: archivedUrl,
+            storageMethod: 'discord',
+            archiveMessageId: archivedMessage.id,
+            localFilePath: null,
+            fileHash: null
         };
     } catch (error) {
         logger.error(`Failed to archive media: ${error}`);
@@ -432,9 +499,16 @@ async function markDeleted(messageId) {
 
         // Update each item individually
         for (const item of items) {
-            // Only mark URL as expired if NOT archived
-            // Archived media has archiveMessageId set and URL remains valid
-            const urlExpired = !item.archiveMessageId;
+            // Determine if URL expired based on storage method:
+            // - Local storage: URL never expires (file on server, not tied to Discord message)
+            // - Discord storage with archive: URL doesn't expire (archived to permanent channel)
+            // - Discord storage without archive: URL expires (original CDN link breaks)
+            let urlExpired = false;
+            if (item.storageMethod === 'local') {
+                urlExpired = false; // Local files persist regardless of message deletion
+            } else if (item.storageMethod === 'discord') {
+                urlExpired = !item.archiveMessageId; // Only expires if not archived
+            }
 
             await db.update(mediaItems)
                 .set({
