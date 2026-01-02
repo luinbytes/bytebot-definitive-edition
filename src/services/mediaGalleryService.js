@@ -450,39 +450,13 @@ class MediaGalleryService {
                 return { success: false, error: 'Media limit reached (500 items).' };
             }
 
-            // Archive media to persistent storage (prevents URL expiration)
-            // Note: Discord bots can only upload files up to 25 MB
-            const MAX_ARCHIVE_SIZE = 25 * 1024 * 1024; // 25 MB in bytes
-            let archiveResult = { success: false };
-            let finalMediaUrl = attachment.url;
-
-            if (attachment.size <= MAX_ARCHIVE_SIZE) {
-                logger.debug(`📦 Archiving ${attachment.name} (${(attachment.size / (1024 * 1024)).toFixed(1)} MB) to archive channel...`);
-                archiveResult = await mediaUtil.archiveMedia(
-                    attachment.url,
-                    attachment.name,
-                    message.guild
-                );
-
-                if (archiveResult.success) {
-                    finalMediaUrl = archiveResult.archivedUrl;
-                    logger.debug(`✅ Archived to permanent URL`);
-                } else {
-                    logger.warn(`Failed to archive ${attachment.name}: ${archiveResult.error}. Using original URL (may expire).`);
-                }
-            } else {
-                const sizeMB = (attachment.size / (1024 * 1024)).toFixed(1);
-                logger.warn(`⚠️ Skipping archive for ${attachment.name} (${sizeMB} MB) - exceeds 25 MB limit. Using original URL (may expire on message delete).`);
-            }
-
-            // Build metadata
+            // Build metadata with original URL first (archive happens after DB insert)
             const metadata = {
                 userId: message.author.id,
                 guildId: message.guild.id,
                 channelId: message.channel.id,
                 messageId: message.id,
-                archiveMessageId: archiveResult.archiveMessageId || null,
-                mediaUrl: finalMediaUrl,
+                mediaUrl: attachment.url, // Original URL, will be updated after archiving
                 fileName: attachment.name,
                 fileType: fileType,
                 mimeType: attachment.contentType,
@@ -492,14 +466,62 @@ class MediaGalleryService {
                 duration: attachment.duration || null,
                 contentPreview: message.content ? message.content.substring(0, 500) : null,
                 authorId: message.author.id,
-                captureMethod: method
+                captureMethod: method,
+                storageMethod: 'discord', // Default, updated after archiving
+                localFilePath: null,
+                fileHash: null,
+                archiveMessageId: null
             };
 
-            // Save to DB
+            // Save to DB first to get mediaId
             const result = await mediaUtil.saveMedia(metadata);
 
             if (result.success) {
                 logger.debug(`✅ Captured media: ${attachment.name} (${fileType}, ${sizeMB.toFixed(1)} MB) from #${message.channel.name}`);
+
+                // Archive media to persistent storage (prevents URL expiration)
+                // Size limits: 100MB for local storage, 25MB for Discord archive channel
+                const botConfig = require('../../config.json');
+                const storageMethod = botConfig.media?.storageMethod || 'discord';
+                const MAX_LOCAL_SIZE = 100 * 1024 * 1024; // 100 MB
+                const MAX_DISCORD_ARCHIVE_SIZE = 25 * 1024 * 1024; // 25 MB (Discord upload limit)
+                const sizeLimit = storageMethod === 'local' ? MAX_LOCAL_SIZE : MAX_DISCORD_ARCHIVE_SIZE;
+
+                if (attachment.size <= sizeLimit) {
+                    logger.debug(`📦 Archiving ${attachment.name} to ${storageMethod} storage...`);
+                    const archiveResult = await mediaUtil.archiveMedia(
+                        attachment.url,
+                        attachment.name,
+                        message.guild,
+                        message.author.id,
+                        result.media.id
+                    );
+
+                    if (archiveResult.success) {
+                        // Update DB record with archive info
+                        const { db } = require('../database/index');
+                        const { mediaItems } = require('../database/schema');
+                        const { eq } = require('drizzle-orm');
+
+                        await db.update(mediaItems)
+                            .set({
+                                mediaUrl: archiveResult.url,
+                                storageMethod: archiveResult.storageMethod,
+                                localFilePath: archiveResult.localFilePath,
+                                fileHash: archiveResult.fileHash,
+                                archiveMessageId: archiveResult.archiveMessageId
+                            })
+                            .where(eq(mediaItems.id, result.media.id));
+
+                        logger.debug(`✅ Archived to ${storageMethod} storage`);
+                    } else {
+                        logger.warn(`Failed to archive ${attachment.name}: ${archiveResult.error}. Using original URL (may expire).`);
+                    }
+                } else {
+                    const sizeMBFormatted = (attachment.size / (1024 * 1024)).toFixed(1);
+                    const limitMB = (sizeLimit / (1024 * 1024)).toFixed(0);
+                    logger.warn(`⚠️ Skipping archive for ${attachment.name} (${sizeMBFormatted} MB) - exceeds ${limitMB} MB limit for ${storageMethod} storage. Using original URL (may expire).`);
+                }
 
                 // Auto-tag with channel name if enabled
                 if (config.autoTagChannel && message.channel?.name) {
