@@ -539,6 +539,15 @@ module.exports = {
                     // Transfer ownership back
                     const oldOwnerId = podData.ownerId;
 
+                    // Capture current whitelist and co-owners BEFORE making any changes
+                    const currentState = getPodState(channel);
+                    const whitelistUsers = currentState.whitelist.filter(id => id !== oldOwnerId && id !== requesterId);
+                    const coOwnerUsers = currentState.coOwners.filter(id => id !== oldOwnerId && id !== requesterId);
+                    
+                    // Check if old owner had Connect permission
+                    const oldOwnerOverwrite = channel.permissionOverwrites.cache.get(oldOwnerId);
+                    const oldOwnerHadConnect = oldOwnerOverwrite?.allow.has(PermissionFlagsBits.Connect) ?? false;
+
                     // Update database - clear pending flag and transfer ownership
                     await db.update(bytepods)
                         .set({
@@ -547,17 +556,48 @@ module.exports = {
                         })
                         .where(eq(bytepods.channelId, channel.id));
 
-                    // Update permissions
-                    await channel.permissionOverwrites.edit(oldOwnerId, {
-                        ManageChannels: null,
-                        MoveMembers: null
-                    }).catch(() => { });
+                    // Update permissions - preserve old owner's Connect if they had it
+                    if (oldOwnerHadConnect) {
+                        await channel.permissionOverwrites.edit(oldOwnerId, {
+                            Connect: true,
+                            ManageChannels: null,
+                            MoveMembers: null
+                        }).catch(() => { });
+                    } else {
+                        await channel.permissionOverwrites.edit(oldOwnerId, {
+                            ManageChannels: null,
+                            MoveMembers: null
+                        }).catch(() => { });
+                    }
 
+                    // Grant full permissions to new owner (requester)
                     await channel.permissionOverwrites.edit(requesterId, {
                         Connect: true,
                         ManageChannels: true,
                         MoveMembers: true
                     });
+
+                    // Preserve whitelist entries
+                    for (const userId of whitelistUsers) {
+                        try {
+                            await channel.permissionOverwrites.edit(userId, { Connect: true });
+                        } catch (e) {
+                            logger.warn(`Failed to preserve whitelist for ${userId} during reclaim: ${e.message}`);
+                        }
+                    }
+
+                    // Preserve co-owner entries
+                    for (const userId of coOwnerUsers) {
+                        try {
+                            await channel.permissionOverwrites.edit(userId, {
+                                Connect: true,
+                                ManageChannels: true,
+                                MoveMembers: true
+                            });
+                        } catch (e) {
+                            logger.warn(`Failed to preserve co-owner permissions for ${userId} during reclaim: ${e.message}`);
+                        }
+                    }
 
                     // Notify and cleanup
                     await channel.send({
