@@ -30,3 +30,4 @@ DATABASE_LOGGING_GUIDE.md
 
 # Local configuration overrides
 config.local.json
+nul

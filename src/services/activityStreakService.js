@@ -6,7 +6,8 @@ const {
     achievementDefinitions,
     customAchievements,
     achievementRoleConfig,
-    achievementRoles
+    achievementRoles,
+    guilds
 } = require('../database/schema');
 const { eq, and, desc } = require('drizzle-orm');
 const { PermissionFlagsBits } = require('discord.js');
@@ -389,6 +390,31 @@ class ActivityStreakService {
         this.client = client;
         this.checkInterval = null;
         this.achievementManager = achievementManager; // Expose achievement manager
+    }
+
+    /**
+     * Check if achievements are enabled for a guild
+     * @param {string} guildId - Guild ID to check
+     * @returns {Promise<boolean>} - True if enabled (or not explicitly disabled), false if disabled
+     */
+    async isAchievementsEnabled(guildId) {
+        try {
+            const guild = await dbLog.select('guilds',
+                () => db.select()
+                    .from(guilds)
+                    .where(eq(guilds.id, guildId))
+                    .get(),
+                { guildId, operation: 'checkAchievementsEnabled' }
+            );
+
+            // If guild record doesn't exist, or achievementsEnabled is not explicitly false, return true (enabled by default)
+            return !guild || guild.achievementsEnabled !== false;
+
+        } catch (error) {
+            logger.error(`Error checking if achievements are enabled for guild ${guildId}:`, error);
+            // On error, default to enabled to avoid breaking existing functionality
+            return true;
+        }
     }
 
     /**
@@ -1026,6 +1052,12 @@ class ActivityStreakService {
      */
     async updateStreak(userId, guildId, today) {
         try {
+            // Check if achievements are enabled for this guild
+            const achievementsEnabled = await this.isAchievementsEnabled(guildId);
+            if (!achievementsEnabled) {
+                return;
+            }
+
             const existing = await dbLog.select('activityStreaks',
                 () => db.select()
                     .from(activityStreaks)
@@ -1478,6 +1510,15 @@ class ActivityStreakService {
      */
     async awardAchievement(userId, guildId, achievementId, awardedBy = null) {
         try {
+            // Only check if enabled for automatic awards (awardedBy = null means auto-awarded)
+            // Manual awards by admins bypass the disabled check
+            if (!awardedBy) {
+                const achievementsEnabled = await this.isAchievementsEnabled(guildId);
+                if (!achievementsEnabled) {
+                    return;
+                }
+            }
+
             // Check if already earned
             if (await this.hasAchievement(userId, guildId, achievementId)) {
                 return;

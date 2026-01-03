@@ -46,7 +46,8 @@ const expectedSchema = {
         joined_at: 'INTEGER',
         voice_hub_channel_id: 'TEXT',
         voice_hub_category_id: 'TEXT',
-        media_archive_channel_id: 'TEXT'
+        media_archive_channel_id: 'TEXT',
+        achievements_enabled: 'INTEGER DEFAULT 1'
     },
     users: {
         id: 'TEXT PRIMARY KEY',

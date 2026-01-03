@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
 const { db } = require('../../database');
-const { achievementRoleConfig, achievementRoles, customAchievements } = require('../../database/schema');
+const { achievementRoleConfig, achievementRoles, customAchievements, guilds } = require('../../database/schema');
 const { eq, and } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const logger = require('../../utils/logger');
@@ -87,7 +87,15 @@ module.exports = {
                         .setName('achievement')
                         .setDescription('Achievement to remove')
                         .setRequired(true)
-                        .setAutocomplete(true))),
+                        .setAutocomplete(true)))
+        .addSubcommand(sub =>
+            sub
+                .setName('disable')
+                .setDescription('Disable the achievement system for this server'))
+        .addSubcommand(sub =>
+            sub
+                .setName('enable')
+                .setDescription('Enable the achievement system for this server')),
 
     async execute(interaction, client) {
         const subcommand = interaction.options.getSubcommand();
@@ -106,6 +114,10 @@ module.exports = {
             await handleAward(interaction, client);
         } else if (subcommand === 'remove') {
             await handleRemove(interaction, client);
+        } else if (subcommand === 'disable') {
+            await handleDisable(interaction);
+        } else if (subcommand === 'enable') {
+            await handleEnable(interaction);
         }
     },
 
@@ -648,6 +660,144 @@ async function handleRemove(interaction, client) {
         logger.error('Error removing achievement:', error);
         await interaction.editReply({
             embeds: [embeds.error('Remove Failed', 'An error occurred while removing the achievement.')]
+        });
+    }
+}
+
+/**
+ * Handle disable subcommand - disable achievement system for this server
+ */
+async function handleDisable(interaction) {
+    try {
+        // Check current status
+        const guild = await dbLog.select('guilds',
+            () => db.select()
+                .from(guilds)
+                .where(eq(guilds.id, interaction.guild.id))
+                .get(),
+            { guildId: interaction.guild.id }
+        );
+
+        // Check if already disabled
+        if (guild && guild.achievementsEnabled === false) {
+            return interaction.reply({
+                embeds: [embeds.warn(
+                    'Already Disabled',
+                    'The achievement system is already disabled for this server.'
+                )],
+                flags: [MessageFlags.Ephemeral]
+            });
+        }
+
+        // Disable achievements
+        if (guild) {
+            // Update existing guild record
+            await dbLog.update('guilds',
+                () => db.update(guilds)
+                    .set({ achievementsEnabled: false })
+                    .where(eq(guilds.id, interaction.guild.id)),
+                { guildId: interaction.guild.id, operation: 'disable achievements' }
+            );
+        } else {
+            // Create new guild record with achievements disabled
+            await dbLog.insert('guilds',
+                () => db.insert(guilds).values({
+                    id: interaction.guild.id,
+                    achievementsEnabled: false
+                }),
+                { guildId: interaction.guild.id }
+            );
+        }
+
+        const embed = embeds.success(
+            '❌ Achievement System Disabled',
+            'The achievement system has been disabled for this server.'
+        );
+
+        embed.setDescription(
+            '**What this means:**\n' +
+            '• No new achievements will be tracked or awarded\n' +
+            '• Existing achievements are preserved\n' +
+            '• Achievement roles remain on users\n' +
+            '• Users can still view their achievements via `/streak`\n\n' +
+            'Use `/achievement enable` to re-enable the system.'
+        );
+
+        await interaction.reply({
+            embeds: [embed],
+            flags: [MessageFlags.Ephemeral]
+        });
+
+        logger.success(`Achievement system disabled in ${interaction.guild.name} by ${interaction.user.tag}`);
+
+    } catch (error) {
+        logger.error('Error disabling achievement system:', error);
+        await interaction.reply({
+            embeds: [embeds.error('Disable Failed', 'An error occurred while disabling the achievement system.')],
+            flags: [MessageFlags.Ephemeral]
+        });
+    }
+}
+
+/**
+ * Handle enable subcommand - enable achievement system for this server
+ */
+async function handleEnable(interaction) {
+    try {
+        // Check current status
+        const guild = await dbLog.select('guilds',
+            () => db.select()
+                .from(guilds)
+                .where(eq(guilds.id, interaction.guild.id))
+                .get(),
+            { guildId: interaction.guild.id }
+        );
+
+        // Check if already enabled (or never disabled)
+        if (!guild || guild.achievementsEnabled !== false) {
+            return interaction.reply({
+                embeds: [embeds.warn(
+                    'Already Enabled',
+                    'The achievement system is already enabled for this server.'
+                )],
+                flags: [MessageFlags.Ephemeral]
+            });
+        }
+
+        // Enable achievements
+        await dbLog.update('guilds',
+            () => db.update(guilds)
+                .set({ achievementsEnabled: true })
+                .where(eq(guilds.id, interaction.guild.id)),
+            { guildId: interaction.guild.id, operation: 'enable achievements' }
+        );
+
+        const embed = embeds.success(
+            '✅ Achievement System Enabled',
+            'The achievement system has been enabled for this server.'
+        );
+
+        embed.setDescription(
+            '**What this means:**\n' +
+            '• Achievement tracking is now active\n' +
+            '• Users will earn achievements for activity\n' +
+            '• Missed achievements will be backfilled on bot restart\n' +
+            '• DM notifications will be sent (if enabled)\n\n' +
+            'Use `/achievement setup` to configure role rewards.'
+        );
+
+        await interaction.reply({
+            embeds: [embed],
+            flags: [MessageFlags.Ephemeral]
+        });
+
+        logger.success(`Achievement system enabled in ${interaction.guild.name} by ${interaction.user.tag}`);
+
+    } catch (error) {
+        logger.error('Error enabling achievement system:', error);
+        await interaction.reply({
+            embeds: [embeds.error('Enable Failed', 'An error occurred while enabling the achievement system.')],
+            flags: [MessageFlags.Ephemeral]
         });
     }
 }

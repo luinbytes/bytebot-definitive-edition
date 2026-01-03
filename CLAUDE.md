@@ -51,7 +51,7 @@ Discord bot (Discord.js v14) with neon purple branding (#8A2BE2), slash commands
 **schema.js - 26 tables:**
 | Table | Key Fields | Notes |
 |-------|------------|-------|
-| guilds | id, prefix, logChannel, welcomeChannel, welcomeMessage, welcomeEnabled, welcomeUseEmbed, voiceHubChannelId, voiceHubCategoryId, mediaArchiveChannelId | Guild config, BytePod, welcome messages, media archive |
+| guilds | id, prefix, logChannel, welcomeChannel, welcomeMessage, welcomeEnabled, welcomeUseEmbed, voiceHubChannelId, voiceHubCategoryId, mediaArchiveChannelId, achievementsEnabled | Guild config, BytePod, welcome messages, media archive, achievement toggle |
 | users | id, guildId, commandsRun, lastSeen, wtNickname, ephemeralPreference | WT account binding, global privacy settings ('always'/'public'/'default') |
 | moderationLogs | id, guildId, targetId, executorId, action, reason, timestamp | Actions: BAN/KICK/CLEAR/WARN |
 | commandPermissions | id, guildId, commandName, roleId | RBAC overrides |
@@ -235,7 +235,7 @@ seasonal    → Limited-time events (Halloween, Christmas, Summer, etc.)
 - **activityStreakService.js (1700+ lines):** Core service, AchievementManager, tracking, awarding
 - **achievementDefinitions.js (1700+ lines):** Centralized achievement data file (98 achievements: 82 core + 16 seasonal)
 - **achievementUtils.js (240 lines):** Shared helpers (emojis, tiers, progress bars, milestones)
-- **achievement.js (525 lines):** Admin command with 6 subcommands + autocomplete
+- **achievement.js (~800 lines):** Admin command with 8 subcommands + autocomplete (disable/enable)
 - **streak.js (700 lines):** User command with 4 subcommands + pagination
 - **userinfo.js:** Added achievement showcase section
 
@@ -267,7 +267,7 @@ User joins → Creates first streak (special_first_streak +10pts)
 | welcome.js (~420 lines) | `/welcome setup/message/toggle/embed/variables/test/view` - New member welcome messages. 18 variables: user mentions, server info, join dates (Discord timestamps), account age, member number (1st, 2nd, 3rd). Embed/plain text modes. `/variables` shows full reference guide. Requires ManageGuild |
 | autorespond.js (~450 lines) | `/autorespond add/remove/list/toggle/edit` - Keyword responses. Match types: exact/contains/wildcard/regex(dev-only). Variables: {user}{server}{channel}{username}. Requires ManageGuild |
 | suggestion.js (~650 lines) | `/suggestion setup/approve/deny/implement/view/list/leaderboard` - Community suggestions. DM notifications, auto-embed updates |
-| achievement.js (~525 lines) | `/achievement setup/view/cleanup/list_roles/create/award` - Achievement system admin. Role reward config, custom achievement builder (modal), manual awards with autocomplete. Requires Administrator |
+| achievement.js (~800 lines) | `/achievement setup/view/cleanup/list_roles/create/award/remove/disable/enable` - Achievement system admin. Role reward config, custom achievement builder (modal), manual awards with autocomplete, guild-level toggle. Requires Administrator |
 
 ### Developer (src/commands/developer/) - All devOnly
 | Command | Description |
@@ -484,6 +484,15 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 ---
 
 ## Recent Changes
+
+### 2026-01-03 - Achievement System Guild Toggle
+- **NEW:** Guild-level toggle to disable/enable achievement system via `/achievement disable` and `/achievement enable`
+- **FEATURES:** Administrators can now disable automatic achievement tracking for their server while preserving existing data
+- **BEHAVIOR:** When disabled, automatic achievement tracking stops (no new achievements awarded from messages/voice/commands), but manual awards via `/achievement award` still work (admin override), existing achievements/roles/data preserved, users can still view achievements via `/streak`
+- **RBAC:** Requires Administrator permission (both UI restriction via `.setDefaultMemberPermissions()` and runtime enforcement via `permissions` array)
+- **DATABASE:** Added `achievementsEnabled` boolean field to guilds table (default: true)
+- **SERVICE:** Added `isAchievementsEnabled(guildId)` helper method, checks in `updateStreak()` (returns early if disabled), `awardAchievement()` (only checks for automatic awards, manual awards bypass)
+- **FILES:** schema.js, database/index.js (expectedSchema), achievement.js (+2 subcommands, +2 handlers), activityStreakService.js, CLAUDE.md
 
 ### 2026-01-01 - Clear Command Race Condition Fix
 - **BUG FIX:** Fixed DiscordAPIError[10008] "Unknown Message" error in `/clear` command
