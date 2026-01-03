@@ -12,6 +12,7 @@ const guilds = sqliteTable('guilds', {
     voiceHubChannelId: text('voice_hub_channel_id'),
     voiceHubCategoryId: text('voice_hub_category_id'),
     mediaArchiveChannelId: text('media_archive_channel_id'), // Archive channel for media gallery
+    achievementsEnabled: integer('achievements_enabled', { mode: 'boolean' }).default(true), // Guild-level achievement toggle
 });
 
 const users = sqliteTable('users', {
