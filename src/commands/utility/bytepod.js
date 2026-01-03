@@ -543,6 +543,8 @@ module.exports = {
                     const currentState = getPodState(channel);
                     const whitelistUsers = currentState.whitelist.filter(id => id !== oldOwnerId && id !== requesterId);
                     const coOwnerUsers = currentState.coOwners.filter(id => id !== oldOwnerId && id !== requesterId);
+                    const isLocked = currentState.isLocked;
+                    const userLimit = currentState.limit;
                     
                     // Check if old owner had Connect permission
                     const oldOwnerOverwrite = channel.permissionOverwrites.cache.get(oldOwnerId);
@@ -597,6 +599,22 @@ module.exports = {
                         } catch (e) {
                             logger.warn(`Failed to preserve co-owner permissions for ${userId} during reclaim: ${e.message}`);
                         }
+                    }
+
+                    // Preserve lock state (@everyone overwrite)
+                    try {
+                        await channel.permissionOverwrites.edit(interaction.guild.id, {
+                            Connect: isLocked ? false : null
+                        });
+                    } catch (e) {
+                        logger.warn(`Failed to preserve lock state during reclaim: ${e.message}`);
+                    }
+
+                    // Preserve user limit
+                    try {
+                        await channel.setUserLimit(userLimit);
+                    } catch (e) {
+                        logger.warn(`Failed to preserve user limit during reclaim: ${e.message}`);
                     }
 
                     // Notify and cleanup
