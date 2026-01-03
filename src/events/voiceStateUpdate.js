@@ -116,12 +116,14 @@ async function transferOwnership(channel, podData, newOwnerId, client) {
         const currentState = getPodState(channel);
         const whitelistUsers = currentState.whitelist.filter(id => id !== oldOwnerId && id !== newOwnerId);
         const coOwnerUsers = currentState.coOwners.filter(id => id !== oldOwnerId && id !== newOwnerId);
+        const isLocked = currentState.isLocked;
+        const userLimit = currentState.limit;
         
         // Also check if old owner had Connect permission (they should, but preserve it explicitly)
         const oldOwnerOverwrite = channel.permissionOverwrites.cache.get(oldOwnerId);
         const oldOwnerHadConnect = oldOwnerOverwrite?.allow.has(PermissionFlagsBits.Connect) ?? false;
 
-        logger.debug(`[Transfer] Preserving whitelist: ${whitelistUsers.length} users, co-owners: ${coOwnerUsers.length} users`);
+        logger.debug(`[Transfer] Preserving whitelist: ${whitelistUsers.length} users, co-owners: ${coOwnerUsers.length} users, locked: ${isLocked}, limit: ${userLimit}`);
 
         logger.debug(`[Transfer] Step 2: Updating database for ${channel.id}`);
         // Update database (keep originalOwnerId unchanged - creator can always reclaim)
@@ -190,14 +192,31 @@ async function transferOwnership(channel, podData, newOwnerId, client) {
             }
         }
 
-        logger.debug(`[Transfer] Step 7: Fetching new owner user`);
+        logger.debug(`[Transfer] Step 7: Preserving lock state and user limit`);
+        // Preserve lock state (@everyone overwrite)
+        try {
+            await channel.permissionOverwrites.edit(guild.id, {
+                Connect: isLocked ? false : null
+            });
+        } catch (e) {
+            logger.warn(`[Transfer] Failed to preserve lock state: ${e.message}`);
+        }
+
+        // Preserve user limit
+        try {
+            await channel.setUserLimit(userLimit);
+        } catch (e) {
+            logger.warn(`[Transfer] Failed to preserve user limit: ${e.message}`);
+        }
+
+        logger.debug(`[Transfer] Step 8: Fetching new owner user`);
         // Notify the channel
         const newOwner = await client.users.fetch(newOwnerId).catch(() => null);
         const embed = embeds.info('Ownership Transferred',
             `<@${oldOwnerId}> left the channel. <@${newOwnerId}> is now the owner of this BytePod.`
         );
 
-        logger.debug(`[Transfer] Step 8: Sending notification embed`);
+        logger.debug(`[Transfer] Step 9: Sending notification embed`);
         await channel.send({
             embeds: [embed],
             content: `<@${newOwnerId}>, you are now the owner! Run \`/bytepod panel\` to access controls.`
