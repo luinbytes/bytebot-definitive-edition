@@ -56,10 +56,20 @@ module.exports = async (client) => {
         logger.info(`Loaded ${loadedContextMenus.length} Context Menus: ${loadedContextMenus.join(', ')}`);
     }
 
-    // Check deployment mode from command-line arguments
+    // Check deployment mode from command-line arguments OR environment variable
+    // Environment variable takes precedence over default behavior (but flags override everything)
     const forceRegister = process.argv.includes('--deploy');
     const deployAll = process.argv.includes('--deploy-all');
-    const deployGlobal = process.argv.includes('--deploy-global');
+    let deployGlobal = process.argv.includes('--deploy-global');
+
+    // AUTO_DEPLOY environment variable: 'guild', 'global', 'none', or unset (defaults to guild if GUILD_ID exists)
+    const autoDeployMode = process.env.AUTO_DEPLOY?.toLowerCase();
+
+    // If AUTO_DEPLOY=global and no flags passed, treat as global deployment
+    if (autoDeployMode === 'global' && !forceRegister && !deployAll && !deployGlobal) {
+        deployGlobal = true;
+        logger.debug('AUTO_DEPLOY=global detected, enabling global deployment mode');
+    }
 
     // Sort commands by name to ensure consistent hash (glob returns files in non-deterministic order)
     const sortedCommands = commands.slice().sort((a, b) => a.name.localeCompare(b.name));
@@ -84,10 +94,21 @@ module.exports = async (client) => {
         logger.debug(`Could not load command cache: ${err.message}`);
     }
 
-    // Only register if commands changed or deployment flag is passed
+    // Check if commands have been deployed before (cache exists)
+    const hasBeenDeployed = cachedHash !== null;
+
+    // Skip deployment if commands unchanged (cache hit)
     if (!forceRegister && !deployAll && !deployGlobal && commandHash === cachedHash) {
         logger.success(`✓ Using cached commands (${commands.length} commands, hash: ${commandHash.substring(0, 8)}...)`);
         logger.info(`Skipping registration - commands unchanged. Use --deploy, --deploy-all, or --deploy-global to force.`);
+        return;
+    }
+
+    // If AUTO_DEPLOY=none, skip re-deployment ONLY if commands were previously deployed
+    // On first run (no cache), deploy to GUILD_ID so /deploy command is available
+    if (autoDeployMode === 'none' && !forceRegister && !deployAll && !deployGlobal && hasBeenDeployed) {
+        logger.info(`AUTO_DEPLOY=none - Skipping automatic re-deployment. Commands: ${commands.length}`);
+        logger.info(`Commands have changed. Deploy manually using /deploy command.`);
         return;
     }
 
@@ -130,6 +151,20 @@ module.exports = async (client) => {
 
             logger.success(`✓ Successfully deployed ${data.length} commands globally`);
             logger.info('Commands will be available in all guilds within 1 hour');
+
+            // Clear guild-specific commands from GUILD_ID to prevent duplicates
+            if (process.env.GUILD_ID) {
+                try {
+                    logger.info(`Clearing guild-specific commands from ${process.env.GUILD_ID} to prevent duplicates...`);
+                    await rest.put(
+                        Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
+                        { body: [] }
+                    );
+                    logger.success(`✓ Cleared guild commands from GUILD_ID (global commands will take over)`);
+                } catch (err) {
+                    logger.warn(`Failed to clear guild commands from GUILD_ID: ${err.message}`);
+                }
+            }
 
         } else {
             // Deploy to specific guild (default/development mode)

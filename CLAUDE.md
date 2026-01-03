@@ -26,6 +26,8 @@ npm start -- --deploy-global  # Deploy globally (1hr propagation)
 ### Environment Setup
 Required `.env` variables: `DISCORD_TOKEN`, `CLIENT_ID`, `GUILD_ID`, `DATABASE_URL` (optional, defaults to sqlite.db)
 
+**Deployment Control:** `AUTO_DEPLOY` (optional) - Controls automatic command deployment. Values: `none` (manual only), `guild` (auto-deploy to GUILD_ID, testing), `global` (auto-deploy globally, production with 1hr propagation), or unset (same as guild). Use for hosts that don't support startup flags.
+
 **Media Storage (optional):** `MEDIA_STORAGE_PATH` (default: ./media-storage), `MEDIA_SERVER_PORT` (default: 3000), `MEDIA_SERVER_DOMAIN` (default: http://localhost:3000), `MEDIA_STORAGE_LIMIT_GB` (default: 8)
 
 ---
@@ -470,12 +472,23 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 
 ## Deployment
 
-**CLI:**
+**CLI Flags:**
 - `npm start -- --deploy` - Force to GUILD_ID
 - `npm start -- --deploy-all` - All guilds (instant)
 - `npm start -- --deploy-global` - Global (1hr propagation)
 
+**Environment Variable (for hosts without flag support):**
+- `AUTO_DEPLOY=none` - Disable automatic re-deployment on changes (deploys once on first run, then manual only)
+- `AUTO_DEPLOY=guild` - Auto-deploy to GUILD_ID on command changes (default, instant updates)
+- `AUTO_DEPLOY=global` - Auto-deploy globally on command changes (all guilds, 1hr propagation)
+- Unset - Same as `guild` if GUILD_ID exists
+
 **In-Bot:** `/deploy scope:Guild|Global` (owner only)
+
+**Avoiding Duplicates:**
+- Never mix guild and global deployments (causes duplicate commands)
+- Use `/unregister scope:Global` to remove global commands if you have duplicates
+- Recommended: `AUTO_DEPLOY=none` + manual `/deploy` for production
 
 **Intents:** Guilds, GuildMembers, GuildMessages, MessageContent, GuildVoiceStates, GuildMessageReactions
 
@@ -484,6 +497,21 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 ---
 
 ## Recent Changes
+
+### 2026-01-03 - AUTO_DEPLOY Environment Variable
+- **NEW:** `AUTO_DEPLOY` environment variable for controlling command deployment without startup flags
+- **USE CASE:** Hosts that don't support custom startup commands (e.g., Pterodactyl panels) can now control deployment via `.env`
+- **VALUES:** `none` (disable auto-redeploy, manual only), `guild` (auto-deploy to GUILD_ID), `global` (auto-deploy globally), or unset (defaults to guild)
+- **BEHAVIOR:**
+  - `AUTO_DEPLOY=none` - Deploys once on first run (so `/deploy` command exists), then skips automatic re-deployment on changes
+  - `AUTO_DEPLOY=guild` - Auto-deploys to GUILD_ID when commands change (instant, development/testing)
+  - `AUTO_DEPLOY=global` - Auto-deploys globally when commands change (1hr propagation, production)
+- **SMART LOGIC:** Checks for cached hash - if commands were never deployed (no cache), initial deployment happens even with `AUTO_DEPLOY=none`
+- **DUPLICATE FIX:** Solves issue where guild + global deployments cause duplicate commands in test guilds
+- **RECOMMENDED SETUP:**
+  - Development/Testing: `AUTO_DEPLOY=guild` or unset (instant updates to test guild)
+  - Production: `AUTO_DEPLOY=global` (automatic global updates) or `AUTO_DEPLOY=none` (manual control via `/deploy`)
+- **FILES:** commandHandler.js, .env, CLAUDE.md
 
 ### 2026-01-03 - Achievement System Guild Toggle
 - **NEW:** Guild-level toggle to disable/enable achievement system via `/achievement disable` and `/achievement enable`
