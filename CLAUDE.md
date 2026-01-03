@@ -274,10 +274,10 @@ User joins → Creates first streak (special_first_streak +10pts)
 ### Developer (src/commands/developer/) - All devOnly
 | Command | Description |
 |---------|-------------|
-| guilds.js | List all guilds |
-| manageguilds.js | List/leave guilds via select menu |
+| guild.js | `/guild list/manage` - View all guilds (list) or manage via select menu (leave multiple guilds with progress bar) |
 | deploy.js | `/deploy <scope>` - Force command sync. Guild(instant) or Global(1hr). Detects duplicates. 10s cooldown |
 | unregister.js | `/unregister <scope>` - Clear command registrations (Global/Guild/Both). Fixes duplicates. 10s cooldown |
+| check-achievements.js | `/check-achievements [user]` - Debug achievement eligibility (developer testing only) |
 
 ### Fun (src/commands/fun/)
 8ball.js (20 responses), coinflip.js, joke.js (official-joke-api), roll.js (2-100 sides)
@@ -290,11 +290,11 @@ User joins → Creates first streak (special_first_streak +10pts)
 ### Moderation (src/commands/moderation/)
 | Command | Description |
 |---------|-------------|
-| audit.js | `/audit user/recent/by` - Moderation log viewer with filters |
-| ban.js, kick.js | Ban/kick + log to DB |
-| clear.js | Bulk delete 1-100 messages |
-| warn.js, unwarn.js, warnings.js | Warning system with DM + DB logging |
-| lock.js, unlock.js | Deny/restore SendMessages for @everyone |
+| audit.js | `/audit user/recent/by` - Moderation log viewer with filters. Requires ModerateMembers |
+| ban.js, kick.js | Ban/kick + log to DB. Requires BanMembers/KickMembers |
+| clear.js | Bulk delete 1-100 messages. Requires ManageMessages |
+| warning.js | `/warning add/remove/list` - Unified warning system. Add warnings (DM notification), remove by ID, view history. Requires ModerateMembers |
+| lockchannel.js | `/lockchannel lock/unlock` - Lock (deny SendMessages) or unlock (restore SendMessages) for @everyone in current channel. Requires ManageChannels |
 
 ### Utility (src/commands/utility/)
 | Command | Description |
@@ -335,8 +335,9 @@ User joins → Creates first streak (special_first_streak +10pts)
 | Module | Purpose |
 |--------|---------|
 | embeds.js | Branding (#8A2BE2). Methods: base, success, error, warn, brand, info. **NEVER use EmbedBuilder directly** |
-| logger.js | Colored console: info(blue), success(green), warn(yellow), error(red), debug(magenta) |
+| logger.js | Colored console: info(blue), success(green), warn(yellow), error(red), debug(magenta). **ALWAYS use logger, never console.log** |
 | permissions.js | `checkUserPermissions()` - RBAC logic |
+| avatarUtil.js | `buildAvatarEmbed(user, member)` - Shared avatar display logic for slash command and context menu. Handles guild/user avatars, download links, GIF detection |
 | permissionCheck.js | `checkBotPermissions()` - BytePod validator (ManageChannels,MoveMembers,Connect) |
 | ephemeralHelper.js | Privacy system: `shouldBeEphemeral()`, `getUserPreference()`, `setUserPreference()` - 3-tier logic (parameter > user pref > command default) |
 | wtService.js | Singleton for ThunderInsights: `searchPlayer()`, `getPlayerStats()` |

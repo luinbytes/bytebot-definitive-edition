@@ -95,7 +95,7 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
         await commandHandler(client);
 
         // Start media server (HTTP server for serving locally-stored media files)
-        const config = require('../config.json');
+        const config = require('./utils/config');
         if (config.media?.storageMethod === 'local') {
             try {
                 const { startMediaServer } = require('./server/mediaServer');

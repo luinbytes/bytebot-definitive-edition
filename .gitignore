@@ -22,7 +22,12 @@ yarn-error.log*
 logs/
 *.log
 sqlite.db.bak
+
+# Command cache
 .command-cache.json
+
+# Media storage
+media-storage/
 
 # Claude
 .claude/

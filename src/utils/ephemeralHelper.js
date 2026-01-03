@@ -2,6 +2,7 @@ const { db } = require('../database');
 const { users } = require('../database/schema');
 const { eq, and } = require('drizzle-orm');
 const { dbLog } = require('./dbLogger');
+const logger = require('./logger');
 
 /**
  * Get user's ephemeral preference from database
@@ -21,7 +22,7 @@ async function getUserPreference(userId) {
 
         return user?.ephemeralPreference || 'default';
     } catch (error) {
-        console.error('[ephemeralHelper] Error fetching user preference:', error);
+        logger.error(`Error fetching user preference: ${error.message}`, 'EphemeralHelper');
         return 'default'; // Fallback to default on error
     }
 }
@@ -116,7 +117,7 @@ async function setUserPreference(userId, guildId, preference) {
 
         return true;
     } catch (error) {
-        console.error('[ephemeralHelper] Error setting user preference:', error);
+        logger.error(`Error setting user preference: ${error.message}`, 'EphemeralHelper');
         return false;
     }
 }
