@@ -58,7 +58,9 @@ module.exports = {
                         .setMaxValue(25)
                         .setRequired(false)
                 )
-        ),
+        )
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+
     permissions: [PermissionFlagsBits.ManageGuild],
     longRunning: true,
 

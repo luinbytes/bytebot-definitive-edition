@@ -461,9 +461,10 @@ function validateAndFixSchema() {
                     sqlite.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${simpleType}`);
                     fixes.push(`Added column: ${tableName}.${columnName}`);
                 } catch (e) {
-                    // Column might already exist or other error
+                    // Column might already exist or other error - silently ignore duplicates
                     if (!e.message.includes('duplicate column')) {
-                        console.error(`Failed to add column ${tableName}.${columnName}:`, e.message);
+                        // Will be logged by runMigrations if dbLoggingEnabled
+                        throw new Error(`Failed to add column ${tableName}.${columnName}: ${e.message}`);
                     }
                 }
             }

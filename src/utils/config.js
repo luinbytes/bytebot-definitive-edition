@@ -10,6 +10,7 @@ const path = require('path');
  * Priority: config.local.json > config.json
  */
 
+// Note: Can't use logger here due to circular dependency (logger requires config)
 let cachedConfig = null;
 
 /**
