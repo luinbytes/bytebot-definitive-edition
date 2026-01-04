@@ -1,8 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
-const { db } = require('../../database/index');
-const { moderationLogs } = require('../../database/schema');
+const { executeModerationAction } = require('../../utils/moderationUtil');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -38,17 +37,18 @@ module.exports = {
         }
 
         try {
-            await target.kick(reason);
-
-            // Log to database
-            await db.insert(moderationLogs).values({
+            // Execute moderation action (log to DB + send DM notification)
+            await executeModerationAction({
                 guildId: interaction.guild.id,
-                targetId: target.id,
-                executorId: interaction.user.id,
+                guildName: interaction.guild.name,
+                target: target.user,
+                executor: interaction.member,
                 action: 'KICK',
-                reason: reason,
-                timestamp: new Date()
+                reason
             });
+
+            // Perform the kick
+            await target.kick(reason);
 
             await interaction.reply({
                 embeds: [embeds.success('Member Kicked', `**${target.user.tag}** has been kicked.\n**Reason:** ${reason}`)]
