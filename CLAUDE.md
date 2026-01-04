@@ -499,6 +499,22 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 
 ## Recent Changes
 
+### 2026-01-04 - Codebase Cleanup & Consolidation
+- **CLEANUP:** Major codebase refactoring to improve maintainability and reduce duplication
+- **COMMAND CONSOLIDATION:** Merged 9 commands into 3 unified commands with subcommands:
+  - `/warn`, `/unwarn`, `/warnings` → `/warning [add|remove|list]` (saved 3 commands)
+  - `/lock`, `/unlock` → `/lockchannel [lock|unlock]` (saved 2 commands)
+  - `/guilds`, `/manageguilds` → `/guild [list|manage]` (saved 2 commands)
+- **CODE DEDUPLICATION:** Created `avatarUtil.js` utility - eliminated 95% code duplication between slash command and context menu avatar implementations (165 lines → 67 lines)
+- **LOGGING CONSISTENCY:** Fixed 3 files using `console.log`/`console.error` to use centralized `logger` utility (ephemeralHelper.js, config.js, database/index.js)
+- **CONFIG LOADING FIX:** Fixed index.js to use `require('./utils/config')` instead of `require('../config.json')` - now respects config.local.json overrides
+- **DIRECTORY CLEANUP:** Removed abandoned `/web/` directory (61MB Next.js experiment) and empty `/scripts/` directory
+- **PERMISSION AUDIT:** Comprehensive 43-command audit - fixed 2 UX issues (starboard.js, audit.js missing `.setDefaultMemberPermissions()` UI indicators)
+- **DEVELOPER EXPERIENCE:** Added `.env.example` with all supported environment variables, updated `.gitignore` for media-storage/ and command cache
+- **DOCUMENTATION:** Updated CLAUDE.md command tables, utilities section, added avatarUtil.js reference
+- **FILES:** 9 commands consolidated, avatarUtil.js (new), .env.example (new), .gitignore, CLAUDE.md, index.js, ephemeralHelper.js, config.js, database/index.js, starboard.js, audit.js
+- **IMPACT:** Cleaner codebase, better discoverability (fewer top-level commands), DRY principle enforcement, consistent logging
+
 ### 2026-01-03 - AUTO_DEPLOY Environment Variable
 - **NEW:** `AUTO_DEPLOY` environment variable for controlling command deployment without startup flags
 - **USE CASE:** Hosts that don't support custom startup commands (e.g., Pterodactyl panels) can now control deployment via `.env`
