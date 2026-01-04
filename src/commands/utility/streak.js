@@ -543,12 +543,12 @@ async function handleAchievements(interaction, client) {
             });
         }
 
-        // Pagination
+        // Pagination setup
         const itemsPerPage = 5;
         const totalPages = Math.ceil(achievements.length / itemsPerPage);
-        let currentPage = 0;
 
-        const generateEmbed = async (page) => {
+        // Render page function for pagination utility
+        const renderPage = async (page) => {
             const start = page * itemsPerPage;
             const end = start + itemsPerPage;
             const pageAchievements = achievements.slice(start, end);
@@ -597,60 +597,15 @@ async function handleAchievements(interaction, client) {
             return embed;
         };
 
-        const generateButtons = (page) => {
-            const prevButton = new ButtonBuilder()
-                .setCustomId('achievements_prev')
-                .setLabel('Previous')
-                .setStyle(ButtonStyle.Primary)
-                .setDisabled(page === 0);
-
-            const nextButton = new ButtonBuilder()
-                .setCustomId('achievements_next')
-                .setLabel('Next')
-                .setStyle(ButtonStyle.Primary)
-                .setDisabled(page === totalPages - 1);
-
-            return new ActionRowBuilder().addComponents(prevButton, nextButton);
-        };
-
-        const embed = await generateEmbed(currentPage);
-        const buttons = generateButtons(currentPage);
-
-        const message = await interaction.editReply({
-            embeds: [embed],
-            components: totalPages > 1 ? [buttons] : []
+        // Use pagination utility for automatic button handling
+        await sendPaginatedMessage({
+            interaction,
+            renderPage,
+            totalPages,
+            customIdPrefix: 'achievements',
+            timeout: 300000, // 5 minutes
+            deferred: true // Interaction was already deferred
         });
-
-        if (totalPages > 1) {
-            const collector = message.createMessageComponentCollector({ time: 300000 }); // 5 min
-
-            collector.on('collect', async (i) => {
-                if (i.user.id !== interaction.user.id) {
-                    return i.reply({
-                        embeds: [embeds.error('Not Your Menu', 'This browser belongs to someone else.')],
-                        flags: [MessageFlags.Ephemeral]
-                    });
-                }
-
-                if (i.customId === 'achievements_next') {
-                    currentPage++;
-                } else if (i.customId === 'achievements_prev') {
-                    currentPage--;
-                }
-
-                const newEmbed = await generateEmbed(currentPage);
-                const newButtons = generateButtons(currentPage);
-
-                await i.update({
-                    embeds: [newEmbed],
-                    components: [newButtons]
-                });
-            });
-
-            collector.on('end', () => {
-                message.edit({ components: [] }).catch(() => { });
-            });
-        }
 
     } catch (error) {
         logger.error('Error showing achievements:', error);
