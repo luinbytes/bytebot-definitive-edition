@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
-const { handleCommandError, handleDMError } = require('../../utils/errorHandlerUtil');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
+const { executeModerationAction } = require('../../utils/moderationUtil');
 const { db } = require('../../database/index');
 const { moderationLogs } = require('../../database/schema');
 const { eq, and, desc } = require('drizzle-orm');
@@ -67,24 +68,15 @@ async function handleWarnAdd(interaction) {
     const reason = interaction.options.getString('reason');
 
     try {
-        // Log to database
-        await db.insert(moderationLogs).values({
+        // Execute moderation action (log to DB + send DM notification)
+        await executeModerationAction({
             guildId: interaction.guild.id,
-            targetId: target.id,
-            executorId: interaction.user.id,
+            guildName: interaction.guild.name,
+            target,
+            executor: interaction.member,
             action: 'WARN',
-            reason: reason,
-            timestamp: new Date()
+            reason
         });
-
-        // Try to DM the user
-        try {
-            await target.send({
-                embeds: [embeds.warn('Warning received', `You have been warned in **${interaction.guild.name}**.\n**Reason:** ${reason}`)]
-            });
-        } catch (dmError) {
-            handleDMError(dmError, target.id, 'warning notification');
-        }
 
         await interaction.reply({
             embeds: [embeds.success('Member Warned', `**${target.tag}** has been warned.\n**Reason:** ${reason}`)]
