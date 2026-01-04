@@ -5,6 +5,7 @@ const { eq, and } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const mediaUtil = require('../../utils/mediaUtil');
 const logger = require('../../utils/logger');
+const { sendPaginatedMessage } = require('../../utils/paginationUtil');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -244,116 +245,7 @@ module.exports = {
             return;
         }
 
-        // Handle button interactions for pagination
-        if (interaction.isButton() && interaction.customId.startsWith('media_list_')) {
-            // Parse customId: media_list_{page}_{fileType}_{channelId}
-            const parts = interaction.customId.split('_');
-            const page = parseInt(parts[2]);
-            const fileType = parts[3] === 'all' ? null : parts[3];
-            const channelId = parts[4] === 'all' ? null : parts[4];
-
-            await interaction.deferUpdate();
-
-            const perPage = 10;
-            const offset = (page - 1) * perPage;
-
-            const filterOptions = {
-                limit: perPage,
-                offset,
-                fileType,
-                channelId
-            };
-
-            try {
-                const mediaList = await mediaUtil.getMedia(interaction.user.id, filterOptions);
-                const totalCount = await mediaUtil.getMediaCount(interaction.user.id);
-                const totalPages = Math.ceil(totalCount / perPage);
-
-                // Build embed
-                const listEmbed = embeds.brand(
-                    'Media Gallery',
-                    `Showing page ${page} of ${totalPages} (${totalCount} total items)`
-                );
-
-                for (const media of mediaList) {
-                    const icon = getFileTypeIcon(media.fileType);
-                    const sizeKB = Math.round(media.fileSize / 1024);
-                    const dimensions = media.width && media.height ? `${media.width}x${media.height}` : 'N/A';
-
-                    let fieldValue = `${icon} **${media.fileName}**\n`;
-                    fieldValue += `**ID:** \`${media.id}\` | **Size:** ${sizeKB} KB`;
-
-                    if (media.fileType === 'image' || media.fileType === 'video') {
-                        fieldValue += ` | **Dimensions:** ${dimensions}`;
-                    }
-
-                    fieldValue += `\n**Channel:** <#${media.channelId}>`;
-
-                    if (media.messageDeleted) {
-                        fieldValue += '\n⚠️ *Original message deleted*';
-                    }
-
-                    listEmbed.addFields([{
-                        name: `<t:${Math.floor(media.savedAt.getTime() / 1000)}:R>`,
-                        value: fieldValue
-                    }]);
-                }
-
-                // Add thumbnail
-                const firstImage = mediaList.find(m => m.fileType === 'image' && !m.messageDeleted);
-                if (firstImage) {
-                    listEmbed.setThumbnail(firstImage.mediaUrl);
-                }
-
-                // Calculate stats
-                const totalSizeMB = mediaList.reduce((sum, m) => sum + (m.fileSize || 0), 0) / (1024 * 1024);
-
-                // Add footer with stats
-                let footerText = `Page ${page}/${totalPages} | ${totalCount}/500 items | ~${totalSizeMB.toFixed(1)} MB on this page`;
-                if (fileType || channelId) {
-                    footerText += ' | Filters active';
-                }
-                listEmbed.setFooter({ text: footerText });
-
-                // Create pagination buttons
-                const buttons = new ActionRowBuilder();
-
-                buttons.addComponents(
-                    new ButtonBuilder()
-                        .setCustomId(`media_list_${page - 1}_${fileType || 'all'}_${channelId || 'all'}`)
-                        .setLabel('◀ Previous')
-                        .setStyle(ButtonStyle.Primary)
-                        .setDisabled(page === 1)
-                );
-
-                buttons.addComponents(
-                    new ButtonBuilder()
-                        .setCustomId('media_page_indicator')
-                        .setLabel(`${page}/${totalPages}`)
-                        .setStyle(ButtonStyle.Secondary)
-                        .setDisabled(true)
-                );
-
-                buttons.addComponents(
-                    new ButtonBuilder()
-                        .setCustomId(`media_list_${page + 1}_${fileType || 'all'}_${channelId || 'all'}`)
-                        .setLabel('Next ▶')
-                        .setStyle(ButtonStyle.Primary)
-                        .setDisabled(page === totalPages)
-                );
-
-                await interaction.editReply({
-                    embeds: [listEmbed],
-                    components: totalPages > 1 ? [buttons] : []
-                });
-            } catch (error) {
-                logger.error('Media pagination error:', error);
-                await interaction.editReply({
-                    embeds: [embeds.error('Pagination Failed', 'An error occurred while loading the page.')],
-                    components: []
-                });
-            }
-        }
+        // Note: Pagination buttons are now handled automatically by paginationUtil
     }
 };
 
@@ -625,20 +517,10 @@ async function handleList(interaction) {
     const channel = interaction.options.getChannel('channel');
 
     const perPage = 10;
-    const offset = (page - 1) * perPage;
-
-    // Build filter options
-    const filterOptions = {
-        limit: perPage,
-        offset,
-        fileType: fileType || undefined,
-        channelId: channel?.id || undefined
-    };
+    const userId = interaction.user.id;
 
     try {
-        const mediaList = await mediaUtil.getMedia(interaction.user.id, filterOptions);
-        const totalCount = await mediaUtil.getMediaCount(interaction.user.id);
-        const totalPages = Math.ceil(totalCount / perPage);
+        const totalCount = await mediaUtil.getMediaCount(userId);
 
         if (totalCount === 0) {
             return interaction.editReply({
@@ -651,103 +533,87 @@ async function handleList(interaction) {
             });
         }
 
-        if (mediaList.length === 0) {
-            return interaction.editReply({
-                embeds: [embeds.info('No Results', 'No media matches your filters.')],
-                flags: [MessageFlags.Ephemeral]
-            });
-        }
+        // Encode filters in customId prefix
+        const customIdPrefix = `media_list_${fileType || 'all'}_${channel?.id || 'all'}`;
 
-        if (page > totalPages) {
-            return interaction.editReply({
-                embeds: [embeds.error(
-                    'Invalid Page',
-                    `Page ${page} doesn't exist. You have ${totalPages} page(s).`
-                )],
-                flags: [MessageFlags.Ephemeral]
-            });
-        }
+        // Render function for each page
+        const renderPage = async (pageNum) => {
+            const offset = (pageNum - 1) * perPage;
 
-        // Build embed
-        const listEmbed = embeds.brand(
-            'Media Gallery',
-            `Showing page ${page} of ${totalPages} (${totalCount} total items)`
-        );
+            const filterOptions = {
+                limit: perPage,
+                offset,
+                fileType: fileType || undefined,
+                channelId: channel?.id || undefined
+            };
 
-        for (const media of mediaList) {
-            const icon = getFileTypeIcon(media.fileType);
-            const sizeKB = Math.round(media.fileSize / 1024);
-            const dimensions = media.width && media.height ? `${media.width}x${media.height}` : 'N/A';
+            const mediaList = await mediaUtil.getMedia(userId, filterOptions);
+            const totalPages = Math.ceil(totalCount / perPage);
 
-            let fieldValue = `${icon} **${media.fileName}**\n`;
-            fieldValue += `**ID:** \`${media.id}\` | **Size:** ${sizeKB} KB`;
-
-            if (media.fileType === 'image' || media.fileType === 'video') {
-                fieldValue += ` | **Dimensions:** ${dimensions}`;
+            if (mediaList.length === 0) {
+                return embeds.info('No Results', 'No media matches your filters.');
             }
 
-            fieldValue += `\n**Channel:** <#${media.channelId}>`;
+            // Build embed
+            const listEmbed = embeds.brand(
+                'Media Gallery',
+                `Showing page ${pageNum} of ${totalPages} (${totalCount} total items)`
+            );
 
-            if (media.messageDeleted) {
-                fieldValue += '\n⚠️ *Original message deleted*';
+            for (const media of mediaList) {
+                const icon = getFileTypeIcon(media.fileType);
+                const sizeKB = Math.round(media.fileSize / 1024);
+                const dimensions = media.width && media.height ? `${media.width}x${media.height}` : 'N/A';
+
+                let fieldValue = `${icon} **${media.fileName}**\n`;
+                fieldValue += `**ID:** \`${media.id}\` | **Size:** ${sizeKB} KB`;
+
+                if (media.fileType === 'image' || media.fileType === 'video') {
+                    fieldValue += ` | **Dimensions:** ${dimensions}`;
+                }
+
+                fieldValue += `\n**Channel:** <#${media.channelId}>`;
+
+                if (media.messageDeleted) {
+                    fieldValue += '\n⚠️ *Original message deleted*';
+                }
+
+                listEmbed.addFields([{
+                    name: `<t:${Math.floor(media.savedAt.getTime() / 1000)}:R>`,
+                    value: fieldValue
+                }]);
             }
 
-            listEmbed.addFields([{
-                name: `<t:${Math.floor(media.savedAt.getTime() / 1000)}:R>`,
-                value: fieldValue
-            }]);
-        }
+            // Add thumbnail (first image in the list with valid URL)
+            const firstImage = mediaList.find(m => m.fileType === 'image' && !m.messageDeleted && !m.urlExpired);
+            if (firstImage) {
+                listEmbed.setThumbnail(firstImage.mediaUrl);
+            }
 
-        // Add thumbnail (first image in the list with valid URL)
-        const firstImage = mediaList.find(m => m.fileType === 'image' && !m.messageDeleted && !m.urlExpired);
-        if (firstImage) {
-            listEmbed.setThumbnail(firstImage.mediaUrl);
-        }
+            // Calculate stats
+            const totalSizeMB = mediaList.reduce((sum, m) => sum + (m.fileSize || 0), 0) / (1024 * 1024);
 
-        // Calculate stats
-        const totalSizeMB = mediaList.reduce((sum, m) => sum + (m.fileSize || 0), 0) / (1024 * 1024);
+            // Add footer with stats
+            let footerText = `Page ${pageNum}/${totalPages} | ${totalCount}/500 items | ~${totalSizeMB.toFixed(1)} MB on this page`;
+            if (fileType || channel) {
+                footerText += ' | Filters active';
+            }
+            listEmbed.setFooter({ text: footerText });
 
-        // Add footer with stats
-        let footerText = `Page ${page}/${totalPages} | ${totalCount}/500 items | ~${totalSizeMB.toFixed(1)} MB on this page`;
-        if (fileType || channel) {
-            footerText += ' | Filters active';
-        }
-        listEmbed.setFooter({ text: footerText });
+            return listEmbed;
+        };
 
-        // Create pagination buttons
-        const buttons = new ActionRowBuilder();
+        const totalPages = Math.ceil(totalCount / perPage);
 
-        // Previous button
-        buttons.addComponents(
-            new ButtonBuilder()
-                .setCustomId(`media_list_${page - 1}_${fileType || 'all'}_${channel?.id || 'all'}`)
-                .setLabel('◀ Previous')
-                .setStyle(ButtonStyle.Primary)
-                .setDisabled(page === 1)
-        );
-
-        // Page indicator button (disabled)
-        buttons.addComponents(
-            new ButtonBuilder()
-                .setCustomId('media_page_indicator')
-                .setLabel(`${page}/${totalPages}`)
-                .setStyle(ButtonStyle.Secondary)
-                .setDisabled(true)
-        );
-
-        // Next button
-        buttons.addComponents(
-            new ButtonBuilder()
-                .setCustomId(`media_list_${page + 1}_${fileType || 'all'}_${channel?.id || 'all'}`)
-                .setLabel('Next ▶')
-                .setStyle(ButtonStyle.Primary)
-                .setDisabled(page === totalPages)
-        );
-
-        return interaction.editReply({
-            embeds: [listEmbed],
-            components: totalPages > 1 ? [buttons] : [],
-            flags: [MessageFlags.Ephemeral]
+        // Use pagination utility
+        await sendPaginatedMessage({
+            interaction,
+            renderPage,
+            totalPages,
+            customIdPrefix,
+            timeout: 300000,
+            initialPage: page - 1, // Convert to 0-indexed
+            deferred: true
         });
     } catch (error) {
         logger.error('Media list error:', error);
