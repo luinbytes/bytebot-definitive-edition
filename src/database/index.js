@@ -1,11 +1,18 @@
 const { drizzle } = require('drizzle-orm/better-sqlite3');
 const Database = require('better-sqlite3');
 const schema = require('./schema');
+const { isValidSQLIdentifier, isValidSQLType } = require('../utils/validationUtil');
 require('dotenv').config();
 
 const { migrate } = require('drizzle-orm/better-sqlite3/migrator');
 
 const sqlite = new Database(process.env.DATABASE_URL || 'sqlite.db');
+
+// SECURITY & PERFORMANCE: Enable database hardening
+sqlite.pragma('journal_mode = WAL'); // Write-Ahead Logging for better concurrency
+sqlite.pragma('busy_timeout = 5000'); // Wait up to 5s for locks instead of failing immediately
+sqlite.pragma('foreign_keys = ON'); // Enforce referential integrity
+
 const db = drizzle(sqlite, { schema });
 
 /**
@@ -440,13 +447,37 @@ function validateAndFixSchema() {
     }
 
     for (const [tableName, columns] of Object.entries(expectedSchema)) {
+        // SECURITY: Validate table name to prevent SQL injection
+        if (!isValidSQLIdentifier(tableName)) {
+            const logger = require('../utils/logger');
+            logger.error(`Invalid table name in expectedSchema: ${tableName}`);
+            continue;
+        }
+
         if (!tableExists(tableName)) {
             // Create the entire table if it doesn't exist
             const columnDefs = Object.entries(columns)
-                .map(([col, type]) => `${col} ${type}`)
+                .map(([col, type]) => {
+                    // SECURITY: Validate column names and types
+                    if (!isValidSQLIdentifier(col)) {
+                        const logger = require('../utils/logger');
+                        logger.error(`Invalid column name: ${col} in table ${tableName}`);
+                        return null;
+                    }
+                    if (!isValidSQLType(type)) {
+                        const logger = require('../utils/logger');
+                        logger.error(`Invalid column type: ${type} for ${tableName}.${col}`);
+                        return null;
+                    }
+                    return `${col} ${type}`;
+                })
+                .filter(def => def !== null)
                 .join(', ');
-            sqlite.exec(`CREATE TABLE IF NOT EXISTS ${tableName} (${columnDefs})`);
-            fixes.push(`Created table: ${tableName}`);
+
+            if (columnDefs) {
+                sqlite.exec(`CREATE TABLE IF NOT EXISTS ${tableName} (${columnDefs})`);
+                fixes.push(`Created table: ${tableName}`);
+            }
             continue;
         }
 
@@ -454,6 +485,18 @@ function validateAndFixSchema() {
         const existingColumns = getTableColumns(tableName);
 
         for (const [columnName, columnType] of Object.entries(columns)) {
+            // SECURITY: Validate column name and type before SQL execution
+            if (!isValidSQLIdentifier(columnName)) {
+                const logger = require('../utils/logger');
+                logger.error(`Invalid column name: ${columnName} in table ${tableName}`);
+                continue;
+            }
+            if (!isValidSQLType(columnType)) {
+                const logger = require('../utils/logger');
+                logger.error(`Invalid column type: ${columnType} for ${tableName}.${columnName}`);
+                continue;
+            }
+
             if (!existingColumns.includes(columnName)) {
                 // Add missing column (SQLite only supports simple ADD COLUMN)
                 const simpleType = columnType.split(' ')[0]; // Get just TEXT, INTEGER, etc.

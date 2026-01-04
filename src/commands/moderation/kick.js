@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
-const logger = require('../../utils/logger');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { db } = require('../../database/index');
 const { moderationLogs } = require('../../database/schema');
 
@@ -54,11 +54,7 @@ module.exports = {
                 embeds: [embeds.success('Member Kicked', `**${target.user.tag}** has been kicked.\n**Reason:** ${reason}`)]
             });
         } catch (error) {
-            logger.error(error);
-            await interaction.reply({
-                embeds: [embeds.error('Error', 'An error occurred while trying to kick this member.')],
-                flags: [MessageFlags.Ephemeral]
-            });
+            await handleCommandError(error, interaction, 'kicking member');
         }
     },
 };

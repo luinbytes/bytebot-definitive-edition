@@ -7,6 +7,7 @@ const { mediaItems } = require('../database/schema');
 const { eq, and } = require('drizzle-orm');
 const logger = require('../utils/logger');
 const { getAbsolutePath, fileExists } = require('../utils/fileStorageUtil');
+const { isValidSnowflake } = require('../utils/validationUtil');
 
 const app = express();
 const PORT = process.env.MEDIA_SERVER_PORT || 3000;
@@ -33,6 +34,12 @@ app.get('/media/:guildId/:mediaId/:filename', async (req, res) => {
     const { guildId, mediaId, filename } = req.params;
 
     try {
+        // SECURITY: Validate guild ID is a valid Discord snowflake
+        if (!isValidSnowflake(guildId)) {
+            logger.warn(`Invalid guild ID attempted: ${guildId}`);
+            return res.status(400).json({ error: 'Invalid guild ID' });
+        }
+
         // SECURITY: Validate mediaId is integer
         const mediaIdInt = parseInt(mediaId, 10);
         if (isNaN(mediaIdInt) || mediaIdInt < 1) {
@@ -90,9 +97,22 @@ app.get('/media/:guildId/:mediaId/:filename', async (req, res) => {
         // Handle range requests (for video seeking)
         const range = req.headers.range;
         if (range) {
+            // SECURITY: Validate range header format
+            if (!/^bytes=\d+-\d*$/.test(range)) {
+                logger.warn(`Invalid range header: ${range}`);
+                return res.status(400).json({ error: 'Invalid range header' });
+            }
+
             const parts = range.replace(/bytes=/, '').split('-');
             const start = parseInt(parts[0], 10);
             const end = parts[1] ? parseInt(parts[1], 10) : stats.size - 1;
+
+            // Validate range bounds
+            if (start < 0 || end >= stats.size || start > end) {
+                logger.warn(`Range out of bounds: ${start}-${end} for size ${stats.size}`);
+                return res.status(416).json({ error: 'Range not satisfiable' });
+            }
+
             const chunkSize = (end - start) + 1;
 
             res.status(206); // Partial Content

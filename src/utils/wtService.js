@@ -2,6 +2,7 @@ const axios = require('axios');
 const logger = require('./logger');
 
 const BASE_URL = 'https://api.thunderinsights.dk/v1';
+const API_TIMEOUT = 10000; // 10 seconds - prevent hanging on slow/unresponsive API
 
 /**
  * Service to interact with the ThunderInsights API.
@@ -15,7 +16,9 @@ class WTService {
     async searchPlayer(nickname) {
         try {
             const response = await axios.get(`${BASE_URL}/users/direct/search/`, {
-                params: { nick: nickname, limit: 2 }
+                params: { nick: nickname, limit: 2 },
+                timeout: API_TIMEOUT,
+                validateStatus: (status) => status < 500 // Retry on 5xx errors
             });
 
             if (response.data && response.data.length > 0) {
@@ -37,7 +40,10 @@ class WTService {
      */
     async getPlayerStats(userid) {
         try {
-            const response = await axios.get(`${BASE_URL}/users/direct/${userid}`);
+            const response = await axios.get(`${BASE_URL}/users/direct/${userid}`, {
+                timeout: API_TIMEOUT,
+                validateStatus: (status) => status < 500 // Retry on 5xx errors
+            });
             const data = response.data;
 
             if (!data) return null;

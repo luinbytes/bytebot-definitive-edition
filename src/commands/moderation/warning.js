@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
-const logger = require('../../utils/logger');
+const { handleCommandError, handleDMError } = require('../../utils/errorHandlerUtil');
 const { db } = require('../../database/index');
 const { moderationLogs } = require('../../database/schema');
 const { eq, and, desc } = require('drizzle-orm');
@@ -83,18 +83,14 @@ async function handleWarnAdd(interaction) {
                 embeds: [embeds.warn('Warning received', `You have been warned in **${interaction.guild.name}**.\n**Reason:** ${reason}`)]
             });
         } catch (dmError) {
-            // Ignore DM errors if user has DMs off
+            handleDMError(dmError, target.id, 'warning notification');
         }
 
         await interaction.reply({
             embeds: [embeds.success('Member Warned', `**${target.tag}** has been warned.\n**Reason:** ${reason}`)]
         });
     } catch (error) {
-        logger.error(error);
-        await interaction.reply({
-            embeds: [embeds.error('Error', 'An error occurred while trying to warn this member.')],
-            flags: [MessageFlags.Ephemeral]
-        });
+        await handleCommandError(error, interaction, 'warning member');
     }
 }
 
@@ -138,11 +134,7 @@ async function handleWarnRemove(interaction) {
         });
 
     } catch (error) {
-        logger.error(error);
-        return interaction.reply({
-            embeds: [embeds.error('Error', 'An error occurred while removing the warning.')],
-            flags: [MessageFlags.Ephemeral]
-        });
+        await handleCommandError(error, interaction, 'removing warning');
     }
 }
 
@@ -179,10 +171,6 @@ async function handleWarnList(interaction) {
 
         await interaction.reply({ embeds: [embed] });
     } catch (error) {
-        logger.error(error);
-        await interaction.reply({
-            embeds: [embeds.error('Error', 'An error occurred while fetching moderation history.')],
-            flags: [MessageFlags.Ephemeral]
-        });
+        await handleCommandError(error, interaction, 'fetching moderation history');
     }
 }
