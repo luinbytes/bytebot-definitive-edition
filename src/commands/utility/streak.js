@@ -1,7 +1,8 @@
-const { SlashCommandBuilder, MessageFlags, ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const logger = require('../../utils/logger');
 const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
+const { sendPaginatedMessage, paginateArray } = require('../../utils/paginationUtil');
 const {
     getRarityEmoji,
     getStreakEmoji,
