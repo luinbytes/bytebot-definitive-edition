@@ -3,7 +3,7 @@ const { db } = require('../../database/index');
 const { guilds } = require('../../database/schema');
 const { eq } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
-const logger = require('../../utils/logger');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { dbLog } = require('../../utils/dbLogger');
 
 module.exports = {
@@ -44,11 +44,7 @@ module.exports = {
                     flags: [MessageFlags.Ephemeral]
                 });
             } catch (error) {
-                logger.error(error);
-                return interaction.reply({
-                    embeds: [embeds.error('Error', 'Failed to update configuration.')],
-                    flags: [MessageFlags.Ephemeral]
-                });
+                await handleCommandError(error, interaction, 'updating configuration');
             }
         }
 

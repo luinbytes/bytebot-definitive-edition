@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const logger = require('../../utils/logger');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -123,15 +124,7 @@ module.exports = {
             }
 
         } catch (error) {
-            logger.error('Error in manual achievement check:', error);
-
-            const errorEmbed = embeds.error('Check Failed', 'An error occurred while checking achievements.');
-
-            if (interaction.deferred || interaction.replied) {
-                await interaction.editReply({ embeds: [errorEmbed] });
-            } else {
-                await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
-            }
+            await handleCommandError(error, interaction, 'checking achievements');
         }
     }
 };

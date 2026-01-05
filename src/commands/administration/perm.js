@@ -2,7 +2,7 @@ const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('disc
 const { db } = require('../../database/index');
 const { commandPermissions } = require('../../database/schema');
 const embeds = require('../../utils/embeds');
-const logger = require('../../utils/logger');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { eq, and } = require('drizzle-orm');
 const { dbLog } = require('../../utils/dbLogger');
 
@@ -176,10 +176,7 @@ module.exports = {
             }
 
         } catch (error) {
-            logger.error(error);
-            return interaction.editReply({
-                embeds: [embeds.error('Database Error', 'Failed to update permissions.')]
-            });
+            await handleCommandError(error, interaction, 'updating permissions');
         }
     },
 

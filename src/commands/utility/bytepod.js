@@ -3,7 +3,7 @@ const { db } = require('../../database');
 const { guilds, bytepods, bytepodAutoWhitelist, bytepodUserSettings, bytepodVoiceStats, bytepodTemplates } = require('../../database/schema');
 const { eq, and, desc } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
-const logger = require('../../utils/logger');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { getControlPanel, getRenameModal, getLimitModal } = require('../../components/bytepodControls');
 
 // Helper to format seconds into human-readable time

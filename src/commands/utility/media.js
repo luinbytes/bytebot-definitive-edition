@@ -4,7 +4,7 @@ const { mediaGalleryConfig } = require('../../database/schema');
 const { eq, and } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const mediaUtil = require('../../utils/mediaUtil');
-const logger = require('../../utils/logger');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { sendPaginatedMessage } = require('../../utils/paginationUtil');
 
 module.exports = {
@@ -340,11 +340,7 @@ async function handleSetup(interaction, client) {
             flags: [MessageFlags.Ephemeral]
         });
     } catch (error) {
-        logger.error('Media setup error:', error);
-        return interaction.editReply({
-            embeds: [embeds.error('Setup Failed', 'An error occurred while configuring the media gallery.')],
-            flags: [MessageFlags.Ephemeral]
-        });
+        await handleCommandError(error, interaction, 'configuring media gallery');
     }
 }
 
@@ -500,11 +496,7 @@ async function handleDisable(interaction, client) {
             });
         }
     } catch (error) {
-        logger.error('Media disable error:', error);
-        return interaction.editReply({
-            embeds: [embeds.error('Disable Failed', 'An error occurred while disabling auto-capture.')],
-            flags: [MessageFlags.Ephemeral]
-        });
+        await handleCommandError(error, interaction, 'disabling auto-capture');
     }
 }
 

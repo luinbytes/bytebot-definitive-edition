@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
-const logger = require('../../utils/logger');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
 const { sendPaginatedMessage, paginateArray } = require('../../utils/paginationUtil');
 const {
@@ -256,10 +256,7 @@ async function handleView(interaction, client) {
         });
 
     } catch (error) {
-        logger.error('Error viewing streak:', error);
-        await interaction.editReply({
-            embeds: [embeds.error('Error', 'Failed to fetch streak data. Please try again.')]
-        });
+        await handleCommandError(error, interaction, 'fetching streak data', { ephemeral: false });
     }
 }
 
@@ -330,10 +327,7 @@ async function handleLeaderboard(interaction, client) {
         });
 
     } catch (error) {
-        logger.error('Error showing leaderboard:', error);
-        await interaction.editReply({
-            embeds: [embeds.error('Error', 'Failed to fetch leaderboard. Please try again.')]
-        });
+        await handleCommandError(error, interaction, 'fetching leaderboard', { ephemeral: false });
     }
 }
 
@@ -451,10 +445,7 @@ async function handleAchievementLeaderboard(interaction, client, type) {
         }
 
     } catch (error) {
-        logger.error('Error showing achievement leaderboard:', error);
-        await interaction.editReply({
-            embeds: [embeds.error('Error', 'Failed to fetch leaderboard.')]
-        });
+        await handleCommandError(error, interaction, 'fetching achievement leaderboard', { ephemeral: false });
     }
 }
 
@@ -608,10 +599,7 @@ async function handleAchievements(interaction, client) {
         });
 
     } catch (error) {
-        logger.error('Error showing achievements:', error);
-        await interaction.editReply({
-            embeds: [embeds.error('Error', 'Failed to load achievements.')]
-        });
+        await handleCommandError(error, interaction, 'loading achievements');
     }
 }
 
@@ -700,10 +688,7 @@ async function handleProgress(interaction, client) {
         await interaction.editReply({ embeds: [embed] });
 
     } catch (error) {
-        logger.error('Error showing progress:', error);
-        await interaction.editReply({
-            embeds: [embeds.error('Error', 'Failed to load progress data.')]
-        });
+        await handleCommandError(error, interaction, 'loading progress data');
     }
 }
 
