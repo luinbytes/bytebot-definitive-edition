@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const wtService = require('../../utils/wtService');
 const embeds = require('../../utils/embeds');
-const logger = require('../../utils/logger');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
 
 module.exports = {
@@ -74,10 +74,7 @@ module.exports = {
                     embeds: [embeds.success('Account Bound', `Successfully bound your Discord ID to War Thunder account: **${player.nick}**`)]
                 });
             } catch (error) {
-                logger.error(`Bind Error: ${error}`);
-                return interaction.editReply({
-                    embeds: [embeds.error('Error', 'An error occurred while binding your account.')]
-                });
+                await handleCommandError(error, interaction, 'binding your War Thunder account');
             }
         }
 
@@ -128,10 +125,7 @@ module.exports = {
                 await interaction.editReply({ embeds: [embed] });
 
             } catch (error) {
-                logger.error(`Command Error (warthunder stats): ${error.message}`);
-                await interaction.editReply({
-                    embeds: [embeds.error('Internal Error', 'An error occurred while fetching War Thunder statistics. Please try again later.')]
-                });
+                await handleCommandError(error, interaction, 'fetching War Thunder statistics', { ephemeral: false });
             }
         }
     },

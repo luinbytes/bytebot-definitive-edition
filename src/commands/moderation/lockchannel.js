@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
-const logger = require('../../utils/logger');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -40,11 +40,7 @@ module.exports = {
                 });
             }
         } catch (error) {
-            logger.error(error);
-            await interaction.reply({
-                embeds: [embeds.error('Error', `An error occurred while trying to ${subcommand} the channel.`)],
-                flags: [MessageFlags.Ephemeral]
-            });
+            await handleCommandError(error, interaction, `${subcommand}ing the channel`, { ephemeral: false });
         }
     },
 };

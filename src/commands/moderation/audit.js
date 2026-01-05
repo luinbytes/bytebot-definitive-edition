@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
-const logger = require('../../utils/logger');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { db } = require('../../database/index');
 const { moderationLogs } = require('../../database/schema');
 const { eq, and, desc } = require('drizzle-orm');
@@ -148,10 +148,7 @@ module.exports = {
             await interaction.editReply({ embeds: [embed] });
 
         } catch (error) {
-            logger.error(`Audit command error: ${error}`);
-            await interaction.editReply({
-                embeds: [embeds.error('Error', 'An error occurred while fetching audit logs.')]
-            });
+            await handleCommandError(error, interaction, 'fetching audit logs', { ephemeral: false });
         }
     },
 };

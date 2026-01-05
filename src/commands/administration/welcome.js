@@ -3,7 +3,7 @@ const { db } = require('../../database/index');
 const { guilds } = require('../../database/schema');
 const { eq } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
-const logger = require('../../utils/logger');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { dbLog } = require('../../utils/dbLogger');
 
 /**
@@ -195,17 +195,7 @@ module.exports = {
             }
 
         } catch (error) {
-            logger.error('Welcome command error:', error);
-            const reply = {
-                embeds: [embeds.error('Error', 'An error occurred while processing your request.')],
-                flags: [MessageFlags.Ephemeral]
-            };
-
-            if (interaction.deferred) {
-                return interaction.editReply(reply);
-            } else {
-                return interaction.reply(reply);
-            }
+            await handleCommandError(error, interaction, 'processing welcome configuration');
         }
     },
 };
@@ -416,12 +406,7 @@ async function handleTest(interaction, config) {
         });
 
     } catch (error) {
-        logger.error('Failed to send test welcome message:', error);
-
-        return interaction.reply({
-            embeds: [embeds.error('Send Failed', `Could not send message to ${channel}. Please check my permissions.`)],
-            flags: [MessageFlags.Ephemeral]
-        });
+        await handleCommandError(error, interaction, 'sending test welcome message');
     }
 }
 

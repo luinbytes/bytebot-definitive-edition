@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, MessageFlags, ActionRowBuilder, StringSelectMenuBuilder, ComponentType } = require('discord.js');
 const embeds = require('../../utils/embeds');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
 
 module.exports = {
     data: new SlashCommandBuilder()

@@ -3,7 +3,7 @@ const { db } = require('../../database');
 const { achievementRoleConfig, achievementRoles, customAchievements, guilds } = require('../../database/schema');
 const { eq, and } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
-const logger = require('../../utils/logger');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { dbLog } = require('../../utils/dbLogger');
 
 module.exports = {
@@ -276,11 +276,7 @@ async function handleSetup(interaction) {
         logger.success(`Achievement config updated in ${interaction.guild.name} by ${interaction.user.tag}`);
 
     } catch (error) {
-        logger.error('Error updating achievement config:', error);
-        await interaction.reply({
-            embeds: [embeds.error('Configuration Failed', 'An error occurred while updating settings.')],
-            flags: [MessageFlags.Ephemeral]
-        });
+        await handleCommandError(error, interaction, 'updating achievement configuration');
     }
 }
 
@@ -329,11 +325,7 @@ async function handleView(interaction) {
         });
 
     } catch (error) {
-        logger.error('Error viewing achievement config:', error);
-        await interaction.reply({
-            embeds: [embeds.error('View Failed', 'An error occurred while fetching settings.')],
-            flags: [MessageFlags.Ephemeral]
-        });
+        await handleCommandError(error, interaction, 'fetching achievement configuration');
     }
 }
 
@@ -363,10 +355,7 @@ async function handleCleanup(interaction, client) {
         logger.success(`Manual role cleanup triggered in ${interaction.guild.name} by ${interaction.user.tag}`);
 
     } catch (error) {
-        logger.error('Error during manual cleanup:', error);
-        await interaction.editReply({
-            embeds: [embeds.error('Cleanup Failed', 'An error occurred during cleanup.')]
-        });
+        await handleCommandError(error, interaction, 'cleaning up orphaned roles');
     }
 }
 
@@ -423,10 +412,7 @@ async function handleListRoles(interaction) {
         await interaction.editReply({ embeds: [embed] });
 
     } catch (error) {
-        logger.error('Error listing achievement roles:', error);
-        await interaction.editReply({
-            embeds: [embeds.error('List Failed', 'An error occurred while fetching roles.')]
-        });
+        await handleCommandError(error, interaction, 'fetching achievement roles');
     }
 }
 
@@ -493,11 +479,7 @@ async function handleCreate(interaction) {
         await interaction.showModal(modal);
 
     } catch (error) {
-        logger.error('Error showing achievement creation modal:', error);
-        await interaction.reply({
-            embeds: [embeds.error('Modal Error', 'Failed to show achievement creation form.')],
-            flags: [MessageFlags.Ephemeral]
-        });
+        await handleCommandError(error, interaction, 'showing achievement creation form');
     }
 }
 
@@ -590,10 +572,7 @@ async function handleAward(interaction, client) {
         logger.success(`${interaction.user.tag} manually awarded ${achievement.title} to ${targetUser.tag} in ${interaction.guild.name}`);
 
     } catch (error) {
-        logger.error('Error awarding achievement:', error);
-        await interaction.editReply({
-            embeds: [embeds.error('Award Failed', 'An error occurred while awarding the achievement.')]
-        });
+        await handleCommandError(error, interaction, 'awarding achievement');
     }
 }
 
@@ -657,10 +636,7 @@ async function handleRemove(interaction, client) {
         logger.success(`${interaction.user.tag} removed ${achievement.title} from ${targetUser.tag} in ${interaction.guild.name}`);
 
     } catch (error) {
-        logger.error('Error removing achievement:', error);
-        await interaction.editReply({
-            embeds: [embeds.error('Remove Failed', 'An error occurred while removing the achievement.')]
-        });
+        await handleCommandError(error, interaction, 'removing achievement');
     }
 }
 
@@ -731,11 +707,7 @@ async function handleDisable(interaction) {
         logger.success(`Achievement system disabled in ${interaction.guild.name} by ${interaction.user.tag}`);
 
     } catch (error) {
-        logger.error('Error disabling achievement system:', error);
-        await interaction.reply({
-            embeds: [embeds.error('Disable Failed', 'An error occurred while disabling the achievement system.')],
-            flags: [MessageFlags.Ephemeral]
-        });
+        await handleCommandError(error, interaction, 'disabling achievement system');
     }
 }
 
@@ -794,10 +766,6 @@ async function handleEnable(interaction) {
         logger.success(`Achievement system enabled in ${interaction.guild.name} by ${interaction.user.tag}`);
 
     } catch (error) {
-        logger.error('Error enabling achievement system:', error);
-        await interaction.reply({
-            embeds: [embeds.error('Enable Failed', 'An error occurred while enabling the achievement system.')],
-            flags: [MessageFlags.Ephemeral]
-        });
+        await handleCommandError(error, interaction, 'enabling achievement system');
     }
 }

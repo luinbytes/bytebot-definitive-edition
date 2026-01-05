@@ -503,6 +503,30 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 
 ## Recent Changes
 
+### 2026-01-05 - Phase 3: Error Handling Consolidation
+- **GOAL:** Migrate all commands to use standardized `errorHandlerUtil.js` for consistent error handling
+- **COMPLETED:** 17 command files migrated (16 fully, 1 partially)
+  - **Fun:** joke.js
+  - **Games:** warthunder.js
+  - **Developer:** unregister.js, check-achievements.js
+  - **Administration:** config.js, perm.js, welcome.js, achievement.js (9 subcommands)
+  - **Moderation:** audit.js, lockchannel.js
+  - **Utility:** reminder.js (4 subcommands), streak.js (5 subcommands), media.js (2/14 subcommands)
+- **ERROR BLOCKS MIGRATED:** 33+ catch blocks → `handleCommandError()`
+- **LINES ELIMINATED:** ~165 lines of duplicate error handling code
+- **IMPROVEMENTS:**
+  - Unique tracking IDs for all errors (8-character hex)
+  - Automatic deferred/replied state handling prevents crashes
+  - Standardized error messages across all commands
+  - Discord API error code detection (10003, 10008, 10013, 50013, 50035)
+  - Consistent logging format
+- **NOT MIGRATED (Justified):**
+  - **bytepod.js:** Uses sophisticated `logger.errorContext` with detailed metadata, specific Discord error code handling, fallback retry logic
+  - **Autocomplete handlers:** Use intentional silent error handling (return empty array)
+  - **Service files:** starboardService.js (not a command)
+- **FILES:** See PHASE3_CHANGELOG.md for complete list
+- **TESTING:** All migrated files verified with syntax checks (node -c)
+
 ### 2026-01-04 - Phase 1 & 2: Security Hardening & Utility Consolidation
 - **PHASE 1 - SECURITY FIXES:** Critical security improvements and standardization
   - **NEW:** `validationUtil.js` - SQL injection protection (isValidSQLIdentifier, isValidSQLType, isValidSnowflake)
