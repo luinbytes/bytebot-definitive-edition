@@ -72,8 +72,8 @@ class StarboardService {
             // Check if emoji matches
             if (reaction.emoji.name !== config.emoji) return;
 
-            // Queue update (debounced)
-            this.queueStarboardUpdate(reaction.message.id);
+            // Queue update (debounced) - pass channel ID for reliable fetching
+            this.queueStarboardUpdate(reaction.message.id, reaction.message.channel.id);
 
         } catch (error) {
             logger.error('Error in handleReactionAdd:', error);
@@ -92,8 +92,8 @@ class StarboardService {
             // Check if emoji matches
             if (reaction.emoji.name !== config.emoji) return;
 
-            // Queue update (debounced)
-            this.queueStarboardUpdate(reaction.message.id);
+            // Queue update (debounced) - pass channel ID for reliable fetching
+            this.queueStarboardUpdate(reaction.message.id, reaction.message.channel.id);
 
         } catch (error) {
             logger.error('Error in handleReactionRemove:', error);
@@ -123,7 +123,7 @@ class StarboardService {
             if (entry.starboardMessageId) {
                 const starboardChannel = await this.client.channels.fetch(config.channelId).catch(() => null);
                 if (starboardChannel) {
-                    await starboardChannel.messages.delete(entry.starboardMessageId).catch(() => {});
+                    await starboardChannel.messages.delete(entry.starboardMessageId).catch(() => { });
                 }
             }
 
@@ -186,49 +186,42 @@ class StarboardService {
 
     /**
      * Queue a starboard update (debounced to prevent spam)
+     * @param {string} messageId - The ID of the message
+     * @param {string} channelId - The ID of the channel containing the message
      */
-    queueStarboardUpdate(messageId) {
+    queueStarboardUpdate(messageId, channelId) {
         // Clear existing timeout
         if (this.updateQueue.has(messageId)) {
-            clearTimeout(this.updateQueue.get(messageId));
+            clearTimeout(this.updateQueue.get(messageId).timeout);
         }
 
         // Set new timeout (5 seconds)
         const timeout = setTimeout(async () => {
-            await this.updateStarboardMessage(messageId);
+            await this.updateStarboardMessage(messageId, channelId);
             this.updateQueue.delete(messageId);
         }, 5000);
 
-        this.updateQueue.set(messageId, timeout);
+        this.updateQueue.set(messageId, { timeout, channelId });
     }
 
     /**
      * Update starboard message (count stars and post/edit/remove as needed)
+     * @param {string} messageId - The ID of the message
+     * @param {string} channelId - The ID of the channel containing the message
      */
-    async updateStarboardMessage(messageId) {
+    async updateStarboardMessage(messageId, channelId) {
         try {
-            // Fetch the original message
-            const channels = this.client.channels.cache;
-            let message = null;
-            let foundChannel = null;
-
-            // Search for message in cached channels
-            for (const [, channel] of channels) {
-                if (channel.isTextBased() && channel.guild) {
-                    try {
-                        message = await channel.messages.fetch(messageId).catch(() => null);
-                        if (message) {
-                            foundChannel = channel;
-                            break;
-                        }
-                    } catch (e) {
-                        continue;
-                    }
-                }
+            // Fetch the channel first
+            const channel = await this.client.channels.fetch(channelId).catch(() => null);
+            if (!channel || !channel.isTextBased() || !channel.guild) {
+                logger.debug(`Could not find channel ${channelId} for starboard update`);
+                return;
             }
 
+            // Fetch the message from the channel
+            const message = await channel.messages.fetch(messageId).catch(() => null);
             if (!message) {
-                logger.debug(`Could not find message ${messageId} for starboard update`);
+                logger.debug(`Could not find message ${messageId} in channel ${channelId} for starboard update`);
                 return;
             }
 
@@ -302,7 +295,7 @@ class StarboardService {
                     // Remove from starboard
                     const starboardChannel = await this.client.channels.fetch(config.channelId).catch(() => null);
                     if (starboardChannel) {
-                        await starboardChannel.messages.delete(entry.starboardMessageId).catch(() => {});
+                        await starboardChannel.messages.delete(entry.starboardMessageId).catch(() => { });
                     }
 
                     // Update DB (keep entry but clear starboard message ID)
@@ -367,7 +360,7 @@ class StarboardService {
                             'Starboard Disabled',
                             `The starboard channel in **${message.guild.name}** was deleted. Starboard has been disabled.`
                         )]
-                    }).catch(() => {}); // Owner may have DMs off
+                    }).catch(() => { }); // Owner may have DMs off
                 }
 
                 logger.warn(`Starboard channel not found for guild ${message.guild.id}, disabled starboard`);
@@ -469,8 +462,8 @@ class StarboardService {
         logger.info('Cleaning up starboard service...');
 
         // Clear all pending update timeouts
-        for (const [messageId, timeout] of this.updateQueue.entries()) {
-            clearTimeout(timeout);
+        for (const [messageId, entry] of this.updateQueue.entries()) {
+            clearTimeout(entry.timeout);
         }
         this.updateQueue.clear();
 
