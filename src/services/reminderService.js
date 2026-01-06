@@ -4,6 +4,7 @@ const { eq, and, lte } = require('drizzle-orm');
 const embeds = require('../utils/embeds');
 const logger = require('../utils/logger');
 const { dbLog } = require('../utils/dbLogger');
+const { fetchMember, fetchChannel, safeDMUser } = require('../utils/discordApiUtil');
 
 // Max safe timeout for setTimeout (24.8 days in ms)
 const MAX_SAFE_TIMEOUT = 2147483647;
@@ -174,7 +175,7 @@ class ReminderService {
      */
     async sendChannelReminder(reminder, embed) {
         try {
-            const channel = await this.client.channels.fetch(reminder.channelId).catch(() => null);
+            const channel = await fetchChannel(this.client, reminder.channelId, { logContext: 'reminder-channel' });
 
             if (!channel) {
                 // Channel deleted, send DM instead
@@ -184,7 +185,7 @@ class ReminderService {
             }
 
             // Check if bot has permissions
-            const botMember = await channel.guild.members.fetch(this.client.user.id).catch(() => null);
+            const botMember = await fetchMember(channel.guild, this.client.user.id, { logContext: 'reminder-bot-perms' });
             if (!botMember || !channel.permissionsFor(botMember).has('SendMessages')) {
                 // Lost permissions, send DM instead
                 logger.warn(`Lost permissions in channel ${reminder.channelId}, sending reminder to user DM`);
@@ -226,7 +227,7 @@ class ReminderService {
                 const guildName = guild ? guild.name : 'Unknown Server';
 
                 // Check if user is still in guild
-                const member = guild ? await guild.members.fetch(reminder.userId).catch(() => null) : null;
+                const member = guild ? await fetchMember(guild, reminder.userId, { logContext: 'reminder-user-guild-check' }) : null;
                 if (!member) {
                     embed.setDescription(`📍 From **${guildName}** (you are no longer a member)\n\n${reminder.message}`);
                 } else {
@@ -234,14 +235,14 @@ class ReminderService {
                 }
             }
 
-            await user.send({ embeds: [embed] });
+            const dmResult = await safeDMUser(user, { embeds: [embed] }, { logError: true, logContext: 'reminder-dm' });
+
+            if (!dmResult) {
+                logger.warn(`Failed to send DM reminder to user ${reminder.userId} (DMs disabled or blocked)`);
+            }
 
         } catch (error) {
-            if (error.code === 50007) {
-                logger.warn(`Cannot send DM to user ${reminder.userId} (DMs disabled)`);
-            } else {
-                logger.error(`Failed to send DM reminder to user ${reminder.userId}:`, error);
-            }
+            logger.error(`Failed to send DM reminder to user ${reminder.userId}:`, error);
         }
     }
 

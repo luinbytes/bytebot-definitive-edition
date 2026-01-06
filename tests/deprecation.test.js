@@ -19,14 +19,15 @@ describe('Deprecation Pattern Checks', () => {
 
         sourceFiles.forEach(file => {
             const content = fs.readFileSync(file, 'utf8');
-            // Match ephemeral: true (but not in comments or deferReply/reply)
+            // Match ephemeral: true (but not in comments or deferReply/reply/safeReply)
             const lines = content.split('\n');
             lines.forEach((line, idx) => {
-                // Allow ephemeral: true in deferReply() and reply() - this is correct usage
+                // Allow ephemeral: true in deferReply(), reply(), and safeReply() - this is correct usage
                 if (line.includes('ephemeral: true') &&
                     !line.trim().startsWith('//') &&
                     !line.includes('deferReply') &&
-                    !line.includes('.reply(')) {
+                    !line.includes('.reply(') &&
+                    !line.includes('safeReply(')) {
                     violations.push({
                         file,
                         line: idx + 1,
@@ -39,7 +40,7 @@ describe('Deprecation Pattern Checks', () => {
         if (violations.length > 0) {
             console.error('Deprecated ephemeral: true usage found:');
             violations.forEach(v => console.error(`- ${v.file}:${v.line}`));
-            console.error('Use flags: [MessageFlags.Ephemeral] instead, or use ephemeral: true in deferReply()/reply()');
+            console.error('Use flags: [MessageFlags.Ephemeral] instead, or use ephemeral: true in deferReply()/reply()/safeReply()');
         }
 
         expect(violations.length).toBe(0);
@@ -47,7 +48,7 @@ describe('Deprecation Pattern Checks', () => {
 
     test('should not use console.log/console.error directly (use logger)', () => {
         const violations = [];
-        const EXCLUDE_FILES = ['logger.js', 'index.js']; // logger.js uses console, index.js is database
+        const EXCLUDE_FILES = ['logger.js', 'index.js', 'config.js']; // logger.js uses console, index.js/config.js load before logger
 
         sourceFiles.forEach(file => {
             const fileName = path.basename(file);
@@ -57,8 +58,14 @@ describe('Deprecation Pattern Checks', () => {
             const content = fs.readFileSync(file, 'utf8');
             const lines = content.split('\n');
             lines.forEach((line, idx) => {
-                if ((line.includes('console.log') || line.includes('console.error'))
+                // Check for console.log/error/warn
+                if ((line.includes('console.log') || line.includes('console.error') || line.includes('console.warn'))
                     && !line.trim().startsWith('//')) {
+                    // Check if previous line has eslint-disable comment
+                    const prevLine = idx > 0 ? lines[idx - 1].trim() : '';
+                    if (prevLine.includes('eslint-disable-next-line no-console')) {
+                        return; // Skip this line, it's intentionally exempted
+                    }
                     violations.push({
                         file,
                         line: idx + 1,

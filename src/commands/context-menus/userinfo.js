@@ -12,6 +12,7 @@ module.exports = {
         .setDMPermission(true), // Works in DMs
 
     cooldown: 3,
+    longRunning: true, // Manual defer with user preferences
 
     async execute(interaction, client) {
         // Manual defer with user preference support

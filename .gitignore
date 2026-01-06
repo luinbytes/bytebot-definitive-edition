@@ -26,9 +26,6 @@ sqlite.db.bak
 # Command cache
 .command-cache.json
 
-# Media storage
-media-storage/
-
 # Claude
 .claude/
 DATABASE_LOGGING_GUIDE.md

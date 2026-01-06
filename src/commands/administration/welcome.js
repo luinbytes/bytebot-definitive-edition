@@ -5,6 +5,7 @@ const { eq } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { dbLog } = require('../../utils/dbLogger');
+const { fetchChannel, safeChannelSend } = require('../../utils/discordApiUtil');
 
 /**
  * Get ordinal suffix for a number (1st, 2nd, 3rd, etc.)
@@ -376,7 +377,7 @@ async function handleTest(interaction, config) {
         });
     }
 
-    const channel = await interaction.guild.channels.fetch(config.welcomeChannel).catch(() => null);
+    const channel = await fetchChannel(interaction.guild, config.welcomeChannel, { logContext: 'welcome-test' });
     if (!channel) {
         return interaction.reply({
             embeds: [embeds.error('Channel Not Found', 'The configured welcome channel no longer exists. Please run `/welcome setup` again.')],
@@ -390,14 +391,22 @@ async function handleTest(interaction, config) {
 
     try {
         // Send test message based on embed preference
+        let messageOptions;
         if (config.welcomeUseEmbed) {
             const welcomeEmbed = embeds.brand('Welcome!', parsedMessage)
                 .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true, size: 256 }))
                 .setFooter({ text: 'This is a test message' });
-
-            await channel.send({ embeds: [welcomeEmbed] });
+            messageOptions = { embeds: [welcomeEmbed] };
         } else {
-            await channel.send(`${parsedMessage}\n\n*This is a test message*`);
+            messageOptions = { content: `${parsedMessage}\n\n*This is a test message*` };
+        }
+
+        const sent = await safeChannelSend(channel, messageOptions, { logContext: 'welcome-test' });
+        if (!sent) {
+            return interaction.reply({
+                embeds: [embeds.error('Failed to Send', 'Could not send test message. Check bot permissions.')],
+                flags: [MessageFlags.Ephemeral]
+            });
         }
 
         return interaction.reply({

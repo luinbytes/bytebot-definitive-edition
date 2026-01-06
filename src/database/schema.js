@@ -11,7 +11,6 @@ const guilds = sqliteTable('guilds', {
     joinedAt: integer('joined_at', { mode: 'timestamp' }),
     voiceHubChannelId: text('voice_hub_channel_id'),
     voiceHubCategoryId: text('voice_hub_category_id'),
-    mediaArchiveChannelId: text('media_archive_channel_id'), // Archive channel for media gallery
     achievementsEnabled: integer('achievements_enabled', { mode: 'boolean' }).default(true), // Guild-level achievement toggle
 });
 
@@ -48,6 +47,7 @@ const bytepods = sqliteTable('bytepods', {
     originalOwnerId: text('original_owner_id'), // Who created the pod (for reclaim eligibility)
     ownerLeftAt: integer('owner_left_at'),      // Timestamp (ms) when owner left - null if owner present
     reclaimRequestPending: integer('reclaim_request_pending', { mode: 'boolean' }).default(false), // Prevents duplicate reclaim prompts
+    panelMessageId: text('panel_message_id'), // Message ID of the active control panel (for cleanup)
     createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date()),
 });
 
@@ -142,81 +142,6 @@ const bookmarks = sqliteTable('bookmarks', {
     userSavedIdx: index('bookmarks_user_saved_idx').on(table.userId, table.savedAt),
     // Index for search queries
     userContentIdx: index('bookmarks_user_content_idx').on(table.userId, table.content),
-}));
-
-// Media Gallery - Channel auto-capture configuration
-const mediaGalleryConfig = sqliteTable('media_gallery_config', {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    guildId: text('guild_id').notNull(),
-    channelId: text('channel_id').notNull(),
-    enabled: integer('enabled', { mode: 'boolean' }).default(true).notNull(),
-    autoCapture: integer('auto_capture', { mode: 'boolean' }).default(true).notNull(),
-    fileTypes: text('file_types').default('image,video,audio').notNull(), // Comma-separated: image,video,audio,document
-    maxFileSizeMB: integer('max_file_size_mb').default(50).notNull(),
-    autoTagChannel: integer('auto_tag_channel', { mode: 'boolean' }).default(true).notNull(),
-    whitelistRoleIds: text('whitelist_role_ids'), // Comma-separated role IDs (null = all members)
-    createdBy: text('created_by').notNull(),
-    createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date()),
-    updatedAt: integer('updated_at', { mode: 'timestamp' }).default(new Date())
-}, (table) => ({
-    // One config per channel
-    guildChannelUnique: unique().on(table.guildId, table.channelId),
-    // Index for active channel lookups
-    guildEnabledIdx: index('media_config_guild_enabled_idx').on(table.guildId, table.enabled)
-}));
-
-// Media Gallery - Core media storage
-const mediaItems = sqliteTable('media_items', {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    userId: text('user_id').notNull(), // Who saved the media
-    guildId: text('guild_id').notNull(),
-    channelId: text('channel_id').notNull(),
-    messageId: text('message_id').notNull(),
-    archiveMessageId: text('archive_message_id'), // Message ID in archive channel (for deletion)
-    localFilePath: text('local_file_path'), // Relative path from MEDIA_STORAGE_PATH (e.g., 'guilds/123/456/789.jpg')
-    storageMethod: text('storage_method').default('discord').notNull(), // 'discord' (legacy archive) or 'local' (filesystem)
-    fileHash: text('file_hash'), // SHA256 hash for deduplication
-    mediaUrl: text('media_url').notNull(), // Discord CDN URL or local HTTP URL
-    fileName: text('file_name').notNull(),
-    fileType: text('file_type').notNull(), // Category: image/video/audio/document
-    mimeType: text('mime_type'),
-    fileSize: integer('file_size'), // Bytes
-    width: integer('width'), // For images/videos
-    height: integer('height'), // For images/videos
-    duration: real('duration'), // For audio/video (seconds)
-    description: text('description'), // User-added alt-text/caption (max 1000 chars)
-    contentPreview: text('content_preview'), // Original message text (max 500 chars)
-    authorId: text('author_id').notNull(), // Original message author
-    captureMethod: text('capture_method').default('auto').notNull(), // auto/manual
-    savedAt: integer('saved_at', { mode: 'timestamp' }).default(new Date()),
-    messageDeleted: integer('message_deleted', { mode: 'boolean' }).default(false).notNull(),
-    urlExpired: integer('url_expired', { mode: 'boolean' }).default(false).notNull()
-}, (table) => ({
-    // Index for user's media list (sorted by date)
-    userSavedIdx: index('media_user_saved_idx').on(table.userId, table.savedAt),
-    // Index for guild media browsing
-    guildSavedIdx: index('media_guild_saved_idx').on(table.guildId, table.savedAt),
-    // Index for file type filtering
-    userTypeIdx: index('media_user_type_idx').on(table.userId, table.fileType),
-    // Index for channel filtering
-    userChannelIdx: index('media_user_channel_idx').on(table.userId, table.channelId),
-    // Index for deduplication lookups (fileHash + guild)
-    fileHashGuildIdx: index('media_file_hash_guild_idx').on(table.fileHash, table.guildId)
-}));
-
-// Media Gallery - Tag system (many-to-many)
-const mediaTags = sqliteTable('media_tags', {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    mediaId: integer('media_id').notNull(), // FK to mediaItems.id
-    tag: text('tag').notNull(), // Lowercase tag
-    autoGenerated: integer('auto_generated', { mode: 'boolean' }).default(false).notNull(),
-    createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date())
-}, (table) => ({
-    // Prevent duplicate tags on same media
-    mediaTagUnique: unique().on(table.mediaId, table.tag),
-    // Index for tag-based queries
-    mediaIdIdx: index('media_tags_media_idx').on(table.mediaId),
-    tagIdx: index('media_tags_tag_idx').on(table.tag)
 }));
 
 // Auto-responder (keyword-based automated responses)
@@ -485,9 +410,6 @@ module.exports = {
     birthdays,
     birthdayConfig,
     bookmarks,
-    mediaGalleryConfig,
-    mediaItems,
-    mediaTags,
     autoResponses,
     starboardConfig,
     starboardMessages,
