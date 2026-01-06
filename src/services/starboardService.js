@@ -293,7 +293,7 @@ class StarboardService {
                                 starCount: starCount,
                                 content: message.content || null,
                                 imageUrl: firstImage?.url || null,
-                                postedAt: Date.now()
+                                postedAt: new Date()
                             }),
                             { guildId: message.guild.id, messageId: message.id, starCount, starboardMsgId }
                         );
