@@ -40,21 +40,6 @@ const shutdown = async (signal) => {
     logger.info(`Received ${signal} signal, shutting down gracefully...`);
 
     try {
-        // Cleanup media server
-        if (client.mediaServer) {
-            await new Promise((resolve, reject) => {
-                client.mediaServer.close((err) => {
-                    if (err) {
-                        logger.error(`Error closing media server: ${err.message}`);
-                        reject(err);
-                    } else {
-                        logger.success('Media server shut down');
-                        resolve();
-                    }
-                });
-            });
-        }
-
         // Cleanup services
         if (client.reminderService && client.reminderService.cleanup) {
             await client.reminderService.cleanup();
@@ -67,6 +52,9 @@ const shutdown = async (signal) => {
         }
         if (client.starboardService && client.starboardService.cleanup) {
             await client.starboardService.cleanup();
+        }
+        if (client.activityStreakService && client.activityStreakService.cleanup) {
+            await client.activityStreakService.cleanup();
         }
 
         // Destroy Discord client
@@ -93,18 +81,6 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 
         await eventHandler(client);
         await commandHandler(client);
-
-        // Start media server (HTTP server for serving locally-stored media files)
-        const config = require('../config.json');
-        if (config.media?.storageMethod === 'local') {
-            try {
-                const { startMediaServer } = require('./server/mediaServer');
-                client.mediaServer = await startMediaServer(client);
-            } catch (error) {
-                logger.error(`Failed to start media server: ${error.message}`);
-                logger.warn('Continuing without media server - local storage will not be accessible');
-            }
-        }
 
         await client.login(process.env.DISCORD_TOKEN);
     } catch (error) {

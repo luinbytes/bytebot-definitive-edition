@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
-const logger = require('../../utils/logger');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { db } = require('../../database/index');
 const { moderationLogs } = require('../../database/schema');
 
@@ -40,19 +40,7 @@ module.exports = {
                 embeds: [embeds.success('Messages Cleared', `Successfully deleted **${deleted.size}** messages.`)]
             });
         } catch (error) {
-            logger.error(error);
-
-            // Check if we've already replied (shouldn't happen in this flow)
-            if (interaction.deferred || interaction.replied) {
-                await interaction.editReply({
-                    embeds: [embeds.error('Error', 'An error occurred while trying to clear messages. Note: Messages older than 14 days cannot be bulk deleted.')]
-                });
-            } else {
-                await interaction.reply({
-                    embeds: [embeds.error('Error', 'An error occurred while trying to clear messages. Note: Messages older than 14 days cannot be bulk deleted.')],
-                    flags: [MessageFlags.Ephemeral]
-                });
-            }
+            await handleCommandError(error, interaction, 'clearing messages');
         }
     },
 };

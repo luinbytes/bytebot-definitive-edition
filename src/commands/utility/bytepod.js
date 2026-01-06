@@ -4,7 +4,9 @@ const { guilds, bytepods, bytepodAutoWhitelist, bytepodUserSettings, bytepodVoic
 const { eq, and, desc } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const logger = require('../../utils/logger');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { getControlPanel, getRenameModal, getLimitModal } = require('../../components/bytepodControls');
+const { upsert, insertIfNotExists } = require('../../utils/dbUtil');
 
 // Helper to format seconds into human-readable time
 function formatDuration(totalSeconds) {
@@ -190,13 +192,33 @@ module.exports = {
                 return interaction.editReply({ embeds: [embeds.error('Error', 'Your BytePod channel was not found. It may have been deleted.')], flags: [MessageFlags.Ephemeral] });
             }
 
+            // Delete old panel if it exists (prevent stale panels)
+            if (userPod.panelMessageId) {
+                try {
+                    const oldPanel = await channel.messages.fetch(userPod.panelMessageId).catch(() => null);
+                    if (oldPanel) {
+                        await oldPanel.delete().catch(() => { });
+                        logger.debug(`[BytePod] Deleted old panel ${userPod.panelMessageId} for ${interaction.user.tag}`);
+                    }
+                } catch (e) {
+                    // Ignore errors - message may already be deleted
+                }
+            }
+
             // Get current state
             const { isLocked, limit, whitelist, coOwners } = getPodState(channel);
             const displayWhitelist = whitelist.filter(id => id !== interaction.user.id);
             const displayCoOwners = coOwners.filter(id => id !== interaction.user.id);
 
             const { embeds: panelEmbeds, components } = getControlPanel(channel.id, isLocked, limit, displayWhitelist, displayCoOwners);
-            return interaction.editReply({ embeds: panelEmbeds, components: components });
+            const panelMessage = await interaction.editReply({ embeds: panelEmbeds, components: components });
+
+            // Store the new panel message ID for future cleanup
+            await db.update(bytepods)
+                .set({ panelMessageId: panelMessage.id })
+                .where(eq(bytepods.channelId, userPod.channelId));
+
+            return panelMessage;
         }
 
         if (group === 'preset') {
@@ -205,21 +227,28 @@ module.exports = {
                 if (target.id === interaction.user.id) return interaction.reply({ content: "You can't whitelist yourself.", flags: [MessageFlags.Ephemeral] });
 
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-                // Check duplicate
-                const existing = await db.select().from(bytepodAutoWhitelist)
-                    .where(and(
+
+                // Insert if not duplicate
+                const result = await insertIfNotExists(
+                    bytepodAutoWhitelist,
+                    () => and(
                         eq(bytepodAutoWhitelist.userId, interaction.user.id),
                         eq(bytepodAutoWhitelist.guildId, interaction.guild.id),
                         eq(bytepodAutoWhitelist.targetUserId, target.id)
-                    )).get();
+                    ),
+                    {
+                        userId: interaction.user.id,
+                        guildId: interaction.guild.id,
+                        targetUserId: target.id
+                    },
+                    { userId: interaction.user.id, targetUserId: target.id, operation: 'add-auto-whitelist' },
+                    `${target} is already in your preset.`
+                );
 
-                if (existing) return interaction.editReply({ content: `${target} is already in your preset.` });
+                if (!result.success) {
+                    return interaction.editReply({ content: result.error });
+                }
 
-                await db.insert(bytepodAutoWhitelist).values({
-                    userId: interaction.user.id,
-                    guildId: interaction.guild.id,
-                    targetUserId: target.id
-                });
                 return interaction.editReply({ embeds: [embeds.success('Preset Added', `Added ${target} to your auto-whitelist.`)] });
             }
             if (subdomain === 'remove') {
@@ -340,36 +369,36 @@ module.exports = {
                 const { isLocked, limit, whitelist } = getPodState(voiceChannel);
                 const whitelistJson = JSON.stringify(whitelist.filter(id => id !== interaction.user.id));
 
-                // Check for existing template with same name
-                const existing = await db.select().from(bytepodTemplates)
-                    .where(and(
+                // Upsert template (update if exists, insert if not)
+                const result = await upsert(
+                    bytepodTemplates,
+                    () => and(
                         eq(bytepodTemplates.userId, interaction.user.id),
                         eq(bytepodTemplates.guildId, interaction.guild.id),
                         eq(bytepodTemplates.name, templateName)
-                    )).get();
-
-                if (existing) {
-                    // Update existing
-                    await db.update(bytepodTemplates)
-                        .set({
-                            userLimit: limit,
-                            autoLock: isLocked,
-                            whitelistUserIds: whitelistJson
-                        })
-                        .where(eq(bytepodTemplates.id, existing.id));
-                    return interaction.editReply({ embeds: [embeds.success('Template Updated', `Template **${templateName}** has been updated.`)] });
-                } else {
-                    // Create new
-                    await db.insert(bytepodTemplates).values({
+                    ),
+                    {
+                        userLimit: limit,
+                        autoLock: isLocked,
+                        whitelistUserIds: whitelistJson
+                    },
+                    {
                         userId: interaction.user.id,
                         guildId: interaction.guild.id,
                         name: templateName,
                         userLimit: limit,
                         autoLock: isLocked,
                         whitelistUserIds: whitelistJson
-                    });
-                    return interaction.editReply({ embeds: [embeds.success('Template Saved', `Template **${templateName}** has been saved.`)] });
+                    },
+                    { userId: interaction.user.id, templateName, operation: 'save-template' }
+                );
+
+                if (!result.success) {
+                    return interaction.editReply({ embeds: [embeds.error('Error', 'Failed to save template.')] });
                 }
+
+                const action = result.created ? 'Saved' : 'Updated';
+                return interaction.editReply({ embeds: [embeds.success(`Template ${action}`, `Template **${templateName}** has been ${action.toLowerCase()}.`)] });
             }
 
             if (subdomain === 'load') {

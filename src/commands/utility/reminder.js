@@ -4,7 +4,7 @@ const { reminders } = require('../../database/schema');
 const { eq, and, count } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const { parseTime, formatDuration } = require('../../utils/timeParser');
-const logger = require('../../utils/logger');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
 
 const MAX_REMINDERS_PER_USER = 25;
 
@@ -142,15 +142,7 @@ async function handleRemindMe(interaction, client) {
         await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
 
     } catch (error) {
-        logger.errorContext('Failed to create reminder (me)', error, {
-            userId: interaction.user.id,
-            timeInput: timeInput,
-            messageLength: message.length
-        });
-        return interaction.reply({
-            embeds: [embeds.error('Failed', 'Failed to create reminder. Please try again.')],
-            flags: [MessageFlags.Ephemeral]
-        });
+        await handleCommandError(error, interaction, 'creating reminder');
     }
 }
 
@@ -237,17 +229,7 @@ async function handleRemindHere(interaction, client) {
         await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
 
     } catch (error) {
-        logger.errorContext('Failed to create reminder (here)', error, {
-            userId: interaction.user.id,
-            guildId: interaction.guild.id,
-            channelId: interaction.channel.id,
-            timeInput: timeInput,
-            messageLength: message.length
-        });
-        return interaction.reply({
-            embeds: [embeds.error('Failed', 'Failed to create reminder. Please try again.')],
-            flags: [MessageFlags.Ephemeral]
-        });
+        await handleCommandError(error, interaction, 'creating channel reminder');
     }
 }
 
@@ -297,13 +279,7 @@ async function handleList(interaction, client) {
         await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
 
     } catch (error) {
-        logger.errorContext('Failed to list reminders', error, {
-            userId: interaction.user.id
-        });
-        return interaction.reply({
-            embeds: [embeds.error('Failed', 'Failed to fetch reminders. Please try again.')],
-            flags: [MessageFlags.Ephemeral]
-        });
+        await handleCommandError(error, interaction, 'fetching reminders');
     }
 }
 
@@ -331,16 +307,6 @@ async function handleCancel(interaction, client) {
         await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
 
     } catch (error) {
-        logger.errorContext('Failed to cancel reminder', error, {
-            userId: interaction.user.id,
-            reminderId: reminderId
-        });
-        return interaction.reply({
-            embeds: [embeds.error(
-                'Failed to Cancel',
-                error.message || 'Could not cancel reminder. It may have already fired or does not exist.'
-            )],
-            flags: [MessageFlags.Ephemeral]
-        });
+        await handleCommandError(error, interaction, 'cancelling reminder');
     }
 }

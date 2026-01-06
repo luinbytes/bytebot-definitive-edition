@@ -4,6 +4,7 @@ const { starboardConfig, starboardMessages } = require('../../database/schema');
 const { eq, desc } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const { dbLog } = require('../../utils/dbLogger');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -58,7 +59,9 @@ module.exports = {
                         .setMaxValue(25)
                         .setRequired(false)
                 )
-        ),
+        )
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+
     permissions: [PermissionFlagsBits.ManageGuild],
     longRunning: true,
 
@@ -115,13 +118,14 @@ async function handleSetup(interaction, client) {
 
     try {
         // Check if config exists
-        const existingConfig = await dbLog.select('starboardConfig',
+        const results = await dbLog.select('starboardConfig',
             () => db.select()
                 .from(starboardConfig)
                 .where(eq(starboardConfig.guildId, interaction.guild.id))
-                .get(),
+                .limit(1),
             { guildId: interaction.guild.id }
         );
+        const existingConfig = results[0];
 
         if (existingConfig) {
             // Update existing config
@@ -166,10 +170,7 @@ async function handleSetup(interaction, client) {
         });
 
     } catch (error) {
-        logger.error('Error setting up starboard:', error);
-        return interaction.editReply({
-            embeds: [embeds.error('Setup Failed', 'Failed to configure starboard. Please try again.')]
-        });
+        await handleCommandError(error, interaction, 'setting up starboard');
     }
 }
 
@@ -177,13 +178,14 @@ async function handleSetup(interaction, client) {
  * Handle /starboard config
  */
 async function handleConfig(interaction, client) {
-    const config = await dbLog.select('starboardConfig',
+    const results = await dbLog.select('starboardConfig',
         () => db.select()
             .from(starboardConfig)
-            .where(eq(starboardConfig.guildId, interaction.guild.id)),
+            .where(eq(starboardConfig.guildId, interaction.guild.id))
+            .limit(1),
         { guildId: interaction.guild.id }
-    )
-        .get();
+    );
+    const config = results[0];
 
     if (!config) {
         return interaction.editReply({
@@ -233,13 +235,14 @@ async function handleConfig(interaction, client) {
  * Handle /starboard disable
  */
 async function handleDisable(interaction, client) {
-    const config = await dbLog.select('starboardConfig',
+    const results = await dbLog.select('starboardConfig',
         () => db.select()
             .from(starboardConfig)
             .where(eq(starboardConfig.guildId, interaction.guild.id))
-            .get(),
+            .limit(1),
         { guildId: interaction.guild.id }
     );
+    const config = results[0];
 
     if (!config) {
         return interaction.editReply({
@@ -278,10 +281,7 @@ async function handleDisable(interaction, client) {
         });
 
     } catch (error) {
-        logger.error('Error disabling starboard:', error);
-        return interaction.editReply({
-            embeds: [embeds.error('Failed', 'Failed to disable starboard. Please try again.')]
-        });
+        await handleCommandError(error, interaction, 'disabling starboard');
     }
 }
 
@@ -289,13 +289,14 @@ async function handleDisable(interaction, client) {
  * Handle /starboard enable
  */
 async function handleEnable(interaction, client) {
-    const config = await dbLog.select('starboardConfig',
+    const results = await dbLog.select('starboardConfig',
         () => db.select()
             .from(starboardConfig)
             .where(eq(starboardConfig.guildId, interaction.guild.id))
-            .get(),
+            .limit(1),
         { guildId: interaction.guild.id }
     );
+    const config = results[0];
 
     if (!config) {
         return interaction.editReply({
@@ -334,10 +335,7 @@ async function handleEnable(interaction, client) {
         });
 
     } catch (error) {
-        logger.error('Error enabling starboard:', error);
-        return interaction.editReply({
-            embeds: [embeds.error('Failed', 'Failed to enable starboard. Please try again.')]
-        });
+        await handleCommandError(error, interaction, 'enabling starboard');
     }
 }
 
@@ -347,13 +345,14 @@ async function handleEnable(interaction, client) {
 async function handleTop(interaction, client) {
     const limit = interaction.options.getInteger('limit') || 10;
 
-    const config = await dbLog.select('starboardConfig',
+    const results = await dbLog.select('starboardConfig',
         () => db.select()
             .from(starboardConfig)
             .where(eq(starboardConfig.guildId, interaction.guild.id))
-            .get(),
+            .limit(1),
         { guildId: interaction.guild.id }
     );
+    const config = results[0];
 
     if (!config) {
         return interaction.editReply({

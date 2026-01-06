@@ -171,7 +171,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
             {
                 name: 'Key Features',
                 value:
-                    'BytePods • Achievements • Activity Streaks • Media Gallery\n' +
+                    'BytePods • Achievements • Activity Streaks\n' +
                     'Suggestions • Birthdays • Bookmarks • Moderation Tools',
                 inline: false
             }

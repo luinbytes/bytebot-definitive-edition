@@ -51,7 +51,7 @@ module.exports = {
 
     cooldown: 3,
     longRunning: true,
-    ephemeral: true, // All bookmark operations are private
+    // All bookmark operations are private - handled in execute via flags: [MessageFlags.Ephemeral]
 
     async execute(interaction, client) {
         const subcommand = interaction.options.getSubcommand();

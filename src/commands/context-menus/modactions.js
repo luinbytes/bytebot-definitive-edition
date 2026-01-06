@@ -3,7 +3,9 @@ const embeds = require('../../utils/embeds');
 const { db } = require('../../database');
 const { moderationLogs } = require('../../database/schema');
 const { eq, desc } = require('drizzle-orm');
-const logger = require('../../utils/logger');
+const { executeModerationAction, validateHierarchy } = require('../../utils/moderationUtil');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
+const { fetchMember } = require('../../utils/discordApiUtil');
 
 module.exports = {
     data: new ContextMenuCommandBuilder()
@@ -19,22 +21,6 @@ module.exports = {
         const targetMember = interaction.targetMember;
         const executor = interaction.member;
 
-        // Can't moderate self
-        if (target.id === interaction.user.id) {
-            return interaction.reply({
-                embeds: [embeds.error('Invalid Target', 'You cannot moderate yourself.')],
-                flags: [MessageFlags.Ephemeral]
-            });
-        }
-
-        // Can't moderate bots (unless you're admin)
-        if (target.bot && !executor.permissions.has(PermissionFlagsBits.Administrator)) {
-            return interaction.reply({
-                embeds: [embeds.error('Invalid Target', 'Only administrators can moderate bots.')],
-                flags: [MessageFlags.Ephemeral]
-            });
-        }
-
         // User must be in guild
         if (!targetMember) {
             return interaction.reply({
@@ -43,10 +29,11 @@ module.exports = {
             });
         }
 
-        // Role hierarchy check
-        if (executor.roles.highest.position <= targetMember.roles.highest.position && !executor.permissions.has(PermissionFlagsBits.Administrator)) {
+        // Validate moderation permissions using centralized hierarchy checker
+        const validation = validateHierarchy(executor, targetMember);
+        if (!validation.valid) {
             return interaction.reply({
-                embeds: [embeds.error('Insufficient Permissions', 'You cannot moderate users with equal or higher roles than you.')],
+                embeds: [embeds.error('Cannot Moderate', validation.error)],
                 flags: [MessageFlags.Ephemeral]
             });
         }
@@ -142,7 +129,7 @@ module.exports = {
         const executor = interaction.member;
 
         // Re-validate hierarchy (user might have left or role changed)
-        const targetMember = await guild.members.fetch(userId).catch(() => null);
+        const targetMember = await fetchMember(guild, userId, { logContext: 'modactions-revalidate' });
 
         if (!targetMember && action !== 'ban') {
             return interaction.reply({
@@ -151,38 +138,29 @@ module.exports = {
             });
         }
 
-        if (targetMember && executor.roles.highest.position <= targetMember.roles.highest.position && !executor.permissions.has(PermissionFlagsBits.Administrator)) {
-            return interaction.reply({
-                embeds: [embeds.error('Insufficient Permissions', 'You cannot moderate users with equal or higher roles.')],
-                flags: [MessageFlags.Ephemeral]
-            });
+        // Validate hierarchy using centralized utility
+        if (targetMember) {
+            const validation = validateHierarchy(executor, targetMember);
+            if (!validation.valid) {
+                return interaction.reply({
+                    embeds: [embeds.error('Cannot Moderate', validation.error)],
+                    flags: [MessageFlags.Ephemeral]
+                });
+            }
         }
 
         try {
             switch (action) {
                 case 'warn':
-                    // Log to database
-                    await db.insert(moderationLogs).values({
+                    // Execute moderation action (log + notify)
+                    await executeModerationAction({
                         guildId: guild.id,
-                        targetId: userId,
-                        executorId: executor.id,
+                        guildName: guild.name,
+                        target,
+                        executor,
                         action: 'WARN',
-                        reason: reason,
-                        timestamp: new Date()
+                        reason
                     });
-
-                    // Try to DM user
-                    try {
-                        const warnEmbed = embeds.warn(
-                            `Warning from ${guild.name}`,
-                            `You have been warned by ${executor.user.tag}.\n\n**Reason:** ${reason}`
-                        );
-                        await target.send({ embeds: [warnEmbed] });
-                    } catch (e) {
-                        // User has DMs disabled, continue anyway
-                    }
-
-                    logger.info(`${executor.user.tag} warned ${target.tag} in ${guild.name}: ${reason}`);
 
                     return interaction.reply({
                         embeds: [embeds.success('User Warned', `${target.tag} has been warned.\n\n**Reason:** ${reason}`)],
@@ -190,31 +168,18 @@ module.exports = {
                     });
 
                 case 'kick':
-                    // Log to database first
-                    await db.insert(moderationLogs).values({
+                    // Execute moderation action (log + notify)
+                    await executeModerationAction({
                         guildId: guild.id,
-                        targetId: userId,
-                        executorId: executor.id,
+                        guildName: guild.name,
+                        target,
+                        executor,
                         action: 'KICK',
-                        reason: reason,
-                        timestamp: new Date()
+                        reason
                     });
 
-                    // Try to DM user before kicking
-                    try {
-                        const kickEmbed = embeds.error(
-                            `Kicked from ${guild.name}`,
-                            `You have been kicked by ${executor.user.tag}.\n\n**Reason:** ${reason}`
-                        );
-                        await target.send({ embeds: [kickEmbed] });
-                    } catch (e) {
-                        // Continue even if DM fails
-                    }
-
-                    // Kick
+                    // Perform the kick
                     await targetMember.kick(reason);
-
-                    logger.info(`${executor.user.tag} kicked ${target.tag} from ${guild.name}: ${reason}`);
 
                     return interaction.reply({
                         embeds: [embeds.success('User Kicked', `${target.tag} has been kicked from the server.\n\n**Reason:** ${reason}`)],
@@ -222,31 +187,18 @@ module.exports = {
                     });
 
                 case 'ban':
-                    // Log to database first
-                    await db.insert(moderationLogs).values({
+                    // Execute moderation action (log + notify)
+                    await executeModerationAction({
                         guildId: guild.id,
-                        targetId: userId,
-                        executorId: executor.id,
+                        guildName: guild.name,
+                        target,
+                        executor,
                         action: 'BAN',
-                        reason: reason,
-                        timestamp: new Date()
+                        reason
                     });
 
-                    // Try to DM user before banning
-                    try {
-                        const banEmbed = embeds.error(
-                            `Banned from ${guild.name}`,
-                            `You have been banned by ${executor.user.tag}.\n\n**Reason:** ${reason}`
-                        );
-                        await target.send({ embeds: [banEmbed] });
-                    } catch (e) {
-                        // Continue even if DM fails
-                    }
-
-                    // Ban
+                    // Perform the ban
                     await guild.members.ban(userId, { reason: reason, deleteMessageSeconds: 0 });
-
-                    logger.info(`${executor.user.tag} banned ${target.tag} from ${guild.name}: ${reason}`);
 
                     return interaction.reply({
                         embeds: [embeds.success('User Banned', `${target.tag} has been banned from the server.\n\n**Reason:** ${reason}`)],
@@ -254,17 +206,7 @@ module.exports = {
                     });
             }
         } catch (error) {
-            logger.errorContext(`Error executing moderation action: ${action}`, error, {
-                action: action,
-                targetId: userId,
-                executorId: executor.id,
-                guildId: guild.id
-            });
-
-            return interaction.reply({
-                embeds: [embeds.error('Action Failed', `Failed to ${action} user. The bot may lack permissions or the user may have left.`)],
-                flags: [MessageFlags.Ephemeral]
-            });
+            await handleCommandError(error, interaction, `executing ${action} action`);
         }
     }
 };
