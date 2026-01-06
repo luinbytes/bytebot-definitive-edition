@@ -14,6 +14,8 @@ const { PermissionFlagsBits } = require('discord.js');
 const logger = require('../utils/logger');
 const embeds = require('../utils/embeds');
 const { dbLog } = require('../utils/dbLogger');
+const { getOne } = require('../utils/dbUtil');
+const { fetchMember, RoleManager } = require('../utils/discordApiUtil');
 
 /**
  * Achievement Manager - Loads and caches achievement definitions from database
@@ -997,16 +999,14 @@ class ActivityStreakService {
      */
     async getOrCreateTodayLog(userId, guildId, today) {
         try {
-            const existingLog = await dbLog.select('activityLogs',
-                () => db.select()
-                    .from(activityLogs)
-                    .where(and(
-                        eq(activityLogs.userId, userId),
-                        eq(activityLogs.guildId, guildId),
-                        eq(activityLogs.activityDate, today)
-                    ))
-                    .get(),
-                { userId, guildId, activityDate: today }
+            const existingLog = await getOne(
+                activityLogs,
+                () => and(
+                    eq(activityLogs.userId, userId),
+                    eq(activityLogs.guildId, guildId),
+                    eq(activityLogs.activityDate, today)
+                ),
+                { userId, guildId, activityDate: today, operation: 'get-or-create-log' }
             );
 
             if (existingLog) {
@@ -1669,7 +1669,7 @@ class ActivityStreakService {
             const guild = await this.client.guilds.fetch(guildId).catch(() => null);
             if (!guild) return;
 
-            const member = await guild.members.fetch(userId).catch(() => null);
+            const member = await fetchMember(guild, userId, { logContext: 'achievement-remove-role' });
             if (!member) return;
 
             // Get role configuration
@@ -1694,8 +1694,14 @@ class ActivityStreakService {
             if (!role) return;
 
             // Remove role from member
-            await member.roles.remove(role, `Achievement removed: ${achievementDef.title}`);
-            logger.success(`Removed role ${role.name} from ${member.user.tag} in ${guild.name}`);
+            const removeResult = await RoleManager.removeRole(member, role, {
+                reason: `Achievement removed: ${achievementDef.title}`,
+                logContext: 'achievement-remove-role'
+            });
+
+            if (removeResult.success) {
+                logger.success(`Removed role ${role.name} from ${member.user.tag} in ${guild.name}`);
+            }
 
         } catch (error) {
             logger.error(`Error removing achievement role for user ${userId}:`, error);
@@ -2003,7 +2009,7 @@ class ActivityStreakService {
                 return;
             }
 
-            const member = await guild.members.fetch(userId).catch(() => null);
+            const member = await fetchMember(guild, userId, { logContext: 'achievement-grant-role' });
             if (!member) {
                 logger.warn(`Member ${userId} not found in guild ${guildId}`);
                 return;
@@ -2022,18 +2028,17 @@ class ActivityStreakService {
                 return;
             }
 
-            // Check role hierarchy (bot's highest role must be above target role)
-            if (guild.members.me.roles.highest.position <= role.position) {
-                logger.warn(`Role hierarchy issue: Bot role not high enough to assign ${role.name}`);
-                return;
-            }
+            // Assign role (RoleManager handles hierarchy validation and duplicate check)
+            const addResult = await RoleManager.addRole(member, role, {
+                reason: `Achievement earned: ${achievementDef.title}`,
+                validateHierarchy: true,
+                logContext: 'achievement-grant-role'
+            });
 
-            // Assign role if user doesn't already have it
-            if (!member.roles.cache.has(role.id)) {
-                await member.roles.add(role, `Achievement earned: ${achievementDef.title}`);
+            if (addResult.success) {
                 logger.success(`Granted role ${role.name} to ${member.user.tag} in ${guild.name}`);
-            } else {
-                logger.debug(`User ${userId} already has role ${role.name}`);
+            } else if (addResult.error) {
+                logger.warn(`Failed to grant role ${role.name}: ${addResult.error}`);
             }
 
         } catch (error) {

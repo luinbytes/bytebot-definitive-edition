@@ -48,6 +48,7 @@ describe('Validation Utility', () => {
         test('should accept types with constraints', () => {
             expect(isValidSQLType('TEXT NOT NULL')).toBe(true);
             expect(isValidSQLType('INTEGER PRIMARY KEY')).toBe(true);
+            expect(isValidSQLType('INTEGER PRIMARY KEY AUTOINCREMENT')).toBe(true);
             expect(isValidSQLType('TEXT UNIQUE')).toBe(true);
             expect(isValidSQLType('INTEGER DEFAULT 0')).toBe(true);
         });

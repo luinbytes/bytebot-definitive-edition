@@ -59,6 +59,8 @@ function loadConfig() {
     try {
         config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     } catch (error) {
+        // Use console.error here since logger may not be initialized yet
+        // eslint-disable-next-line no-console
         console.error('Failed to load config.json:', error.message);
         process.exit(1);
     }

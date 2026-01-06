@@ -32,7 +32,7 @@ function isValidSQLIdentifier(identifier) {
  * isValidSQLType('TEXT; DROP TABLE users')     // false
  */
 function isValidSQLType(type) {
-    const allowedTypes = /^(INTEGER|TEXT|REAL|BLOB|BOOLEAN|TIMESTAMP)(\s+(PRIMARY KEY|NOT NULL|DEFAULT .+|UNIQUE|CHECK\(.+\)))*$/i;
+    const allowedTypes = /^(INTEGER|TEXT|REAL|BLOB|BOOLEAN|TIMESTAMP)(\s+(PRIMARY KEY( AUTOINCREMENT)?|NOT NULL|DEFAULT .+|UNIQUE|CHECK\(.+\)))*$/i;
     return allowedTypes.test(type.trim());
 }
 

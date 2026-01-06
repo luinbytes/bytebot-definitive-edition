@@ -891,18 +891,6 @@ const CORE_ACHIEVEMENTS = [
         points: 75
     },
     {
-        id: 'social_media_archivist',
-        title: 'Media Archivist',
-        description: 'Save 500 media items to the gallery',
-        emoji: '📸',
-        category: 'social',
-        rarity: 'rare',
-        checkType: 'special',
-        criteria: JSON.stringify({ type: 'media_saved', count: 500 }),
-        grantRole: true,
-        points: 250
-    },
-    {
         id: 'social_suggestion_maker',
         title: 'Suggestion Maker',
         description: 'Submit 10 suggestions',

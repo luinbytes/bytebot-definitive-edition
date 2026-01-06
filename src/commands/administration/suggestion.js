@@ -4,6 +4,7 @@ const { suggestions, suggestionConfig } = require('../../database/schema');
 const { eq, and, desc } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const { dbLog } = require('../../utils/dbLogger');
+const { fetchChannel, safeMessageFetch } = require('../../utils/discordApiUtil');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -506,10 +507,10 @@ module.exports = {
 
     async updateSuggestionMessage(guild, suggestion, newStatus, reason) {
         try {
-            const channel = await guild.channels.fetch(suggestion.channelId);
+            const channel = await fetchChannel(guild, suggestion.channelId, { logContext: 'suggestion-update' });
             if (!channel) return;
 
-            const message = await channel.messages.fetch(suggestion.messageId);
+            const message = await safeMessageFetch(channel, suggestion.messageId, { logContext: 'suggestion-update' });
             if (!message) return;
 
             const statusEmojis = {

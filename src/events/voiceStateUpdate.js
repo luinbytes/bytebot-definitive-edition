@@ -197,6 +197,20 @@ module.exports = {
         const joinedChannelId = newState.channelId;
         const leftChannelId = oldState.channelId;
 
+        // Validate hub channel still exists (auto-clear stale config if manually deleted)
+        const hubChannel = guild.channels.cache.get(hubId) || await guild.channels.fetch(hubId).catch(() => null);
+        if (!hubChannel) {
+            // Hub channel was deleted, clear the stale configuration
+            logger.warn(`BytePod hub channel ${hubId} was deleted in guild ${guild.id}, auto-clearing configuration`);
+            await dbLog.update('guilds',
+                () => db.update(guilds)
+                    .set({ voiceHubChannelId: null, voiceHubCategoryId: null })
+                    .where(eq(guilds.id, guild.id)),
+                { guildId: guild.id, operation: 'clearStaleHubConfig' }
+            );
+            return; // No hub to process
+        }
+
         // --- JOIN HUB TRIGGER ---
         if (joinedChannelId === hubId) {
             // Check Permissions
@@ -485,7 +499,32 @@ module.exports = {
             if (podData) {
                 const channel = oldState.channel || await guild.channels.fetch(leftChannelId).catch(() => null);
 
-                if (channel && channel.members.size === 0) {
+                // --- CHANNEL ALREADY DELETED: CLEANUP DB IMMEDIATELY ---
+                if (!channel) {
+                    logger.info(`BytePod channel ${leftChannelId} was manually deleted, cleaning up database`);
+
+                    // Cancel any pending ownership transfer
+                    if (pendingOwnershipTransfers.has(leftChannelId)) {
+                        clearTimeout(pendingOwnershipTransfers.get(leftChannelId));
+                        pendingOwnershipTransfers.delete(leftChannelId);
+                    }
+
+                    // Finalize any remaining sessions and clean up
+                    const remainingSessions = await dbLog.select('bytepodActiveSessions',
+                        () => db.select().from(bytepodActiveSessions)
+                            .where(eq(bytepodActiveSessions.podId, leftChannelId)),
+                        { podId: leftChannelId, operation: 'orphanCleanup' }
+                    );
+                    for (const s of remainingSessions) {
+                        await finalizeVoiceSession(s, newState.client);
+                    }
+
+                    // Delete orphaned pod record
+                    await dbLog.delete('bytepods',
+                        () => db.delete(bytepods).where(eq(bytepods.channelId, leftChannelId)),
+                        { podId: leftChannelId, guildId: guild.id, operation: 'orphanedChannelCleanup' }
+                    );
+                } else if (channel.members.size === 0) {
                     // --- CHANNEL EMPTY: DELETE POD ---
                     // Cancel any pending ownership transfer
                     if (pendingOwnershipTransfers.has(leftChannelId)) {

@@ -19,15 +19,20 @@ class StarboardService {
     constructor(client) {
         this.client = client;
         this.updateQueue = new Map(); // messageId -> timeout
-        this.configCache = new Map(); // guildId -> config (cached indefinitely, invalidate on change)
+        this.configCache = new Map(); // guildId -> { config, expiry }
+        this.cacheExpiry = 300000; // 5 minutes in ms
     }
 
     /**
-     * Get starboard config for a guild (with caching)
+     * Get starboard config for a guild (with caching and TTL)
      */
     async getConfig(guildId) {
-        if (this.configCache.has(guildId)) {
-            return this.configCache.get(guildId);
+        const now = Date.now();
+        const cached = this.configCache.get(guildId);
+
+        // Return cached if still valid
+        if (cached && cached.expiry > now) {
+            return cached.config;
         }
 
         const config = await dbLog.select('starboardConfig',
@@ -39,7 +44,10 @@ class StarboardService {
         );
 
         if (config) {
-            this.configCache.set(guildId, config);
+            this.configCache.set(guildId, {
+                config: config,
+                expiry: now + this.cacheExpiry
+            });
         }
 
         return config || null;
@@ -452,6 +460,24 @@ class StarboardService {
         embed.setTimestamp(message.createdAt);
 
         return embed;
+    }
+
+    /**
+     * Cleanup method - Clear all pending update timeouts and cache
+     */
+    cleanup() {
+        logger.info('Cleaning up starboard service...');
+
+        // Clear all pending update timeouts
+        for (const [messageId, timeout] of this.updateQueue.entries()) {
+            clearTimeout(timeout);
+        }
+        this.updateQueue.clear();
+
+        // Clear config cache
+        this.configCache.clear();
+
+        logger.success('Starboard service cleanup complete');
     }
 }
 

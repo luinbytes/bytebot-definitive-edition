@@ -19,9 +19,5 @@
         "file": true,
         "database": false,
         "logDirectory": "logs"
-    },
-    "media": {
-        "storageMethod": "local",
-        "enableDeduplication": true
     }
 }

@@ -5,6 +5,7 @@ const { moderationLogs } = require('../../database/schema');
 const { eq, desc } = require('drizzle-orm');
 const { executeModerationAction, validateHierarchy } = require('../../utils/moderationUtil');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
+const { fetchMember } = require('../../utils/discordApiUtil');
 
 module.exports = {
     data: new ContextMenuCommandBuilder()
@@ -128,7 +129,7 @@ module.exports = {
         const executor = interaction.member;
 
         // Re-validate hierarchy (user might have left or role changed)
-        const targetMember = await guild.members.fetch(userId).catch(() => null);
+        const targetMember = await fetchMember(guild, userId, { logContext: 'modactions-revalidate' });
 
         if (!targetMember && action !== 'ban') {
             return interaction.reply({

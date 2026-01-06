@@ -4,6 +4,7 @@ const { eq, and, or } = require('drizzle-orm');
 const logger = require('../utils/logger');
 const embeds = require('../utils/embeds');
 const { dbLog } = require('../utils/dbLogger');
+const { fetchMember, fetchChannel, RoleManager } = require('../utils/discordApiUtil');
 
 class BirthdayService {
     constructor(client) {
@@ -184,7 +185,7 @@ class BirthdayService {
             // Filter to only members still in guild
             const validMembers = [];
             for (const birthday of birthdayQuery) {
-                const member = await guild.members.fetch(birthday.userId).catch(() => null);
+                const member = await fetchMember(guild, birthday.userId, { logContext: 'birthday-check' });
                 if (member) {
                     validMembers.push(member);
                 }
@@ -202,7 +203,7 @@ class BirthdayService {
             }
 
             // Get announcement channel
-            const channel = await this.client.channels.fetch(config.channelId).catch(() => null);
+            const channel = await fetchChannel(this.client, config.channelId, { logContext: 'birthday-announcement-channel' });
 
             if (!channel) {
                 // Channel deleted, disable system
@@ -253,17 +254,24 @@ class BirthdayService {
                             continue;
                         }
 
-                        await member.roles.add(role).catch(err => {
-                            logger.error(`Failed to assign birthday role to ${member.user.tag}:`, err);
+                        const addResult = await RoleManager.addRole(member, role, {
+                            reason: 'Birthday role assigned',
+                            logContext: 'birthday-role-assign'
                         });
+
+                        if (!addResult.success) {
+                            logger.error(`Failed to assign birthday role to ${member.user.tag}: ${addResult.error}`);
+                            continue;
+                        }
 
                         // Schedule role removal after 24 hours
                         const timeoutKey = `${member.id}_${guildId}`;
                         const timeout = setTimeout(async () => {
-                            const refreshedMember = await guild.members.fetch(member.id).catch(() => null);
+                            const refreshedMember = await fetchMember(guild, member.id, { logContext: 'birthday-role-removal' });
                             if (refreshedMember && refreshedMember.roles.cache.has(role.id)) {
-                                await refreshedMember.roles.remove(role).catch(() => {
-                                    logger.debug(`Could not remove birthday role from ${member.user.tag}`);
+                                await RoleManager.removeRole(refreshedMember, role, {
+                                    reason: 'Birthday role expired (24h)',
+                                    logContext: 'birthday-role-expire'
                                 });
                             }
                             this.roleRemovalTimeouts.delete(timeoutKey);
