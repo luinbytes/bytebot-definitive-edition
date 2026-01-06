@@ -2,6 +2,7 @@ const { SlashCommandBuilder } = require('discord.js');
 const { REST, Routes } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const logger = require('../../utils/logger');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -132,13 +133,7 @@ module.exports = {
                 await i.editReply({ embeds: [resultEmbed] });
 
             } catch (error) {
-                logger.errorContext('Command clearing failed', error);
-                await i.editReply({
-                    embeds: [embeds.error(
-                        'Clearing Failed',
-                        `Failed to clear commands.\n\n**Error:** ${error.message}`
-                    )]
-                });
+                await handleCommandError(error, i, 'clearing command registrations');
             }
         });
 

@@ -10,6 +10,7 @@ const path = require('path');
  * Priority: config.local.json > config.json
  */
 
+// Note: Can't use logger here due to circular dependency (logger requires config)
 let cachedConfig = null;
 
 /**
@@ -58,6 +59,8 @@ function loadConfig() {
     try {
         config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     } catch (error) {
+        // Use console.error here since logger may not be initialized yet
+        // eslint-disable-next-line no-console
         console.error('Failed to load config.json:', error.message);
         process.exit(1);
     }

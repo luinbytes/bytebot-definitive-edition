@@ -4,6 +4,7 @@ const { birthdays, birthdayConfig } = require('../../database/schema');
 const { eq, and } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
+const { upsert } = require('../../utils/dbUtil');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -126,32 +127,27 @@ module.exports = {
             leapYearWarning = '\n\n⚠️ **Leap year birthday!** You\'ll be celebrated on February 28th in non-leap years.';
         }
 
-        // Check if birthday already exists for this user in this guild
-        const existingBirthday = await db.select().from(birthdays).where(
-            and(
+        // Upsert birthday (update if exists, insert if not)
+        const upsertResult = await upsert(
+            birthdays,
+            () => and(
                 eq(birthdays.userId, interaction.user.id),
                 eq(birthdays.guildId, interaction.guild.id)
-            )
-        ).get();
-
-        if (existingBirthday) {
-            // Update existing birthday
-            await db.update(birthdays)
-                .set({ month, day })
-                .where(
-                    and(
-                        eq(birthdays.userId, interaction.user.id),
-                        eq(birthdays.guildId, interaction.guild.id)
-                    )
-                );
-        } else {
-            // Insert new birthday
-            await db.insert(birthdays).values({
+            ),
+            { month, day },
+            {
                 userId: interaction.user.id,
                 guildId: interaction.guild.id,
                 month,
                 day,
                 createdAt: new Date()
+            },
+            { userId: interaction.user.id, guildId: interaction.guild.id, operation: 'set-birthday' }
+        );
+
+        if (!upsertResult.success) {
+            return interaction.editReply({
+                embeds: [embeds.error('Error', 'Failed to save your birthday. Please try again.')]
             });
         }
 

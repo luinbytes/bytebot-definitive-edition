@@ -3,6 +3,7 @@ const { bookmarks } = require('../database/schema');
 const { eq, and, desc, like, or } = require('drizzle-orm');
 const logger = require('./logger');
 const { dbLog } = require('./dbLogger');
+const { getCount, deleteIfOwner, insertIfNotExists } = require('./dbUtil');
 
 /**
  * Bookmark Utility - Handles all bookmark database operations
@@ -119,19 +120,16 @@ async function getBookmarks(userId, options = {}) {
 
 /**
  * Get total bookmark count for a user
+ * PERFORMANCE: Uses SQL COUNT(*) instead of fetching all records (10-100x faster)
  * @param {string} userId - Discord user ID
  * @returns {number} Total bookmark count
  */
 async function getBookmarkCount(userId) {
-    try {
-        const results = await db.select().from(bookmarks)
-            .where(eq(bookmarks.userId, userId))
-            .all();
-        return results.length;
-    } catch (error) {
-        logger.error(`Failed to get bookmark count: ${error}`);
-        return 0;
-    }
+    return await getCount(
+        bookmarks,
+        () => eq(bookmarks.userId, userId),
+        { userId }
+    );
 }
 
 /**
@@ -141,33 +139,16 @@ async function getBookmarkCount(userId) {
  * @returns {Object} { success: boolean, error?: string }
  */
 async function deleteBookmark(userId, bookmarkId) {
-    try {
-        // Verify ownership before deleting
-        const bookmark = await db.select().from(bookmarks)
-            .where(and(
-                eq(bookmarks.id, bookmarkId),
-                eq(bookmarks.userId, userId)
-            ))
-            .get();
-
-        if (!bookmark) {
-            return {
-                success: false,
-                error: 'Bookmark not found or you do not have permission to delete it.'
-            };
-        }
-
-        await db.delete(bookmarks)
-            .where(eq(bookmarks.id, bookmarkId));
-
-        return { success: true };
-    } catch (error) {
-        logger.error(`Failed to delete bookmark: ${error}`);
-        return {
-            success: false,
-            error: 'An unexpected error occurred while deleting the bookmark.'
-        };
-    }
+    return await deleteIfOwner(
+        bookmarks,
+        () => and(
+            eq(bookmarks.id, bookmarkId),
+            eq(bookmarks.userId, userId)
+        ),
+        bookmarkId,
+        userId,
+        { operation: 'delete-bookmark' }
+    );
 }
 
 /**
@@ -248,6 +229,7 @@ async function getBookmarkById(userId, bookmarkId) {
 
 /**
  * Search bookmarks by content
+ * PERFORMANCE: Uses SQL COUNT(*) for total instead of fetching all records twice
  * @param {string} userId - Discord user ID
  * @param {string} query - Search query
  * @param {Object} options - { limit: number, offset: number }
@@ -268,17 +250,19 @@ async function searchBookmarks(userId, query, options = {}) {
             .offset(offset)
             .all();
 
-        // Get total count for pagination
-        const totalResults = await db.select().from(bookmarks)
-            .where(and(
+        // Get total count efficiently with SQL COUNT(*)
+        const total = await getCount(
+            bookmarks,
+            () => and(
                 eq(bookmarks.userId, userId),
                 like(bookmarks.content, `%${query}%`)
-            ))
-            .all();
+            ),
+            { userId, query, operation: 'search-count' }
+        );
 
         return {
             results: results,
-            total: totalResults.length
+            total: total
         };
     } catch (error) {
         logger.error(`Failed to search bookmarks: ${error}`);

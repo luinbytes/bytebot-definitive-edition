@@ -1,11 +1,18 @@
 const { drizzle } = require('drizzle-orm/better-sqlite3');
 const Database = require('better-sqlite3');
 const schema = require('./schema');
+const { isValidSQLIdentifier, isValidSQLType } = require('../utils/validationUtil');
 require('dotenv').config();
 
 const { migrate } = require('drizzle-orm/better-sqlite3/migrator');
 
 const sqlite = new Database(process.env.DATABASE_URL || 'sqlite.db');
+
+// SECURITY & PERFORMANCE: Enable database hardening
+sqlite.pragma('journal_mode = WAL'); // Write-Ahead Logging for better concurrency
+sqlite.pragma('busy_timeout = 5000'); // Wait up to 5s for locks instead of failing immediately
+sqlite.pragma('foreign_keys = ON'); // Enforce referential integrity
+
 const db = drizzle(sqlite, { schema });
 
 /**
@@ -46,7 +53,6 @@ const expectedSchema = {
         joined_at: 'INTEGER',
         voice_hub_channel_id: 'TEXT',
         voice_hub_category_id: 'TEXT',
-        media_archive_channel_id: 'TEXT',
         achievements_enabled: 'INTEGER DEFAULT 1'
     },
     users: {
@@ -79,6 +85,7 @@ const expectedSchema = {
         original_owner_id: 'TEXT',
         owner_left_at: 'INTEGER',
         reclaim_request_pending: 'INTEGER DEFAULT 0',
+        panel_message_id: 'TEXT',
         created_at: 'INTEGER'
     },
     bytepod_autowhitelist: {
@@ -142,53 +149,6 @@ const expectedSchema = {
         attachment_urls: 'TEXT',
         saved_at: 'INTEGER',
         message_deleted: 'INTEGER DEFAULT 0 NOT NULL'
-    },
-    media_gallery_config: {
-        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
-        guild_id: 'TEXT NOT NULL',
-        channel_id: 'TEXT NOT NULL',
-        enabled: 'INTEGER DEFAULT 1 NOT NULL',
-        auto_capture: 'INTEGER DEFAULT 1 NOT NULL',
-        file_types: 'TEXT DEFAULT "image,video,audio" NOT NULL',
-        max_file_size_mb: 'INTEGER DEFAULT 50 NOT NULL',
-        auto_tag_channel: 'INTEGER DEFAULT 1 NOT NULL',
-        whitelist_role_ids: 'TEXT',
-        created_by: 'TEXT NOT NULL',
-        created_at: 'INTEGER',
-        updated_at: 'INTEGER'
-    },
-    media_items: {
-        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
-        user_id: 'TEXT NOT NULL',
-        guild_id: 'TEXT NOT NULL',
-        channel_id: 'TEXT NOT NULL',
-        message_id: 'TEXT NOT NULL',
-        archive_message_id: 'TEXT',
-        local_file_path: 'TEXT',
-        storage_method: 'TEXT DEFAULT discord NOT NULL',
-        file_hash: 'TEXT',
-        media_url: 'TEXT NOT NULL',
-        file_name: 'TEXT NOT NULL',
-        file_type: 'TEXT NOT NULL',
-        mime_type: 'TEXT',
-        file_size: 'INTEGER',
-        width: 'INTEGER',
-        height: 'INTEGER',
-        duration: 'REAL',
-        description: 'TEXT',
-        content_preview: 'TEXT',
-        author_id: 'TEXT NOT NULL',
-        capture_method: 'TEXT DEFAULT auto NOT NULL',
-        saved_at: 'INTEGER',
-        message_deleted: 'INTEGER DEFAULT 0 NOT NULL',
-        url_expired: 'INTEGER DEFAULT 0 NOT NULL'
-    },
-    media_tags: {
-        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
-        media_id: 'INTEGER NOT NULL',
-        tag: 'TEXT NOT NULL',
-        auto_generated: 'INTEGER DEFAULT 0 NOT NULL',
-        created_at: 'INTEGER'
     },
     auto_responses: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
@@ -440,13 +400,37 @@ function validateAndFixSchema() {
     }
 
     for (const [tableName, columns] of Object.entries(expectedSchema)) {
+        // SECURITY: Validate table name to prevent SQL injection
+        if (!isValidSQLIdentifier(tableName)) {
+            const logger = require('../utils/logger');
+            logger.error(`Invalid table name in expectedSchema: ${tableName}`);
+            continue;
+        }
+
         if (!tableExists(tableName)) {
             // Create the entire table if it doesn't exist
             const columnDefs = Object.entries(columns)
-                .map(([col, type]) => `${col} ${type}`)
+                .map(([col, type]) => {
+                    // SECURITY: Validate column names and types
+                    if (!isValidSQLIdentifier(col)) {
+                        const logger = require('../utils/logger');
+                        logger.error(`Invalid column name: ${col} in table ${tableName}`);
+                        return null;
+                    }
+                    if (!isValidSQLType(type)) {
+                        const logger = require('../utils/logger');
+                        logger.error(`Invalid column type: ${type} for ${tableName}.${col}`);
+                        return null;
+                    }
+                    return `${col} ${type}`;
+                })
+                .filter(def => def !== null)
                 .join(', ');
-            sqlite.exec(`CREATE TABLE IF NOT EXISTS ${tableName} (${columnDefs})`);
-            fixes.push(`Created table: ${tableName}`);
+
+            if (columnDefs) {
+                sqlite.exec(`CREATE TABLE IF NOT EXISTS ${tableName} (${columnDefs})`);
+                fixes.push(`Created table: ${tableName}`);
+            }
             continue;
         }
 
@@ -454,6 +438,18 @@ function validateAndFixSchema() {
         const existingColumns = getTableColumns(tableName);
 
         for (const [columnName, columnType] of Object.entries(columns)) {
+            // SECURITY: Validate column name and type before SQL execution
+            if (!isValidSQLIdentifier(columnName)) {
+                const logger = require('../utils/logger');
+                logger.error(`Invalid column name: ${columnName} in table ${tableName}`);
+                continue;
+            }
+            if (!isValidSQLType(columnType)) {
+                const logger = require('../utils/logger');
+                logger.error(`Invalid column type: ${columnType} for ${tableName}.${columnName}`);
+                continue;
+            }
+
             if (!existingColumns.includes(columnName)) {
                 // Add missing column (SQLite only supports simple ADD COLUMN)
                 const simpleType = columnType.split(' ')[0]; // Get just TEXT, INTEGER, etc.
@@ -461,9 +457,10 @@ function validateAndFixSchema() {
                     sqlite.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${simpleType}`);
                     fixes.push(`Added column: ${tableName}.${columnName}`);
                 } catch (e) {
-                    // Column might already exist or other error
+                    // Column might already exist or other error - silently ignore duplicates
                     if (!e.message.includes('duplicate column')) {
-                        console.error(`Failed to add column ${tableName}.${columnName}:`, e.message);
+                        // Will be logged by runMigrations if dbLoggingEnabled
+                        throw new Error(`Failed to add column ${tableName}.${columnName}: ${e.message}`);
                     }
                 }
             }

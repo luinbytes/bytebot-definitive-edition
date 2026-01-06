@@ -1,7 +1,8 @@
-const { SlashCommandBuilder, MessageFlags, ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
-const logger = require('../../utils/logger');
+const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
+const { sendPaginatedMessage, paginateArray } = require('../../utils/paginationUtil');
 const {
     getRarityEmoji,
     getStreakEmoji,
@@ -255,10 +256,7 @@ async function handleView(interaction, client) {
         });
 
     } catch (error) {
-        logger.error('Error viewing streak:', error);
-        await interaction.editReply({
-            embeds: [embeds.error('Error', 'Failed to fetch streak data. Please try again.')]
-        });
+        await handleCommandError(error, interaction, 'fetching streak data', { ephemeral: false });
     }
 }
 
@@ -329,10 +327,7 @@ async function handleLeaderboard(interaction, client) {
         });
 
     } catch (error) {
-        logger.error('Error showing leaderboard:', error);
-        await interaction.editReply({
-            embeds: [embeds.error('Error', 'Failed to fetch leaderboard. Please try again.')]
-        });
+        await handleCommandError(error, interaction, 'fetching leaderboard', { ephemeral: false });
     }
 }
 
@@ -450,10 +445,7 @@ async function handleAchievementLeaderboard(interaction, client, type) {
         }
 
     } catch (error) {
-        logger.error('Error showing achievement leaderboard:', error);
-        await interaction.editReply({
-            embeds: [embeds.error('Error', 'Failed to fetch leaderboard.')]
-        });
+        await handleCommandError(error, interaction, 'fetching achievement leaderboard', { ephemeral: false });
     }
 }
 
@@ -542,12 +534,12 @@ async function handleAchievements(interaction, client) {
             });
         }
 
-        // Pagination
+        // Pagination setup
         const itemsPerPage = 5;
         const totalPages = Math.ceil(achievements.length / itemsPerPage);
-        let currentPage = 0;
 
-        const generateEmbed = async (page) => {
+        // Render page function for pagination utility
+        const renderPage = async (page) => {
             const start = page * itemsPerPage;
             const end = start + itemsPerPage;
             const pageAchievements = achievements.slice(start, end);
@@ -596,66 +588,18 @@ async function handleAchievements(interaction, client) {
             return embed;
         };
 
-        const generateButtons = (page) => {
-            const prevButton = new ButtonBuilder()
-                .setCustomId('achievements_prev')
-                .setLabel('Previous')
-                .setStyle(ButtonStyle.Primary)
-                .setDisabled(page === 0);
-
-            const nextButton = new ButtonBuilder()
-                .setCustomId('achievements_next')
-                .setLabel('Next')
-                .setStyle(ButtonStyle.Primary)
-                .setDisabled(page === totalPages - 1);
-
-            return new ActionRowBuilder().addComponents(prevButton, nextButton);
-        };
-
-        const embed = await generateEmbed(currentPage);
-        const buttons = generateButtons(currentPage);
-
-        const message = await interaction.editReply({
-            embeds: [embed],
-            components: totalPages > 1 ? [buttons] : []
+        // Use pagination utility for automatic button handling
+        await sendPaginatedMessage({
+            interaction,
+            renderPage,
+            totalPages,
+            customIdPrefix: 'achievements',
+            timeout: 300000, // 5 minutes
+            deferred: true // Interaction was already deferred
         });
-
-        if (totalPages > 1) {
-            const collector = message.createMessageComponentCollector({ time: 300000 }); // 5 min
-
-            collector.on('collect', async (i) => {
-                if (i.user.id !== interaction.user.id) {
-                    return i.reply({
-                        embeds: [embeds.error('Not Your Menu', 'This browser belongs to someone else.')],
-                        flags: [MessageFlags.Ephemeral]
-                    });
-                }
-
-                if (i.customId === 'achievements_next') {
-                    currentPage++;
-                } else if (i.customId === 'achievements_prev') {
-                    currentPage--;
-                }
-
-                const newEmbed = await generateEmbed(currentPage);
-                const newButtons = generateButtons(currentPage);
-
-                await i.update({
-                    embeds: [newEmbed],
-                    components: [newButtons]
-                });
-            });
-
-            collector.on('end', () => {
-                message.edit({ components: [] }).catch(() => { });
-            });
-        }
 
     } catch (error) {
-        logger.error('Error showing achievements:', error);
-        await interaction.editReply({
-            embeds: [embeds.error('Error', 'Failed to load achievements.')]
-        });
+        await handleCommandError(error, interaction, 'loading achievements');
     }
 }
 
@@ -744,10 +688,7 @@ async function handleProgress(interaction, client) {
         await interaction.editReply({ embeds: [embed] });
 
     } catch (error) {
-        logger.error('Error showing progress:', error);
-        await interaction.editReply({
-            embeds: [embeds.error('Error', 'Failed to load progress data.')]
-        });
+        await handleCommandError(error, interaction, 'loading progress data');
     }
 }
 

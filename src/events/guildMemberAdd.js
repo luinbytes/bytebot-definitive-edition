@@ -5,6 +5,7 @@ const { eq } = require('drizzle-orm');
 const embeds = require('../utils/embeds');
 const logger = require('../utils/logger');
 const { dbLog } = require('../utils/dbLogger');
+const { fetchChannel, safeChannelSend } = require('../utils/discordApiUtil');
 
 /**
  * Get ordinal suffix for a number (1st, 2nd, 3rd, etc.)
@@ -109,7 +110,7 @@ module.exports = {
             }
 
             // Fetch the welcome channel
-            const channel = await member.guild.channels.fetch(config.welcomeChannel).catch(() => null);
+            const channel = await fetchChannel(member.guild, config.welcomeChannel, { logContext: 'welcome-message' });
             if (!channel) {
                 logger.warn(`Welcome channel ${config.welcomeChannel} not found in guild ${member.guild.id}`);
                 return;
@@ -120,13 +121,19 @@ module.exports = {
             const parsedMessage = parseWelcomeMessage(messageTemplate, member, member.guild);
 
             // Send welcome message based on embed preference
+            let messageOptions;
             if (config.welcomeUseEmbed) {
                 const welcomeEmbed = embeds.brand('Welcome!', parsedMessage)
                     .setThumbnail(member.user.displayAvatarURL({ dynamic: true, size: 256 }));
-
-                await channel.send({ embeds: [welcomeEmbed] });
+                messageOptions = { embeds: [welcomeEmbed] };
             } else {
-                await channel.send(parsedMessage);
+                messageOptions = { content: parsedMessage };
+            }
+
+            const sent = await safeChannelSend(channel, messageOptions, { logContext: 'welcome-message' });
+            if (!sent) {
+                logger.warn(`Failed to send welcome message in guild ${member.guild.id}`);
+                return;
             }
 
             logger.debug(`Welcome message sent for ${member.user.tag} in ${member.guild.name}`);
