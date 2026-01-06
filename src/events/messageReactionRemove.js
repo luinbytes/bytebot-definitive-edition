@@ -3,7 +3,10 @@ const logger = require('../utils/logger');
 
 module.exports = {
     name: Events.MessageReactionRemove,
-    async execute(reaction, user, client) {
+    async execute(reaction, user) {
+        // Get the actual client from the reaction object (more reliable than passed parameter)
+        const client = reaction.client;
+
         try {
             // Handle partials
             if (reaction.partial) {

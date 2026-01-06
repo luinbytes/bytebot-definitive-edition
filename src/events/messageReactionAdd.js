@@ -3,16 +3,11 @@ const logger = require('../utils/logger');
 
 module.exports = {
     name: Events.MessageReactionAdd,
-    async execute(reaction, user, client) {
+    async execute(reaction, user) {
+        // Get the actual client from the reaction object (more reliable than passed parameter)
+        const client = reaction.client;
+
         try {
-            logger.info(`[ReactionAdd] Reaction received: emoji=${reaction.emoji.name}, user=${user.tag}, msgId=${reaction.message.id}`);
-
-            // Debug: check what services are on client
-            const services = ['starboardService', 'birthdayService', 'autoResponderService', 'reminderService', 'activityStreakService'];
-            const found = services.filter(s => client[s]);
-            logger.info(`[ReactionAdd] Services on client: ${found.join(', ') || 'NONE'}`);
-            logger.info(`[ReactionAdd] client.user: ${client.user?.tag || 'undefined'}`);
-
             // Handle partials
             if (reaction.partial) {
                 try {
@@ -52,7 +47,6 @@ module.exports = {
             }
 
             // Check starboard
-            logger.info(`[ReactionAdd] Checking starboard service: ${client.starboardService ? 'exists' : 'NOT FOUND'}`);
             if (client.starboardService) {
                 await client.starboardService.handleReactionAdd(reaction, user);
             }

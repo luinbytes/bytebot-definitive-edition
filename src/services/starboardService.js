@@ -65,26 +65,14 @@ class StarboardService {
      */
     async handleReactionAdd(reaction, user) {
         try {
-            logger.info(`[Starboard] Reaction add event: emoji=${reaction.emoji.name}, guildId=${reaction.message.guild?.id}, messageId=${reaction.message.id}`);
-
             // Fetch config
             const config = await this.getConfig(reaction.message.guild.id);
-            logger.info(`[Starboard] Config for guild: ${JSON.stringify(config)}`);
-
-            if (!config || !config.enabled) {
-                logger.info(`[Starboard] No config or disabled for guild ${reaction.message.guild.id}`);
-                return;
-            }
+            if (!config || !config.enabled) return;
 
             // Check if emoji matches
-            logger.info(`[Starboard] Comparing emoji: reaction="${reaction.emoji.name}" vs config="${config.emoji}"`);
-            if (reaction.emoji.name !== config.emoji) {
-                logger.info(`[Starboard] Emoji mismatch, skipping`);
-                return;
-            }
+            if (reaction.emoji.name !== config.emoji) return;
 
             // Queue update (debounced) - pass channel ID for reliable fetching
-            logger.info(`[Starboard] Queuing update for message ${reaction.message.id} in channel ${reaction.message.channel.id}`);
             this.queueStarboardUpdate(reaction.message.id, reaction.message.channel.id);
 
         } catch (error) {
