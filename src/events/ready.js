@@ -218,6 +218,7 @@ module.exports = {
             const StarboardService = require('../services/starboardService');
             client.starboardService = new StarboardService(client);
             logger.success('Starboard service initialized');
+            logger.info(`[Debug] client.starboardService set: ${!!client.starboardService}`);
         } catch (e) {
             logger.error(`Failed to initialize starboard service: ${e}`);
         }

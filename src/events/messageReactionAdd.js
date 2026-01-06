@@ -7,6 +7,12 @@ module.exports = {
         try {
             logger.info(`[ReactionAdd] Reaction received: emoji=${reaction.emoji.name}, user=${user.tag}, msgId=${reaction.message.id}`);
 
+            // Debug: check what services are on client
+            const services = ['starboardService', 'birthdayService', 'autoResponderService', 'reminderService', 'activityStreakService'];
+            const found = services.filter(s => client[s]);
+            logger.info(`[ReactionAdd] Services on client: ${found.join(', ') || 'NONE'}`);
+            logger.info(`[ReactionAdd] client.user: ${client.user?.tag || 'undefined'}`);
+
             // Handle partials
             if (reaction.partial) {
                 try {
