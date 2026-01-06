@@ -65,14 +65,26 @@ class StarboardService {
      */
     async handleReactionAdd(reaction, user) {
         try {
+            logger.debug(`[Starboard] Reaction add event: emoji=${reaction.emoji.name}, guildId=${reaction.message.guild?.id}, messageId=${reaction.message.id}`);
+
             // Fetch config
             const config = await this.getConfig(reaction.message.guild.id);
-            if (!config || !config.enabled) return;
+            logger.debug(`[Starboard] Config for guild: ${JSON.stringify(config)}`);
+
+            if (!config || !config.enabled) {
+                logger.debug(`[Starboard] No config or disabled for guild ${reaction.message.guild.id}`);
+                return;
+            }
 
             // Check if emoji matches
-            if (reaction.emoji.name !== config.emoji) return;
+            logger.debug(`[Starboard] Comparing emoji: reaction="${reaction.emoji.name}" vs config="${config.emoji}"`);
+            if (reaction.emoji.name !== config.emoji) {
+                logger.debug(`[Starboard] Emoji mismatch, skipping`);
+                return;
+            }
 
             // Queue update (debounced) - pass channel ID for reliable fetching
+            logger.debug(`[Starboard] Queuing update for message ${reaction.message.id} in channel ${reaction.message.channel.id}`);
             this.queueStarboardUpdate(reaction.message.id, reaction.message.channel.id);
 
         } catch (error) {
@@ -211,6 +223,8 @@ class StarboardService {
      */
     async updateStarboardMessage(messageId, channelId) {
         try {
+            logger.debug(`[Starboard] Processing update for message ${messageId} in channel ${channelId}`);
+
             // Fetch the channel first
             const channel = await this.client.channels.fetch(channelId).catch(() => null);
             if (!channel || !channel.isTextBased() || !channel.guild) {
@@ -225,12 +239,18 @@ class StarboardService {
                 return;
             }
 
+            logger.debug(`[Starboard] Found message, fetching config for guild ${message.guild.id}`);
+
             // Get config
             const config = await this.getConfig(message.guild.id);
-            if (!config || !config.enabled) return;
+            if (!config || !config.enabled) {
+                logger.debug(`[Starboard] No config or disabled during update`);
+                return;
+            }
 
             // Count valid stars
             const starCount = await this.countValidStars(message, config.emoji);
+            logger.debug(`[Starboard] Star count: ${starCount}, threshold: ${config.threshold}`);
 
             // Check if already in DB
             let entry = await dbLog.select('starboardMessages',
@@ -240,9 +260,11 @@ class StarboardService {
                     .get(),
                 { messageId, guildId: message.guild.id }
             );
+            logger.debug(`[Starboard] Existing entry: ${entry ? `id=${entry.id}` : 'none'}`);
 
             // If star count >= threshold
             if (starCount >= config.threshold) {
+                logger.debug(`[Starboard] Star count meets threshold, processing...`);
                 if (entry) {
                     // Update existing entry
                     await dbLog.update('starboardMessages',
