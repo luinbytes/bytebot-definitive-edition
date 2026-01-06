@@ -195,11 +195,11 @@ class StarboardService {
             clearTimeout(this.updateQueue.get(messageId).timeout);
         }
 
-        // Set new timeout (5 seconds)
+        // Set new timeout (2 seconds)
         const timeout = setTimeout(async () => {
             await this.updateStarboardMessage(messageId, channelId);
             this.updateQueue.delete(messageId);
-        }, 5000);
+        }, 2000);
 
         this.updateQueue.set(messageId, { timeout, channelId });
     }
