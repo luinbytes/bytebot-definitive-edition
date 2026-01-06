@@ -5,6 +5,8 @@ module.exports = {
     name: Events.MessageReactionAdd,
     async execute(reaction, user, client) {
         try {
+            logger.info(`[ReactionAdd] Reaction received: emoji=${reaction.emoji.name}, user=${user.tag}, msgId=${reaction.message.id}`);
+
             // Handle partials
             if (reaction.partial) {
                 try {
@@ -44,6 +46,7 @@ module.exports = {
             }
 
             // Check starboard
+            logger.info(`[ReactionAdd] Checking starboard service: ${client.starboardService ? 'exists' : 'NOT FOUND'}`);
             if (client.starboardService) {
                 await client.starboardService.handleReactionAdd(reaction, user);
             }
