@@ -85,11 +85,7 @@ module.exports = {
                         .addUserOption(option => option.setName('user').setDescription('The user to remove').setRequired(true)))
                 .addSubcommand(sub =>
                     sub.setName('list')
-                        .setDescription('View your current auto-whitelist.'))
-                .addSubcommand(sub =>
-                    sub.setName('autolock')
-                        .setDescription('Set whether your BytePods should automatically lock on creation.')
-                        .addBooleanOption(option => option.setName('enabled').setDescription('Enable or disable auto-lock').setRequired(true))))
+                        .setDescription('View your current auto-whitelist.')))
         .addSubcommand(sub =>
             sub.setName('stats')
                 .setDescription('View BytePod voice activity statistics.')
@@ -271,19 +267,6 @@ module.exports = {
                     ));
                 const names = presets.map(p => `<@${p.targetUserId}>`).join(', ') || 'No users.';
                 return interaction.editReply({ embeds: [embeds.info('Auto-Whitelist Presets', names)] });
-            }
-            if (subdomain === 'autolock') {
-                await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-                const enabled = interaction.options.getBoolean('enabled');
-                await db.insert(bytepodUserSettings).values({
-                    userId: interaction.user.id,
-                    guildId: interaction.guild.id,
-                    autoLock: enabled
-                }).onConflictDoUpdate({
-                    target: [bytepodUserSettings.userId, bytepodUserSettings.guildId],
-                    set: { autoLock: enabled }
-                });
-                return interaction.editReply({ embeds: [embeds.success('Settings Updated', `Auto-Lock is now **${enabled ? 'Enabled' : 'Disabled'}**.`)] });
             }
         }
 
@@ -574,7 +557,7 @@ module.exports = {
                     const coOwnerUsers = currentState.coOwners.filter(id => id !== oldOwnerId && id !== requesterId);
                     const isLocked = currentState.isLocked;
                     const userLimit = currentState.limit;
-                    
+
                     // Check if old owner had Connect permission
                     const oldOwnerOverwrite = channel.permissionOverwrites.cache.get(oldOwnerId);
                     const oldOwnerHadConnect = oldOwnerOverwrite?.allow.has(PermissionFlagsBits.Connect) ?? false;

@@ -54,7 +54,7 @@ Discord bot (Discord.js v14) with neon purple branding (#8A2BE2), slash commands
 | Table | Key Fields | Notes |
 |-------|------------|-------|
 | guilds | id, prefix, logChannel, welcomeChannel, welcomeMessage, welcomeEnabled, welcomeUseEmbed, voiceHubChannelId, voiceHubCategoryId, mediaArchiveChannelId, achievementsEnabled | Guild config, BytePod, welcome messages, media archive, achievement toggle |
-| users | id, guildId, commandsRun, lastSeen, wtNickname, ephemeralPreference | WT account binding, global privacy settings ('always'/'public'/'default') |
+| users | id, guildId, commandsRun, lastSeen, wtNickname, ephemeralPreference, achievementsOptedOut | WT account binding, global privacy settings, global achievement opt-out |
 | moderationLogs | id, guildId, targetId, executorId, action, reason, timestamp | Actions: BAN/KICK/CLEAR/WARN |
 | commandPermissions | id, guildId, commandName, roleId | RBAC overrides |
 | bytepods | channelId(PK), guildId, ownerId, originalOwnerId, ownerLeftAt, reclaimRequestPending, panelMessageId, createdAt | Ephemeral VC tracking, panel cleanup |
@@ -313,7 +313,7 @@ User joins → Creates first streak (special_first_streak +10pts)
 | media.js (~680 lines) | `/media setup/list/delete/search/view/tag/describe` - Full media gallery with auto-capture and manual saves. Rich metadata, tag system, full-text search, detailed views. Setup requires ManageChannels, 500-item limit |
 | bytepod.js (~600 lines) | `/bytepod setup/disable/panel/preset/stats/leaderboard/template` - Full pod management, `handleInteraction()` routes all components. `setup` configures hub channel, `disable` turns off BytePods |
 | streak.js (~700 lines) | `/streak view/leaderboard/achievements/progress` - Comprehensive activity tracking. View streaks with rarity/points, 5 leaderboard types (current/longest/achievements/points/rare), achievement browser with filters & pagination (category/rarity/earned status), progress tracking with visual bars for milestones. Auto-tracks 8 metrics, 82+ achievements, monthly freeze system |
-| settings.js (~170 lines) | `/settings privacy/view` - Global user privacy preferences. Controls ephemeral defaults across all guilds (always private/always public/smart defaults). Optional `private` param available on info commands for per-command override |
+| settings.js (~250 lines) | `/settings privacy/achievements/bytepod/view` - Centralized user preferences. Privacy controls ephemeral defaults, achievements toggles global opt-out, bytepod sets per-server auto-lock |
 
 ### Context Menus (src/commands/context-menus/)
 

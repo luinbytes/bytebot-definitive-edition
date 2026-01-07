@@ -7,7 +7,8 @@ const {
     customAchievements,
     achievementRoleConfig,
     achievementRoles,
-    guilds
+    guilds,
+    users
 } = require('../database/schema');
 const { eq, and, desc } = require('drizzle-orm');
 const { PermissionFlagsBits } = require('discord.js');
@@ -314,7 +315,7 @@ class AchievementManager {
             range2End.setFullYear(currentYear + 1);
 
             return (now >= range1Start && now <= range1End) ||
-                   (now >= range2Start && now <= range2End);
+                (now >= range2Start && now <= range2End);
         }
 
         // Normal date range within same year (year-agnostic)
@@ -416,6 +417,30 @@ class ActivityStreakService {
             logger.error(`Error checking if achievements are enabled for guild ${guildId}:`, error);
             // On error, default to enabled to avoid breaking existing functionality
             return true;
+        }
+    }
+
+    /**
+     * Check if a user has opted out of achievements globally
+     * @param {string} userId - User ID to check
+     * @returns {Promise<boolean>} - True if user has opted out, false otherwise
+     */
+    async isUserOptedOut(userId) {
+        try {
+            const user = await dbLog.select('users',
+                () => db.select()
+                    .from(users)
+                    .where(eq(users.id, userId))
+                    .get(),
+                { userId, operation: 'checkUserOptOut' }
+            );
+
+            return user?.achievementsOptedOut === true;
+
+        } catch (error) {
+            logger.error(`Error checking user opt-out for ${userId}:`, error);
+            // On error, default to NOT opted out (continue tracking)
+            return false;
         }
     }
 
@@ -1055,6 +1080,11 @@ class ActivityStreakService {
             // Check if achievements are enabled for this guild
             const achievementsEnabled = await this.isAchievementsEnabled(guildId);
             if (!achievementsEnabled) {
+                return;
+            }
+
+            // Check if user has opted out globally
+            if (await this.isUserOptedOut(userId)) {
                 return;
             }
 

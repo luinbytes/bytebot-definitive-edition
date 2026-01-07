@@ -21,6 +21,7 @@ const users = sqliteTable('users', {
     lastSeen: integer('last_seen', { mode: 'timestamp' }),
     wtNickname: text('wt_nickname'),
     ephemeralPreference: text('ephemeral_preference').default('default'), // 'always' | 'public' | 'default'
+    achievementsOptedOut: integer('achievements_opted_out', { mode: 'boolean' }).default(false), // Global opt-out from achievement tracking
 });
 
 const moderationLogs = sqliteTable('moderation_logs', {
