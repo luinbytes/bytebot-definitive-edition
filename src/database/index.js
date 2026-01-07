@@ -61,7 +61,8 @@ const expectedSchema = {
         commands_run: 'INTEGER DEFAULT 0',
         last_seen: 'INTEGER',
         wt_nickname: 'TEXT',
-        ephemeral_preference: 'TEXT DEFAULT "default"'
+        ephemeral_preference: 'TEXT DEFAULT "default"',
+        achievements_opted_out: 'INTEGER DEFAULT 0'
     },
     moderation_logs: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',

@@ -1,6 +1,10 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
+const { db } = require('../../database');
+const { users, bytepodUserSettings } = require('../../database/schema');
+const { eq, and } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const { getUserPreference, setUserPreference } = require('../../utils/ephemeralHelper');
+const logger = require('../../utils/logger');
 
 module.exports = {
     category: 'Utility',
@@ -25,6 +29,28 @@ module.exports = {
         )
         .addSubcommand(subcommand =>
             subcommand
+                .setName('achievements')
+                .setDescription('Enable or disable achievement tracking for yourself')
+                .addBooleanOption(option =>
+                    option
+                        .setName('enabled')
+                        .setDescription('Track achievements?')
+                        .setRequired(true)
+                )
+        )
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('bytepod')
+                .setDescription('Configure your BytePod defaults (per-server)')
+                .addBooleanOption(option =>
+                    option
+                        .setName('autolock')
+                        .setDescription('Auto-lock new BytePods?')
+                        .setRequired(true)
+                )
+        )
+        .addSubcommand(subcommand =>
+            subcommand
                 .setName('view')
                 .setDescription('View your current settings')
         ),
@@ -34,6 +60,10 @@ module.exports = {
 
         if (subcommand === 'privacy') {
             return await handlePrivacy(interaction);
+        } else if (subcommand === 'achievements') {
+            return await handleAchievements(interaction);
+        } else if (subcommand === 'bytepod') {
+            return await handleBytepod(interaction);
         } else if (subcommand === 'view') {
             return await handleView(interaction);
         }
@@ -46,7 +76,6 @@ module.exports = {
 async function handlePrivacy(interaction) {
     const preference = interaction.options.getString('preference');
 
-    // Update user's preference
     const success = await setUserPreference(
         interaction.user.id,
         interaction.guildId,
@@ -63,72 +92,156 @@ async function handlePrivacy(interaction) {
         });
     }
 
-    // Build confirmation message
     let description = '';
     switch (preference) {
         case 'always':
-            description = '🔒 All personal command responses will now be **visible only to you** (across all servers).\n\nYou can still override this per-command using the `private` parameter.';
+            description = '🔒 All personal command responses will now be **visible only to you** (across all servers).';
             break;
         case 'public':
-            description = '🌐 All personal command responses will now be **public** (across all servers).\n\nYou can still override this per-command using the `private` parameter.';
+            description = '🌐 All personal command responses will now be **public** (across all servers).';
             break;
         case 'default':
-            description = '🤖 Command responses will use **smart defaults** (across all servers):\n\n' +
-                '• Viewing your own data → Private\n' +
-                '• Viewing others\' data → Public (social context)\n' +
-                '• Admin/mod commands → Always appropriate visibility\n\n' +
-                'You can still override per-command using the `private` parameter.';
+            description = '🤖 Command responses will use **smart defaults** (across all servers).';
             break;
     }
 
-    const embed = embeds.success('Privacy Settings Updated', description)
-        .addFields({
-            name: 'Current Preference',
-            value: getPreferenceLabel(preference),
-            inline: false
-        });
-
     return await interaction.reply({
-        embeds: [embed],
+        embeds: [embeds.success('Privacy Settings Updated', description)],
         flags: [MessageFlags.Ephemeral]
     });
+}
+
+/**
+ * Handle /settings achievements subcommand
+ */
+async function handleAchievements(interaction) {
+    const enabled = interaction.options.getBoolean('enabled');
+    const optedOut = !enabled; // Inverted: enabled=true means optedOut=false
+
+    try {
+        await db.insert(users).values({
+            id: interaction.user.id,
+            guildId: interaction.guildId,
+            achievementsOptedOut: optedOut,
+            commandsRun: 0,
+            lastSeen: new Date()
+        }).onConflictDoUpdate({
+            target: users.id,
+            set: { achievementsOptedOut: optedOut }
+        });
+
+        const description = enabled
+            ? '✅ Achievement tracking is now **enabled**. Your streaks and achievements will be tracked.'
+            : '🔕 Achievement tracking is now **disabled**. You won\'t earn new achievements, but existing data is preserved.';
+
+        return await interaction.reply({
+            embeds: [embeds.success('Achievement Settings Updated', description)],
+            flags: [MessageFlags.Ephemeral]
+        });
+
+    } catch (error) {
+        logger.error(`Error updating achievement settings for ${interaction.user.id}:`, error);
+        return await interaction.reply({
+            embeds: [embeds.error('Settings Update Failed', 'There was an error saving your preferences. Please try again.')],
+            flags: [MessageFlags.Ephemeral]
+        });
+    }
+}
+
+/**
+ * Handle /settings bytepod subcommand
+ */
+async function handleBytepod(interaction) {
+    const autolock = interaction.options.getBoolean('autolock');
+
+    try {
+        await db.insert(bytepodUserSettings).values({
+            userId: interaction.user.id,
+            guildId: interaction.guildId,
+            autoLock: autolock
+        }).onConflictDoUpdate({
+            target: [bytepodUserSettings.userId, bytepodUserSettings.guildId],
+            set: { autoLock: autolock }
+        });
+
+        const description = autolock
+            ? '🔒 Your BytePods will now **auto-lock** when created (in this server).'
+            : '🔓 Your BytePods will now be **unlocked** when created (in this server).';
+
+        return await interaction.reply({
+            embeds: [embeds.success('BytePod Settings Updated', description)],
+            flags: [MessageFlags.Ephemeral]
+        });
+
+    } catch (error) {
+        logger.error(`Error updating BytePod settings for ${interaction.user.id}:`, error);
+        return await interaction.reply({
+            embeds: [embeds.error('Settings Update Failed', 'There was an error saving your preferences. Please try again.')],
+            flags: [MessageFlags.Ephemeral]
+        });
+    }
 }
 
 /**
  * Handle /settings view subcommand
  */
 async function handleView(interaction) {
-    const preference = await getUserPreference(interaction.user.id);
+    try {
+        // Get privacy preference
+        const privacyPref = await getUserPreference(interaction.user.id);
 
-    const embed = embeds.brand('Your ByteBot Settings', 'Global settings across all servers')
-        .addFields(
-            {
-                name: 'Privacy Preference',
-                value: getPreferenceLabel(preference),
-                inline: false
-            },
-            {
-                name: 'How It Works',
-                value: getPreferenceDescription(preference),
-                inline: false
-            },
-            {
-                name: 'Commands with Privacy Control',
-                value: '• `/streak view` - Activity stats\n' +
-                    '• `/stats server` - Server statistics\n' +
-                    '• `/serverinfo` - Server information\n' +
-                    '• `/birthday view` - Birthday information\n' +
-                    '• `/userinfo` - User profile\n' +
-                    '• And more...\n\n' +
-                    '*Add `private:True` to any command to force private mode.*',
-                inline: false
-            }
-        );
+        // Get achievement opt-out status
+        const userData = await db.select()
+            .from(users)
+            .where(eq(users.id, interaction.user.id))
+            .get();
+        const achievementsEnabled = !userData?.achievementsOptedOut;
 
-    return await interaction.reply({
-        embeds: [embed],
-        flags: [MessageFlags.Ephemeral]
-    });
+        // Get BytePod autolock setting (per-guild)
+        const bytepodSettings = await db.select()
+            .from(bytepodUserSettings)
+            .where(and(
+                eq(bytepodUserSettings.userId, interaction.user.id),
+                eq(bytepodUserSettings.guildId, interaction.guildId)
+            ))
+            .get();
+        const autolock = bytepodSettings?.autoLock || false;
+
+        const embed = embeds.brand('Your ByteBot Settings', 'Personal preferences')
+            .addFields(
+                {
+                    name: 'Privacy',
+                    value: getPreferenceLabel(privacyPref),
+                    inline: false
+                },
+                {
+                    name: 'Achievements',
+                    value: achievementsEnabled
+                        ? '✅ **Enabled** - Tracking streaks and achievements'
+                        : '🔕 **Disabled** - Opted out of tracking',
+                    inline: false
+                },
+                {
+                    name: 'BytePod Auto-Lock',
+                    value: (autolock
+                        ? '🔒 **Enabled** - New pods lock automatically'
+                        : '🔓 **Disabled** - New pods stay unlocked') + ' *(this server)*',
+                    inline: false
+                }
+            );
+
+        return await interaction.reply({
+            embeds: [embed],
+            flags: [MessageFlags.Ephemeral]
+        });
+
+    } catch (error) {
+        logger.error(`Error viewing settings for ${interaction.user.id}:`, error);
+        return await interaction.reply({
+            embeds: [embeds.error('Error', 'Could not load your settings. Please try again.')],
+            flags: [MessageFlags.Ephemeral]
+        });
+    }
 }
 
 /**
@@ -144,26 +257,5 @@ function getPreferenceLabel(preference) {
             return '🤖 **Default (Smart)** - Context-aware visibility';
         default:
             return '❓ Unknown';
-    }
-}
-
-/**
- * Get detailed preference description
- */
-function getPreferenceDescription(preference) {
-    switch (preference) {
-        case 'always':
-            return 'Every command response will be private (ephemeral), visible only to you across all servers. ' +
-                'Perfect for users who prefer maximum privacy.';
-        case 'public':
-            return 'Every command response will be public, visible to everyone across all servers. ' +
-                'Great for social interaction and sharing.';
-        case 'default':
-            return 'ByteBot intelligently decides visibility based on context across all servers:\n' +
-                '• **Private** when viewing your own data\n' +
-                '• **Public** when viewing others (social context)\n' +
-                '• Admin/mod commands use appropriate defaults';
-        default:
-            return 'Unknown preference setting.';
     }
 }
