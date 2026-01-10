@@ -112,7 +112,14 @@ module.exports = {
                         .addStringOption(opt => opt.setName('name').setDescription('Template name').setRequired(true))))
         .addSubcommand(sub =>
             sub.setName('leaderboard')
-                .setDescription('View the top BytePod users by voice time.')),
+                .setDescription('View the top BytePod users by voice time.'))
+        .addSubcommand(sub =>
+            sub.setName('autolock')
+                .setDescription('Toggle auto-locking when you create a new BytePod (per-server)')
+                .addBooleanOption(opt => opt
+                    .setName('enabled')
+                    .setDescription('Auto-lock new pods?')
+                    .setRequired(true))),
 
     async execute(interaction) {
         const subdomain = interaction.options.getSubcommand();
@@ -329,6 +336,37 @@ module.exports = {
                 .setFooter({ text: `Top ${stats.length} users by voice time` });
 
             return interaction.editReply({ embeds: [embed] });
+        }
+
+        // --- AUTOLOCK SUBCOMMAND ---
+        if (subdomain === 'autolock') {
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+            const autolock = interaction.options.getBoolean('enabled');
+
+            try {
+                await db.insert(bytepodUserSettings).values({
+                    userId: interaction.user.id,
+                    guildId: interaction.guildId,
+                    autoLock: autolock
+                }).onConflictDoUpdate({
+                    target: [bytepodUserSettings.userId, bytepodUserSettings.guildId],
+                    set: { autoLock: autolock }
+                });
+
+                const description = autolock
+                    ? '🔒 Your BytePods will now **auto-lock** when created (in this server).'
+                    : '🔓 Your BytePods will now be **unlocked** when created (in this server).';
+
+                return interaction.editReply({
+                    embeds: [embeds.success('BytePod Settings Updated', description)]
+                });
+
+            } catch (error) {
+                logger.error(`Error updating BytePod autolock for ${interaction.user.id}:`, error);
+                return interaction.editReply({
+                    embeds: [embeds.error('Settings Update Failed', 'There was an error saving your preferences. Please try again.')]
+                });
+            }
         }
 
         // --- TEMPLATE SUBCOMMAND GROUP ---
