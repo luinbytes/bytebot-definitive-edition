@@ -40,17 +40,6 @@ module.exports = {
         )
         .addSubcommand(subcommand =>
             subcommand
-                .setName('bytepod')
-                .setDescription('Configure your BytePod defaults (per-server)')
-                .addBooleanOption(option =>
-                    option
-                        .setName('autolock')
-                        .setDescription('Auto-lock new BytePods?')
-                        .setRequired(true)
-                )
-        )
-        .addSubcommand(subcommand =>
-            subcommand
                 .setName('view')
                 .setDescription('View your current settings')
         ),
@@ -62,8 +51,6 @@ module.exports = {
             return await handlePrivacy(interaction);
         } else if (subcommand === 'achievements') {
             return await handleAchievements(interaction);
-        } else if (subcommand === 'bytepod') {
-            return await handleBytepod(interaction);
         } else if (subcommand === 'view') {
             return await handleView(interaction);
         }
@@ -149,40 +136,6 @@ async function handleAchievements(interaction) {
 }
 
 /**
- * Handle /settings bytepod subcommand
- */
-async function handleBytepod(interaction) {
-    const autolock = interaction.options.getBoolean('autolock');
-
-    try {
-        await db.insert(bytepodUserSettings).values({
-            userId: interaction.user.id,
-            guildId: interaction.guildId,
-            autoLock: autolock
-        }).onConflictDoUpdate({
-            target: [bytepodUserSettings.userId, bytepodUserSettings.guildId],
-            set: { autoLock: autolock }
-        });
-
-        const description = autolock
-            ? '🔒 Your BytePods will now **auto-lock** when created (in this server).'
-            : '🔓 Your BytePods will now be **unlocked** when created (in this server).';
-
-        return await interaction.reply({
-            embeds: [embeds.success('BytePod Settings Updated', description)],
-            flags: [MessageFlags.Ephemeral]
-        });
-
-    } catch (error) {
-        logger.error(`Error updating BytePod settings for ${interaction.user.id}:`, error);
-        return await interaction.reply({
-            embeds: [embeds.error('Settings Update Failed', 'There was an error saving your preferences. Please try again.')],
-            flags: [MessageFlags.Ephemeral]
-        });
-    }
-}
-
-/**
  * Handle /settings view subcommand
  */
 async function handleView(interaction) {
@@ -225,7 +178,7 @@ async function handleView(interaction) {
                     name: 'BytePod Auto-Lock',
                     value: (autolock
                         ? '🔒 **Enabled** - New pods lock automatically'
-                        : '🔓 **Disabled** - New pods stay unlocked') + ' *(this server)*',
+                        : '🔓 **Disabled** - New pods stay unlocked') + ' *(use `/bytepod autolock` to change)*',
                     inline: false
                 }
             );
