@@ -5,6 +5,7 @@ const { eq, and } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { dbLog } = require('../../utils/dbLogger');
+const logger = require('../../utils/logger');
 
 module.exports = {
     data: new SlashCommandBuilder()

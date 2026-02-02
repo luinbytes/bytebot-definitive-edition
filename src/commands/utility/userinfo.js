@@ -1,6 +1,12 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const { getRarityEmoji } = require('../../utils/achievementUtils');
+const logger = require('../../utils/logger');
+
+// Moved imports from the try block
+const { db } = require('../../database');
+const { activityAchievements } = require('../../database/schema');
+const { eq, and, desc, count } = require('drizzle-orm');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -39,10 +45,6 @@ module.exports = {
         let totalPoints = 0;
 
         try {
-            const { db } = require('../../database');
-            const { activityAchievements } = require('../../database/schema');
-            const { eq, and, desc, count } = require('drizzle-orm');
-
             const userAchievements = await db.select()
                 .from(activityAchievements)
                 .where(and(
@@ -86,7 +88,6 @@ module.exports = {
                 }
             }
         } catch (error) {
-            const logger = require('../../utils/logger');
             logger.error('Failed to load achievements for userinfo:', error);
         }
 

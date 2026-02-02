@@ -2,6 +2,7 @@ const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
+const logger = require('../../utils/logger');
 const { sendPaginatedMessage, paginateArray } = require('../../utils/paginationUtil');
 const {
     getRarityEmoji,
