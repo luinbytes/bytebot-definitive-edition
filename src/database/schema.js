@@ -63,6 +63,7 @@ const bytepodUserSettings = sqliteTable('bytepod_user_settings', {
     userId: text('user_id').notNull(),
     guildId: text('guild_id').notNull(),
     autoLock: integer('auto_lock', { mode: 'boolean' }).default(false),
+    summaryEnabled: integer('summary_enabled', { mode: 'boolean' }).default(false), // Receive BytePod session summaries via DM
 }, (table) => ({
     // Composite primary key: one setting per user per guild
     pk: primaryKey({ columns: [table.userId, table.guildId] }),
@@ -98,6 +99,26 @@ const bytepodTemplates = sqliteTable('bytepod_templates', {
 }, (table) => ({
     // Composite unique constraint: one template name per user per guild
     userGuildNameUnique: unique().on(table.userId, table.guildId, table.name),
+}));
+
+// Session history (archived pod sessions for stats/analytics)
+const bytepodSessionHistory = sqliteTable('bytepod_session_history', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    podId: text('pod_id').notNull(),
+    guildId: text('guild_id').notNull(),
+    ownerId: text('owner_id').notNull(),
+    podName: text('pod_name'),
+    startedAt: integer('started_at', { mode: 'timestamp' }).notNull(),
+    endedAt: integer('ended_at', { mode: 'timestamp' }).notNull(),
+    peakUsers: integer('peak_users').default(1),
+    uniqueVisitors: integer('unique_visitors').default(1),
+    totalVoiceMinutes: integer('total_voice_minutes').default(0),
+    visitorData: text('visitor_data'), // JSON: [{userId, durationSeconds}]
+}, (table) => ({
+    // Index for owner session history queries
+    ownerIdx: index('bytepod_session_owner_idx').on(table.ownerId, table.guildId),
+    // Index for guild analytics
+    guildIdx: index('bytepod_session_guild_idx').on(table.guildId, table.endedAt),
 }));
 
 // Birthday tracking (per-user, per-guild)
@@ -408,6 +429,7 @@ module.exports = {
     bytepodActiveSessions,
     bytepodVoiceStats,
     bytepodTemplates,
+    bytepodSessionHistory,
     birthdays,
     birthdayConfig,
     bookmarks,

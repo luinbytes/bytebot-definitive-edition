@@ -40,6 +40,17 @@ module.exports = {
         )
         .addSubcommand(subcommand =>
             subcommand
+                .setName('summaries')
+                .setDescription('Enable or disable BytePod session summary DMs')
+                .addBooleanOption(option =>
+                    option
+                        .setName('enabled')
+                        .setDescription('Receive session summaries via DM when your pod ends?')
+                        .setRequired(true)
+                )
+        )
+        .addSubcommand(subcommand =>
+            subcommand
                 .setName('view')
                 .setDescription('View your current settings')
         ),
@@ -51,6 +62,8 @@ module.exports = {
             return await handlePrivacy(interaction);
         } else if (subcommand === 'achievements') {
             return await handleAchievements(interaction);
+        } else if (subcommand === 'summaries') {
+            return await handleSummaries(interaction);
         } else if (subcommand === 'view') {
             return await handleView(interaction);
         }
@@ -136,6 +149,42 @@ async function handleAchievements(interaction) {
 }
 
 /**
+ * Handle /settings summaries subcommand
+ */
+async function handleSummaries(interaction) {
+    const enabled = interaction.options.getBoolean('enabled');
+
+    try {
+        // Upsert user settings (composite key: userId + guildId)
+        await db.insert(bytepodUserSettings).values({
+            userId: interaction.user.id,
+            guildId: interaction.guildId,
+            autoLock: false,
+            summaryEnabled: enabled
+        }).onConflictDoUpdate({
+            target: [bytepodUserSettings.userId, bytepodUserSettings.guildId],
+            set: { summaryEnabled: enabled }
+        });
+
+        const description = enabled
+            ? '📊 BytePod session summaries are now **enabled**. You\'ll receive a DM with stats when your pod ends.'
+            : '📊 BytePod session summaries are now **disabled**. You won\'t receive summary DMs.';
+
+        return await interaction.reply({
+            embeds: [embeds.success('Summary Settings Updated', description)],
+            flags: [MessageFlags.Ephemeral]
+        });
+
+    } catch (error) {
+        logger.error(`Error updating summary settings for ${interaction.user.id}:`, error);
+        return await interaction.reply({
+            embeds: [embeds.error('Settings Update Failed', 'There was an error saving your preferences. Please try again.')],
+            flags: [MessageFlags.Ephemeral]
+        });
+    }
+}
+
+/**
  * Handle /settings view subcommand
  */
 async function handleView(interaction) {
@@ -150,7 +199,7 @@ async function handleView(interaction) {
             .get();
         const achievementsEnabled = !userData?.achievementsOptedOut;
 
-        // Get BytePod autolock setting (per-guild)
+        // Get BytePod settings (per-guild)
         const bytepodSettings = await db.select()
             .from(bytepodUserSettings)
             .where(and(
@@ -159,6 +208,7 @@ async function handleView(interaction) {
             ))
             .get();
         const autolock = bytepodSettings?.autoLock || false;
+        const summariesEnabled = bytepodSettings?.summaryEnabled || false;
 
         const embed = embeds.brand('Your ByteBot Settings', 'Personal preferences')
             .addFields(
@@ -179,6 +229,13 @@ async function handleView(interaction) {
                     value: (autolock
                         ? '🔒 **Enabled** - New pods lock automatically'
                         : '🔓 **Disabled** - New pods stay unlocked') + ' *(use `/bytepod autolock` to change)*',
+                    inline: false
+                },
+                {
+                    name: 'BytePod Summaries',
+                    value: (summariesEnabled
+                        ? '📊 **Enabled** - Receive DM with stats when pod ends'
+                        : '📊 **Disabled** - No summary DMs') + ' *(use `/settings summaries` to change)*',
                     inline: false
                 }
             );
