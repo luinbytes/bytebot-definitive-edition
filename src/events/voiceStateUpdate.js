@@ -1,12 +1,13 @@
 const { Events, ChannelType, PermissionFlagsBits } = require('discord.js');
 const { db } = require('../database');
-const { guilds, bytepods, bytepodAutoWhitelist, bytepodUserSettings, bytepodActiveSessions, bytepodVoiceStats } = require('../database/schema');
+const { guilds, bytepods, bytepodAutoWhitelist, bytepodUserSettings, bytepodActiveSessions, bytepodVoiceStats, bytepodSessionHistory } = require('../database/schema');
 const { eq, and } = require('drizzle-orm');
 const logger = require('../utils/logger');
 const embeds = require('../utils/embeds');
 const { checkBotPermissions } = require('../utils/permissionCheck');
 const { getControlPanel } = require('../components/bytepodControls');
 const { dbLog } = require('../utils/dbLogger');
+const { createSummaryEmbed } = require('../utils/bytepodSummaryUtil');
 
 // Helper to get pod state (lock status, whitelist, etc.)
 function getPodState(channel) {
@@ -102,6 +103,11 @@ async function finalizeVoiceSession(session, client) {
 // In-memory map to track pending ownership transfers: channelId -> timeoutId
 const pendingOwnershipTransfers = new Map();
 const OWNERSHIP_TRANSFER_DELAY_MS = 5 * 60 * 1000; // 5 minutes
+
+// --- SESSION STATS TRACKING ---
+// Track pod statistics in memory for session summaries
+// podId -> { peakUsers: number, currentUsers: number, visitors: Set<string> }
+const podStatsTracker = new Map();
 
 /**
  * Transfer ownership of a BytePod to a new member
@@ -377,6 +383,13 @@ module.exports = {
                     { podId: newChannel.id, userId: member.id, guildId: guild.id }
                 );
 
+                // Initialize stats tracker for new pod
+                podStatsTracker.set(newChannel.id, {
+                    peakUsers: 1,
+                    currentUsers: 1,
+                    visitors: new Set([member.id])
+                });
+
                 // Send Welcome Message
                 await newChannel.send({
                     embeds: [embeds.brand('Welcome to Your BytePod!', `Your personal voice channel has been created! 🎉\n\n**To manage your pod:** Run \`/bytepod panel\` to access controls (lock/unlock, whitelist, co-owners, etc.)`)],
@@ -520,6 +533,29 @@ module.exports = {
                         { podId: joinedChannelId, userId: member.id, guildId: guild.id }
                     );
                 }
+
+                // Update stats tracker
+                let stats = podStatsTracker.get(joinedChannelId);
+                if (!stats) {
+                    // Reconstruct from channel state (bot restart case)
+                    stats = {
+                        peakUsers: channel.members.size,
+                        currentUsers: channel.members.size,
+                        visitors: new Set(Array.from(channel.members.keys()).filter(id => {
+                            const m = channel.members.get(id);
+                            return m && !m.user.bot;
+                        }))
+                    };
+                    podStatsTracker.set(joinedChannelId, stats);
+                } else {
+                    stats.currentUsers++;
+                    if (stats.currentUsers > stats.peakUsers) {
+                        stats.peakUsers = stats.currentUsers;
+                    }
+                    if (!member.user.bot) {
+                        stats.visitors.add(member.id);
+                    }
+                }
             }
         }
 
@@ -555,6 +591,12 @@ module.exports = {
                 }
             }
 
+            // Decrement stats tracker
+            const leaveStats = podStatsTracker.get(leftChannelId);
+            if (leaveStats) {
+                leaveStats.currentUsers = Math.max(0, leaveStats.currentUsers - 1);
+            }
+
             // Check if it's a BytePod
             const podData = await dbLog.select('bytepods',
                 () => db.select().from(bytepods).where(eq(bytepods.channelId, leftChannelId)).get(),
@@ -573,6 +615,9 @@ module.exports = {
                         clearTimeout(pendingOwnershipTransfers.get(leftChannelId));
                         pendingOwnershipTransfers.delete(leftChannelId);
                     }
+
+                    // Clean up stats tracker
+                    podStatsTracker.delete(leftChannelId);
 
                     // Finalize any remaining sessions and clean up
                     const remainingSessions = await dbLog.select('bytepodActiveSessions',
@@ -595,6 +640,92 @@ module.exports = {
                     if (pendingOwnershipTransfers.has(leftChannelId)) {
                         clearTimeout(pendingOwnershipTransfers.get(leftChannelId));
                         pendingOwnershipTransfers.delete(leftChannelId);
+                    }
+
+                    // --- GENERATE SESSION SUMMARY ---
+                    try {
+                        // Get all sessions for this pod
+                        const sessions = await dbLog.select('bytepodActiveSessions',
+                            () => db.select().from(bytepodActiveSessions)
+                                .where(eq(bytepodActiveSessions.podId, leftChannelId)),
+                            { podId: leftChannelId }
+                        );
+
+                        // Get stats from tracker or reconstruct
+                        let stats = podStatsTracker.get(leftChannelId);
+                        if (!stats) {
+                            stats = {
+                                peakUsers: sessions.length || 1,
+                                currentUsers: sessions.length || 0,
+                                visitors: new Set(sessions.map(s => s.userId))
+                            };
+                        }
+
+                        // Calculate per-user durations
+                        const userDurations = new Map();
+                        for (const session of sessions) {
+                            const duration = Math.floor((Date.now() - session.startTime) / 1000);
+                            userDurations.set(session.userId, (userDurations.get(session.userId) || 0) + duration);
+                        }
+
+                        // Build summary data
+                        const summaryData = {
+                            podName: channel.name,
+                            ownerId: podData.ownerId,
+                            guildId: guild.id,
+                            startedAt: podData.createdAt,
+                            endedAt: new Date(),
+                            peakUsers: stats.peakUsers,
+                            uniqueVisitors: stats.visitors.size,
+                            userDurations: Array.from(userDurations.entries())
+                                .map(([userId, durationSeconds]) => ({ userId, durationSeconds }))
+                        };
+
+                        // Check if owner wants summaries (default: off)
+                        const ownerSettings = await dbLog.select('bytepodUserSettings',
+                            () => db.select().from(bytepodUserSettings)
+                                .where(and(
+                                    eq(bytepodUserSettings.userId, podData.ownerId),
+                                    eq(bytepodUserSettings.guildId, guild.id)
+                                )).get(),
+                            { userId: podData.ownerId, guildId: guild.id }
+                        );
+
+                        // Only DM if explicitly enabled
+                        if (ownerSettings?.summaryEnabled) {
+                            const owner = await newState.client.users.fetch(podData.ownerId).catch(() => null);
+                            if (owner) {
+                                const summaryEmbed = createSummaryEmbed(summaryData);
+                                await owner.send({ embeds: [summaryEmbed] }).catch(() => {
+                                    logger.debug(`Could not DM BytePod summary to ${podData.ownerId}`);
+                                });
+                            }
+                        }
+
+                        // Archive to history table
+                        const totalSeconds = [...userDurations.values()].reduce((a, b) => a + b, 0);
+                        await dbLog.insert('bytepodSessionHistory',
+                            () => db.insert(bytepodSessionHistory).values({
+                                podId: leftChannelId,
+                                guildId: guild.id,
+                                ownerId: podData.ownerId,
+                                podName: summaryData.podName,
+                                startedAt: summaryData.startedAt,
+                                endedAt: summaryData.endedAt,
+                                peakUsers: summaryData.peakUsers,
+                                uniqueVisitors: summaryData.uniqueVisitors,
+                                totalVoiceMinutes: Math.floor(totalSeconds / 60),
+                                visitorData: JSON.stringify(summaryData.userDurations)
+                            }),
+                            { podId: leftChannelId, guildId: guild.id }
+                        );
+
+                        // Clean up tracker
+                        podStatsTracker.delete(leftChannelId);
+
+                    } catch (error) {
+                        logger.error(`Failed to generate BytePod summary:`, error);
+                        // Continue with deletion regardless
                     }
 
                     try {

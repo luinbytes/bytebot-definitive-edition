@@ -98,7 +98,8 @@ const expectedSchema = {
     bytepod_user_settings: {
         user_id: 'TEXT NOT NULL',
         guild_id: 'TEXT NOT NULL',
-        auto_lock: 'INTEGER DEFAULT 0'
+        auto_lock: 'INTEGER DEFAULT 0',
+        summary_enabled: 'INTEGER DEFAULT 0'
         // Note: Composite primary key (user_id, guild_id) - handled by Drizzle migrations
     },
     bytepod_active_sessions: {
@@ -123,6 +124,19 @@ const expectedSchema = {
         user_limit: 'INTEGER DEFAULT 0',
         auto_lock: 'INTEGER DEFAULT 0',
         whitelist_user_ids: 'TEXT'
+    },
+    bytepod_session_history: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        pod_id: 'TEXT NOT NULL',
+        guild_id: 'TEXT NOT NULL',
+        owner_id: 'TEXT NOT NULL',
+        pod_name: 'TEXT',
+        started_at: 'INTEGER NOT NULL',
+        ended_at: 'INTEGER NOT NULL',
+        peak_users: 'INTEGER DEFAULT 1',
+        unique_visitors: 'INTEGER DEFAULT 1',
+        total_voice_minutes: 'INTEGER DEFAULT 0',
+        visitor_data: 'TEXT'
     },
     birthdays: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
