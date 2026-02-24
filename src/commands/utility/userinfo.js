@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
+const logger = require('../../utils/logger');
 const { getRarityEmoji } = require('../../utils/achievementUtils');
 
 module.exports = {
@@ -86,7 +87,6 @@ module.exports = {
                 }
             }
         } catch (error) {
-            const logger = require('../../utils/logger');
             logger.error('Failed to load achievements for userinfo:', error);
         }
 

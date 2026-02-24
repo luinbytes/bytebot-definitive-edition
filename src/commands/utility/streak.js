@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
+const logger = require('../../utils/logger');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
 const { sendPaginatedMessage, paginateArray } = require('../../utils/paginationUtil');
