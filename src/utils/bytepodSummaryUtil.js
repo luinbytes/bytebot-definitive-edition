@@ -29,7 +29,10 @@ function formatDuration(seconds) {
  * @returns {import('discord.js').EmbedBuilder}
  */
 function createSummaryEmbed(data) {
-    const duration = Math.floor((data.endedAt - data.startedAt) / 1000);
+    // Convert both to timestamps (handle both Date objects and Unix timestamps)
+    const startTime = data.startedAt instanceof Date ? data.startedAt.getTime() : data.startedAt;
+    const endTime = data.endedAt instanceof Date ? data.endedAt.getTime() : data.endedAt;
+    const duration = Math.floor((endTime - startTime) / 1000);
 
     // Sort users by duration (top 5)
     const sortedUsers = [...data.userDurations].sort((a, b) => b.durationSeconds - a.durationSeconds);
