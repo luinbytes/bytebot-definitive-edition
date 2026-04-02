@@ -29,10 +29,21 @@ function formatDuration(seconds) {
  * @returns {import('discord.js').EmbedBuilder}
  */
 function createSummaryEmbed(data) {
-    // Convert both to timestamps (handle both Date objects and Unix timestamps)
-    const startTime = data.startedAt instanceof Date ? data.startedAt.getTime() : data.startedAt;
-    const endTime = data.endedAt instanceof Date ? data.endedAt.getTime() : data.endedAt;
-    const duration = Math.floor((endTime - startTime) / 1000);
+    // Compute actual voice session duration from per-user durations (max = longest continuous session).
+    // Fall back to pod creation/endedAt range if no userDurations available.
+    let duration;
+    if (data.userDurations && data.userDurations.length > 0) {
+        duration = Math.max(...data.userDurations.map(u => u.durationSeconds));
+    } else {
+        const startTime = data.startedAt instanceof Date ? data.startedAt.getTime() : data.startedAt;
+        const endTime = data.endedAt instanceof Date ? data.endedAt.getTime() : data.endedAt;
+        duration = Math.floor((endTime - startTime) / 1000);
+    }
+
+    // Pod lifetime (creation → deletion) as a secondary metric
+    const podStartTime = data.startedAt instanceof Date ? data.startedAt.getTime() : data.startedAt;
+    const podEndTime = data.endedAt instanceof Date ? data.endedAt.getTime() : data.endedAt;
+    const podLifetime = Math.floor((podEndTime - podStartTime) / 1000);
 
     // Sort users by duration (top 5)
     const sortedUsers = [...data.userDurations].sort((a, b) => b.durationSeconds - a.durationSeconds);
@@ -47,6 +58,7 @@ function createSummaryEmbed(data) {
     const embed = embeds.brand('BytePod Session Summary', `Your pod "${data.podName}" has ended.`);
     embed.addFields(
         { name: 'Duration', value: formatDuration(duration), inline: true },
+        { name: 'Pod Lifetime', value: formatDuration(podLifetime), inline: true },
         { name: 'Unique Visitors', value: `${data.uniqueVisitors}`, inline: true },
         { name: 'Peak Users', value: `${data.peakUsers}`, inline: true }
     );

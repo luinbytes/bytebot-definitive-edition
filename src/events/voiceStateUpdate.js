@@ -583,6 +583,12 @@ module.exports = {
                 { podId: leftChannelId, userId: member.id }
             );
 
+            // Capture leaving user's duration BEFORE finalizing (which deletes the session).
+            // This is needed so their time is included in the pod summary if the pod becomes empty.
+            const leavingUserDuration = session
+                ? { userId: session.userId, durationSeconds: Math.floor((Date.now() - session.startTime) / 1000) }
+                : null;
+
             if (session) {
                 try {
                     await finalizeVoiceSession(session, newState.client);
@@ -663,6 +669,15 @@ module.exports = {
 
                         // Calculate per-user durations
                         const userDurations = new Map();
+
+                        // Include the leaving user's duration (their session was already finalized/deleted above)
+                        if (leavingUserDuration) {
+                            userDurations.set(
+                                leavingUserDuration.userId,
+                                (userDurations.get(leavingUserDuration.userId) || 0) + leavingUserDuration.durationSeconds
+                            );
+                        }
+
                         for (const session of sessions) {
                             const duration = Math.floor((Date.now() - session.startTime) / 1000);
                             userDurations.set(session.userId, (userDurations.get(session.userId) || 0) + duration);
