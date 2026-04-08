@@ -391,7 +391,8 @@ module.exports = {
                 podStatsTracker.set(newChannel.id, {
                     peakUsers: 1,
                     currentUsers: 1,
-                    visitors: new Set([member.id])
+                    visitors: new Set([member.id]),
+                    userDurations: new Map()  // accumulated per-user voice time (seconds)
                 });
 
                 // Send Welcome Message
@@ -548,7 +549,8 @@ module.exports = {
                         visitors: new Set(Array.from(channel.members.keys()).filter(id => {
                             const m = channel.members.get(id);
                             return m && !m.user.bot;
-                        }))
+                        })),
+                        userDurations: new Map()  // can't recover past durations after restart
                     };
                     podStatsTracker.set(joinedChannelId, stats);
                 } else {
@@ -601,10 +603,14 @@ module.exports = {
                 }
             }
 
-            // Decrement stats tracker
+            // Decrement stats tracker and accumulate this user's duration
             const leaveStats = podStatsTracker.get(leftChannelId);
             if (leaveStats) {
                 leaveStats.currentUsers = Math.max(0, leaveStats.currentUsers - 1);
+                if (leavingUserDuration) {
+                    const prev = leaveStats.userDurations.get(leavingUserDuration.userId) || 0;
+                    leaveStats.userDurations.set(leavingUserDuration.userId, prev + leavingUserDuration.durationSeconds);
+                }
             }
 
             // Check if it's a BytePod
@@ -664,28 +670,24 @@ module.exports = {
                         // Get stats from tracker or reconstruct
                         let stats = podStatsTracker.get(leftChannelId);
                         if (!stats) {
+                            // Bot restart fallback: can't recover past durations, use active sessions for what's left
+                            const activeDurations = new Map();
+                            for (const s of sessions) {
+                                const d = Math.floor((Date.now() - s.startTime) / 1000);
+                                activeDurations.set(s.userId, (activeDurations.get(s.userId) || 0) + d);
+                            }
                             stats = {
                                 peakUsers: sessions.length || 1,
                                 currentUsers: sessions.length || 0,
-                                visitors: new Set(sessions.map(s => s.userId))
+                                visitors: new Set(sessions.map(s => s.userId)),
+                                userDurations: activeDurations
                             };
                         }
 
-                        // Calculate per-user durations
-                        const userDurations = new Map();
-
-                        // Include the leaving user's duration (their session was already finalized/deleted above)
-                        if (leavingUserDuration) {
-                            userDurations.set(
-                                leavingUserDuration.userId,
-                                (userDurations.get(leavingUserDuration.userId) || 0) + leavingUserDuration.durationSeconds
-                            );
-                        }
-
-                        for (const session of sessions) {
-                            const duration = Math.floor((Date.now() - session.startTime) / 1000);
-                            userDurations.set(session.userId, (userDurations.get(session.userId) || 0) + duration);
-                        }
+                        // Use durations accumulated in podStatsTracker as users left throughout the session.
+                        // sessions[] is empty here because each user's row is deleted from bytepodActiveSessions
+                        // when they leave — so we can't recalculate from DB at this point.
+                        const userDurations = new Map(stats.userDurations || []);
 
                         // Build summary data
                         const summaryData = {
