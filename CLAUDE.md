@@ -105,21 +105,30 @@ Discord bot (Discord.js v14) with neon purple branding (#8A2BE2), slash commands
 
 ### 2. BytePod System (src/events/voiceStateUpdate.js)
 
-**Join Hub (29-112):**
+**Join Hub:**
 ```
 Join hub → Fetch voiceHubChannelId → checkBotPermissions(ManageChannels,MoveMembers,Connect)
   → If missing: Kick user, DM user+owner
-  → Fetch autoLock setting → Create "{username}'s Pod"
+  → Fetch userSettings (autoLock, podNameStyle) → Generate channel name
+    → podNameStyle='random': getRandomPodName() (e.g. "Wobbly Narwhal Pod")
+    → podNameStyle='username' (default): "{username}'s Pod"
     → Overwrites: @everyone(View=true,Connect=autoLock), Owner(Connect+ManageChannels+MoveMembers)
-    → Apply auto-whitelist → Move user → Insert DB → Send control panel
+    → Apply auto-whitelist → Move user → Insert DB → Initialize podStatsTracker → Send control panel
 ```
 
-**Leave Pod (114-136):**
+**Leave Pod:**
 ```
-Leave → Check bytepods table
-  → members.size === 0: Delete channel + DB (handle error 10003)
+Leave → Capture leavingUserDuration (before session deleted) → finalizeVoiceSession()
+  → Accumulate duration into podStatsTracker.userDurations
+  → members.size === 0: Generate summary → Archive to bytepodSessionHistory → Delete channel + DB
   → OWNER leaves (others remain): Set ownerLeftAt → 5-min timeout → Transfer to first member
 ```
+
+**Session Summary (`src/utils/bytepodSummaryUtil.js`):**
+- `podStatsTracker` (in-memory Map) tracks `{ peakUsers, currentUsers, visitors, userDurations }` per pod
+- Per-user durations accumulated into `podStatsTracker.userDurations` as each user leaves (sessions are deleted from DB on leave, so must accumulate in-memory)
+- Summary embed: Duration (pod lifetime createdAt→endedAt), Unique Visitors, Peak Users, Top Talkers (per-user time)
+- DM sent to owner if `summaryEnabled=true`; archived to `bytepodSessionHistory` regardless
 
 **Ownership Transfer:**
 - Owner leaves: `pendingOwnershipTransfers` Map tracks timeout
@@ -353,6 +362,8 @@ User joins → Creates first streak (special_first_streak +10pts)
 | mediaUtil.js | `saveMedia/getMedia/searchMedia/getMediaById/deleteMedia/addTag/removeTag/updateDescription/getMediaCount/markDeleted/getOrCreateArchiveChannel/archiveMedia` - 500 limit, dual-path archiving (Discord/local) |
 | fileStorageUtil.js | `calculateHash/getRelativePath/getAbsolutePath/checkDiskSpace/saveToFilesystem/deleteFile/fileExists` - Local storage with path traversal prevention, 8GB limit |
 | commandDeployer.js | `loadCommands/deployCommands/getCachedHash` - Registration utility |
+| podNameGenerator.js | `getRandomPodName()` - Generates funny random pod names (adjective + noun + "Pod"), used when user sets `podNameStyle='random'` |
+| bytepodSummaryUtil.js | `createSummaryEmbed(data)`, `formatDuration(seconds)` - Builds BytePod session summary DM embed with duration, visitors, peak users, top talkers |
 
 ## Server (src/server/)
 | Module | Purpose |
@@ -506,6 +517,18 @@ Welcome: User joins → guildMemberAdd → check enabled+channel → parse varia
 ---
 
 ## Recent Changes
+
+### 2026-04-08 - BytePod Session Summary Fix & Name Style Feature
+- **BUG FIX:** Session summary only showed the last user's voice time
+  - Root cause: `podStatsTracker` didn't accumulate per-user durations. Each user's `bytepodActiveSessions` row is deleted when they leave, so the DB query at pod-close returned empty — only the last leaver's time was included.
+  - Fix: Added `userDurations: new Map()` to `podStatsTracker`. Each user's duration is accumulated into the tracker on leave. Summary reads from tracker, not the empty DB table.
+  - Also simplified summary embed: removed confusing `Math.max` "Duration" field and redundant "Pod Lifetime" duplicate. Duration is now straightforwardly `createdAt → endedAt`.
+- **FEATURE:** `/bytepod namestyle` — per-server preference for pod spawn name
+  - `'username'` (default): `"{username}'s Pod"`
+  - `'random'`: funny generated name via `podNameGenerator.js` (e.g. "Wobbly Narwhal Pod")
+  - New `podNameStyle` column in `bytepodUserSettings` (schema.js + expectedSchema in index.js)
+  - Shown in `/settings view`
+- **FILES:** `voiceStateUpdate.js`, `bytepodSummaryUtil.js`, `schema.js`, `database/index.js`, `bytepod.js`, `settings.js`, `podNameGenerator.js` (new)
 
 ### 2026-01-05 - Phase 4.1: Database Utilities & Code Consolidation (COMPLETE ✅)
 - **GOAL:** Consolidate duplicate database operation patterns and improve performance
