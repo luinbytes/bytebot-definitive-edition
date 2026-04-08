@@ -362,7 +362,8 @@ module.exports = {
                         channelId: newChannel.id,
                         guildId: guild.id,
                         ownerId: member.id,
-                        originalOwnerId: member.id, // Track original creator for reclaim feature
+                        originalOwnerId: member.id, // Track original creator for reclaim eligibility
+                        createdAt: new Date(), // Explicit timestamp — schema default is evaluated once at load time
                     }),
                     { podId: newChannel.id, guildId: guild.id, userId: member.id }
                 );
