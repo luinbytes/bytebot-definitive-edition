@@ -8,6 +8,7 @@ const { checkBotPermissions } = require('../utils/permissionCheck');
 const { getControlPanel } = require('../components/bytepodControls');
 const { dbLog } = require('../utils/dbLogger');
 const { createSummaryEmbed } = require('../utils/bytepodSummaryUtil');
+const { getRandomPodName } = require('../utils/podNameGenerator');
 
 // Helper to get pod state (lock status, whitelist, etc.)
 function getPodState(channel) {
@@ -308,7 +309,10 @@ module.exports = {
                 const categoryId = guildData.voiceHubCategoryId || newState.channel.parentId;
 
                 // Create Channel
-                const channelName = `${member.user.username}'s Pod`;
+                const nameStyle = userSettings?.podNameStyle || 'username';
+                const channelName = (nameStyle === 'random'
+                    ? getRandomPodName()
+                    : `${member.user.username}'s Pod`).slice(0, 100);
                 const newChannel = await guild.channels.create({
                     name: channelName,
                     type: ChannelType.GuildVoice,

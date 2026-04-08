@@ -59,7 +59,7 @@ Discord bot (Discord.js v14) with neon purple branding (#8A2BE2), slash commands
 | commandPermissions | id, guildId, commandName, roleId | RBAC overrides |
 | bytepods | channelId(PK), guildId, ownerId, originalOwnerId, ownerLeftAt, reclaimRequestPending, panelMessageId, createdAt | Ephemeral VC tracking, panel cleanup |
 | bytepodAutoWhitelist | id, userId, targetUserId, guildId | Auto-allow presets |
-| bytepodUserSettings | userId(PK), autoLock | Per-user prefs |
+| bytepodUserSettings | userId(PK), guildId(PK), autoLock, summaryEnabled, podNameStyle | Per-user per-server prefs; composite PK |
 | bytepodActiveSessions | id, podId, userId, guildId, startTime | Restart resilience |
 | bytepodVoiceStats | id, userId, guildId, totalSeconds, sessionCount | Aggregate stats |
 | bytepodTemplates | id, userId, name, userLimit, autoLock, whitelistUserIds(JSON) | Saved configs |
@@ -311,7 +311,7 @@ User joins → Creates first streak (special_first_streak +10pts)
 | birthday.js (~450 lines) | `/birthday set/remove/view/upcoming/setup/role` - Privacy-focused (no year), leap year handling, 24hr role |
 | bookmark.js (~420 lines) | `/bookmark list/search/view/delete/clear` - Pagination, jump links, attachment caching |
 | media.js (~680 lines) | `/media setup/list/delete/search/view/tag/describe` - Full media gallery with auto-capture and manual saves. Rich metadata, tag system, full-text search, detailed views. Setup requires ManageChannels, 500-item limit |
-| bytepod.js (~600 lines) | `/bytepod setup/disable/panel/preset/stats/leaderboard/template` - Full pod management, `handleInteraction()` routes all components. `setup` configures hub channel, `disable` turns off BytePods |
+| bytepod.js (~600 lines) | `/bytepod setup/disable/panel/preset/stats/leaderboard/template/autolock/namestyle` - Full pod management, `handleInteraction()` routes all components. `setup` configures hub channel, `disable` turns off BytePods, `autolock` toggles auto-lock per server, `namestyle` sets pod name style per server |
 | streak.js (~700 lines) | `/streak view/leaderboard/achievements/progress` - Comprehensive activity tracking. View streaks with rarity/points, 5 leaderboard types (current/longest/achievements/points/rare), achievement browser with filters & pagination (category/rarity/earned status), progress tracking with visual bars for milestones. Auto-tracks 8 metrics, 82+ achievements, monthly freeze system |
 | settings.js (~250 lines) | `/settings privacy/achievements/bytepod/view` - Centralized user preferences. Privacy controls ephemeral defaults, achievements toggles global opt-out, bytepod sets per-server auto-lock |
 

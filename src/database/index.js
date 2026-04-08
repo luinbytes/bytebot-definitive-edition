@@ -99,7 +99,8 @@ const expectedSchema = {
         user_id: 'TEXT NOT NULL',
         guild_id: 'TEXT NOT NULL',
         auto_lock: 'INTEGER DEFAULT 0',
-        summary_enabled: 'INTEGER DEFAULT 0'
+        summary_enabled: 'INTEGER DEFAULT 0',
+        pod_name_style: 'TEXT DEFAULT "username"'
         // Note: Composite primary key (user_id, guild_id) - handled by Drizzle migrations
     },
     bytepod_active_sessions: {
@@ -359,14 +360,18 @@ function fixBytepodUserSettingsTable() {
                 user_id TEXT NOT NULL,
                 guild_id TEXT NOT NULL,
                 auto_lock INTEGER DEFAULT 0,
+                summary_enabled INTEGER DEFAULT 0,
+                pod_name_style TEXT DEFAULT "username",
                 PRIMARY KEY (user_id, guild_id)
             )
         `);
 
         // Copy data from old table (skip rows with NULL user_id or guild_id)
         sqlite.exec(`
-            INSERT INTO bytepod_user_settings_new (user_id, guild_id, auto_lock)
-            SELECT user_id, guild_id, auto_lock
+            INSERT INTO bytepod_user_settings_new (user_id, guild_id, auto_lock, summary_enabled, pod_name_style)
+            SELECT user_id, guild_id, auto_lock,
+                   COALESCE(summary_enabled, 0),
+                   COALESCE(pod_name_style, 'username')
             FROM bytepod_user_settings
             WHERE user_id IS NOT NULL AND guild_id IS NOT NULL
         `);

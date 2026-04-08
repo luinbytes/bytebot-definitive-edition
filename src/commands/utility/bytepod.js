@@ -119,7 +119,20 @@ module.exports = {
                 .addBooleanOption(opt => opt
                     .setName('enabled')
                     .setDescription('Auto-lock new pods?')
-                    .setRequired(true))),
+                    .setRequired(true)))
+        .addSubcommand(sub =>
+            sub.setName('namestyle')
+                .setDescription('Choose how your BytePod is named when it spawns (per-server)')
+                .addStringOption(opt => opt
+                    .setName('style')
+                    .setDescription('Name style')
+                    .setRequired(true)
+                    .addChoices(
+                        { name: "Username's Pod  (e.g. Lu's Pod)", value: 'username' },
+                        { name: 'Random funny name  (e.g. Wobbly Narwhal Pod)', value: 'random' }
+                    )
+                )
+        ),
 
     async execute(interaction) {
         const subdomain = interaction.options.getSubcommand();
@@ -363,6 +376,43 @@ module.exports = {
 
             } catch (error) {
                 logger.error(`Error updating BytePod autolock for ${interaction.user.id}:`, error);
+                return interaction.editReply({
+                    embeds: [embeds.error('Settings Update Failed', 'There was an error saving your preferences. Please try again.')]
+                });
+            }
+        }
+
+        if (subdomain === 'namestyle') {
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+            const style = interaction.options.getString('style');
+
+            const VALID_STYLES = ['username', 'random'];
+            if (!VALID_STYLES.includes(style)) {
+                return interaction.editReply({
+                    embeds: [embeds.error('Invalid Style', 'Please select a valid name style.')]
+                });
+            }
+
+            try {
+                await db.insert(bytepodUserSettings).values({
+                    userId: interaction.user.id,
+                    guildId: interaction.guildId,
+                    podNameStyle: style
+                }).onConflictDoUpdate({
+                    target: [bytepodUserSettings.userId, bytepodUserSettings.guildId],
+                    set: { podNameStyle: style }
+                });
+
+                const description = style === 'random'
+                    ? '🎲 Your BytePods will now spawn with a **random funny name** when created (in this server).'
+                    : `👤 Your BytePods will now spawn as **"[Username]'s Pod"** when created (in this server).`;
+
+                return interaction.editReply({
+                    embeds: [embeds.success('BytePod Settings Updated', description)]
+                });
+
+            } catch (error) {
+                logger.error(`Error updating BytePod namestyle for ${interaction.user.id}:`, error);
                 return interaction.editReply({
                     embeds: [embeds.error('Settings Update Failed', 'There was an error saving your preferences. Please try again.')]
                 });

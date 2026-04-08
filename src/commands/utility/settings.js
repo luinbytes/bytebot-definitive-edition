@@ -209,6 +209,7 @@ async function handleView(interaction) {
             .get();
         const autolock = bytepodSettings?.autoLock || false;
         const summariesEnabled = bytepodSettings?.summaryEnabled || false;
+        const podNameStyle = bytepodSettings?.podNameStyle ?? 'username';
 
         const embed = embeds.brand('Your ByteBot Settings', 'Personal preferences')
             .addFields(
@@ -236,6 +237,13 @@ async function handleView(interaction) {
                     value: (summariesEnabled
                         ? '📊 **Enabled** - Receive DM with stats when pod ends'
                         : '📊 **Disabled** - No summary DMs') + ' *(use `/settings summaries` to change)*',
+                    inline: false
+                },
+                {
+                    name: 'BytePod Name Style',
+                    value: (podNameStyle === 'random'
+                        ? '🎲 **Random** - Pods spawn with a funny random name'
+                        : '👤 **Username** - Pods spawn as "[Username]\'s Pod"') + ' *(use `/bytepod namestyle` to change)*',
                     inline: false
                 }
             );

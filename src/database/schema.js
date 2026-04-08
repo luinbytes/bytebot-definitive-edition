@@ -64,6 +64,7 @@ const bytepodUserSettings = sqliteTable('bytepod_user_settings', {
     guildId: text('guild_id').notNull(),
     autoLock: integer('auto_lock', { mode: 'boolean' }).default(false),
     summaryEnabled: integer('summary_enabled', { mode: 'boolean' }).default(false), // Receive BytePod session summaries via DM
+    podNameStyle: text('pod_name_style').default('username'), // 'username' | 'random'
 }, (table) => ({
     // Composite primary key: one setting per user per guild
     pk: primaryKey({ columns: [table.userId, table.guildId] }),
