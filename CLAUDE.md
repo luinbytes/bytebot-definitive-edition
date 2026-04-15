@@ -2,821 +2,208 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-**IMPORTANT: Update this file when making significant changes. Add to "Recent Changes" with dates.**
-
 ---
 
-## Quick Reference
+## Commands
 
-### Development Commands
 ```bash
 npm install              # Install dependencies
-npm start                # Start the bot
-npm run dev              # Run tests + start bot
-npm test                 # Run test suite
-npm run db:generate      # Generate Drizzle migrations
-npm run db:push          # Push schema changes to database
+npm start                # Start the bot (uses .env)
+npm run dev              # Run Jest suite, then start bot
+npm run dev:alt          # Same as dev, but loads .env.dev via --dev flag
+npm test                 # Run Jest suite only
+npm run db:generate      # Generate Drizzle migration file from schema.js
+npm run db:push          # Push schema directly to sqlite.db (dev shortcut)
 
-# Command deployment (CLI flags)
-npm start -- --deploy         # Deploy to GUILD_ID (instant)
-npm start -- --deploy-all     # Deploy to all guilds (instant)
-npm start -- --deploy-global  # Deploy globally (1hr propagation)
+# Run a single test file
+npx jest tests/commands.test.js
+npx jest -t "name of test"
 ```
 
-### Environment Setup
-Required `.env` variables: `DISCORD_TOKEN`, `CLIENT_ID`, `GUILD_ID`, `DATABASE_URL` (optional, defaults to sqlite.db)
+**CLI deploy flags** (pass after `--` to `npm start`):
+- `--deploy` — force re-deploy commands to `GUILD_ID` (instant)
+- `--deploy-all` — deploy to every guild the bot is in (instant)
+- `--deploy-global` — deploy globally (~1hr propagation)
+- `--dev` — load `.env.dev` instead of `.env`
 
-**Deployment Control:** `AUTO_DEPLOY` (optional) - Controls automatic command deployment. Values: `none` (manual only), `guild` (auto-deploy to GUILD_ID, testing), `global` (auto-deploy globally, production with 1hr propagation), or unset (same as guild). Use for hosts that don't support startup flags.
-
-**Media Storage (optional):** `MEDIA_STORAGE_PATH` (default: ./media-storage), `MEDIA_SERVER_PORT` (default: 3000), `MEDIA_SERVER_DOMAIN` (default: http://localhost:3000), `MEDIA_STORAGE_LIMIT_GB` (default: 8)
-
----
-
-## Project Overview
-
-Discord bot (Discord.js v14) with neon purple branding (#8A2BE2), slash commands, RBAC, BytePods (ephemeral voice channels), SQLite+Drizzle, and War Thunder integration.
-
-**Stack:** discord.js v14.25.1, drizzle-orm v0.45.1, better-sqlite3, axios, chalk, glob, Jest
+**Environment (`.env`):** `DISCORD_TOKEN`, `CLIENT_ID`, `GUILD_ID`, `DATABASE_URL` (optional, defaults to `sqlite.db`), `AUTO_DEPLOY` (optional: `none`/`guild`/`global` — controls automatic re-deploy on command hash change; useful for hosts without custom startup flags).
 
 ---
 
 ## Architecture
 
-### Entry Point (src/index.js, lines 1-86)
-1. Create Client (Intents: Guilds, GuildMembers, GuildMessages, MessageContent, GuildVoiceStates, GuildMessageReactions)
-2. Init `client.commands` and `client.cooldowns` Collections
-3. Global error handlers (unhandledRejection, uncaughtException)
-4. Run DB migrations → Load handlers → Login
+Discord.js v14 bot with neon-purple branding (`#8A2BE2`), slash commands, RBAC, ephemeral voice channels ("BytePods"), SQLite + Drizzle ORM, and an activity/achievement system.
 
-### Database (src/database/)
+### Entry point (`src/index.js`)
 
-**schema.js - 27 tables:**
-| Table | Key Fields | Notes |
-|-------|------------|-------|
-| guilds | id, prefix, logChannel, welcomeChannel, welcomeMessage, welcomeEnabled, welcomeUseEmbed, joinedAt, voiceHubChannelId, voiceHubCategoryId, achievementsEnabled | Guild config, BytePod, welcome messages, achievement toggle |
-| users | id, guildId, commandsRun, lastSeen, wtNickname, ephemeralPreference, achievementsOptedOut | WT account binding, global privacy settings, global achievement opt-out |
-| moderationLogs | id, guildId, targetId, executorId, action, reason, timestamp | Actions: BAN/KICK/CLEAR/WARN |
-| commandPermissions | id, guildId, commandName, roleId | RBAC overrides |
-| bytepods | channelId(PK), guildId, ownerId, originalOwnerId, ownerLeftAt, reclaimRequestPending, panelMessageId, createdAt | Ephemeral VC tracking, panel cleanup |
-| bytepodAutoWhitelist | id, userId, targetUserId, guildId | Auto-allow presets |
-| bytepodUserSettings | userId(PK), guildId(PK), autoLock, summaryEnabled, podNameStyle | Per-user per-server prefs; composite PK |
-| bytepodActiveSessions | id, podId, userId, guildId, startTime | Restart resilience |
-| bytepodVoiceStats | id, userId, guildId, totalSeconds, sessionCount | Aggregate stats |
-| bytepodTemplates | id, userId, name, userLimit, autoLock, whitelistUserIds(JSON) | Saved configs |
-| birthdays | id, userId, guildId, month, day, createdAt | No year (privacy), unique(userId,guildId) |
-| birthdayConfig | guildId(PK), channelId, roleId, enabled, lastCheck | Guild celebration config |
-| bookmarks | id, userId, guildId, channelId, messageId, content, authorId, attachmentUrls, savedAt, messageDeleted | 100 limit, 4000 char |
-| autoResponses | id, guildId, trigger, response, channelId, creatorId, enabled, cooldown, matchType, requireRoleId, useCount, createdAt, lastUsed | 50/guild, 5-min cache |
-| suggestionConfig | guildId(PK), channelId, reviewRoleId, enabled, allowAnonymous | Review role null=Admin only |
-| suggestions | id, guildId, userId, content, messageId, channelId, status, upvotes, downvotes, reviewedBy, reviewedAt, reviewReason, createdAt, anonymous | Status: pending/approved/denied/implemented |
-| activityStreaks | id, userId, guildId, currentStreak, longestStreak, lastActivityDate, totalActiveDays, freezesAvailable, lastFreezeReset | unique(userId,guildId), monthly freeze reset |
-| activityAchievements | id, userId, guildId, achievementId, points, notified, earnedAt | unique(userId,guildId,achievementId), auto-tracked + manual awards |
-| activityLogs | id, userId, guildId, activityDate, messageCount, voiceMinutes, commandsRun, bytepodsCreated, channelJoins, reactionsAdded, activeHours, updatedAt | unique(userId,guildId,activityDate), comprehensive daily tracking |
-| achievementDefinitions | id(PK), title, description, emoji, category, rarity, points, criteria(JSON), grantRole, seasonal, seasonalEvent, startDate, endDate, createdAt | 82 core achievements with seasonal support |
-| achievementRoleConfig | guildId(PK), enabled, rolePrefix, useRarityColors, cleanupOrphaned, notifyOnEarn, createdAt, updatedAt | Per-guild role reward settings |
-| achievementRoles | id, guildId, achievementId, roleId, createdAt | Tracks which roles map to achievements, unique(guildId,achievementId) |
-| customAchievements | id, guildId, achievementId, title, description, emoji, category, rarity, points, criteria(JSON), grantRole, enabled, createdBy, createdAt | Guild-specific custom achievements |
+Client boots with intents `Guilds, GuildMembers, GuildMessages, MessageContent, GuildVoiceStates, GuildMessageReactions`. Order: run DB migrations → load events → load commands → login. Graceful shutdown on SIGINT/SIGTERM cleans up all services attached to `client.*Service` fields.
 
-**index.js:** better-sqlite3 → Drizzle wrapper. `runMigrations()` runs `validateAndFixSchema()` first (auto-heals), then Drizzle migrations.
+### Handler auto-loading
 
-### Handlers (src/handlers/)
-- **commandHandler.js (7-48):** Globs `src/commands/**/*.js`, validates data+execute, extracts category from folder, stores in `client.commands`, registers to Discord
-- **eventHandler.js (6-23):** Globs `src/events/**/*.js`, binds via `client.once()` or `client.on()` based on `event.once`
+- `src/handlers/commandHandler.js` — globs `src/commands/**/*.js`, validates `data` + `execute` exports, **derives `category` from the parent folder name**, stores in `client.commands` Collection, registers with Discord.
+- `src/handlers/eventHandler.js` — globs `src/events/**/*.js`, binds via `client.once` or `client.on` based on `event.once`.
+
+Adding a new command or event is just dropping a file in the right folder — no registration step.
+
+### Command module shape
+
+```js
+module.exports = {
+    data: new SlashCommandBuilder()...,   // required
+    async execute(interaction, client) {}, // required
+    permissions: [PermissionFlagsBits.X],  // optional — enforced at runtime
+    cooldown: 5,                           // optional — seconds, default 3
+    devOnly: false,                        // optional — gate to config.developers
+    longRunning: false,                    // optional — auto-defers reply
+    async autocomplete(interaction) {},    // optional
+    async handleInteraction(interaction) {}// optional — button/modal routing
+};
+```
+
+### The interaction security pipeline (`src/events/interactionCreate.js`)
+
+**This is the ONLY entry point for slash commands.** All security happens here. Ordering matters.
+
+1. **Duplicate guard** — 1-minute rolling set prevents double-processing the same interaction ID.
+2. **Component routing** — buttons/selects/modals with `customId` prefixes (`bytepod_`, `bookmark_`, `help_page_`, etc.) are routed to the owning command's `handleInteraction()` and return early.
+3. **DM validation** — reject if `data.dm_permission === false`.
+4. **Bot permission check** — bot must hold `SendMessages` + `EmbedLinks` in the channel.
+5. **Dev-only gate** — checked before RBAC so DB overrides can't bypass `devOnly`.
+6. **RBAC** (`src/utils/permissions.js::checkUserPermissions`):
+   - Query `commandPermissions` for `(guildId, commandName)`.
+   - **If DB overrides exist → user needs ANY whitelisted role OR Administrator. Code-defined `permissions` are IGNORED.**
+   - Otherwise → enforce the command's `permissions` array.
+7. **Cooldown** — per-command, per-user, in-memory (`client.cooldowns`), resets on restart.
+8. **DB tracking** — increment `users.commandsRun`, update `lastSeen`.
+9. **Auto-defer** — if `command.longRunning`, `deferReply()` before executing.
+10. **Execute** — wrapped in try/catch; errors routed through `errorHandlerUtil.handleCommandError` with unique 8-char tracking IDs.
+
+### ⚠️ CRITICAL permission gotcha
+
+`.setDefaultMemberPermissions()` on the builder is **Discord UI-only** — it hides the command from users in the UI but provides **zero runtime enforcement**. `checkUserPermissions()` defaults to `allowed: true` when `command.permissions` is undefined.
+
+**Every moderation/admin command MUST export both:**
+```js
+data: new SlashCommandBuilder()...setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+permissions: [PermissionFlagsBits.ModerateMembers],  // ← runtime enforcement
+```
+
+Missing the `permissions` array on a moderation command = unauthenticated moderation actions. This has bitten the codebase before.
+
+### Database (`src/database/`)
+
+- `schema.js` — 28 Drizzle table definitions. Source of truth.
+- `index.js` — `better-sqlite3` + Drizzle wrapper with `WAL` mode, `foreign_keys=ON`, 5s busy timeout.
+- `runMigrations()` calls `validateAndFixSchema()` **first** (auto-heals missing columns by diffing against `expectedSchema`), then runs Drizzle's `migrate()`.
+- **`expectedSchema` in `database/index.js` must be kept in sync with `schema.js` by hand.** If you add a column to `schema.js` without updating `expectedSchema`, the auto-healer won't create it on existing databases and migrations will fail. Every column in `expectedSchema` is passed through `isValidSQLIdentifier`/`isValidSQLType` before being interpolated into `ALTER TABLE`, so do NOT bypass these validators.
+
+**Schema change workflow:**
+1. Edit `schema.js`
+2. Mirror the change in `expectedSchema` in `database/index.js`
+3. `npm run db:generate` (creates migration file in `drizzle/`)
+4. Start the bot — migrations apply automatically
+
+### BytePods — ephemeral voice channels (`src/events/voiceStateUpdate.js`, `src/commands/utility/bytepod.js`)
+
+Users join a configured "hub" channel → bot creates a personal voice channel → deletes it when empty. The non-obvious pieces:
+
+**Creation flow:** Join hub → `checkBotPermissions(ManageChannels, MoveMembers, Connect)` → fetch `bytepodUserSettings` to pick name style (`username` = `"{name}'s Pod"`, `random` = `podNameGenerator.js` output like "Wobbly Narwhal Pod") → create channel with overwrites (`@everyone`: Connect=!autoLock, owner: Connect+ManageChannels+MoveMembers) → apply auto-whitelist → move user → insert into `bytepods` → initialize `podStatsTracker` → send control panel.
+
+**Session summary — the non-obvious bit** (`src/utils/bytepodSummaryUtil.js`):
+- `podStatsTracker` is an **in-memory `Map`** keyed by pod ID, holding `{ peakUsers, currentUsers, visitors, userDurations }`.
+- When a user leaves, their session duration is **accumulated into `podStatsTracker.userDurations`** before the DB row in `bytepodActiveSessions` is deleted.
+- **Why:** sessions are deleted from the DB on leave. Reading durations from the DB at pod-close time would only find the last leaver's row. A prior bug showed exactly this symptom (summary only showed one user's time) — do NOT "simplify" by reading durations from the DB.
+
+**Ownership transfer:** Owner leaves but others remain → set `ownerLeftAt`, start 5-min timeout in `pendingOwnershipTransfers` Map → if owner returns, cancel → otherwise transfer perms to first member, rename channel, notify. If the original owner comes back **after** transfer, a "Request Ownership Back" button appears with accept/deny; `reclaimRequestPending` flag on `bytepods` prevents duplicate prompts. Accept/deny handlers use `reply()` not `deferUpdate()` to avoid a voice disconnect bug.
+
+**Co-owner check is STRICT** (`bytepod.js`): ownership actions require the user to be the owner OR have an **explicit member-level `ManageChannels` allow overwrite on the channel**. Server Administrators and role-level perms do NOT pass this check. This is intentional — it prevents server mods from hijacking arbitrary pods. When editing BytePod code, do not "fix" this by falling back to `member.permissions.has(ManageChannels)`.
+
+### Activity & achievements (`src/services/activityStreakService.js`)
+
+Tracks 8 daily metrics per user (messages, voice minutes, commands, pods created, channel joins, reactions, active hours, streak) in `activityLogs`. `AchievementManager` class auto-seeds 98 achievement definitions on first run (82 core + 16 seasonal) into `achievementDefinitions`. Categories: streak, dedication, social, voice, explorer, special, combo, meta, seasonal. Rarities: common → uncommon → rare → epic → legendary → mythic.
+
+On every activity event, `checkAllAchievements()` runs cumulative/combo/meta checks — achievements fire **instantly** the moment a threshold is crossed, not on daily rollover. Streak/total-day achievements only check on day change. Seasonal achievements validate dates on award to prevent backdating.
+
+Auto-backfill: `processMissedAchievements()` runs on every startup, awarding anything earned while the bot was offline. Achievement cache is 1-hour — invalidate after creating custom achievements via `/achievement create`.
+
+Guild-level kill switch: `guilds.achievementsEnabled`. When false, automatic awards are skipped but `/achievement award` (manual) still works.
+
+### Services (`src/services/`)
+
+Long-lived singletons attached to `client` in `ready.js`: `activityStreakService`, `birthdayService`, `autoResponderService`, `reminderService`, `starboardService`. Each exposes a `cleanup()` method called during graceful shutdown. When adding a new service with timers/intervals, wire up `cleanup()` and add it to the shutdown block in `index.js`.
 
 ---
 
-## Critical Systems
+## Conventions
 
-### 1. Command Security Pipeline (src/events/interactionCreate.js:49-174)
-```
-1. DM Validation (61-69) → data.dm_permission !== false
-2. Bot Permission Check (72-85) → SendMessages + EmbedLinks
-3. Developer-Only Gate (88-93) → command.devOnly checks config.developers
-4. RBAC (96-106) → checkUserPermissions(), DB overrides > code perms
-5. Cooldown (109-129) → Per-command/user, default 3s
-6. DB Tracking (134-149) → Increment commandsRun, update lastSeen
-7. Auto-Defer (154-157) → If command.longRunning, deferReply()
-8. Execute (160-173) → try/catch with error embeds
-```
-**Key:** This is the ONLY slash command entry point. All security happens here.
+**Embeds:** Always use `src/utils/embeds.js` (`embeds.success/error/warn/brand/info/base`). **Never** construct `EmbedBuilder` directly — the branding test (`tests/branding.test.js`) fails the build if you do.
 
-### 2. BytePod System (src/events/voiceStateUpdate.js)
+**Logging:** Always use `src/utils/logger.js` (`info/success/warn/error/debug/errorContext`). **Never** use `console.log`.
 
-**Join Hub:**
-```
-Join hub → Fetch voiceHubChannelId → checkBotPermissions(ManageChannels,MoveMembers,Connect)
-  → If missing: Kick user, DM user+owner
-  → Fetch userSettings (autoLock, podNameStyle) → Generate channel name
-    → podNameStyle='random': getRandomPodName() (e.g. "Wobbly Narwhal Pod")
-    → podNameStyle='username' (default): "{username}'s Pod"
-    → Overwrites: @everyone(View=true,Connect=autoLock), Owner(Connect+ManageChannels+MoveMembers)
-    → Apply auto-whitelist → Move user → Insert DB → Initialize podStatsTracker → Send control panel
-```
+**Ephemeral replies:** Use `flags: [MessageFlags.Ephemeral]`, not the deprecated `ephemeral: true`. User-facing info commands should respect `ephemeralHelper.shouldBeEphemeral(userId, commandDefault, paramOverride)` — the three-tier logic: explicit parameter > user preference (`users.ephemeralPreference`) > command default.
 
-**Leave Pod:**
-```
-Leave → Capture leavingUserDuration (before session deleted) → finalizeVoiceSession()
-  → Accumulate duration into podStatsTracker.userDurations
-  → members.size === 0: Generate summary → Archive to bytepodSessionHistory → Delete channel + DB
-  → OWNER leaves (others remain): Set ownerLeftAt → 5-min timeout → Transfer to first member
-```
+**Error handling:** Use `errorHandlerUtil.handleCommandError(error, interaction, actionDescription)` — it handles deferred/replied state, generates tracking IDs, and detects known Discord API error codes (10003 channel deleted, 10008 unknown message, 50013 missing perms, etc.).
 
-**Session Summary (`src/utils/bytepodSummaryUtil.js`):**
-- `podStatsTracker` (in-memory Map) tracks `{ peakUsers, currentUsers, visitors, userDurations }` per pod
-- Per-user durations accumulated into `podStatsTracker.userDurations` as each user leaves (sessions are deleted from DB on leave, so must accumulate in-memory)
-- Summary embed: Duration (pod lifetime createdAt→endedAt), Unique Visitors, Peak Users, Top Talkers (per-user time)
-- DM sent to owner if `summaryEnabled=true`; archived to `bytepodSessionHistory` regardless
+**Moderation actions:** Use `moderationUtil.executeModerationAction()` for the log+DM flow and `moderationUtil.validateHierarchy(executor, target)` for role-hierarchy checks. **`target.bannable`/`kickable` only check whether the bot outranks the target — they do NOT check the executor**, so `validateHierarchy` is required on every moderation handler to prevent privilege escalation.
 
-**Ownership Transfer:**
-- Owner leaves: `pendingOwnershipTransfers` Map tracks timeout
-- After 5 min: New owner gets perms, channel renamed, notification sent
-- Owner returns during grace: Cancel timeout, clear ownerLeftAt
-- Original owner returns after transfer: "Request Ownership Back" button → Accept/Deny flow
-- **Reclaim System:** Prevents duplicate reclaim prompts via `reclaimRequestPending` flag in bytepods table, originalOwnerId Backfill tracks original creator for old pods
-- **Voice Reconnect Bug:** Uses `reply()` instead of `deferUpdate()` to prevent voice disconnection when accepting/denying ownership
-- **Duplicate Reclaim Prompts:** Database flag prevents multiple reclaim prompts from being sent simultaneously via `reclaimRequestPending`
+**Database patterns:** Prefer helpers in `src/utils/dbUtil.js` (`upsert`, `insertIfNotExists`, `deleteIfOwner`, `getCount`, `getPaginatedResults`, `getOne`, `getMany`). `getCount` uses SQL `COUNT(*)` and is 10–100× faster than fetch-all-and-length for large tables.
 
-**Control Panel (src/commands/utility/bytepod.js):**
-- Ownership check: Must be owner OR have EXPLICIT ManageChannels allow overwrite (not server Admin)
-- Components: Lock/Unlock, Whitelist(batch), Co-Owner(owner only), Rename modal, Limit modal(0-99), Kick
-- Panel updates: customId embeds panel message ID for targeted updates
+**Pagination:** Use `paginationUtil.js` (`sendPaginatedMessage`, `paginateArray`) — handles collectors, timeouts, and user validation automatically.
 
-**CRITICAL:** Co-owner check is STRICT - requires explicit channel permission overwrite, prevents server mod bypass.
-
-### 3. RBAC Permission System (src/utils/permissions.js:15-49)
-```javascript
-checkUserPermissions():
-1. Query commandPermissions for (guildId, commandName)
-2. If overrides exist: User needs ANY allowed role OR Administrator
-3. If no overrides: Check command.permissions array
-4. Return { allowed: true/false, error? }
-```
-- `/perm add/remove [cmd] [role]` - Manage overrides
-- `/perm reset [cmd]` - Clear overrides, revert to code
-- `/perm list` - View all overrides
-
-**Key:** Once DB overrides exist, code-defined permissions are IGNORED.
-
-### 4. Achievement System (src/services/activityStreakService.js)
-
-**Architecture:** 82 core achievements + 16 seasonal + guild custom achievements with automatic tracking, role rewards, and seasonal events.
-
-**Achievement Categories (9 total):**
-```
-streak      → Consecutive day milestones (3-1000 days)
-dedication  → Total active days (30-1500 days)
-social      → Messages, reactions, BytePods
-voice       → Voice hours milestones (10-5000 hrs)
-explorer    → Channel joins, active hours
-special     → Unique achievements (first streak, freeze master, night owl, etc.)
-combo       → Multi-criteria (social butterfly, triple threat)
-meta        → Achievement collecting (25, 50, 75+ achievements)
-seasonal    → Limited-time events (Halloween, Christmas, Summer, etc.)
-```
-
-**Rarity Tiers (6 levels):**
-- common (⚪ 10-25 pts) → uncommon (🟢 50 pts) → rare (🔵 75-100 pts)
-- epic (🟣 150-250 pts) → legendary (🟠 500 pts) → mythic (🔴 1000 pts)
-
-**Core Components:**
-
-1. **AchievementManager Class** (`activityStreakService.js:20-286`)
-   - **Auto-initialization:** Automatically seeds 98 achievements on first run if database is empty
-   - Loads definitions from DB with 1-hour cache
-   - Methods: `loadDefinitions()`, `seedAchievements()`, `getById()`, `getByCategory()`, `getByRarity()`, `getAllGrantingRoles()`
-   - Seasonal validation: `isSeasonalActive()`, `canAward()`, `getActiveSeasonalAchievements()`
-   - Custom achievements: `getCustomAchievements(guildId)`
-
-2. **Activity Tracking** (8 metrics tracked daily in `activityLogs`):
-   - Messages, voice minutes, commands run
-   - BytePods created, channel joins, reactions added
-   - Active hours (hourly tracking)
-   - Tracked via: `messageCreate.js`, `voiceStateUpdate.js`, `interactionCreate.js`, `messageReactionAdd.js`
-
-3. **Achievement Checking** (6 check methods):
-   - `checkStreakAchievements()` - Exact streak milestone matches
-   - `checkTotalDaysAchievements()` - Total active days thresholds
-   - `checkCumulativeAchievements()` - Messages, voice, commands, BytePods
-   - `checkSpecialAchievements()` - Unique conditions (night owl, weekend warrior)
-   - `checkComboAchievements()` - Multi-criteria combinations
-   - `checkMetaAchievements()` - Achievement count milestones
-
-4. **Award Flow:**
-   ```
-   Activity occurs → Tracking method called → checkAllAchievements() runs
-     → calculateEligibleAchievements() → Seasonal validation → awardAchievement()
-       → Insert DB → Send DM notification → Grant role reward (if enabled)
-         → Invalidate cache
-   ```
-
-5. **Startup Processing:**
-   - **Auto-seeding:** First run detects empty database → seeds 98 achievements (82 core + 16 seasonal)
-   - **Missed achievements:** Every startup runs `processMissedAchievements()` → checks all users → awards missing achievements
-   - **Bot downtime recovery:** Awards achievements earned while bot was offline automatically on restart
-   - **Daily check:** Midnight UTC → runs streak check + achievement processing for all users
-
-5. **Role Reward System** (`activityStreakService.js:1458-1615`):
-   - Dynamic role creation with achievement name
-   - Rarity-based colors (or brand purple #8A2BE2)
-   - Configurable prefix (default: 🏆)
-   - Automatic cleanup of orphaned roles (0 members)
-   - Scheduled cleanup runs daily at midnight UTC
-
-6. **Seasonal Achievements:**
-   - Year-agnostic date matching (Oct 1-31 = Halloween every year)
-   - Handles year-spanning events (Dec 26 - Jan 5)
-   - Validation before awarding prevents off-season awards
-   - 16 seasonal achievements defined in `scripts/seed-seasonal-events.js`
-
-7. **Custom Achievements:**
-   - Per-guild custom achievements via modal builder
-   - 5-field modal: title, description, emoji, rarity, points
-   - Auto-generated ID: `custom_{guildId}_{sanitized_title}`
-   - Manual award only (no auto-tracking)
-   - Stored in `customAchievements` table
-
-**Commands:**
-- `/achievement setup/view/cleanup/list_roles` - Admin config (Administrator required)
-- `/achievement create` - Modal builder for custom achievements
-- `/achievement award [user] [achievement]` - Manual award with autocomplete
-- `/streak view/leaderboard/achievements/progress` - User commands
-- Achievements shown in `/userinfo` context menu (top 6 + total count)
-
-**Key Files:**
-- **activityStreakService.js (1700+ lines):** Core service, AchievementManager, tracking, awarding
-- **achievementDefinitions.js (1700+ lines):** Centralized achievement data file (98 achievements: 82 core + 16 seasonal)
-- **achievementUtils.js (240 lines):** Shared helpers (emojis, tiers, progress bars, milestones)
-- **achievement.js (~800 lines):** Admin command with 8 subcommands + autocomplete (disable/enable)
-- **streak.js (700 lines):** User command with 4 subcommands + pagination
-- **userinfo.js:** Added achievement showcase section
-
-**Achievement Progression Example:**
-```
-User joins → Creates first streak (special_first_streak +10pts)
-  → 3 days active (streak_3 +25pts)
-    → 7 days active (streak_7 +50pts)
-      → 30 days active (streak_30 +100pts) + role reward granted
-        → 365 days active (streak_365 +500pts, legendary rarity)
-```
-
-**Gotchas:**
-- Achievement cache is 1-hour, invalidate after creating custom achievements
-- Seasonal achievements checked on award, not on earn (prevents backdating)
-- Custom achievements must have unique titles within a guild
-- Role rewards require bot to have ManageRoles permission
-- DM notifications fail silently if user has DMs disabled (logged)
+**Input validation:** Any dynamic SQL or Discord snowflake parsing must go through `validationUtil.js` (`isValidSQLIdentifier`, `isValidSQLType`, `isValidSnowflake`).
 
 ---
 
-## Commands
+## Config (`config.json` / `config.local.json`)
 
-### Administration (src/commands/administration/)
-| Command | Description |
-|---------|-------------|
-| config.js | Manage log channels, view config (Admin) |
-| perm.js | RBAC management with autocomplete (Admin) |
-| welcome.js (~420 lines) | `/welcome setup/message/toggle/embed/variables/test/view` - New member welcome messages. 18 variables: user mentions, server info, join dates (Discord timestamps), account age, member number (1st, 2nd, 3rd). Embed/plain text modes. `/variables` shows full reference guide. Requires ManageGuild |
-| autorespond.js (~450 lines) | `/autorespond add/remove/list/toggle/edit` - Keyword responses. Match types: exact/contains/wildcard/regex(dev-only). Variables: {user}{server}{channel}{username}. Requires ManageGuild |
-| suggestion.js (~650 lines) | `/suggestion setup/approve/deny/implement/view/list/leaderboard` - Community suggestions. DM notifications, auto-embed updates |
-| achievement.js (~800 lines) | `/achievement setup/view/cleanup/list_roles/create/award/remove/disable/enable` - Achievement system admin. Role reward config, custom achievement builder (modal), manual awards with autocomplete, guild-level toggle. Requires Administrator |
+`config.local.json` overrides `config.json` if present (loaded via `src/utils/config.js`). Shape:
 
-### Developer (src/commands/developer/) - All devOnly
-| Command | Description |
-|---------|-------------|
-| guild.js | `/guild list/manage` - View all guilds (list) or manage via select menu (leave multiple guilds with progress bar) |
-| deploy.js | `/deploy <scope>` - Force command sync. Guild(instant) or Global(1hr). Detects duplicates. 10s cooldown |
-| unregister.js | `/unregister <scope>` - Clear command registrations (Global/Guild/Both). Fixes duplicates. 10s cooldown |
-| check-achievements.js | `/check-achievements [user]` - Debug achievement eligibility (developer testing only) |
-
-### Fun (src/commands/fun/)
-| Command | Description |
-|---------|-------------|
-| fun.js | `/fun 8ball/coin/dice/joke` - 8ball (20 responses), coin flip, dice roll (2-100 sides), joke (official-joke-api) |
-
-### Games (src/commands/games/)
-| Command | Description |
-|---------|-------------|
-| warthunder.js | `/warthunder bind/stats` - ThunderInsights API, aggregates all modes, calculates K/D+winRate |
-
-### Moderation (src/commands/moderation/)
-| Command | Description |
-|---------|-------------|
-| mod.js | `/mod ban/kick/warn/unwarn/history/recent/actions` - Unified moderation command. Ban/kick with reason + DB log, warn/unwarn with DM notifications, history view per user/moderator. Requires appropriate permissions per subcommand |
-| clear.js | `/clear <amount>` - Bulk delete 1-100 messages. Requires ManageMessages |
-| lockchannel.js | `/lockchannel lock/unlock` - Lock (deny SendMessages) or unlock (restore SendMessages) for @everyone in current channel. Requires ManageChannels |
-
-### Utility (src/commands/utility/)
-| Command | Description |
-|---------|-------------|
-| help.js | Command browser with categories |
-| ping.js | Roundtrip + WS heartbeat |
-| serverinfo.js, userinfo.js | Guild/user stats |
-| stats.js | `/stats server` - Members, channels, bot activity, top voice users |
-| avatar.js | `/avatar [user] [private]` - View user/server avatars with download links (PNG/WebP/GIF). DM-enabled, privacy preference support, 2s cooldown |
-| suggest.js (~140 lines) | `/suggest <idea> [anonymous]` - Submit to configured channel, 👍/👎 reactions, 60s cooldown |
-| birthday.js (~450 lines) | `/birthday set/remove/view/upcoming/setup/role` - Privacy-focused (no year), leap year handling, 24hr role |
-| bookmark.js (~420 lines) | `/bookmark list/search/view/delete/clear` - Pagination, jump links, attachment caching |
-| bytepod.js (~1000 lines) | `/bytepod setup/disable/panel/preset/stats/leaderboard/template/autolock/namestyle` - Full pod management, `handleInteraction()` routes all components. `setup` configures hub channel, `disable` turns off BytePods, `autolock` toggles auto-lock per server, `namestyle` sets pod name style per server |
-| streak.js (~700 lines) | `/streak view/leaderboard/achievements/progress` - Comprehensive activity tracking. View streaks with rarity/points, 5 leaderboard types (current/longest/achievements/points/rare), achievement browser with filters & pagination (category/rarity/earned status), progress tracking with visual bars for milestones. Auto-tracks 8 metrics, 82+ achievements, monthly freeze system |
-| settings.js (~250 lines) | `/settings privacy/achievements/summaries/view` - Centralized user preferences. Privacy controls ephemeral defaults, achievements toggles global opt-out, summaries toggles BytePod session summary DMs |
-
-### Context Menus (src/commands/context-menus/)
-
-**Message:**
-- bookmark.js - Right-click → "Bookmark Message", DM-enabled, 3s cooldown
-
-**User:**
-| Menu | Description |
-|------|-------------|
-| avatar.js | Server+user avatar, PNG/WebP/GIF links, DM-enabled |
-| userinfo.js | Full user info, badges, bot stats, DM-enabled |
-| copyid.js | Code block format, DM-enabled |
-| modactions.js (~350 lines) | Warn/Kick/Ban/History buttons, modal input, hierarchy validation, DM notifications, Guild-only |
-
----
-
-## Utilities (src/utils/)
-
-| Module | Purpose |
-|--------|---------|
-| embeds.js | Branding (#8A2BE2). Methods: base, success, error, warn, brand, info. **NEVER use EmbedBuilder directly** |
-| logger.js | Colored console: info(blue), success(green), warn(yellow), error(red), debug(magenta). **ALWAYS use logger, never console.log** |
-| permissions.js | `checkUserPermissions()` - RBAC logic |
-| validationUtil.js | **NEW** - SQL injection protection and input validation: `isValidSQLIdentifier()`, `isValidSQLType()`, `isValidSnowflake()` - Prevents SQL injection in dynamic queries, validates Discord snowflakes (17-19 digits) |
-| errorHandlerUtil.js | **NEW** - Standardized error handling with unique tracking IDs: `handleCommandError()`, `handleDMError()`, `safeReply()`, `generateErrorId()` - Automatic deferred/replied state handling, Discord API error detection |
-| moderationUtil.js | **NEW** - Centralized moderation logic: `logModerationAction()`, `notifyUser()`, `validateHierarchy()`, `executeModerationAction()` - Eliminates code duplication across moderation commands, consistent DM messaging |
-| paginationUtil.js | **NEW** - Reusable pagination with automatic collectors: `createPaginationButtons()`, `handlePaginationInteraction()`, `sendPaginatedMessage()`, `paginateArray()`, `calculatePaginationMeta()` - Automatic timeout, user validation, button state management |
-| dbUtil.js | **NEW** - Database operation patterns consolidation: `upsert()`, `insertIfNotExists()`, `deleteIfOwner()`, `getCount()`, `getPaginatedResults()`, `getOne()`, `getMany()` - Eliminates duplicate database patterns, 10-100x performance improvement for count operations, atomic ownership verification |
-| avatarUtil.js | `buildAvatarEmbed(user, member)` - Shared avatar display logic for slash command and context menu. Handles guild/user avatars, download links, GIF detection |
-| permissionCheck.js | `checkBotPermissions()` - BytePod validator (ManageChannels,MoveMembers,Connect) |
-| ephemeralHelper.js | Privacy system: `shouldBeEphemeral()`, `getUserPreference()`, `setUserPreference()` - 3-tier logic (parameter > user pref > command default) |
-| wtService.js | Singleton for ThunderInsights: `searchPlayer()`, `getPlayerStats()` |
-| bookmarkUtil.js | `saveBookmark/getBookmarks/deleteBookmark/deleteAllBookmarks/markDeleted/searchBookmarks` - 100 limit, duplicate prevention |
-| commandDeployer.js | `loadCommands/deployCommands/getCachedHash` - Registration utility |
-| podNameGenerator.js | `getRandomPodName()` - Generates funny random pod names (adjective + noun + "Pod"), used when user sets `podNameStyle='random'` |
-| bytepodSummaryUtil.js | `createSummaryEmbed(data)`, `formatDuration(seconds)` - Builds BytePod session summary DM embed with duration, visitors, peak users, top talkers |
-
-## Components (src/components/)
-| Component | Purpose |
-|-----------|---------|
-| bytepodControls.js | `getControlPanel()`, `getRenameModal()`, `getLimitModal()`. Layout: Row1[Lock,Whitelist,Co-Owner] Row2[Rename,Limit,Kick] |
-
----
-
-## Events (src/events/)
-
-| Event | Purpose |
-|-------|---------|
-| ready.js | Once. Init services (Birthday, Auto-Responder, Starboard, Reminder, Activity Streak), BytePod cleanup, Rich Presence rotation |
-| interactionCreate.js | Routes autocomplete, BytePod interactions, executes security pipeline, tracks command activity for streaks |
-| voiceStateUpdate.js | BytePod create/delete lifecycle, tracks voice activity for streaks |
-| guildCreate.js / guildDelete.js | Auto-register/cleanup guilds table |
-| guildMemberAdd.js | Welcome message system, 18 variable replacements, embed/plain text modes |
-| messageCreate.js | Auto-responder triggers, tracks message activity for streaks |
-| messageDelete.js | Mark bookmarks as deleted |
-| messageReactionAdd/Remove.js | Suggestion vote counting (pending status only) |
-
----
-
-## Development Patterns
-
-### Adding Commands
-1. Create `src/commands/[category]/name.js`
-2. Export: `data` (SlashCommandBuilder), `execute` (async), optional: `cooldown`, `devOnly`, `longRunning`, `permissions`, `autocomplete`
-3. **CRITICAL:** If using `.setDefaultMemberPermissions()`, MUST also export `permissions: [...]` array with matching flags for runtime enforcement
-4. Category auto-assigned from folder, auto-registered
-
-### Adding Events
-1. Create `src/events/name.js`
-2. Export: `name` (Events constant), `execute` (async), optional: `once`
-3. Auto-registered
-
-### Database Changes
-1. Edit `src/database/schema.js`
-2. **CRITICAL:** Update `expectedSchema` in `src/database/index.js` to match (auto-migration won't work without this!)
-3. `npm run db:generate` (creates migration file)
-4. Start bot - migrations auto-applied via `validateAndFixSchema()` + Drizzle migrate
-
-**Important:** The `expectedSchema` object must stay in sync with `schema.js`. It's used by `validateAndFixSchema()` to auto-add missing columns before Drizzle migrations run. If you add a new field to a table in `schema.js`, you MUST also add it to `expectedSchema` or the column won't be created automatically.
-
-### Testing
-`npm test` - branding.test.js (no direct EmbedBuilder), commands.test.js, events.test.js, utils.test.js
-
-### Important Flags
-- `MessageFlags.Ephemeral` - New ephemeral pattern
-- `command.longRunning` - Auto-defers for API calls
-- `command.devOnly` - Restricts to config.developers
-- `data.dm_permission = false` - Prevent DM usage
-
----
-
-## Data Flows
-
-```
-Command: User → Slash → interactionCreate → Security(8 steps) → execute() → branded embed
-BytePod Create: Join Hub → voiceStateUpdate → perm check → create channel → apply whitelist → move user → insert DB → control panel
-BytePod Control: Click → interactionCreate → handleInteraction() → validate ownership → execute → update perms → refresh panel
-RBAC: /perm add → insert DB | User runs cmd → checkUserPermissions() → DB overrides? check roles : check code perms
-Welcome: User joins → guildMemberAdd → check enabled+channel → parse variables (18 types) → send embed/plain → error handling (perms/deleted)
+```json
+{
+  "developers": ["discord-user-id"],
+  "brand": { "name": "ByteBot", "color": "#8A2BE2" },
+  "colors": { "primary": "#8A2BE2", "success": "#57F287", "error": "#ED4245", "warning": "#FEE75C" }
+}
 ```
 
+Developer-only commands (`devOnly: true`) check against `config.developers`.
+
 ---
 
-## File Reference
+## Testing
 
-**Core:** index.js(114), commandHandler.js(48), eventHandler.js(23)
-**Database:** schema.js(319), index.js(302)
-**Data:** achievementDefinitions.js(1700+)
-**Events:** interactionCreate.js(375), voiceStateUpdate.js(500+), ready.js(200), guildCreate.js(22), guildDelete.js(19), guildMemberAdd.js(125), messageCreate.js(39)
-**Utils:** embeds.js(61), logger.js(15), permissions.js(51), permissionCheck.js(66), ephemeralHelper.js(129), wtService.js(101), fileStorageUtil.js(239)
-**Server:** mediaServer.js(158)
-**Services:** activityStreakService.js(595), birthdayService.js(353), autoResponderService.js, starboardService.js, reminderService.js, mediaGalleryService.js(540)
-**Components:** bytepodControls.js(94)
-**Commands:** bytepod.js(394)⚠️COMPLEX, perm.js(168), welcome.js(380), media.js(680), help.js(84), streak.js(240)
+Jest-based. Key suites:
+- `tests/branding.test.js` — enforces no raw `EmbedBuilder` usage
+- `tests/commands.test.js` — validates every command exports `data` + `execute`
+- `tests/events.test.js` — validates every event exports `name` + `execute`
+- `tests/utils.test.js` — unit tests for utility functions
+
+`npm run dev` runs the suite before starting the bot; a test failure blocks startup.
+
+---
+
+## Deployment notes
+
+- **Never mix guild and global deployments** — Discord will show duplicate commands. Use `/unregister scope:Global` to clear globals if duplicates appear.
+- `AUTO_DEPLOY=none` is the recommended production setting: deploys once on first run (so `/deploy` exists), then you trigger updates manually via `/deploy scope:Global`.
+- `/deploy` and `/unregister` are developer-only (`devOnly: true`) with 10s cooldowns.
 
 ---
 
 ## Gotchas
 
 | Area | Issue |
-|------|-------|
-| BytePod | Co-owner requires EXPLICIT ManageChannels overwrite, not server Admin |
-| BytePod | CustomIds embed panel message ID for targeted updates |
-| BytePod | Whitelist intent: If any user lacks Connect, action="add"; else "remove" |
-| BytePod | Owner can't be kicked, can't whitelist self, filtered from lists |
-| RBAC | DB overrides exist → code permissions IGNORED |
-| RBAC | Administrator always bypasses |
-| Permissions | **CRITICAL:** `.setDefaultMemberPermissions()` is UI-only. MUST export `permissions: [...]` array for runtime checks |
-| Database | **CRITICAL:** Adding columns to schema.js? MUST also update `expectedSchema` in database/index.js or auto-migration fails |
-| Errors | 10003 = channel deleted, handle gracefully |
-| Errors | Wrap all DMs in try/catch |
-| Cooldowns | In-memory only, reset on restart |
-| Achievements | Auto-seeds on first run, auto-backfills on every startup |
-| Achievements | Achievement cache is 1-hour, invalidate after creating custom achievements |
-| Achievements | Seasonal achievements validated on award, not on earn (prevents backdating) |
-| Media Storage | Media server only starts if config.media.storageMethod === 'local'. Local: 100MB limit, Discord: 25MB limit |
-| Media Storage | Deduplication is per-guild via SHA256 hash. Same file in different guilds = separate storage |
-| Media Storage | Path structure: guilds/{guildId}/{userId}/{mediaId}.{ext}. getAbsolutePath() prevents traversal attacks |
-
----
-
-## Config
-
-**.env:** `DISCORD_TOKEN`, `CLIENT_ID`, `GUILD_ID`, `DATABASE_URL` (optional, defaults sqlite.db)
-
-**config.json:**
-```json
-{
-  "developers": ["208026791749746690"],
-  "brand": { "name": "ByteBot", "color": "#8A2BE2", "logo": "" },
-  "colors": { "primary": "#8A2BE2", "success": "#57F287", "error": "#ED4245", "warning": "#FEE75C", "white": "#FFFFFF" },
-  "media": { "storageMethod": "local", "enableDeduplication": true }
-}
-```
-
----
-
-## Deployment
-
-**CLI Flags:**
-- `npm start -- --deploy` - Force to GUILD_ID
-- `npm start -- --deploy-all` - All guilds (instant)
-- `npm start -- --deploy-global` - Global (1hr propagation)
-
-**Environment Variable (for hosts without flag support):**
-- `AUTO_DEPLOY=none` - Disable automatic re-deployment on changes (deploys once on first run, then manual only)
-- `AUTO_DEPLOY=guild` - Auto-deploy to GUILD_ID on command changes (default, instant updates)
-- `AUTO_DEPLOY=global` - Auto-deploy globally on command changes (all guilds, 1hr propagation)
-- Unset - Same as `guild` if GUILD_ID exists
-
-**In-Bot:** `/deploy scope:Guild|Global` (owner only)
-
-**Avoiding Duplicates:**
-- Never mix guild and global deployments (causes duplicate commands)
-- Use `/unregister scope:Global` to remove global commands if you have duplicates
-- Recommended: `AUTO_DEPLOY=none` + manual `/deploy` for production
-
-**Intents:** Guilds, GuildMembers, GuildMessages, MessageContent, GuildVoiceStates, GuildMessageReactions
-
-**Permissions:** Min(SendMessages,EmbedLinks,UseSlashCommands), Mod(BanMembers,KickMembers,ManageMessages,ManageChannels), BytePods(ManageChannels,MoveMembers,Connect)
-
----
-
-## Recent Changes
-
-### 2026-04-08 - BytePod Session Summary Fix & Name Style Feature
-- **BUG FIX:** Session summary only showed the last user's voice time
-  - Root cause: `podStatsTracker` didn't accumulate per-user durations. Each user's `bytepodActiveSessions` row is deleted when they leave, so the DB query at pod-close returned empty — only the last leaver's time was included.
-  - Fix: Added `userDurations: new Map()` to `podStatsTracker`. Each user's duration is accumulated into the tracker on leave. Summary reads from tracker, not the empty DB table.
-  - Also simplified summary embed: removed confusing `Math.max` "Duration" field and redundant "Pod Lifetime" duplicate. Duration is now straightforwardly `createdAt → endedAt`.
-- **FEATURE:** `/bytepod namestyle` — per-server preference for pod spawn name
-  - `'username'` (default): `"{username}'s Pod"`
-  - `'random'`: funny generated name via `podNameGenerator.js` (e.g. "Wobbly Narwhal Pod")
-  - New `podNameStyle` column in `bytepodUserSettings` (schema.js + expectedSchema in index.js)
-  - Shown in `/settings view`
-- **FILES:** `voiceStateUpdate.js`, `bytepodSummaryUtil.js`, `schema.js`, `database/index.js`, `bytepod.js`, `settings.js`, `podNameGenerator.js` (new)
-
-### 2026-01-05 - Phase 4.1: Database Utilities & Code Consolidation (COMPLETE ✅)
-- **GOAL:** Consolidate duplicate database operation patterns and improve performance
-- **COMPLETED:** Phase 4.1 - Database Utilities (6/6 files refactored, 100% complete)
-  - **NEW UTILITY:** `dbUtil.js` (365 lines) - 7 core database functions
-  - **FUNCTIONS:** upsert, insertIfNotExists, deleteIfOwner, getCount, getPaginatedResults, getOne, getMany
-  - **FILES REFACTORED:** bookmarkUtil.js, mediaUtil.js, activityStreakService.js, bytepod.js, media.js, birthday.js
-- **CRITICAL BUG FIXES (4/4):**
-  - ✅ starboardService.js - Added cleanup() method for updateQueue timers (memory leak)
-  - ✅ starboardService.js - Added 5-minute TTL to configCache (stale cache bug)
-  - ✅ activityStreakService.js - Added cleanup() call to index.js shutdown
-  - ✅ mediaGalleryService.js - Added cleanup() call to index.js shutdown
-- **PERFORMANCE IMPROVEMENTS (2 major):**
-  - ⚡ bookmarkUtil.getBookmarkCount() - 10-100x faster using SQL COUNT(*) instead of fetch-all
-  - ⚡ bookmarkUtil.searchBookmarks() - Eliminated duplicate fetch-all operation for total count
-- **LINES ELIMINATED:** ~95+ lines of duplicate database code
-- **BENEFITS:**
-  - Single source of truth for database patterns (upsert, duplicate prevention, ownership checks)
-  - Consistent dbLog metadata across all operations
-  - Better error handling with custom messages
-  - Easier to add new features (use existing helpers)
-- **FILES:** dbUtil.js (new), bookmarkUtil.js, mediaUtil.js, activityStreakService.js, bytepod.js, media.js, birthday.js, starboardService.js, index.js
-- **TESTING:** All modified files verified with syntax checks (node -c)
-- **DOCUMENTATION:** See PHASE4_PLAN.md and PHASE4_CHANGELOG.md for complete details
-
-### 2026-01-05 - Phase 3: Error Handling Consolidation
-- **GOAL:** Migrate all commands to use standardized `errorHandlerUtil.js` for consistent error handling
-- **COMPLETED:** 17 command files migrated (16 fully, 1 partially)
-  - **Fun:** joke.js
-  - **Games:** warthunder.js
-  - **Developer:** unregister.js, check-achievements.js
-  - **Administration:** config.js, perm.js, welcome.js, achievement.js (9 subcommands)
-  - **Moderation:** audit.js, lockchannel.js
-  - **Utility:** reminder.js (4 subcommands), streak.js (5 subcommands), media.js (2/14 subcommands)
-- **ERROR BLOCKS MIGRATED:** 33+ catch blocks → `handleCommandError()`
-- **LINES ELIMINATED:** ~165 lines of duplicate error handling code
-- **IMPROVEMENTS:**
-  - Unique tracking IDs for all errors (8-character hex)
-  - Automatic deferred/replied state handling prevents crashes
-  - Standardized error messages across all commands
-  - Discord API error code detection (10003, 10008, 10013, 50013, 50035)
-  - Consistent logging format
-- **NOT MIGRATED (Justified):**
-  - **bytepod.js:** Uses sophisticated `logger.errorContext` with detailed metadata, specific Discord error code handling, fallback retry logic
-  - **Autocomplete handlers:** Use intentional silent error handling (return empty array)
-  - **Service files:** starboardService.js (not a command)
-- **FILES:** See PHASE3_CHANGELOG.md for complete list
-- **TESTING:** All migrated files verified with syntax checks (node -c)
-
-### 2026-01-04 - Phase 1 & 2: Security Hardening & Utility Consolidation
-- **PHASE 1 - SECURITY FIXES:** Critical security improvements and standardization
-  - **NEW:** `validationUtil.js` - SQL injection protection (isValidSQLIdentifier, isValidSQLType, isValidSnowflake)
-  - **NEW:** `errorHandlerUtil.js` - Standardized error handling with unique IDs (handleCommandError, handleDMError, safeReply, generateErrorId)
-  - **SECURITY:** Database hardening (WAL mode, foreign keys, busy timeout 5s)
-  - **SECURITY:** API timeout protection (wtService.js: 10s timeout, validateStatus)
-  - **SECURITY:** Media server input validation (snowflake validation, range header validation)
-  - **FILES:** validationUtil.js, errorHandlerUtil.js, database/index.js, wtService.js, mediaServer.js
-- **PHASE 2.1 - MODERATION CONSOLIDATION:** Eliminated 7 instances of duplicate code (~140 lines)
-  - **NEW:** `moderationUtil.js` - Centralized moderation logic (logModerationAction, notifyUser, validateHierarchy, executeModerationAction)
-  - **REFACTORED:** ban.js, kick.js, warning.js, modactions.js - Now use moderation utility
-  - **BENEFITS:** Single source of truth, consistent DM messaging, centralized hierarchy validation
-  - **FILES:** moderationUtil.js (new), ban.js, kick.js, warning.js, modactions.js
-- **PHASE 2.2 - PAGINATION CONSOLIDATION:** Eliminated ~245 lines of duplicate pagination code
-  - **NEW:** `paginationUtil.js` - Reusable pagination with automatic collectors (createPaginationButtons, handlePaginationInteraction, sendPaginatedMessage, paginateArray, calculatePaginationMeta)
-  - **REFACTORED:** streak.js (achievements browser, ~91 lines saved), media.js (list subcommand, ~134 lines saved)
-  - **BENEFITS:** Consistent pagination UX, automatic timeout handling, user validation
-  - **FILES:** paginationUtil.js (new), streak.js, media.js
-- **TESTING:** Comprehensive test suite - 61 tests (all passing)
-  - validationUtil.test.js (16 tests) - SQL injection prevention, snowflake validation
-  - errorHandlerUtil.test.js (12 tests) - Error ID generation, Discord API errors, safeReply
-  - moderationUtil.test.js (14 tests) - Hierarchy validation, notifications, logging
-  - paginationUtil.test.js (19 tests) - Button generation, collectors, user validation, array pagination
-- **TOTAL IMPACT:** ~385 lines of duplicate code eliminated, 4 new utilities, 7 files refactored, 100% test coverage
-- **FILES:** 4 new utilities, 7 commands refactored, 4 test files created
-
-### 2026-01-04 - Codebase Cleanup & Consolidation
-- **CLEANUP:** Major codebase refactoring to improve maintainability and reduce duplication
-- **COMMAND CONSOLIDATION:** Merged 9 commands into 3 unified commands with subcommands:
-  - `/warn`, `/unwarn`, `/warnings` → `/warning [add|remove|list]` (saved 3 commands)
-  - `/lock`, `/unlock` → `/lockchannel [lock|unlock]` (saved 2 commands)
-  - `/guilds`, `/manageguilds` → `/guild [list|manage]` (saved 2 commands)
-- **CODE DEDUPLICATION:** Created `avatarUtil.js` utility - eliminated 95% code duplication between slash command and context menu avatar implementations (165 lines → 67 lines)
-- **LOGGING CONSISTENCY:** Fixed 3 files using `console.log`/`console.error` to use centralized `logger` utility (ephemeralHelper.js, config.js, database/index.js)
-- **CONFIG LOADING FIX:** Fixed index.js to use `require('./utils/config')` instead of `require('../config.json')` - now respects config.local.json overrides
-- **DIRECTORY CLEANUP:** Removed abandoned `/web/` directory (61MB Next.js experiment) and empty `/scripts/` directory
-- **PERMISSION AUDIT:** Comprehensive 43-command audit - fixed 2 UX issues (starboard.js, audit.js missing `.setDefaultMemberPermissions()` UI indicators)
-- **DEVELOPER EXPERIENCE:** Added `.env.example` with all supported environment variables, updated `.gitignore` for media-storage/ and command cache
-- **DOCUMENTATION:** Updated CLAUDE.md command tables, utilities section, added avatarUtil.js reference
-- **FILES:** 9 commands consolidated, avatarUtil.js (new), .env.example (new), .gitignore, CLAUDE.md, index.js, ephemeralHelper.js, config.js, database/index.js, starboard.js, audit.js
-- **IMPACT:** Cleaner codebase, better discoverability (fewer top-level commands), DRY principle enforcement, consistent logging
-
-### 2026-01-03 - AUTO_DEPLOY Environment Variable
-- **NEW:** `AUTO_DEPLOY` environment variable for controlling command deployment without startup flags
-- **USE CASE:** Hosts that don't support custom startup commands (e.g., Pterodactyl panels) can now control deployment via `.env`
-- **VALUES:** `none` (disable auto-redeploy, manual only), `guild` (auto-deploy to GUILD_ID), `global` (auto-deploy globally), or unset (defaults to guild)
-- **BEHAVIOR:**
-  - `AUTO_DEPLOY=none` - Deploys once on first run (so `/deploy` command exists), then skips automatic re-deployment on changes
-  - `AUTO_DEPLOY=guild` - Auto-deploys to GUILD_ID when commands change (instant, development/testing)
-  - `AUTO_DEPLOY=global` - Auto-deploys globally when commands change (1hr propagation, production)
-- **SMART LOGIC:** Checks for cached hash - if commands were never deployed (no cache), initial deployment happens even with `AUTO_DEPLOY=none`
-- **DUPLICATE FIX:** Solves issue where guild + global deployments cause duplicate commands in test guilds
-- **RECOMMENDED SETUP:**
-  - Development/Testing: `AUTO_DEPLOY=guild` or unset (instant updates to test guild)
-  - Production: `AUTO_DEPLOY=global` (automatic global updates) or `AUTO_DEPLOY=none` (manual control via `/deploy`)
-- **FILES:** commandHandler.js, .env, CLAUDE.md
-
-### 2026-01-03 - Achievement System Guild Toggle
-- **NEW:** Guild-level toggle to disable/enable achievement system via `/achievement disable` and `/achievement enable`
-- **FEATURES:** Administrators can now disable automatic achievement tracking for their server while preserving existing data
-- **BEHAVIOR:** When disabled, automatic achievement tracking stops (no new achievements awarded from messages/voice/commands), but manual awards via `/achievement award` still work (admin override), existing achievements/roles/data preserved, users can still view achievements via `/streak`
-- **RBAC:** Requires Administrator permission (both UI restriction via `.setDefaultMemberPermissions()` and runtime enforcement via `permissions` array)
-- **DATABASE:** Added `achievementsEnabled` boolean field to guilds table (default: true)
-- **SERVICE:** Added `isAchievementsEnabled(guildId)` helper method, checks in `updateStreak()` (returns early if disabled), `awardAchievement()` (only checks for automatic awards, manual awards bypass)
-- **FILES:** schema.js, database/index.js (expectedSchema), achievement.js (+2 subcommands, +2 handlers), activityStreakService.js, CLAUDE.md
-
-### 2026-01-01 - Clear Command Race Condition Fix
-- **BUG FIX:** Fixed DiscordAPIError[10008] "Unknown Message" error in `/clear` command
-- **ROOT CAUSE:** Deferred reply was being deleted by the bulk delete operation, then command tried to edit the deleted message
-- **SOLUTION:** Reply AFTER deletion instead of deferring before deletion
-- **CHANGES:**
-  - Removed `deferReply()` (was creating a message that got deleted)
-  - Moved `reply()` to after `bulkDelete()` completes
-  - Added fallback error handling for both reply states (deferred/not deferred)
-- **FILES:** `src/commands/moderation/clear.js`
-
-### 2026-01-02 - Local Media Storage System
-- **NEW:** Local filesystem storage for media gallery (replaces Discord archive channel method)
-- **FEATURES:** 100MB file support (vs 25MB Discord limit), 8GB total storage, SHA256 deduplication per guild, HTTP server (port 3000)
-- **ARCHITECTURE:** Dual-path system maintains backward compatibility with existing Discord-archived media
-- **SECURITY:** Path traversal prevention (normalize + startsWith validation), input validation (integer/regex checks), axios 30s timeout
-- **DATABASE:** 3 new columns in media_items (localFilePath, storageMethod, fileHash), 1 new index (file_hash_guild_idx)
-- **FILES:** mediaServer.js (new), fileStorageUtil.js (new), mediaUtil.js, mediaGalleryService.js, index.js (graceful shutdown), schema.js, expectedSchema
-- **CONFIG:** .env vars (MEDIA_STORAGE_PATH, MEDIA_SERVER_PORT, MEDIA_SERVER_DOMAIN, MEDIA_STORAGE_LIMIT_GB), config.json (media.storageMethod: "local")
-
-### 2026-01-01 - Permission Error Message UX Improvement
-- **UX FIX:** Permission denied errors now show human-readable permission names instead of numeric flag values
-- **BEFORE:** "You need the following permissions: `1099511627776`"
-- **AFTER:** "You need the following permissions: `ModerateMembers`"
-- **IMPLEMENTATION:** Added `getPermissionNames()` helper function to convert BigInt flags to string names
-- **FILES:** `src/utils/permissions.js` (lines 8-25, 64)
-
-### 2026-01-01 - CRITICAL Permission System Security Fix
-- **CRITICAL FIX:** Fixed severe security vulnerability allowing unauthorized users to execute moderation and administration commands
-- **ROOT CAUSE:** Commands used `.setDefaultMemberPermissions()` (Discord UI restriction only) but lacked `permissions` property for runtime enforcement
-- **VULNERABILITY:** Security pipeline's `checkUserPermissions()` defaults to `allowed: true` when `command.permissions` is undefined (permissions.js:43,52)
-- **AFFECTED COMMANDS (11 total):**
-  - **Moderation (8):** warn, unwarn, warnings, kick, ban, clear, lock, unlock - ALL completely unprotected at runtime
-  - **Administration (3):** autorespond, suggestion, welcome - Had runtime enforcement but missing UI restriction (poor UX)
-- **FIXES:**
-  - Added `permissions: [PermissionFlagsBits.*]` property to all 8 moderation commands for runtime enforcement
-  - Fixed unwarn.js permission mismatch (KickMembers → ModerateMembers to match warn.js)
-  - Added `.setDefaultMemberPermissions()` to 3 administration commands for UI restriction
-  - warnings.js had ZERO protection (no UI or runtime checks) - added both layers
-- **VERIFICATION:** Confirmed utility commands (bytepod, media, birthday) use correct subcommand-level permission checks, developer commands use `devOnly: true`
-- **DOCUMENTATION:** Updated CLAUDE.md with critical warnings in Development Patterns and Gotchas sections
-- **SEVERITY:** HIGH - Any user could warn, kick, ban, and perform other moderation actions without permissions before fix
-- **FILES:** warn.js, unwarn.js, warnings.js, kick.js, ban.js, clear.js, lock.js, unlock.js, autorespond.js, suggestion.js, welcome.js, CLAUDE.md
-
-### 2026-01-01 - CLAUDE.md Maintenance & 40k Character Limit
-- **DOCS:** Added 40k character limit constraint to Agent Instructions (currently 37.3k/93% capacity)
-- **UPDATE:** Added missing `/settings` command to Utility table, ephemeralHelper.js to Utils section
-- **UPDATE:** Added ephemeralPreference to users table schema documentation
-- **CLEANUP:** Condensed older changelog entries (Dec 22-26) to save 5k+ characters while preserving key info
-- **FILES:** `CLAUDE.md`
-
-### 2026-01-01 - Achievement Instant Award Fix
-- **CRITICAL FIX:** Cumulative achievements (messages, voice, commands, reactions, etc.) now award INSTANTLY when threshold is hit, not delayed until next day or restart
-- **ROOT CAUSE:** `updateStreak()` was returning early for same-day activities (line 1086), skipping achievement checks entirely
-- **AFFECTED:** Message achievements (message_100+), voice achievements (voice_10hrs+), command achievements (command_50+), combo achievements, meta achievements - all were delayed
-- **NOT AFFECTED:** Streak/total day achievements (only check on day change), BytePod achievements (had workaround)
-- **FIX:** Modified `updateStreak()` to check cumulative/combo/meta achievements even when user already active today (lines 1086-1095)
-- **CLEANUP:** Removed redundant BytePod achievement workaround code (previously lines 825-845)
-- **IMPACT:** All cumulative achievements now fire in real-time as thresholds are crossed
-- **DISCOVERED:** Special achievements (checkType:'special') are defined but not implemented - 18 achievements with no check method exist
-- **FILES:** `activityStreakService.js` (achievement checking logic), `CLAUDE.md` updated
-
-### 2025-12-31 - BytePod Disable Command
-- **NEW:** `/bytepod disable` command - Allows administrators to turn off BytePod creation
-- **FEATURES:** Checks if BytePods are configured, clears `voiceHubChannelId` and `voiceHubCategoryId` from database, provides informative feedback
-- **BEHAVIOR:** Existing BytePods remain active until members leave, re-enable anytime with `/bytepod setup`
-- **PERMISSIONS:** Requires Administrator permission (same as setup)
-- **FILES:** `bytepod.js`, `CLAUDE.md` updated
-
-### 2025-12-30 - Avatar Slash Command & Database Logging
-- **NEW:** `/avatar [user] [private]` slash command - Complements existing context menu with full privacy preference support
-- **FEATURES:** View any user's avatar (defaults to self), server vs user avatar detection, PNG/WebP/GIF download links, DM-enabled
-- **PRIVACY:** Integrated with ephemeralHelper - respects user preferences, supports per-command override via `private` parameter
-- **FILES:** `avatar.js` (utility command), `CLAUDE.md` updated
-
-### 2025-12-29 - CLAUDE.md Documentation Maintenance
-- **FIX:** Corrected achievement count inconsistencies throughout documentation (98 total: 82 core + 16 seasonal)
-- **UPDATE:** Removed references to obsolete seed script files (seed-achievements.js, seed-seasonal-events.js, backfill-achievements.js)
-- **ENHANCEMENT:** Added achievementDefinitions.js to File Reference section under Data category
-- **CONDENSING:** Reduced document size from 756 to 615 lines (19% reduction) while preserving all critical information
-  - Merged duplicate achievement system changelog entries (77→32 lines)
-  - Combined media gallery entries (36→18 lines)
-  - Archived older changes to timeline format (65→10 lines)
-  - Total savings: 141 lines with zero information loss
-
-### 2025-12-28 - Achievement System Implementation
-- **COMPLETE:** Full achievement system (98 achievements: 82 core + 16 seasonal) with auto-seeding, auto-backfill, DM notifications, and role rewards
-- **ARCHITECTURE:** 9 categories (streak, dedication, social, voice, explorer, special, combo, meta, seasonal), 6 rarity tiers (common→mythic), point system (10-1000pts)
-- **AUTO-INIT:** `achievementDefinitions.js` auto-seeds on first run, `processMissedAchievements()` backfills all users on every startup
-- **TRACKING:** 8 daily metrics (messages, voice, commands, BytePods, channels, reactions, active hours) via messageCreate/voiceStateUpdate/interactionCreate/messageReactionAdd
-- **CHECKING:** 6 methods (streak, totalDays, cumulative, special, combo, meta) run on activity + daily midnight UTC checks
-- **ROLE REWARDS:** Dynamic creation with rarity colors, configurable prefix, auto-cleanup of 0-member roles (daily midnight)
-- **SEASONAL:** Year-agnostic date matching, 16 events, validation on award prevents backdating
-- **CUSTOM:** Guild-specific achievements via modal builder (title, description, emoji, rarity, points), manual award only
-- **COMMANDS:**
-  - `/achievement setup/view/cleanup/list_roles/create/award` - Admin (Administrator required)
-  - `/streak view/leaderboard/achievements/progress` - User (5 leaderboard types, filters, pagination)
-  - `/userinfo` integration - Top 6 achievements + total count/points
-- **DATABASE:** 4 new tables (achievementDefinitions, achievementRoleConfig, achievementRoles, customAchievements), 2 extended (activityAchievements +points/notified, activityLogs +7 columns)
-- **FILES:** activityStreakService.js(1700), achievementDefinitions.js(1700), achievementUtils.js(240), achievement.js(525), streak.js(700), userinfo.js, schema.js, interactionCreate.js
-- **KEY FEATURES:** AchievementManager with 1-hour cache, seasonal validation, tier badges (Newcomer→Legend), unique title enforcement
-- **GOTCHAS:** 1-hour cache (invalidate after custom creation), seasonal validated on award not earn, requires ManageRoles for role rewards
-- **WORKFLOW:** `npm start` → Auto-seed achievements → Auto-backfill all users → Ready (eliminated manual seed/backfill scripts)
-
-### 2025-12-26/28 - Media Gallery System with Persistent Archive
-- **NEW:** Dual-capture media archive (auto-monitor + manual saves) with rich metadata, tags, descriptions, full-text search
-- **PERSISTENT ARCHIVE:** Auto-downloads/re-uploads all media to hidden guild `media-archive` channel for permanent Discord CDN URLs, auto-recreates if deleted
-- **BUG FIXES (12/28):** Fixed `buildMediaMessage()` to use archived URLs (not original), `markDeleted()` only expires if archiveMessageId null
-- **UI/UX:** Button pagination, embed thumbnails, real-time stats (page size MB, item count), 500/user limit
-- **COMMANDS:** `/media setup/list/delete/search/view/tag/describe/help` + Save Media context menu (100MB vs 50MB auto-capture)
-- **SUBCOMMANDS:** setup (ManageChannels, auto-creates archive), list (filters), delete, search (full-text), view (metadata/tags/links), tag (comma-separated), describe (1000 chars)
-- **DATABASE:** 3 tables (mediaGalleryConfig, mediaItems with urlExpired flag, mediaTags), added mediaArchiveChannelId to guilds
-- **ARCHITECTURE:** MediaGalleryService (5-min cache, role whitelist, file type/size filtering), mediaUtil.js (CRUD, pagination, archive mgmt), hooks into messageCreate/messageDelete/ready/interactionCreate
-- **SECURITY:** ManageChannels for setup, ownership verification, 3s cooldown
-- **FILES:** mediaUtil.js, mediaGalleryService.js, media.js(1000), save-media.js, schema.js, ready.js, messageCreate.js, messageDelete.js, interactionCreate.js
-
-### 2025-12-26 - Welcome System, Ephemeral UX, Duplicate Command Fix
-- **NEW:** Welcome message system with 18 variables, embed/plain modes (`/welcome`, guildMemberAdd.js)
-- **FIX:** Added GuildMembers intent for welcome events to fire
-- **UX:** Made admin/dev commands ephemeral, kept moderation public for transparency
-- **FIX:** Renamed dev `/clear` to `/unregister` (conflict with moderation clear)
-
-### 2025-12-25 - Activity Streak System
-- **NEW:** Daily engagement tracking, streaks, 11 achievements (3-365 day milestones), monthly freeze
-- **TABLES:** activityStreaks, activityAchievements, activityLogs
-- **TRACKING:** messageCreate, interactionCreate, voiceStateUpdate
-
-### 2025-12-24 - Suggestion System & Deployment
-- **NEW:** `/suggest` + `/suggestion` admin - voting, lifecycle, DM notifications
-- **NEW:** `/deploy` command with duplicate detection, CLI flags (--deploy/--deploy-all/--deploy-global)
-- **FIX:** `/warthunder` timeout (added longRunning:true)
-
-### 2025-12-30 - Embed Design System & User Privacy Preferences
-- **DESIGN SYSTEM:** Implemented professional embed guidelines - "Visual Anchors, Not Decoration"
-- **EMOJI REDUCTION:** Removed 80%+ decorative emojis from field names across 40+ commands
-  - Kept functional emojis: 🥇🥈🥉 (leaderboard medals), ✅/❌ (status indicators), achievement badges
-  - Examples: help.js (12→0 emojis), streak.js (6→1 emoji), stats.js (14→1 emoji)
-- **USER PREFERENCES:** New privacy control system via `/settings privacy <preference>`
-  - Three options: `always` (all ephemeral), `public` (all public), `default` (smart defaults)
-  - Optional `private` parameter on info commands for per-command override
-  - Three-tier logic: parameter override > user preference > command default
-- **DATABASE:** Added `ephemeralPreference` column to users table (default: 'default')
-- **NEW COMMAND:** `/settings privacy` - Configure ephemeral defaults with view subcommand
-- **NEW UTILITY:** `ephemeralHelper.js` - Centralized visibility logic (`shouldBeEphemeral`, `getUserPreference`, `setUserPreference`)
-- **REFACTORED COMMANDS (11 files):**
-  - `help.js` - Split Key Features into 3 clean fields (540 chars → 150-200 chars each)
-  - `streak.js` - Added longRunning, removed 5 field emojis, added private param
-  - `stats.js` - Removed 14 field emojis, added private param, manual defer
-  - `serverinfo.js` - Added private param
-  - `birthday.js` - Added private param to view, removed 1 field emoji
-  - `userinfo.js` (context menu) - User preference support, removed Badges emoji
-  - `warthunder.js` - Added private param to stats, removed ephemeral property
-  - `ping.js` - Added private param
-  - `config.js` - Fixed missing ephemeral on success message
-  - `audit.js`, `clear.js` - Changed to public for moderation transparency
-- **PHILOSOPHY:** Emojis are visual anchors (1-2 per embed), not decoration (12+ per embed)
-- **FILES:** 40+ commands refactored, 2 new files (ephemeralHelper.js, settings.js), schema.js, index.js
-- **COMPLIANCE:** All admin commands ephemeral, all moderation commands public, info commands user-controlled
-
-### 2025-12-22 - Core Systems
-- **NEW:** Auto-responder (keyword triggers, 5-min cache), Birthday system (privacy-focused), Bookmarks (100 limit)
-- **NEW:** 6 user context menus (Avatar/UserInfo/CopyID/Permissions/Activity/ModActions)
-
-### Pre-December 2025
-- **2025-12-20:** BytePod ownership transfer (5-min grace), leaderboard, stats, validateAndFixSchema()
-- **2025-12-19:** Voice stats tracking, BytePod templates, audit system
-- **Initial:** CLAUDE.md created, core bot architecture established
-
----
-
-## Agent Instructions
-
-**CRITICAL CONSTRAINTS:**
-- **MAXIMUM FILE SIZE:** CLAUDE.md must not exceed 40,000 characters. Current size: ~37,300 chars (93% capacity).
-- Keep documentation concise, technical, and focused on non-obvious patterns.
-- Archive old changelog entries when approaching limit (keep last 3-6 months detailed).
-
-**WHEN CHANGING:**
-1. Update "Recent Changes" with date
-2. Update technical sections if modifying: DB schema, security pipeline, commands, data flows
-3. Add new patterns to conventions
-4. Document new gotchas
-5. Keep line numbers current
-
-**BEFORE CHANGING:**
-1. Read relevant sections first
-2. Follow established patterns
-3. Don't break security pipeline
-4. Use embeds.js (never raw EmbedBuilder)
-
-**This is your knowledge base. Keep it accurate.**
+|---|---|
+| Permissions | `.setDefaultMemberPermissions()` is UI-only. Must ALSO export `permissions: [...]` for runtime enforcement. |
+| Schema | Adding a column to `schema.js` requires mirroring it in `expectedSchema` (`database/index.js`) or auto-healing fails. |
+| BytePods | Co-owner check requires **explicit member-level** `ManageChannels` overwrite. Server Admin does NOT pass. |
+| BytePods | Per-user durations must be accumulated in `podStatsTracker.userDurations` — the DB session row is deleted on leave. |
+| BytePods | Ownership accept/deny handlers must use `reply()`, not `deferUpdate()` (voice disconnect bug). |
+| Moderation | `target.bannable`/`kickable` only checks the bot's hierarchy. Always call `validateHierarchy(executor, target)`. |
+| RBAC | Once DB overrides exist for a command, code-defined `permissions` are completely ignored. |
+| RBAC | Administrator always bypasses RBAC (but not `devOnly`). |
+| Cooldowns | In-memory only, reset on every restart. |
+| Achievements | Cache is 1-hour — invalidate after creating a custom achievement. |
+| Achievements | Seasonal achievements are validated on award, not on earn — prevents backdating. |
+| Discord API | Always wrap DMs in try/catch (users may have DMs disabled; fails with 50007). |
+| Discord API | Error code 10003 = channel deleted; handle gracefully in BytePod code paths. |
