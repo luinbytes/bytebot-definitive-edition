@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
-const { executeModerationAction } = require('../../utils/moderationUtil');
+const { executeModerationAction, validateHierarchy } = require('../../utils/moderationUtil');
 const { db } = require('../../database/index');
 const { moderationLogs } = require('../../database/schema');
 const { eq, and, desc } = require('drizzle-orm');
@@ -148,6 +148,14 @@ async function handleBan(interaction) {
         });
     }
 
+    const hierarchy = validateHierarchy(interaction.member, target);
+    if (!hierarchy.valid) {
+        return interaction.reply({
+            embeds: [embeds.error('Cannot Moderate', hierarchy.error)],
+            flags: [MessageFlags.Ephemeral]
+        });
+    }
+
     if (!target.bannable) {
         return interaction.reply({
             embeds: [embeds.error('Error', 'I cannot ban this user. They might have a higher role than me.')],
@@ -189,6 +197,14 @@ async function handleKick(interaction) {
         });
     }
 
+    const hierarchy = validateHierarchy(interaction.member, target);
+    if (!hierarchy.valid) {
+        return interaction.reply({
+            embeds: [embeds.error('Cannot Moderate', hierarchy.error)],
+            flags: [MessageFlags.Ephemeral]
+        });
+    }
+
     if (!target.kickable) {
         return interaction.reply({
             embeds: [embeds.error('Error', 'I cannot kick this user. They might have a higher role than me.')],
@@ -222,6 +238,22 @@ async function handleKick(interaction) {
 async function handleWarn(interaction) {
     const target = interaction.options.getUser('target');
     const reason = interaction.options.getString('reason');
+
+    const targetMember = await interaction.guild.members.fetch(target.id).catch(() => null);
+    if (!targetMember) {
+        return interaction.reply({
+            embeds: [embeds.error('Error', 'Target member not found in this server.')],
+            flags: [MessageFlags.Ephemeral]
+        });
+    }
+
+    const hierarchy = validateHierarchy(interaction.member, targetMember);
+    if (!hierarchy.valid) {
+        return interaction.reply({
+            embeds: [embeds.error('Cannot Moderate', hierarchy.error)],
+            flags: [MessageFlags.Ephemeral]
+        });
+    }
 
     try {
         await executeModerationAction({
