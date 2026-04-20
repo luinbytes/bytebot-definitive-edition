@@ -294,6 +294,8 @@ module.exports = {
                 return;
             }
 
+            let newChannel = null;
+            let userMoved = false;
             try {
                 // Fetch User Settings
                 const userSettings = await dbLog.select('bytepodUserSettings',
@@ -313,7 +315,7 @@ module.exports = {
                 const channelName = (nameStyle === 'random'
                     ? getRandomPodName()
                     : `${member.user.username}'s Pod`).slice(0, 100);
-                const newChannel = await guild.channels.create({
+                newChannel = await guild.channels.create({
                     name: channelName,
                     type: ChannelType.GuildVoice,
                     parent: categoryId,
@@ -353,8 +355,22 @@ module.exports = {
                     }
                 }
 
+                // Race guard: user may have left the hub during the async work above.
+                // Calling setChannel() on a disconnected user throws DiscordAPIError[40032].
+                // Voice state lives in guild.voiceStates.cache (kept fresh by gateway
+                // VOICE_STATE_UPDATE events) — members.fetch() does NOT refresh it.
+                // Note: if they moved to a different voice channel, setChannel() would
+                // succeed, but we intentionally bail anyway — they chose to leave the hub.
+                const freshVoice = guild.voiceStates.cache.get(member.id);
+                if (!freshVoice || freshVoice.channelId !== hubId) {
+                    logger.info(`BytePod creation aborted for ${member.user.tag}: left voice before move. Cleaning up orphan channel ${newChannel.id}`);
+                    await newChannel.delete('BytePod creator disconnected before move').catch(() => {});
+                    return;
+                }
+
                 // Move Member
                 await member.voice.setChannel(newChannel);
+                userMoved = true;
 
                 // DB Insert - BytePod record
                 await dbLog.insert('bytepods',
@@ -403,7 +419,25 @@ module.exports = {
                 });
 
             } catch (error) {
+                // 40032: target user not connected to voice — they disconnected between
+                // joining the hub and the bot's move attempt. Benign race, not a permission
+                // problem; don't DM the user a misleading error. Just clean up the orphan.
+                if (error.code === 40032) {
+                    logger.info(`BytePod move aborted for ${member.user.tag}: user disconnected from voice before move (40032), channel ${newChannel?.id}`);
+                    if (newChannel) {
+                        await newChannel.delete('BytePod creator disconnected before move').catch(() => {});
+                    }
+                    return;
+                }
+
                 logger.error(`Failed to create BytePod for ${member.user.tag}: ${error}`);
+
+                // Only clean up the channel if we never successfully moved the user into it.
+                // If setChannel succeeded, the user is in the pod; deleting here would yank
+                // them out with no explanation for a downstream DB/welcome-message failure.
+                if (newChannel && !userMoved) {
+                    await newChannel.delete('BytePod creation failed').catch(() => {});
+                }
 
                 // Alert User
                 try {
@@ -414,7 +448,11 @@ module.exports = {
                     // DMs closed
                 }
 
-                try { await member.voice.disconnect(); } catch (e) { }
+                // Don't attempt to disconnect a user who is already out of voice
+                // (would just throw another 40032) or one who is successfully in the pod.
+                if (!userMoved && member.voice.channelId) {
+                    try { await member.voice.disconnect(); } catch (e) { }
+                }
             }
         }
 
@@ -768,8 +806,10 @@ module.exports = {
                             { podId: leftChannelId, guildId: guild.id, operation: 'deletePod' }
                         );
                     } catch (error) {
-                        logger.error(`Failed to cleanup BytePod ${leftChannelId}: ${error}`);
+                        // 10003: channel was already deleted (manually, or by a racing cleanup).
+                        // Benign — just reconcile the DB. Don't log at error level.
                         if (error.code === 10003) {
+                            logger.info(`BytePod ${leftChannelId} already deleted during cleanup, reconciling DB`);
                             await dbLog.delete('bytepods',
                                 () => db.delete(bytepods).where(eq(bytepods.channelId, leftChannelId)),
                                 { podId: leftChannelId, operation: 'cleanupError' }
@@ -778,6 +818,8 @@ module.exports = {
                                 () => db.delete(bytepodActiveSessions).where(eq(bytepodActiveSessions.podId, leftChannelId)),
                                 { podId: leftChannelId, operation: 'cleanupError' }
                             );
+                        } else {
+                            logger.error(`Failed to cleanup BytePod ${leftChannelId}: ${error}`);
                         }
                     }
                 } else if (channel && channel.members.size > 0 && podData.ownerId === member.id) {
