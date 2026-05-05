@@ -29,6 +29,8 @@ sqlite.db.bak
 # Claude
 .claude/
 DATABASE_LOGGING_GUIDE.md
+CLAUDE.md
+AGENTS.md
 
 # Local configuration overrides
 config.local.json
