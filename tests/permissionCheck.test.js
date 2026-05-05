@@ -59,6 +59,9 @@ describe('BytePod Permission Check', () => {
             expect(mockBotMember.permissions.has).toHaveBeenCalledWith(PermissionFlagsBits.ManageChannels);
             expect(mockBotMember.permissions.has).toHaveBeenCalledWith(PermissionFlagsBits.MoveMembers);
             expect(mockBotMember.permissions.has).toHaveBeenCalledWith(PermissionFlagsBits.Connect);
+            expect(mockBotMember.permissions.has).toHaveBeenCalledWith(PermissionFlagsBits.ViewChannel);
+            expect(mockBotMember.permissions.has).toHaveBeenCalledWith(PermissionFlagsBits.SendMessages);
+            expect(mockBotMember.permissions.has).toHaveBeenCalledWith(PermissionFlagsBits.EmbedLinks);
         });
 
         test('should return false when missing ManageChannels permission', async () => {
@@ -84,6 +87,36 @@ describe('BytePod Permission Check', () => {
         test('should return false when missing Connect permission', async () => {
             mockBotMember.permissions.has.mockImplementation((perm) => {
                 return perm !== PermissionFlagsBits.Connect;
+            });
+
+            const result = await checkBotPermissions(mockGuild, mockTriggerMember);
+
+            expect(result).toBe(false);
+        });
+
+        test('should return false when missing ViewChannel permission', async () => {
+            mockBotMember.permissions.has.mockImplementation((perm) => {
+                return perm !== PermissionFlagsBits.ViewChannel;
+            });
+
+            const result = await checkBotPermissions(mockGuild, mockTriggerMember);
+
+            expect(result).toBe(false);
+        });
+
+        test('should return false when missing SendMessages permission', async () => {
+            mockBotMember.permissions.has.mockImplementation((perm) => {
+                return perm !== PermissionFlagsBits.SendMessages;
+            });
+
+            const result = await checkBotPermissions(mockGuild, mockTriggerMember);
+
+            expect(result).toBe(false);
+        });
+
+        test('should return false when missing EmbedLinks permission', async () => {
+            mockBotMember.permissions.has.mockImplementation((perm) => {
+                return perm !== PermissionFlagsBits.EmbedLinks;
             });
 
             const result = await checkBotPermissions(mockGuild, mockTriggerMember);
@@ -222,6 +255,9 @@ describe('BytePod Permission Check', () => {
             expect(embedData.description).toContain('Manage Channels');
             expect(embedData.description).toContain('Move Members');
             expect(embedData.description).toContain('Connect');
+            expect(embedData.description).toContain('View Channel');
+            expect(embedData.description).toContain('Send Messages');
+            expect(embedData.description).toContain('Embed Links');
         });
 
         test('should list only missing permissions when some are granted', async () => {

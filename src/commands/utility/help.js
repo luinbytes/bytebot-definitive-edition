@@ -164,15 +164,27 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
         .setThumbnail(client.user.displayAvatarURL())
         .setDescription(
             '**Welcome to ByteBot!**\n\n' +
-            'A feature-rich Discord bot with moderation, utilities, and unique community engagement systems.\n\n' +
+            'Start with an intent hub: `/me`, `/server`, `/pod`, `/mod`, `/game`, `/fun`, or `/bot`.\n\n' +
             `📊 **${totalCommands}** commands • **${sortedCategories.length}** categories`
         )
         .addFields(
             {
-                name: 'Key Features',
+                name: 'Intent Hubs',
                 value:
-                    'BytePods • Achievements • Activity Streaks\n' +
-                    'Suggestions • Birthdays • Bookmarks • Moderation Tools',
+                    '`/me` personal settings, reminders, bookmarks, birthdays, streaks\n' +
+                    '`/server` setup, stats, suggestions, welcome, starboard, achievements\n' +
+                    '`/pod` BytePod actions and settings\n' +
+                    '`/mod` user actions, logs, and channel controls\n' +
+                    '`/game` F1 and War Thunder\n' +
+                    '`/bot` help, health, deployment, and developer tools',
+                inline: false
+            },
+            {
+                name: 'Common Paths',
+                value:
+                    '`/me reminder add` • `/me bookmark search` • `/pod panel`\n' +
+                    '`/server suggestion submit` • `/server welcome setup`\n' +
+                    '`/mod user warn` • `/game warthunder stats`',
                 inline: false
             }
         );
@@ -187,12 +199,12 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
 
         embed.addFields({
             name: '📂 Browse Commands by Category',
-            value: categoryList + '\n\n💡 Use the **Next** button below to browse each category',
+            value: categoryList + '\n\n💡 Legacy commands remain available while the hub layout rolls out.',
             inline: false
         });
     }
 
-    embed.setFooter({ text: 'Type /help [command] for detailed command info' });
+    embed.setFooter({ text: 'Type /bot help command:me for detailed command info' });
 
     return embed;
 }

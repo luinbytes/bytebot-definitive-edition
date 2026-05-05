@@ -5,130 +5,148 @@ const { executeModerationAction, validateHierarchy } = require('../../utils/mode
 const { db } = require('../../database/index');
 const { moderationLogs } = require('../../database/schema');
 const { eq, and, desc } = require('drizzle-orm');
+const { createCommandAliasInteraction, executeAliasCommand } = require('../../utils/commandAlias');
+const { checkUserPermissions } = require('../../utils/permissions');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('mod')
         .setDescription('Moderation commands')
-        // Ban subcommand
+        .setDMPermission(false)
         .addSubcommand(sub => sub
             .setName('ban')
             .setDescription('Ban a member from the server')
-            .addUserOption(opt => opt
-                .setName('target')
-                .setDescription('The member to ban')
-                .setRequired(true))
-            .addStringOption(opt => opt
-                .setName('reason')
-                .setDescription('Reason for the ban')))
-        // Kick subcommand
+            .addUserOption(opt => opt.setName('target').setDescription('The member to ban').setRequired(true))
+            .addStringOption(opt => opt.setName('reason').setDescription('Reason for the ban')))
         .addSubcommand(sub => sub
             .setName('kick')
             .setDescription('Kick a member from the server')
-            .addUserOption(opt => opt
-                .setName('target')
-                .setDescription('The member to kick')
-                .setRequired(true))
-            .addStringOption(opt => opt
-                .setName('reason')
-                .setDescription('Reason for the kick')))
-        // Warn subcommand
+            .addUserOption(opt => opt.setName('target').setDescription('The member to kick').setRequired(true))
+            .addStringOption(opt => opt.setName('reason').setDescription('Reason for the kick')))
         .addSubcommand(sub => sub
             .setName('warn')
             .setDescription('Warn a member')
-            .addUserOption(opt => opt
-                .setName('target')
-                .setDescription('The member to warn')
-                .setRequired(true))
-            .addStringOption(opt => opt
-                .setName('reason')
-                .setDescription('Reason for the warning')
-                .setRequired(true)))
-        // Remove warning subcommand
+            .addUserOption(opt => opt.setName('target').setDescription('The member to warn').setRequired(true))
+            .addStringOption(opt => opt.setName('reason').setDescription('Reason for the warning').setRequired(true)))
         .addSubcommand(sub => sub
             .setName('unwarn')
             .setDescription('Remove a warning from a user')
-            .addUserOption(opt => opt
-                .setName('target')
-                .setDescription('The user to remove the warning from')
-                .setRequired(true))
-            .addIntegerOption(opt => opt
-                .setName('id')
-                .setDescription('The warning ID to remove')
-                .setRequired(true)))
-        // History for specific user
+            .addUserOption(opt => opt.setName('target').setDescription('The user to remove the warning from').setRequired(true))
+            .addIntegerOption(opt => opt.setName('id').setDescription('The warning ID to remove').setRequired(true)))
         .addSubcommand(sub => sub
             .setName('history')
             .setDescription('View moderation history for a user')
-            .addUserOption(opt => opt
-                .setName('target')
-                .setDescription('User to view history for')
-                .setRequired(true))
-            .addStringOption(opt => opt
-                .setName('action')
-                .setDescription('Filter by action type')
-                .addChoices(
+            .addUserOption(opt => opt.setName('target').setDescription('User to view history for').setRequired(true))
+            .addStringOption(opt => opt.setName('action').setDescription('Filter by action type').addChoices(
+                { name: 'Warn', value: 'WARN' },
+                { name: 'Kick', value: 'KICK' },
+                { name: 'Ban', value: 'BAN' },
+                { name: 'Clear', value: 'CLEAR' }
+            ))
+            .addIntegerOption(opt => opt.setName('limit').setDescription('Number of results').setMinValue(1).setMaxValue(50)))
+        .addSubcommand(sub => sub
+            .setName('recent')
+            .setDescription('View recent moderation actions')
+            .addIntegerOption(opt => opt.setName('limit').setDescription('Number of results').setMinValue(1).setMaxValue(50)))
+        .addSubcommand(sub => sub
+            .setName('actions')
+            .setDescription('View actions taken by a specific moderator')
+            .addUserOption(opt => opt.setName('moderator').setDescription('Moderator to view').setRequired(true))
+            .addIntegerOption(opt => opt.setName('limit').setDescription('Number of results').setMinValue(1).setMaxValue(50)))
+        .addSubcommandGroup(group => group
+            .setName('user')
+            .setDescription('Moderate members')
+            .addSubcommand(sub => sub.setName('ban').setDescription('Ban a member').addUserOption(opt => opt.setName('target').setDescription('The member to ban').setRequired(true)).addStringOption(opt => opt.setName('reason').setDescription('Reason for the ban')))
+            .addSubcommand(sub => sub.setName('kick').setDescription('Kick a member').addUserOption(opt => opt.setName('target').setDescription('The member to kick').setRequired(true)).addStringOption(opt => opt.setName('reason').setDescription('Reason for the kick')))
+            .addSubcommand(sub => sub.setName('warn').setDescription('Warn a member').addUserOption(opt => opt.setName('target').setDescription('The member to warn').setRequired(true)).addStringOption(opt => opt.setName('reason').setDescription('Reason for the warning').setRequired(true)))
+            .addSubcommand(sub => sub.setName('unwarn').setDescription('Remove a warning').addUserOption(opt => opt.setName('target').setDescription('The user to remove the warning from').setRequired(true)).addIntegerOption(opt => opt.setName('id').setDescription('The warning ID to remove').setRequired(true)))
+            .addSubcommand(sub => sub
+                .setName('history')
+                .setDescription('View moderation history for a user')
+                .addUserOption(opt => opt.setName('target').setDescription('User to view history for').setRequired(true))
+                .addStringOption(opt => opt.setName('action').setDescription('Filter by action type').addChoices(
                     { name: 'Warn', value: 'WARN' },
                     { name: 'Kick', value: 'KICK' },
                     { name: 'Ban', value: 'BAN' },
                     { name: 'Clear', value: 'CLEAR' }
                 ))
-            .addIntegerOption(opt => opt
-                .setName('limit')
-                .setDescription('Number of results (default 10, max 50)')
-                .setMinValue(1)
-                .setMaxValue(50)))
-        // Recent actions server-wide
-        .addSubcommand(sub => sub
-            .setName('recent')
-            .setDescription('View recent moderation actions')
-            .addIntegerOption(opt => opt
-                .setName('limit')
-                .setDescription('Number of results (default 10, max 50)')
-                .setMinValue(1)
-                .setMaxValue(50)))
-        // Actions by specific moderator
-        .addSubcommand(sub => sub
-            .setName('actions')
-            .setDescription('View actions taken by a specific moderator')
-            .addUserOption(opt => opt
-                .setName('moderator')
-                .setDescription('Moderator to view')
-                .setRequired(true))
-            .addIntegerOption(opt => opt
-                .setName('limit')
-                .setDescription('Number of results (default 10, max 50)')
-                .setMinValue(1)
-                .setMaxValue(50)))
-        .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+                .addIntegerOption(opt => opt.setName('limit').setDescription('Number of results').setMinValue(1).setMaxValue(50))))
+        .addSubcommandGroup(group => group
+            .setName('logs')
+            .setDescription('Moderation logs')
+            .addSubcommand(sub => sub.setName('recent').setDescription('View recent moderation actions').addIntegerOption(opt => opt.setName('limit').setDescription('Number of results').setMinValue(1).setMaxValue(50)))
+            .addSubcommand(sub => sub.setName('by-moderator').setDescription('View actions by a moderator').addUserOption(opt => opt.setName('moderator').setDescription('Moderator to view').setRequired(true)).addIntegerOption(opt => opt.setName('limit').setDescription('Number of results').setMinValue(1).setMaxValue(50))))
+        .addSubcommandGroup(group => group
+            .setName('channel')
+            .setDescription('Moderate the current channel')
+            .addSubcommand(sub => sub.setName('clear').setDescription('Delete recent messages').addIntegerOption(opt => opt.setName('amount').setDescription('Number of messages to delete').setRequired(true).setMinValue(1).setMaxValue(100)))
+            .addSubcommand(sub => sub.setName('lock').setDescription('Lock the current channel'))
+            .addSubcommand(sub => sub.setName('unlock').setDescription('Unlock the current channel'))),
 
-    permissions: [PermissionFlagsBits.ModerateMembers],
+    permissions: [],
     cooldown: 3,
 
-    async execute(interaction) {
+    async execute(interaction, client) {
+        const group = interaction.options.getSubcommandGroup(false);
         const subcommand = interaction.options.getSubcommand();
 
-        switch (subcommand) {
+        if (group === 'channel') {
+            if (subcommand === 'clear') {
+                return executeAliasCommand(interaction, client, {
+                    commandName: 'clear',
+                    requirePath: 'src/commands/moderation/clear.js',
+                    subcommand: null,
+                    subcommandGroup: null
+                });
+            }
+
+            return executeAliasCommand(interaction, client, {
+                commandName: 'lockchannel',
+                requirePath: 'src/commands/moderation/lockchannel.js',
+                subcommand,
+                subcommandGroup: null
+            });
+        }
+
+        const permissionCheck = await checkUserPermissions(interaction, {
+            data: { name: 'mod' },
+            permissions: [PermissionFlagsBits.ModerateMembers]
+        });
+
+        if (!permissionCheck.allowed) {
+            return interaction.reply({
+                embeds: [permissionCheck.error],
+                flags: [MessageFlags.Ephemeral]
+            });
+        }
+
+        const legacyInteraction = createCommandAliasInteraction(interaction, {
+            commandName: 'mod',
+            subcommand: subcommand === 'by-moderator' ? 'actions' : subcommand,
+            subcommandGroup: null
+        });
+
+        switch (legacyInteraction.options.getSubcommand()) {
             case 'ban':
-                await handleBan(interaction);
+                await handleBan(legacyInteraction);
                 break;
             case 'kick':
-                await handleKick(interaction);
+                await handleKick(legacyInteraction);
                 break;
             case 'warn':
-                await handleWarn(interaction);
+                await handleWarn(legacyInteraction);
                 break;
             case 'unwarn':
-                await handleUnwarn(interaction);
+                await handleUnwarn(legacyInteraction);
                 break;
             case 'history':
-                await handleHistory(interaction);
+                await handleHistory(legacyInteraction);
                 break;
             case 'recent':
-                await handleRecent(interaction);
+                await handleRecent(legacyInteraction);
                 break;
             case 'actions':
-                await handleActions(interaction);
+                await handleActions(legacyInteraction);
                 break;
         }
     }

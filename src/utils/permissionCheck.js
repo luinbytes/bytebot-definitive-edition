@@ -14,7 +14,10 @@ async function checkBotPermissions(guild, triggerMember) {
     const requiredPermissions = [
         PermissionFlagsBits.ManageChannels,
         PermissionFlagsBits.MoveMembers,
-        PermissionFlagsBits.Connect
+        PermissionFlagsBits.Connect,
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.EmbedLinks
     ];
 
     const botMember = guild.members.cache.get(guild.client.user.id);

@@ -48,6 +48,44 @@ function extractExpectedSchemaTables() {
     return Array.from(tableMatches).map(m => m[1]);
 }
 
+function extractSchemaTableColumns() {
+    const schema = require('../src/database/schema');
+    const tableNameSymbol = Symbol.for('drizzle:Name');
+    const columnsSymbol = Symbol.for('drizzle:Columns');
+    const tables = {};
+
+    for (const exportedValue of Object.values(schema)) {
+        if (!exportedValue || !exportedValue[tableNameSymbol] || !exportedValue[columnsSymbol]) {
+            continue;
+        }
+
+        tables[exportedValue[tableNameSymbol]] = Object.values(exportedValue[columnsSymbol])
+            .map(column => column.name)
+            .sort();
+    }
+
+    return tables;
+}
+
+function extractExpectedSchemaColumns() {
+    const indexPath = path.join(__dirname, '../src/database/index.js');
+    const content = fs.readFileSync(indexPath, 'utf8');
+    const schemaMatch = content.match(/const expectedSchema\s*=\s*\{([\s\S]*?)\n\};/);
+    if (!schemaMatch) return {};
+
+    const expected = {};
+    const tableRegex = /^\s{4}(\w+):\s*\{([\s\S]*?)^\s{4}\},?/gm;
+    let tableMatch;
+    while ((tableMatch = tableRegex.exec(schemaMatch[1])) !== null) {
+        const [, tableName, tableBody] = tableMatch;
+        expected[tableName] = Array.from(tableBody.matchAll(/^\s{8}(\w+):\s*['"]/gm))
+            .map(match => match[1])
+            .sort();
+    }
+
+    return expected;
+}
+
 describe('Database Schema Synchronization', () => {
     test('expectedSchema should contain all tables from schema.js', () => {
         const schemaTables = extractTableNamesFromSchema();
@@ -87,5 +125,51 @@ describe('Database Schema Synchronization', () => {
 
         expect(content).toContain('const expectedSchema');
         expect(content).toContain('validateAndFixSchema');
+    });
+
+    test('expectedSchema should contain all columns from schema.js', () => {
+        const schemaColumns = extractSchemaTableColumns();
+        const expectedColumns = extractExpectedSchemaColumns();
+
+        const missing = [];
+        for (const [tableName, columns] of Object.entries(schemaColumns)) {
+            const expectedTableColumns = expectedColumns[tableName] || [];
+            for (const columnName of columns) {
+                if (!expectedTableColumns.includes(columnName)) {
+                    missing.push(`${tableName}.${columnName}`);
+                }
+            }
+        }
+
+        if (missing.length > 0) {
+            console.error('Columns in schema.js but missing from expectedSchema in database/index.js:');
+            missing.forEach(column => console.error(`- ${column}`));
+            console.error('Please add these columns to expectedSchema so existing databases can be auto-fixed.');
+        }
+
+        expect(missing).toEqual([]);
+    });
+
+    test('expectedSchema should not have extra columns not in schema.js', () => {
+        const schemaColumns = extractSchemaTableColumns();
+        const expectedColumns = extractExpectedSchemaColumns();
+
+        const extra = [];
+        for (const [tableName, columns] of Object.entries(expectedColumns)) {
+            const schemaTableColumns = schemaColumns[tableName] || [];
+            for (const columnName of columns) {
+                if (!schemaTableColumns.includes(columnName)) {
+                    extra.push(`${tableName}.${columnName}`);
+                }
+            }
+        }
+
+        if (extra.length > 0) {
+            console.error('Columns in expectedSchema but not in schema.js:');
+            extra.forEach(column => console.error(`- ${column}`));
+            console.error('Please remove these columns from expectedSchema or add them to schema.js.');
+        }
+
+        expect(extra).toEqual([]);
     });
 });

@@ -195,9 +195,12 @@ module.exports = {
         }
 
         if (subdomain === 'panel') {
-            await interaction.deferReply();
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
             // Check if user owns a pod
-            const userPod = await db.select().from(bytepods).where(eq(bytepods.ownerId, interaction.user.id)).get();
+            const userPod = await db.select().from(bytepods).where(and(
+                eq(bytepods.ownerId, interaction.user.id),
+                eq(bytepods.guildId, interaction.guild.id)
+            )).get();
             // Also check if they are in the channel?
             if (!userPod) {
                 return interaction.editReply({ embeds: [embeds.error('No Pod Found', 'You do not seem to have an active BytePod.')], flags: [MessageFlags.Ephemeral] });
@@ -227,14 +230,16 @@ module.exports = {
             const displayCoOwners = coOwners.filter(id => id !== interaction.user.id);
 
             const { embeds: panelEmbeds, components } = getControlPanel(channel.id, isLocked, limit, displayWhitelist, displayCoOwners);
-            const panelMessage = await interaction.editReply({ embeds: panelEmbeds, components: components });
+            const panelMessage = await channel.send({ embeds: panelEmbeds, components: components });
 
             // Store the new panel message ID for future cleanup
             await db.update(bytepods)
                 .set({ panelMessageId: panelMessage.id })
                 .where(eq(bytepods.channelId, userPod.channelId));
 
-            return panelMessage;
+            return interaction.editReply({
+                embeds: [embeds.success('Panel Sent', `Your BytePod control panel was posted in ${channel}.`)]
+            });
         }
 
         if (group === 'preset') {
@@ -633,7 +638,11 @@ module.exports = {
                     return interaction.reply({ content: 'Only the current owner can accept this request.', flags: [MessageFlags.Ephemeral] });
                 }
 
-                await interaction.deferUpdate();
+                // Use reply instead of deferUpdate to avoid Discord voice reconnects.
+                await interaction.reply({
+                    content: '✅ Accepting ownership request...',
+                    flags: [MessageFlags.Ephemeral]
+                });
 
                 try {
                     // Transfer ownership back
@@ -740,7 +749,11 @@ module.exports = {
                     return interaction.reply({ content: 'Only the current owner can deny this request.', flags: [MessageFlags.Ephemeral] });
                 }
 
-                await interaction.deferUpdate();
+                // Use reply instead of deferUpdate to avoid Discord voice reconnects.
+                await interaction.reply({
+                    content: 'Request denied.',
+                    flags: [MessageFlags.Ephemeral]
+                });
 
                 // Clear pending flag in database
                 await db.update(bytepods)

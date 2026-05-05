@@ -105,6 +105,9 @@ async function finalizeVoiceSession(session, client) {
 const pendingOwnershipTransfers = new Map();
 const OWNERSHIP_TRANSFER_DELAY_MS = 5 * 60 * 1000; // 5 minutes
 
+// In-memory guard to coalesce duplicate join-hub events while one pod is being created.
+const pendingPodCreations = new Set();
+
 // --- SESSION STATS TRACKING ---
 // Track pod statistics in memory for session summaries
 // podId -> { peakUsers: number, currentUsers: number, visitors: Set<string> }
@@ -285,18 +288,25 @@ module.exports = {
 
         // --- JOIN HUB TRIGGER ---
         if (joinedChannelId === hubId) {
-            // Check Permissions
-            const hasPerms = await checkBotPermissions(guild, member);
-            if (!hasPerms) {
-                // Kick user from hub to prevent camping? Or just let them sit. 
-                // Better to disconnect them so they know something failed if DM failed.
-                try { await member.voice.disconnect(); } catch (e) { }
+            const creationKey = `${guild.id}:${member.id}`;
+            if (pendingPodCreations.has(creationKey)) {
+                logger.debug(`Ignoring duplicate BytePod creation event for ${member.user.tag} in guild ${guild.id}`);
                 return;
             }
+            pendingPodCreations.add(creationKey);
 
             let newChannel = null;
             let userMoved = false;
             try {
+                // Check Permissions
+                const hasPerms = await checkBotPermissions(guild, member);
+                if (!hasPerms) {
+                    // Kick user from hub to prevent camping? Or just let them sit.
+                    // Better to disconnect them so they know something failed if DM failed.
+                    try { await member.voice.disconnect(); } catch (e) { }
+                    return;
+                }
+
                 // Fetch User Settings
                 const userSettings = await dbLog.select('bytepodUserSettings',
                     () => db.select().from(bytepodUserSettings).where(and(
@@ -309,6 +319,46 @@ module.exports = {
 
                 // Determine Category
                 const categoryId = guildData.voiceHubCategoryId || newState.channel.parentId;
+
+                // Late duplicate join-hub events can arrive after the user was moved
+                // by an earlier create flow. Re-check before creating anything.
+                const currentVoice = guild.voiceStates.cache.get(member.id);
+                if (!currentVoice || currentVoice.channelId !== hubId) {
+                    logger.debug(`BytePod creation skipped for ${member.user.tag}: no longer in hub before channel create`);
+                    return;
+                }
+
+                const existingOwnedPod = await dbLog.select('bytepods',
+                    () => db.select().from(bytepods).where(and(
+                        eq(bytepods.ownerId, member.id),
+                        eq(bytepods.guildId, guild.id)
+                    )).get(),
+                    { userId: member.id, guildId: guild.id, operation: 'existingOwnedPodCheck' }
+                );
+
+                if (existingOwnedPod) {
+                    const existingChannel = guild.channels.cache.get(existingOwnedPod.channelId) ||
+                        await guild.channels.fetch(existingOwnedPod.channelId).catch(() => null);
+
+                    if (existingChannel) {
+                        logger.info(`BytePod creation skipped for ${member.user.tag}: moving to existing pod ${existingOwnedPod.channelId}`);
+                        await member.voice.setChannel(existingChannel);
+                        userMoved = true;
+                        return;
+                    }
+
+                    logger.info(`Cleaning up stale BytePod row ${existingOwnedPod.channelId} for ${member.user.tag} before creating a new pod`);
+                    pendingOwnershipTransfers.delete(existingOwnedPod.channelId);
+                    podStatsTracker.delete(existingOwnedPod.channelId);
+                    await dbLog.delete('bytepodActiveSessions',
+                        () => db.delete(bytepodActiveSessions).where(eq(bytepodActiveSessions.podId, existingOwnedPod.channelId)),
+                        { podId: existingOwnedPod.channelId, operation: 'existingOwnedPodCleanup' }
+                    );
+                    await dbLog.delete('bytepods',
+                        () => db.delete(bytepods).where(eq(bytepods.channelId, existingOwnedPod.channelId)),
+                        { podId: existingOwnedPod.channelId, operation: 'existingOwnedPodCleanup' }
+                    );
+                }
 
                 // Create Channel
                 const nameStyle = userSettings?.podNameStyle || 'username';
@@ -453,6 +503,8 @@ module.exports = {
                 if (!userMoved && member.voice.channelId) {
                     try { await member.voice.disconnect(); } catch (e) { }
                 }
+            } finally {
+                pendingPodCreations.delete(creationKey);
             }
         }
 
@@ -711,14 +763,23 @@ module.exports = {
                         if (!stats) {
                             // Bot restart fallback: can't recover past durations, use active sessions for what's left
                             const activeDurations = new Map();
+                            const visitorIds = new Set();
                             for (const s of sessions) {
                                 const d = Math.floor((Date.now() - s.startTime) / 1000);
                                 activeDurations.set(s.userId, (activeDurations.get(s.userId) || 0) + d);
+                                visitorIds.add(s.userId);
+                            }
+                            if (leavingUserDuration) {
+                                activeDurations.set(
+                                    leavingUserDuration.userId,
+                                    (activeDurations.get(leavingUserDuration.userId) || 0) + leavingUserDuration.durationSeconds
+                                );
+                                visitorIds.add(leavingUserDuration.userId);
                             }
                             stats = {
-                                peakUsers: sessions.length || 1,
+                                peakUsers: visitorIds.size || 1,
                                 currentUsers: sessions.length || 0,
-                                visitors: new Set(sessions.map(s => s.userId)),
+                                visitors: visitorIds,
                                 userDurations: activeDurations
                             };
                         }

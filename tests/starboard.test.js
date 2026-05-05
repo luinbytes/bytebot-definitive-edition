@@ -35,9 +35,8 @@ describe('Starboard System', () => {
 
         afterEach(() => {
             // Clear all pending timeouts to prevent Jest warnings
-            if (service && service.updateQueue) {
-                service.updateQueue.forEach(timeout => clearTimeout(timeout));
-                service.updateQueue.clear();
+            if (service && typeof service.cleanup === 'function') {
+                service.cleanup();
             }
         });
 
