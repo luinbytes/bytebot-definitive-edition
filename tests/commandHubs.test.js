@@ -1,7 +1,12 @@
 const path = require('path');
+const { PermissionFlagsBits } = require('discord.js');
 
 function commandJson(commandPath) {
     return require(path.resolve(commandPath)).data.toJSON();
+}
+
+function commandModule(commandPath) {
+    return require(path.resolve(commandPath));
 }
 
 function optionNames(options = []) {
@@ -128,10 +133,12 @@ describe('Intent command hubs', () => {
 
     test('moderation hub uses user, logs, and channel intent groups', () => {
         const command = commandJson('src/commands/moderation/mod.js');
+        const mod = commandModule('src/commands/moderation/mod.js');
 
         expect(command.name).toBe('mod');
         expect(command.dm_permission).toBe(false);
-        expect(command.default_member_permissions).toBeUndefined();
+        expect(command.default_member_permissions).toBe(PermissionFlagsBits.ModerateMembers.toString());
+        expect(mod.permissions).toEqual([PermissionFlagsBits.ModerateMembers]);
         expect(optionNames(command.options)).toEqual([
             'ban',
             'kick',

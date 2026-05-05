@@ -13,6 +13,7 @@ module.exports = {
         .setName('mod')
         .setDescription('Moderation commands')
         .setDMPermission(false)
+        .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
         .addSubcommand(sub => sub
             .setName('ban')
             .setDescription('Ban a member from the server')
@@ -83,13 +84,14 @@ module.exports = {
             .addSubcommand(sub => sub.setName('lock').setDescription('Lock the current channel'))
             .addSubcommand(sub => sub.setName('unlock').setDescription('Unlock the current channel'))),
 
-    permissions: [],
+    permissions: [PermissionFlagsBits.ModerateMembers],
     cooldown: 3,
 
     async execute(interaction, client) {
         const group = interaction.options.getSubcommandGroup(false);
         const subcommand = interaction.options.getSubcommand();
 
+        // channel-group enforces target-command perms (ManageMessages/ManageChannels), not ModerateMembers
         if (group === 'channel') {
             if (subcommand === 'clear') {
                 return executeAliasCommand(interaction, client, {
