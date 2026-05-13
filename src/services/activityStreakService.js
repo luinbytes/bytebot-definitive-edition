@@ -11,7 +11,7 @@ const {
     users
 } = require('../database/schema');
 const { eq, and, desc } = require('drizzle-orm');
-const { PermissionFlagsBits } = require('discord.js');
+const { PermissionFlagsBits, escapeMarkdown } = require('discord.js');
 const logger = require('../utils/logger');
 const embeds = require('../utils/embeds');
 const { dbLog } = require('../utils/dbLogger');
@@ -638,13 +638,17 @@ class ActivityStreakService {
             await this.checkComboAchievements(userId, guildId, streakData.currentStreak, streakData.totalActiveDays, totals, toAward);
             await this.checkMetaAchievements(userId, guildId, toAward);
 
-            // Award each eligible achievement
+            // Award each eligible achievement, collecting actual awards (skips
+            // dedup/disabled/seasonal-inactive) so they can be DM'd as one batch.
+            const awarded = [];
             for (const achievementId of toAward) {
-                await this.awardAchievement(userId, guildId, achievementId);
+                const def = await this._awardAchievementWithoutNotify(userId, guildId, achievementId);
+                if (def) awarded.push(def);
             }
 
-            if (toAward.length > 0) {
-                logger.success(`Awarded ${toAward.length} achievements to user ${userId} in guild ${guildId}`);
+            if (awarded.length > 0) {
+                await this.notifyAchievementsBatch(userId, guildId, awarded);
+                logger.success(`Awarded ${awarded.length} achievements to user ${userId} in guild ${guildId}`);
             }
 
         } catch (error) {
@@ -1230,9 +1234,15 @@ class ActivityStreakService {
             // 5. Check meta achievements (achievement count)
             await this.checkMetaAchievements(userId, guildId, toAward);
 
-            // Award all newly earned achievements
+            // Same batched-DM rationale as checkAllAchievements above.
+            const awarded = [];
             for (const achievementId of toAward) {
-                await this.awardAchievement(userId, guildId, achievementId);
+                const def = await this._awardAchievementWithoutNotify(userId, guildId, achievementId);
+                if (def) awarded.push(def);
+            }
+
+            if (awarded.length > 0) {
+                await this.notifyAchievementsBatch(userId, guildId, awarded);
             }
 
         } catch (error) {
@@ -1533,82 +1543,120 @@ class ActivityStreakService {
     }
 
     /**
-     * Award an achievement to a user
-     * @param {string} userId - User ID
-     * @param {string} guildId - Guild ID
-     * @param {string} achievementId - Achievement ID
+     * Insert achievement + grant role without sending a DM.
+     * Returns the achievement definition object on a real award, or null when
+     * skipped (disabled guild, already earned, unknown id, seasonal-inactive,
+     * or DB error). Callers can collect non-null results to drive batched
+     * notifications.
+     * @param {string} userId
+     * @param {string} guildId
+     * @param {string} achievementId
+     * @param {string|null} awardedBy - null = auto-tracked, userId = manual
+     * @returns {Promise<Object|null>} achievement definition or null
      */
-    async awardAchievement(userId, guildId, achievementId, awardedBy = null) {
+    async _awardAchievementWithoutNotify(userId, guildId, achievementId, awardedBy = null) {
         try {
-            // Only check if enabled for automatic awards (awardedBy = null means auto-awarded)
-            // Manual awards by admins bypass the disabled check
+            // Manual awards (awardedBy != null) bypass the per-guild enabled check.
             if (!awardedBy) {
                 const achievementsEnabled = await this.isAchievementsEnabled(guildId);
                 if (!achievementsEnabled) {
-                    return;
+                    return null;
                 }
             }
 
-            // Check if already earned
             if (await this.hasAchievement(userId, guildId, achievementId)) {
-                return;
+                return null;
             }
 
-            // Get achievement definition
             const achievement = await this.achievementManager.getById(achievementId);
             if (!achievement) {
                 logger.warn(`Achievement ${achievementId} not found in definitions`);
-                return;
+                return null;
             }
 
-            // Validate seasonal achievement can be awarded
             if (achievement.seasonal) {
                 const canAward = await this.achievementManager.canAward(achievementId);
                 if (!canAward) {
                     logger.debug(`Seasonal achievement ${achievementId} not currently active, skipping award`);
-                    return;
+                    return null;
                 }
             }
 
-            // Insert into database
             await dbLog.insert('activityAchievements',
                 () => db.insert(activityAchievements).values({
                     userId,
                     guildId,
                     achievementId,
                     points: achievement.points,
-                    awardedBy, // null = auto-tracked, userId = manually awarded
+                    awardedBy,
                     notified: false,
                     earnedAt: new Date()
                 }),
                 { userId, guildId, achievementId, points: achievement.points }
             );
 
-            // Send DM notification
-            await this.notifyAchievement(userId, guildId, achievementId);
-
-            // Grant role reward if achievement provides one
             if (achievement.grantRole) {
-                await this.grantAchievementRole(userId, guildId, achievement);
+                // Role-grant failures must NOT poison the award flow. The DB row
+                // is already inserted at this point — if we let an exception
+                // escape, the outer catch returns null and the batch DM loses
+                // this entry, leaving the user with a silent achievement.
+                try {
+                    await this.grantAchievementRole(userId, guildId, achievement);
+                } catch (roleErr) {
+                    logger.error(
+                        `Role grant failed for achievement ${achievementId} (user ${userId}, guild ${guildId}):`,
+                        roleErr
+                    );
+                }
             }
 
             logger.success(`🏆 Awarded ${achievement.title} to user ${userId}`);
+            return achievement;
 
         } catch (error) {
             logger.error(`Error awarding achievement ${achievementId} to user ${userId}:`, error);
+            return null;
         }
     }
 
     /**
-     * Notify user of new achievement
+     * Award an achievement to a user and send a single-item DM.
+     * Used by /achievement award (manual) and as a back-compat shim for any
+     * caller that still wants one-shot award+notify.
      * @param {string} userId - User ID
      * @param {string} guildId - Guild ID
      * @param {string} achievementId - Achievement ID
      */
-    async notifyAchievement(userId, guildId, achievementId) {
+    async awardAchievement(userId, guildId, achievementId, awardedBy = null) {
+        const achievement = await this._awardAchievementWithoutNotify(userId, guildId, achievementId, awardedBy);
+        if (!achievement) return;
+        await this.notifyAchievementsBatch(userId, guildId, [achievement]);
+    }
+
+    /**
+     * Notify user of new achievement(s).
+     * Accepts either an array of achievement ids OR an array of already-resolved
+     * achievement definition objects. Length 1 renders identical to the legacy
+     * single-DM embed; length >= 2 collapses into one combined embed.
+     *
+     * @param {string} userId
+     * @param {string} guildId
+     * @param {Array<string|Object>} achievements
+     */
+    async notifyAchievementsBatch(userId, guildId, achievements) {
         try {
-            const achievement = await this.achievementManager.getById(achievementId);
-            if (!achievement) return;
+            if (!Array.isArray(achievements) || achievements.length === 0) return;
+
+            const resolved = [];
+            for (const entry of achievements) {
+                if (entry && typeof entry === 'object' && entry.id) {
+                    resolved.push(entry);
+                } else if (typeof entry === 'string') {
+                    const def = await this.achievementManager.getById(entry);
+                    if (def) resolved.push(def);
+                }
+            }
+            if (resolved.length === 0) return;
 
             const user = await this.client.users.fetch(userId).catch(() => null);
             if (!user) return;
@@ -1616,19 +1664,50 @@ class ActivityStreakService {
             const guild = await this.client.guilds.fetch(guildId).catch(() => null);
             const guildName = guild ? guild.name : 'Unknown Server';
 
-            const embed = embeds.success(
-                `${achievement.emoji} Achievement Unlocked!`,
-                `**${achievement.title}**\n${achievement.description}\n\nEarned in: **${guildName}**\n\nKeep up the great work!`
-            );
+            // Custom achievements accept admin-supplied title/description from a modal.
+            // Escape markdown to prevent injection (fake bullets, bold breakouts,
+            // spoofed link syntax). Strip newlines from descriptions first —
+            // escapeMarkdown won't touch them and a stray \n breaks the bullet layout.
+            const safeTitle = (t) => escapeMarkdown(String(t ?? ''));
+            const safeDesc = (d) => escapeMarkdown(String(d ?? '').replace(/\n+/g, ' ').trim());
+
+            let embed;
+            if (resolved.length === 1) {
+                const achievement = resolved[0];
+                embed = embeds.success(
+                    `${achievement.emoji} Achievement Unlocked!`,
+                    `**${safeTitle(achievement.title)}**\n${safeDesc(achievement.description)}\n\nEarned in: **${guildName}**\n\nKeep up the great work!`
+                );
+            } else {
+                const lines = resolved.map(a => `${a.emoji} **${safeTitle(a.title)}** — ${safeDesc(a.description)}`);
+                embed = embeds.success(
+                    `🏆 Achievements Unlocked! (×${resolved.length})`,
+                    `${lines.join('\n')}\n\nEarned in: **${guildName}**\n\nKeep up the great work!`
+                );
+            }
 
             await user.send({ embeds: [embed] }).catch(() => {
                 logger.debug(`Could not DM achievement to user ${userId}`);
             });
 
-            logger.success(`🏆 Achievement unlocked: ${achievement.title} for user ${userId}`);
+            if (resolved.length === 1) {
+                logger.success(`🏆 Achievement unlocked: ${resolved[0].title} for user ${userId}`);
+            } else {
+                logger.success(`🏆 ${resolved.length} achievements unlocked for user ${userId}: ${resolved.map(a => a.title).join(', ')}`);
+            }
         } catch (error) {
-            logger.error(`Error notifying achievement for user ${userId}:`, error);
+            const ids = Array.isArray(achievements)
+                ? achievements.map(a => (a && typeof a === 'object') ? a.id : a).join(',')
+                : '';
+            logger.error(`Error notifying achievements for user ${userId} [ids=${ids}]:`, error);
         }
+    }
+
+    /**
+     * Back-compat shim. Prefer notifyAchievementsBatch for new callers.
+     */
+    async notifyAchievement(userId, guildId, achievementId) {
+        await this.notifyAchievementsBatch(userId, guildId, [achievementId]);
     }
 
     /**
