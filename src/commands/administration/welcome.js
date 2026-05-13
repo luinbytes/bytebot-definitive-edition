@@ -96,53 +96,59 @@ module.exports = {
         .setName('welcome')
         .setDescription('Manage welcome messages for new members.')
         .setDMPermission(false)
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('setup')
-                .setDescription('Set the welcome channel.')
-                .addChannelOption(option =>
-                    option.setName('channel')
-                        .setDescription('The channel to send welcome messages to')
-                        .addChannelTypes(ChannelType.GuildText)
-                        .setRequired(true)))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('message')
-                .setDescription('Set the welcome message template.')
-                .addStringOption(option =>
-                    option.setName('text')
-                        .setDescription('Message template (use {user} {username} {server} {memberCount})')
-                        .setRequired(true)
-                        .setMinLength(1)
-                        .setMaxLength(2000)))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('toggle')
-                .setDescription('Enable or disable welcome messages.')
-                .addBooleanOption(option =>
-                    option.setName('enabled')
-                        .setDescription('Enable or disable')
-                        .setRequired(true)))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('embed')
-                .setDescription('Toggle whether to use an embed for welcome messages.')
-                .addBooleanOption(option =>
-                    option.setName('use_embed')
-                        .setDescription('Use embed format')
-                        .setRequired(true)))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('variables')
-                .setDescription('View all available placeholder variables and examples.'))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('test')
-                .setDescription('Send a test welcome message to see how it looks.'))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('view')
-                .setDescription('View current welcome message configuration.'))
+        .addSubcommandGroup(group => group
+            .setName('configure')
+            .setDescription('Set up and maintain welcome messages')
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('channel')
+                    .setDescription('Set the welcome channel')
+                    .addChannelOption(option =>
+                        option.setName('channel')
+                            .setDescription('The channel to send welcome messages to')
+                            .addChannelTypes(ChannelType.GuildText)
+                            .setRequired(true)))
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('message')
+                    .setDescription('Set the welcome message template')
+                    .addStringOption(option =>
+                        option.setName('text')
+                            .setDescription('Message template (use {user} {username} {server} {memberCount})')
+                            .setRequired(true)
+                            .setMinLength(1)
+                            .setMaxLength(2000)))
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('enabled')
+                    .setDescription('Enable or disable welcome messages')
+                    .addBooleanOption(option =>
+                        option.setName('enabled')
+                            .setDescription('Enable or disable')
+                            .setRequired(true)))
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('format')
+                    .setDescription('Toggle whether to use an embed for welcome messages')
+                    .addBooleanOption(option =>
+                        option.setName('use_embed')
+                            .setDescription('Use embed format')
+                            .setRequired(true))))
+        .addSubcommandGroup(group => group
+            .setName('preview')
+            .setDescription('Preview and inspect welcome settings')
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('variables')
+                    .setDescription('View all available placeholder variables and examples'))
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('test')
+                    .setDescription('Send a test welcome message to see how it looks'))
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('view')
+                    .setDescription('View current welcome message configuration')))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
 
     permissions: [PermissionFlagsBits.ManageGuild],
@@ -166,6 +172,7 @@ module.exports = {
             }
 
             switch (subcommand) {
+                case 'channel':
                 case 'setup':
                     await handleSetup(interaction, config);
                     break;
@@ -174,10 +181,12 @@ module.exports = {
                     await handleMessage(interaction, config);
                     break;
 
+                case 'enabled':
                 case 'toggle':
                     await handleToggle(interaction, config);
                     break;
 
+                case 'format':
                 case 'embed':
                     await handleEmbed(interaction, config);
                     break;

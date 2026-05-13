@@ -180,21 +180,27 @@ describe('Auto-Responder System', () => {
 });
 
 describe('Auto-Responder Command', () => {
+    function findGroup(command, name) {
+        return command.data.options.find(opt => opt.name === name);
+    }
+
+    function findSubcommand(command, groupName, subcommandName) {
+        const group = findGroup(command, groupName);
+        return group.options.find(opt => opt.name === subcommandName);
+    }
+
     test('/autorespond command should have all required subcommands', () => {
         const autoRespondCmd = require('../src/commands/administration/autorespond');
-        const subcommands = autoRespondCmd.data.options;
+        const groups = autoRespondCmd.data.options;
 
-        const subcommandNames = subcommands.map(opt => opt.name);
-        expect(subcommandNames).toContain('add');
-        expect(subcommandNames).toContain('remove');
-        expect(subcommandNames).toContain('list');
-        expect(subcommandNames).toContain('toggle');
-        expect(subcommandNames).toContain('edit');
+        expect(groups.map(opt => opt.name)).toEqual(['manage', 'browse']);
+        expect(findGroup(autoRespondCmd, 'manage').options.map(opt => opt.name)).toEqual(['add', 'edit', 'remove', 'toggle']);
+        expect(findGroup(autoRespondCmd, 'browse').options.map(opt => opt.name)).toEqual(['list']);
     });
 
     test('/autorespond add should have match type choices', () => {
         const autoRespondCmd = require('../src/commands/administration/autorespond');
-        const addSubcommand = autoRespondCmd.data.options.find(opt => opt.name === 'add');
+        const addSubcommand = findSubcommand(autoRespondCmd, 'manage', 'add');
         const matchTypeOption = addSubcommand.options.find(opt => opt.name === 'match_type');
 
         expect(matchTypeOption).toBeDefined();
@@ -209,7 +215,7 @@ describe('Auto-Responder Command', () => {
 
     test('/autorespond add should validate response length', () => {
         const autoRespondCmd = require('../src/commands/administration/autorespond');
-        const addSubcommand = autoRespondCmd.data.options.find(opt => opt.name === 'add');
+        const addSubcommand = findSubcommand(autoRespondCmd, 'manage', 'add');
         const responseOption = addSubcommand.options.find(opt => opt.name === 'response');
 
         expect(responseOption.max_length).toBe(2000); // Discord's message limit

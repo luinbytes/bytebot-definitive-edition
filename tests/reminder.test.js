@@ -130,20 +130,27 @@ describe('Reminder System', () => {
 });
 
 describe('Reminder Command', () => {
+    function findGroup(command, name) {
+        return command.data.options.find(opt => opt.name === name);
+    }
+
+    function findSubcommand(command, groupName, subcommandName) {
+        const group = findGroup(command, groupName);
+        return group.options.find(opt => opt.name === subcommandName);
+    }
+
     test('/reminder command should have all required subcommands', () => {
         const reminderCmd = require('../src/commands/utility/reminder');
-        const subcommands = reminderCmd.data.options;
+        const groups = reminderCmd.data.options;
 
-        const subcommandNames = subcommands.map(opt => opt.name);
-        expect(subcommandNames).toContain('me');
-        expect(subcommandNames).toContain('here');
-        expect(subcommandNames).toContain('list');
-        expect(subcommandNames).toContain('cancel');
+        expect(groups.map(opt => opt.name)).toEqual(['create', 'manage']);
+        expect(findGroup(reminderCmd, 'create').options.map(opt => opt.name)).toEqual(['me', 'here']);
+        expect(findGroup(reminderCmd, 'manage').options.map(opt => opt.name)).toEqual(['list', 'cancel']);
     });
 
     test('/reminder me should require time and message', () => {
         const reminderCmd = require('../src/commands/utility/reminder');
-        const meSubcommand = reminderCmd.data.options.find(opt => opt.name === 'me');
+        const meSubcommand = findSubcommand(reminderCmd, 'create', 'me');
 
         const timeOption = meSubcommand.options.find(opt => opt.name === 'time');
         const messageOption = meSubcommand.options.find(opt => opt.name === 'message');
@@ -155,7 +162,7 @@ describe('Reminder Command', () => {
 
     test('/reminder cancel should validate ID as positive integer', () => {
         const reminderCmd = require('../src/commands/utility/reminder');
-        const cancelSubcommand = reminderCmd.data.options.find(opt => opt.name === 'cancel');
+        const cancelSubcommand = findSubcommand(reminderCmd, 'manage', 'cancel');
         const idOption = cancelSubcommand.options.find(opt => opt.name === 'id');
 
         expect(idOption.required).toBe(true);

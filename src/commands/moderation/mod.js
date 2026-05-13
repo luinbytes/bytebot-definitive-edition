@@ -14,46 +14,6 @@ module.exports = {
         .setDescription('Moderation commands')
         .setDMPermission(false)
         .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
-        .addSubcommand(sub => sub
-            .setName('ban')
-            .setDescription('Ban a member from the server')
-            .addUserOption(opt => opt.setName('target').setDescription('The member to ban').setRequired(true))
-            .addStringOption(opt => opt.setName('reason').setDescription('Reason for the ban')))
-        .addSubcommand(sub => sub
-            .setName('kick')
-            .setDescription('Kick a member from the server')
-            .addUserOption(opt => opt.setName('target').setDescription('The member to kick').setRequired(true))
-            .addStringOption(opt => opt.setName('reason').setDescription('Reason for the kick')))
-        .addSubcommand(sub => sub
-            .setName('warn')
-            .setDescription('Warn a member')
-            .addUserOption(opt => opt.setName('target').setDescription('The member to warn').setRequired(true))
-            .addStringOption(opt => opt.setName('reason').setDescription('Reason for the warning').setRequired(true)))
-        .addSubcommand(sub => sub
-            .setName('unwarn')
-            .setDescription('Remove a warning from a user')
-            .addUserOption(opt => opt.setName('target').setDescription('The user to remove the warning from').setRequired(true))
-            .addIntegerOption(opt => opt.setName('id').setDescription('The warning ID to remove').setRequired(true)))
-        .addSubcommand(sub => sub
-            .setName('history')
-            .setDescription('View moderation history for a user')
-            .addUserOption(opt => opt.setName('target').setDescription('User to view history for').setRequired(true))
-            .addStringOption(opt => opt.setName('action').setDescription('Filter by action type').addChoices(
-                { name: 'Warn', value: 'WARN' },
-                { name: 'Kick', value: 'KICK' },
-                { name: 'Ban', value: 'BAN' },
-                { name: 'Clear', value: 'CLEAR' }
-            ))
-            .addIntegerOption(opt => opt.setName('limit').setDescription('Number of results').setMinValue(1).setMaxValue(50)))
-        .addSubcommand(sub => sub
-            .setName('recent')
-            .setDescription('View recent moderation actions')
-            .addIntegerOption(opt => opt.setName('limit').setDescription('Number of results').setMinValue(1).setMaxValue(50)))
-        .addSubcommand(sub => sub
-            .setName('actions')
-            .setDescription('View actions taken by a specific moderator')
-            .addUserOption(opt => opt.setName('moderator').setDescription('Moderator to view').setRequired(true))
-            .addIntegerOption(opt => opt.setName('limit').setDescription('Number of results').setMinValue(1).setMaxValue(50)))
         .addSubcommandGroup(group => group
             .setName('user')
             .setDescription('Moderate members')

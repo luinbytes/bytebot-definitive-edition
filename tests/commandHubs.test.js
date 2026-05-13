@@ -140,13 +140,6 @@ describe('Intent command hubs', () => {
         expect(command.default_member_permissions).toBe(PermissionFlagsBits.ModerateMembers.toString());
         expect(mod.permissions).toEqual([PermissionFlagsBits.ModerateMembers]);
         expect(optionNames(command.options)).toEqual([
-            'ban',
-            'kick',
-            'warn',
-            'unwarn',
-            'history',
-            'recent',
-            'actions',
             'user',
             'logs',
             'channel'

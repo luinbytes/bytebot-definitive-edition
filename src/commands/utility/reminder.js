@@ -12,54 +12,60 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('reminder')
         .setDescription('Set and manage reminders')
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('me')
-                .setDescription('Set a personal DM reminder')
-                .addStringOption(option =>
-                    option.setName('time')
-                        .setDescription('Time until reminder (e.g., 10m, 2h, 3d, 2h 30m)')
-                        .setRequired(true)
-                )
-                .addStringOption(option =>
-                    option.setName('message')
-                        .setDescription('What to remind you about')
-                        .setRequired(true)
-                        .setMaxLength(1000)
-                )
-        )
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('here')
-                .setDescription('Set a reminder in this channel')
-                .addStringOption(option =>
-                    option.setName('time')
-                        .setDescription('Time until reminder (e.g., 10m, 2h, 3d, 2h 30m)')
-                        .setRequired(true)
-                )
-                .addStringOption(option =>
-                    option.setName('message')
-                        .setDescription('What to remind about')
-                        .setRequired(true)
-                        .setMaxLength(1000)
-                )
-        )
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('list')
-                .setDescription('View your active reminders')
-        )
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('cancel')
-                .setDescription('Cancel a reminder')
-                .addIntegerOption(option =>
-                    option.setName('id')
-                        .setDescription('Reminder ID (from /reminder list)')
-                        .setRequired(true)
-                        .setMinValue(1)
-                )
-        ),
+        .addSubcommandGroup(group => group
+            .setName('create')
+            .setDescription('Create new reminders')
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('me')
+                    .setDescription('Set a personal DM reminder')
+                    .addStringOption(option =>
+                        option.setName('time')
+                            .setDescription('Time until reminder (e.g., 10m, 2h, 3d, 2h 30m)')
+                            .setRequired(true)
+                    )
+                    .addStringOption(option =>
+                        option.setName('message')
+                            .setDescription('What to remind you about')
+                            .setRequired(true)
+                            .setMaxLength(1000)
+                    )
+            )
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('here')
+                    .setDescription('Set a reminder in this channel')
+                    .addStringOption(option =>
+                        option.setName('time')
+                            .setDescription('Time until reminder (e.g., 10m, 2h, 3d, 2h 30m)')
+                            .setRequired(true)
+                    )
+                    .addStringOption(option =>
+                        option.setName('message')
+                            .setDescription('What to remind about')
+                            .setRequired(true)
+                            .setMaxLength(1000)
+                    )
+            ))
+        .addSubcommandGroup(group => group
+            .setName('manage')
+            .setDescription('Review and cancel reminders')
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('list')
+                    .setDescription('View your active reminders')
+            )
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('cancel')
+                    .setDescription('Cancel a reminder')
+                    .addIntegerOption(option =>
+                        option.setName('id')
+                            .setDescription('Reminder ID (from /reminder manage list)')
+                            .setRequired(true)
+                            .setMinValue(1)
+                    )
+            )),
 
     async execute(interaction, client) {
         const subcommand = interaction.options.getSubcommand();

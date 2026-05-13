@@ -65,11 +65,23 @@ async function showCommandDetails(interaction, client, commandName) {
         );
 
     if (command.data.options && command.data.options.length > 0) {
-        const optionsList = command.data.options.map(opt => {
-            const required = opt.required ? '(required)' : '(optional)';
-            return `\`${opt.name}\` ${required} - ${opt.description}`;
-        }).join('\n');
-        embed.addFields({ name: 'Options', value: optionsList });
+        const groups = command.data.options.filter(opt => opt.type === 2);
+        if (groups.length > 0) {
+            const groupList = groups.map(group => {
+                const subcommands = (group.options || [])
+                    .filter(opt => opt.type === 1)
+                    .map(sub => sub.name)
+                    .join(', ');
+                return `\`${group.name}\`: ${subcommands}`;
+            }).join('\n');
+            embed.addFields({ name: 'Command Groups', value: groupList });
+        } else {
+            const optionsList = command.data.options.map(opt => {
+                const required = opt.required ? '(required)' : '(optional)';
+                return `\`${opt.name}\` ${required} - ${opt.description}`;
+            }).join('\n');
+            embed.addFields({ name: 'Options', value: optionsList });
+        }
     }
 
     return interaction.reply({
@@ -231,9 +243,17 @@ function buildCategoryEmbed(categoryName, categoryCommands) {
                 desc = desc.substring(0, 97) + '...';
             }
 
-            // Check for subcommands
-            const hasSubcommands = cmd.data.options && cmd.data.options.length > 0 &&
-                cmd.data.options[0].type === 1; // Type 1 = Subcommand
+            const hasGroups = cmd.data.options && cmd.data.options.some(opt => opt.type === 2);
+
+            if (hasGroups) {
+                const groups = cmd.data.options
+                    .filter(opt => opt.type === 2)
+                    .map(group => `${group.name}: ${(group.options || []).filter(opt => opt.type === 1).map(sub => sub.name).join(', ')}`)
+                    .join(' • ');
+                return `**/${cmd.data.name}** \`${groups}\`\n${desc}`;
+            }
+
+            const hasSubcommands = cmd.data.options && cmd.data.options.some(opt => opt.type === 1);
 
             if (hasSubcommands) {
                 const subcommands = cmd.data.options

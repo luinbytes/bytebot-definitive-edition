@@ -12,83 +12,89 @@ module.exports = {
         .setDescription('Manage automated keyword responses')
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
         .setDMPermission(false)
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('add')
-                .setDescription('Create a new auto-response')
-                .addStringOption(option =>
-                    option.setName('trigger')
-                        .setDescription('Trigger keyword or pattern')
-                        .setRequired(true)
-                        .setMinLength(1)
-                        .setMaxLength(100))
-                .addStringOption(option =>
-                    option.setName('response')
-                        .setDescription('Response message (use {user} {server} {channel} variables)')
-                        .setRequired(true)
-                        .setMinLength(1)
-                        .setMaxLength(2000))
-                .addStringOption(option =>
-                    option.setName('match_type')
-                        .setDescription('How to match the trigger')
-                        .setRequired(false)
-                        .addChoices(
-                            { name: 'Contains (default)', value: 'contains' },
-                            { name: 'Exact Match', value: 'exact' },
-                            { name: 'Wildcard (*)', value: 'wildcard' },
-                            { name: 'Regex (dev only)', value: 'regex' }
-                        ))
-                .addChannelOption(option =>
-                    option.setName('channel')
-                        .setDescription('Restrict to specific channel (optional)')
-                        .setRequired(false))
-                .addRoleOption(option =>
-                    option.setName('role')
-                        .setDescription('Require user to have this role (optional)')
-                        .setRequired(false))
-                .addIntegerOption(option =>
-                    option.setName('cooldown')
-                        .setDescription('Cooldown in seconds (default: 60)')
-                        .setRequired(false)
-                        .setMinValue(5)
-                        .setMaxValue(3600)))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('remove')
-                .setDescription('Delete an auto-response')
-                .addIntegerOption(option =>
-                    option.setName('id')
-                        .setDescription('Auto-response ID')
-                        .setRequired(true)
-                        .setAutocomplete(true)))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('list')
-                .setDescription('View all auto-responses'))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('toggle')
-                .setDescription('Enable/disable an auto-response')
-                .addIntegerOption(option =>
-                    option.setName('id')
-                        .setDescription('Auto-response ID')
-                        .setRequired(true)
-                        .setAutocomplete(true)))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('edit')
-                .setDescription('Update an auto-response message')
-                .addIntegerOption(option =>
-                    option.setName('id')
-                        .setDescription('Auto-response ID')
-                        .setRequired(true)
-                        .setAutocomplete(true))
-                .addStringOption(option =>
-                    option.setName('new_response')
-                        .setDescription('New response message')
-                        .setRequired(true)
-                        .setMinLength(1)
-                        .setMaxLength(2000))),
+        .addSubcommandGroup(group => group
+            .setName('manage')
+            .setDescription('Create and maintain auto-responses')
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('add')
+                    .setDescription('Create a new auto-response')
+                    .addStringOption(option =>
+                        option.setName('trigger')
+                            .setDescription('Trigger keyword or pattern')
+                            .setRequired(true)
+                            .setMinLength(1)
+                            .setMaxLength(100))
+                    .addStringOption(option =>
+                        option.setName('response')
+                            .setDescription('Response message (use {user} {server} {channel} variables)')
+                            .setRequired(true)
+                            .setMinLength(1)
+                            .setMaxLength(2000))
+                    .addStringOption(option =>
+                        option.setName('match_type')
+                            .setDescription('How to match the trigger')
+                            .setRequired(false)
+                            .addChoices(
+                                { name: 'Contains (default)', value: 'contains' },
+                                { name: 'Exact Match', value: 'exact' },
+                                { name: 'Wildcard (*)', value: 'wildcard' },
+                                { name: 'Regex (dev only)', value: 'regex' }
+                            ))
+                    .addChannelOption(option =>
+                        option.setName('channel')
+                            .setDescription('Restrict to specific channel (optional)')
+                            .setRequired(false))
+                    .addRoleOption(option =>
+                        option.setName('role')
+                            .setDescription('Require user to have this role (optional)')
+                            .setRequired(false))
+                    .addIntegerOption(option =>
+                        option.setName('cooldown')
+                            .setDescription('Cooldown in seconds (default: 60)')
+                            .setRequired(false)
+                            .setMinValue(5)
+                            .setMaxValue(3600)))
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('edit')
+                    .setDescription('Update an auto-response message')
+                    .addIntegerOption(option =>
+                        option.setName('id')
+                            .setDescription('Auto-response ID')
+                            .setRequired(true)
+                            .setAutocomplete(true))
+                    .addStringOption(option =>
+                        option.setName('new_response')
+                            .setDescription('New response message')
+                            .setRequired(true)
+                            .setMinLength(1)
+                            .setMaxLength(2000)))
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('remove')
+                    .setDescription('Delete an auto-response')
+                    .addIntegerOption(option =>
+                        option.setName('id')
+                            .setDescription('Auto-response ID')
+                            .setRequired(true)
+                            .setAutocomplete(true)))
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('toggle')
+                    .setDescription('Enable/disable an auto-response')
+                    .addIntegerOption(option =>
+                        option.setName('id')
+                            .setDescription('Auto-response ID')
+                            .setRequired(true)
+                            .setAutocomplete(true))))
+        .addSubcommandGroup(group => group
+            .setName('browse')
+            .setDescription('Review auto-responses')
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('list')
+                    .setDescription('View all auto-responses'))),
 
     permissions: [PermissionFlagsBits.ManageGuild],
     cooldown: 3,

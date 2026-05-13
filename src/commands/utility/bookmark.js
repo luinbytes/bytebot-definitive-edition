@@ -7,47 +7,53 @@ module.exports = {
         .setName('bookmark')
         .setDescription('Manage your saved message bookmarks')
         .setDMPermission(true)
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('list')
-                .setDescription('View your bookmarks')
-                .addIntegerOption(option =>
-                    option.setName('page')
-                        .setDescription('Page number (10 bookmarks per page)')
-                        .setMinValue(1)
-                        .setRequired(false)))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('search')
-                .setDescription('Search your bookmarks by content')
-                .addStringOption(option =>
-                    option.setName('query')
-                        .setDescription('Search query')
-                        .setRequired(true)
-                        .setMinLength(2)
-                        .setMaxLength(100)))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('view')
-                .setDescription('View a specific bookmark in detail')
-                .addIntegerOption(option =>
-                    option.setName('id')
-                        .setDescription('Bookmark ID')
-                        .setRequired(true)
-                        .setMinValue(1)))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('delete')
-                .setDescription('Delete a specific bookmark')
-                .addIntegerOption(option =>
-                    option.setName('id')
-                        .setDescription('Bookmark ID')
-                        .setRequired(true)
-                        .setMinValue(1)))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('clear')
-                .setDescription('Delete ALL your bookmarks (requires confirmation)')),
+        .addSubcommandGroup(group => group
+            .setName('browse')
+            .setDescription('Find and inspect bookmarks')
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('list')
+                    .setDescription('View your bookmarks')
+                    .addIntegerOption(option =>
+                        option.setName('page')
+                            .setDescription('Page number (10 bookmarks per page)')
+                            .setMinValue(1)
+                            .setRequired(false)))
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('search')
+                    .setDescription('Search your bookmarks by content')
+                    .addStringOption(option =>
+                        option.setName('query')
+                            .setDescription('Search query')
+                            .setRequired(true)
+                            .setMinLength(2)
+                            .setMaxLength(100)))
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('view')
+                    .setDescription('View a specific bookmark in detail')
+                    .addIntegerOption(option =>
+                        option.setName('id')
+                            .setDescription('Bookmark ID')
+                            .setRequired(true)
+                            .setMinValue(1))))
+        .addSubcommandGroup(group => group
+            .setName('manage')
+            .setDescription('Remove saved bookmarks')
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('delete')
+                    .setDescription('Delete a specific bookmark')
+                    .addIntegerOption(option =>
+                        option.setName('id')
+                            .setDescription('Bookmark ID')
+                            .setRequired(true)
+                            .setMinValue(1)))
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('clear')
+                    .setDescription('Delete ALL your bookmarks (requires confirmation)'))),
 
     cooldown: 3,
     longRunning: true,
