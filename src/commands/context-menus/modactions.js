@@ -124,6 +124,9 @@ module.exports = {
         if (modalType !== 'modal') return;
 
         const reason = interaction.fields.getTextInputValue('reason');
+
+        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
         const target = await client.users.fetch(userId);
         const guild = interaction.guild;
         const executor = interaction.member;
@@ -132,9 +135,8 @@ module.exports = {
         const targetMember = await fetchMember(guild, userId, { logContext: 'modactions-revalidate' });
 
         if (!targetMember && action !== 'ban') {
-            return interaction.reply({
-                embeds: [embeds.error('User Not Found', 'This user is no longer in the server.')],
-                flags: [MessageFlags.Ephemeral]
+            return interaction.editReply({
+                embeds: [embeds.error('User Not Found', 'This user is no longer in the server.')]
             });
         }
 
@@ -142,9 +144,8 @@ module.exports = {
         if (targetMember) {
             const validation = validateHierarchy(executor, targetMember);
             if (!validation.valid) {
-                return interaction.reply({
-                    embeds: [embeds.error('Cannot Moderate', validation.error)],
-                    flags: [MessageFlags.Ephemeral]
+                return interaction.editReply({
+                    embeds: [embeds.error('Cannot Moderate', validation.error)]
                 });
             }
         }
@@ -162,9 +163,8 @@ module.exports = {
                         reason
                     });
 
-                    return interaction.reply({
-                        embeds: [embeds.success('User Warned', `${target.tag} has been warned.\n\n**Reason:** ${reason}`)],
-                        flags: [MessageFlags.Ephemeral]
+                    return interaction.editReply({
+                        embeds: [embeds.success('User Warned', `${target.tag} has been warned.\n\n**Reason:** ${reason}`)]
                     });
 
                 case 'kick':
@@ -181,9 +181,8 @@ module.exports = {
                     // Perform the kick
                     await targetMember.kick(reason);
 
-                    return interaction.reply({
-                        embeds: [embeds.success('User Kicked', `${target.tag} has been kicked from the server.\n\n**Reason:** ${reason}`)],
-                        flags: [MessageFlags.Ephemeral]
+                    return interaction.editReply({
+                        embeds: [embeds.success('User Kicked', `${target.tag} has been kicked from the server.\n\n**Reason:** ${reason}`)]
                     });
 
                 case 'ban':
@@ -200,9 +199,8 @@ module.exports = {
                     // Perform the ban
                     await guild.members.ban(userId, { reason: reason, deleteMessageSeconds: 0 });
 
-                    return interaction.reply({
-                        embeds: [embeds.success('User Banned', `${target.tag} has been banned from the server.\n\n**Reason:** ${reason}`)],
-                        flags: [MessageFlags.Ephemeral]
+                    return interaction.editReply({
+                        embeds: [embeds.success('User Banned', `${target.tag} has been banned from the server.\n\n**Reason:** ${reason}`)]
                     });
             }
         } catch (error) {
@@ -238,6 +236,8 @@ async function showReasonModal(interaction, userId, action, title) {
  * Show moderation history
  */
 async function showHistory(interaction, userId) {
+    await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
     const logs = await db.select()
         .from(moderationLogs)
         .where(eq(moderationLogs.targetId, userId))
@@ -246,9 +246,8 @@ async function showHistory(interaction, userId) {
         .all();
 
     if (logs.length === 0) {
-        return interaction.reply({
-            embeds: [embeds.info('No History', 'This user has no moderation history.')],
-            flags: [MessageFlags.Ephemeral]
+        return interaction.editReply({
+            embeds: [embeds.info('No History', 'This user has no moderation history.')]
         });
     }
 
@@ -273,8 +272,7 @@ async function showHistory(interaction, userId) {
         });
     }
 
-    return interaction.reply({
-        embeds: [historyEmbed],
-        flags: [MessageFlags.Ephemeral]
+    return interaction.editReply({
+        embeds: [historyEmbed]
     });
 }

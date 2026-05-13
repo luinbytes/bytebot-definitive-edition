@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const logger = require('../../utils/logger');
 const { getRarityEmoji } = require('../../utils/achievementUtils');
@@ -10,6 +10,9 @@ module.exports = {
         .addUserOption(option =>
             option.setName('target')
                 .setDescription('The user to get info about')),
+
+    longRunning: true,
+    deferEphemeral: true,
 
     async execute(interaction) {
         const user = interaction.options.getUser('target') ?? interaction.user;
@@ -97,10 +100,8 @@ module.exports = {
             inline: false
         });
 
-        await interaction.reply({
-            embeds: [embed],
-            flags: [MessageFlags.Ephemeral]
+        await interaction.editReply({
+            embeds: [embed]
         });
     },
 };
-

@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder } = require('discord.js');
 const { db } = require('../../database');
 const { users, bytepodUserSettings } = require('../../database/schema');
 const { eq, and } = require('drizzle-orm');
@@ -55,6 +55,9 @@ module.exports = {
                 .setDescription('View your current settings')
         ),
 
+    longRunning: true,
+    deferEphemeral: true,
+
     async execute(interaction) {
         const subcommand = interaction.options.getSubcommand();
 
@@ -83,12 +86,11 @@ async function handlePrivacy(interaction) {
     );
 
     if (!success) {
-        return await interaction.reply({
+        return await interaction.editReply({
             embeds: [embeds.error(
                 'Settings Update Failed',
                 'There was an error saving your preferences. Please try again.'
-            )],
-            flags: [MessageFlags.Ephemeral]
+            )]
         });
     }
 
@@ -105,9 +107,8 @@ async function handlePrivacy(interaction) {
             break;
     }
 
-    return await interaction.reply({
-        embeds: [embeds.success('Privacy Settings Updated', description)],
-        flags: [MessageFlags.Ephemeral]
+    return await interaction.editReply({
+        embeds: [embeds.success('Privacy Settings Updated', description)]
     });
 }
 
@@ -134,16 +135,14 @@ async function handleAchievements(interaction) {
             ? '✅ Achievement tracking is now **enabled**. Your streaks and achievements will be tracked.'
             : '🔕 Achievement tracking is now **disabled**. You won\'t earn new achievements, but existing data is preserved.';
 
-        return await interaction.reply({
-            embeds: [embeds.success('Achievement Settings Updated', description)],
-            flags: [MessageFlags.Ephemeral]
+        return await interaction.editReply({
+            embeds: [embeds.success('Achievement Settings Updated', description)]
         });
 
     } catch (error) {
         logger.error(`Error updating achievement settings for ${interaction.user.id}:`, error);
-        return await interaction.reply({
-            embeds: [embeds.error('Settings Update Failed', 'There was an error saving your preferences. Please try again.')],
-            flags: [MessageFlags.Ephemeral]
+        return await interaction.editReply({
+            embeds: [embeds.error('Settings Update Failed', 'There was an error saving your preferences. Please try again.')]
         });
     }
 }
@@ -170,16 +169,14 @@ async function handleSummaries(interaction) {
             ? '📊 BytePod session summaries are now **enabled**. You\'ll receive a DM with stats when your pod ends.'
             : '📊 BytePod session summaries are now **disabled**. You won\'t receive summary DMs.';
 
-        return await interaction.reply({
-            embeds: [embeds.success('Summary Settings Updated', description)],
-            flags: [MessageFlags.Ephemeral]
+        return await interaction.editReply({
+            embeds: [embeds.success('Summary Settings Updated', description)]
         });
 
     } catch (error) {
         logger.error(`Error updating summary settings for ${interaction.user.id}:`, error);
-        return await interaction.reply({
-            embeds: [embeds.error('Settings Update Failed', 'There was an error saving your preferences. Please try again.')],
-            flags: [MessageFlags.Ephemeral]
+        return await interaction.editReply({
+            embeds: [embeds.error('Settings Update Failed', 'There was an error saving your preferences. Please try again.')]
         });
     }
 }
@@ -248,16 +245,14 @@ async function handleView(interaction) {
                 }
             );
 
-        return await interaction.reply({
-            embeds: [embed],
-            flags: [MessageFlags.Ephemeral]
+        return await interaction.editReply({
+            embeds: [embed]
         });
 
     } catch (error) {
         logger.error(`Error viewing settings for ${interaction.user.id}:`, error);
-        return await interaction.reply({
-            embeds: [embeds.error('Error', 'Could not load your settings. Please try again.')],
-            flags: [MessageFlags.Ephemeral]
+        return await interaction.editReply({
+            embeds: [embeds.error('Error', 'Could not load your settings. Please try again.')]
         });
     }
 }

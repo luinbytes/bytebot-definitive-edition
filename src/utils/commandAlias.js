@@ -84,7 +84,7 @@ async function executeAliasCommand(interaction, client, alias) {
 
     if (command.longRunning && !interaction.deferred && !interaction.replied) {
         await interaction.deferReply({
-            flags: (command.ephemeral || command.devOnly) ? [MessageFlags.Ephemeral] : []
+            flags: (command.deferEphemeral || command.devOnly) ? [MessageFlags.Ephemeral] : []
         });
     }
 

@@ -46,6 +46,7 @@ module.exports = {
 
     permissions: [PermissionFlagsBits.ModerateMembers],
     cooldown: 3,
+    longRunning: true,
 
     async execute(interaction, client) {
         const group = interaction.options.getSubcommandGroup(false);
@@ -76,10 +77,18 @@ module.exports = {
         });
 
         if (!permissionCheck.allowed) {
+            if (interaction.deferred || interaction.replied) {
+                return interaction.editReply({ embeds: [permissionCheck.error] });
+            }
+
             return interaction.reply({
                 embeds: [permissionCheck.error],
                 flags: [MessageFlags.Ephemeral]
             });
+        }
+
+        if (!interaction.deferred && !interaction.replied) {
+            await interaction.deferReply();
         }
 
         const legacyInteraction = createCommandAliasInteraction(interaction, {
@@ -122,24 +131,21 @@ async function handleBan(interaction) {
     const reason = interaction.options.getString('reason') ?? 'No reason provided';
 
     if (!target) {
-        return interaction.reply({
-            embeds: [embeds.error('Error', 'Target member not found.')],
-            flags: [MessageFlags.Ephemeral]
+        return interaction.editReply({
+            embeds: [embeds.error('Error', 'Target member not found.')]
         });
     }
 
     const hierarchy = validateHierarchy(interaction.member, target);
     if (!hierarchy.valid) {
-        return interaction.reply({
-            embeds: [embeds.error('Cannot Moderate', hierarchy.error)],
-            flags: [MessageFlags.Ephemeral]
+        return interaction.editReply({
+            embeds: [embeds.error('Cannot Moderate', hierarchy.error)]
         });
     }
 
     if (!target.bannable) {
-        return interaction.reply({
-            embeds: [embeds.error('Error', 'I cannot ban this user. They might have a higher role than me.')],
-            flags: [MessageFlags.Ephemeral]
+        return interaction.editReply({
+            embeds: [embeds.error('Error', 'I cannot ban this user. They might have a higher role than me.')]
         });
     }
 
@@ -155,7 +161,7 @@ async function handleBan(interaction) {
 
         await target.ban({ reason });
 
-        await interaction.reply({
+        await interaction.editReply({
             embeds: [embeds.success('Member Banned', `**${target.user.tag}** has been banned.\n**Reason:** ${reason}`)]
         });
     } catch (error) {
@@ -171,24 +177,21 @@ async function handleKick(interaction) {
     const reason = interaction.options.getString('reason') ?? 'No reason provided';
 
     if (!target) {
-        return interaction.reply({
-            embeds: [embeds.error('Error', 'Target member not found.')],
-            flags: [MessageFlags.Ephemeral]
+        return interaction.editReply({
+            embeds: [embeds.error('Error', 'Target member not found.')]
         });
     }
 
     const hierarchy = validateHierarchy(interaction.member, target);
     if (!hierarchy.valid) {
-        return interaction.reply({
-            embeds: [embeds.error('Cannot Moderate', hierarchy.error)],
-            flags: [MessageFlags.Ephemeral]
+        return interaction.editReply({
+            embeds: [embeds.error('Cannot Moderate', hierarchy.error)]
         });
     }
 
     if (!target.kickable) {
-        return interaction.reply({
-            embeds: [embeds.error('Error', 'I cannot kick this user. They might have a higher role than me.')],
-            flags: [MessageFlags.Ephemeral]
+        return interaction.editReply({
+            embeds: [embeds.error('Error', 'I cannot kick this user. They might have a higher role than me.')]
         });
     }
 
@@ -204,7 +207,7 @@ async function handleKick(interaction) {
 
         await target.kick(reason);
 
-        await interaction.reply({
+        await interaction.editReply({
             embeds: [embeds.success('Member Kicked', `**${target.user.tag}** has been kicked.\n**Reason:** ${reason}`)]
         });
     } catch (error) {
@@ -221,17 +224,15 @@ async function handleWarn(interaction) {
 
     const targetMember = await interaction.guild.members.fetch(target.id).catch(() => null);
     if (!targetMember) {
-        return interaction.reply({
-            embeds: [embeds.error('Error', 'Target member not found in this server.')],
-            flags: [MessageFlags.Ephemeral]
+        return interaction.editReply({
+            embeds: [embeds.error('Error', 'Target member not found in this server.')]
         });
     }
 
     const hierarchy = validateHierarchy(interaction.member, targetMember);
     if (!hierarchy.valid) {
-        return interaction.reply({
-            embeds: [embeds.error('Cannot Moderate', hierarchy.error)],
-            flags: [MessageFlags.Ephemeral]
+        return interaction.editReply({
+            embeds: [embeds.error('Cannot Moderate', hierarchy.error)]
         });
     }
 
@@ -245,7 +246,7 @@ async function handleWarn(interaction) {
             reason
         });
 
-        await interaction.reply({
+        await interaction.editReply({
             embeds: [embeds.success('Member Warned', `**${target.tag}** has been warned.\n**Reason:** ${reason}`)]
         });
     } catch (error) {
@@ -271,16 +272,14 @@ async function handleUnwarn(interaction) {
             .get();
 
         if (!warning) {
-            return interaction.reply({
-                embeds: [embeds.error('Not Found', `Warning ID **${id}** was not found in this server.`)],
-                flags: [MessageFlags.Ephemeral]
+            return interaction.editReply({
+                embeds: [embeds.error('Not Found', `Warning ID **${id}** was not found in this server.`)]
             });
         }
 
         if (warning.targetId !== target.id) {
-            return interaction.reply({
-                embeds: [embeds.error('Mismatch', `Warning ID **${id}** does not belong to ${target}.`)],
-                flags: [MessageFlags.Ephemeral]
+            return interaction.editReply({
+                embeds: [embeds.error('Mismatch', `Warning ID **${id}** does not belong to ${target}.`)]
             });
         }
 
@@ -288,7 +287,7 @@ async function handleUnwarn(interaction) {
         await db.delete(moderationLogs)
             .where(eq(moderationLogs.id, id));
 
-        return interaction.reply({
+        return interaction.editReply({
             embeds: [embeds.success('Warning Removed', `Successfully removed Warning ID **${id}** from ${target}.`)]
         });
 
@@ -305,7 +304,9 @@ async function handleHistory(interaction) {
     const actionFilter = interaction.options.getString('action');
     const limit = interaction.options.getInteger('limit') ?? 10;
 
-    await interaction.deferReply(); // Public for transparency
+    if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferReply(); // Public for transparency
+    }
 
     try {
         let logs = await db.select()
@@ -354,7 +355,9 @@ async function handleHistory(interaction) {
 async function handleRecent(interaction) {
     const limit = interaction.options.getInteger('limit') ?? 10;
 
-    await interaction.deferReply(); // Public for transparency
+    if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferReply(); // Public for transparency
+    }
 
     try {
         const logs = await db.select()
@@ -392,7 +395,9 @@ async function handleActions(interaction) {
     const moderator = interaction.options.getUser('moderator');
     const limit = interaction.options.getInteger('limit') ?? 10;
 
-    await interaction.deferReply(); // Public for transparency
+    if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferReply(); // Public for transparency
+    }
 
     try {
         const logs = await db.select()

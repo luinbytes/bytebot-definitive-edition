@@ -158,6 +158,8 @@ module.exports = {
         const subcommand = interaction.options.getSubcommand();
 
         try {
+            await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
             // Fetch current config
             const [config] = await dbLog.select('guilds',
                 () => db.select().from(guilds).where(eq(guilds.id, interaction.guild.id)),
@@ -165,9 +167,8 @@ module.exports = {
             );
 
             if (!config) {
-                return interaction.reply({
-                    embeds: [embeds.error('Error', 'Configuration not found for this server.')],
-                    flags: [MessageFlags.Ephemeral]
+                return interaction.editReply({
+                    embeds: [embeds.error('Error', 'Configuration not found for this server.')]
                 });
             }
 
@@ -219,9 +220,8 @@ async function handleSetup(interaction, config) {
     // Check bot permissions in the target channel
     const botPermissions = channel.permissionsFor(interaction.guild.members.me);
     if (!botPermissions.has([PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks])) {
-        return interaction.reply({
-            embeds: [embeds.error('Missing Permissions', `I need **Send Messages** and **Embed Links** permissions in ${channel}.`)],
-            flags: [MessageFlags.Ephemeral]
+        return interaction.editReply({
+            embeds: [embeds.error('Missing Permissions', `I need **Send Messages** and **Embed Links** permissions in ${channel}.`)]
         });
     }
 
@@ -232,9 +232,8 @@ async function handleSetup(interaction, config) {
         { guildId: interaction.guild.id, welcomeChannel: channel.id }
     );
 
-    return interaction.reply({
-        embeds: [embeds.success('Welcome Channel Set', `Welcome messages will be sent to ${channel}.\n\nUse \`/welcome message\` to set a custom message, then \`/welcome toggle\` to enable.`)],
-        flags: [MessageFlags.Ephemeral]
+    return interaction.editReply({
+        embeds: [embeds.success('Welcome Channel Set', `Welcome messages will be sent to ${channel}.\n\nUse \`/welcome message\` to set a custom message, then \`/welcome toggle\` to enable.`)]
     });
 }
 
@@ -261,9 +260,8 @@ async function handleMessage(interaction, config) {
             { name: 'Available Variables', value: '**User:** `{user}` `{username}` `{tag}` `{displayname}`\n**Server:** `{server}` `{memberCount}` `{memberNumber}`\n**Dates:** `{joinedAt}` `{joinedRelative}` `{createdAt}` `{accountAgeDays}`', inline: false }
         );
 
-    return interaction.reply({
-        embeds: [embed],
-        flags: [MessageFlags.Ephemeral]
+    return interaction.editReply({
+        embeds: [embed]
     });
 }
 
@@ -275,9 +273,8 @@ async function handleToggle(interaction, config) {
 
     // Check if channel is configured
     if (enabled && !config.welcomeChannel) {
-        return interaction.reply({
-            embeds: [embeds.error('Channel Not Set', 'Please use `/welcome setup` to set a welcome channel first.')],
-            flags: [MessageFlags.Ephemeral]
+        return interaction.editReply({
+            embeds: [embeds.error('Channel Not Set', 'Please use `/welcome setup` to set a welcome channel first.')]
         });
     }
 
@@ -291,9 +288,8 @@ async function handleToggle(interaction, config) {
     const statusText = enabled ? 'enabled' : 'disabled';
     const emoji = enabled ? '✅' : '❌';
 
-    return interaction.reply({
-        embeds: [embeds.success(`Welcome Messages ${enabled ? 'Enabled' : 'Disabled'}`, `${emoji} Welcome messages are now **${statusText}**.`)],
-        flags: [MessageFlags.Ephemeral]
+    return interaction.editReply({
+        embeds: [embeds.success(`Welcome Messages ${enabled ? 'Enabled' : 'Disabled'}`, `${emoji} Welcome messages are now **${statusText}**.`)]
     });
 }
 
@@ -312,9 +308,8 @@ async function handleEmbed(interaction, config) {
 
     const formatText = useEmbed ? 'branded embed' : 'plain text';
 
-    return interaction.reply({
-        embeds: [embeds.success('Welcome Format Updated', `Welcome messages will now be sent as **${formatText}**.`)],
-        flags: [MessageFlags.Ephemeral]
+    return interaction.editReply({
+        embeds: [embeds.success('Welcome Format Updated', `Welcome messages will now be sent as **${formatText}**.`)]
     });
 }
 
@@ -368,9 +363,8 @@ async function handleVariables(interaction) {
         )
         .setFooter({ text: 'Use /welcome message to set your custom message' });
 
-    return interaction.reply({
-        embeds: [embed],
-        flags: [MessageFlags.Ephemeral]
+    return interaction.editReply({
+        embeds: [embed]
     });
 }
 
@@ -380,17 +374,15 @@ async function handleVariables(interaction) {
 async function handleTest(interaction, config) {
     // Check if channel is configured
     if (!config.welcomeChannel) {
-        return interaction.reply({
-            embeds: [embeds.error('Channel Not Set', 'Please use `/welcome setup` to set a welcome channel first.')],
-            flags: [MessageFlags.Ephemeral]
+        return interaction.editReply({
+            embeds: [embeds.error('Channel Not Set', 'Please use `/welcome setup` to set a welcome channel first.')]
         });
     }
 
     const channel = await fetchChannel(interaction.guild, config.welcomeChannel, { logContext: 'welcome-test' });
     if (!channel) {
-        return interaction.reply({
-            embeds: [embeds.error('Channel Not Found', 'The configured welcome channel no longer exists. Please run `/welcome setup` again.')],
-            flags: [MessageFlags.Ephemeral]
+        return interaction.editReply({
+            embeds: [embeds.error('Channel Not Found', 'The configured welcome channel no longer exists. Please run `/welcome setup` again.')]
         });
     }
 
@@ -412,15 +404,13 @@ async function handleTest(interaction, config) {
 
         const sent = await safeChannelSend(channel, messageOptions, { logContext: 'welcome-test' });
         if (!sent) {
-            return interaction.reply({
-                embeds: [embeds.error('Failed to Send', 'Could not send test message. Check bot permissions.')],
-                flags: [MessageFlags.Ephemeral]
+            return interaction.editReply({
+                embeds: [embeds.error('Failed to Send', 'Could not send test message. Check bot permissions.')]
             });
         }
 
-        return interaction.reply({
-            embeds: [embeds.success('Test Sent', `A test welcome message has been sent to ${channel}.`)],
-            flags: [MessageFlags.Ephemeral]
+        return interaction.editReply({
+            embeds: [embeds.success('Test Sent', `A test welcome message has been sent to ${channel}.`)]
         });
 
     } catch (error) {
@@ -466,8 +456,7 @@ async function handleView(interaction, config) {
             }
         );
 
-    return interaction.reply({
-        embeds: [embed],
-        flags: [MessageFlags.Ephemeral]
+    return interaction.editReply({
+        embeds: [embed]
     });
 }

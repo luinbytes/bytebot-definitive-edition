@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { db } = require('../../database/index');
@@ -17,6 +17,7 @@ module.exports = {
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
 
     permissions: [PermissionFlagsBits.ManageMessages],
+    longRunning: true,
 
     async execute(interaction) {
         const amount = interaction.options.getInteger('amount');
@@ -36,7 +37,7 @@ module.exports = {
             });
 
             // Reply AFTER deletion to avoid our reply being caught in bulkDelete
-            await interaction.reply({
+            await interaction.editReply({
                 embeds: [embeds.success('Messages Cleared', `Successfully deleted **${deleted.size}** messages.`)]
             });
         } catch (error) {

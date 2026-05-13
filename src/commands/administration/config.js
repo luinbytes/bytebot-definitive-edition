@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, ChannelType, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
 const { db } = require('../../database/index');
 const { guilds } = require('../../database/schema');
 const { eq } = require('drizzle-orm');
@@ -39,9 +39,8 @@ module.exports = {
                     { guildId: interaction.guild.id, logChannel: channel.id }
                 );
 
-                return interaction.reply({
-                    embeds: [embeds.success('Configuration Updated', `Moderation logs will now be sent to ${channel}.`)],
-                    flags: [MessageFlags.Ephemeral]
+                return interaction.editReply({
+                    embeds: [embeds.success('Configuration Updated', `Moderation logs will now be sent to ${channel}.`)]
                 });
             } catch (error) {
                 await handleCommandError(error, interaction, 'updating configuration');
@@ -55,9 +54,8 @@ module.exports = {
             );
 
             if (!config) {
-                return interaction.reply({
-                    embeds: [embeds.error('Error', 'Configuration not found for this server.')],
-                    flags: [MessageFlags.Ephemeral]
+                return interaction.editReply({
+                    embeds: [embeds.error('Error', 'Configuration not found for this server.')]
                 });
             }
 
@@ -69,12 +67,13 @@ module.exports = {
                     { name: 'Welcome Messages', value: config.welcomeEnabled ? '✅ Enabled' : '❌ Disabled', inline: true }
                 );
 
-            return interaction.reply({
-                embeds: [embed],
-                flags: [MessageFlags.Ephemeral]
+            return interaction.editReply({
+                embeds: [embed]
             });
         }
     },
 
-    permissions: [PermissionFlagsBits.Administrator]
+    permissions: [PermissionFlagsBits.Administrator],
+    longRunning: true,
+    deferEphemeral: true
 };

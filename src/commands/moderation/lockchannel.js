@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { PermissionOverwriteManager } = require('../../utils/discordApiUtil');
@@ -18,6 +18,7 @@ module.exports = {
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
 
     permissions: [PermissionFlagsBits.ManageChannels],
+    longRunning: true,
 
     async execute(interaction) {
         const subcommand = interaction.options.getSubcommand();
@@ -34,7 +35,7 @@ module.exports = {
                     return await handleCommandError(new Error(result.error), interaction, 'locking the channel', { ephemeral: false });
                 }
 
-                await interaction.reply({
+                await interaction.editReply({
                     embeds: [embeds.success('Channel Locked', 'The @everyone role can no longer send messages in this channel.')]
                 });
             } else if (subcommand === 'unlock') {
@@ -48,7 +49,7 @@ module.exports = {
                     return await handleCommandError(new Error(result.error), interaction, 'unlocking the channel', { ephemeral: false });
                 }
 
-                await interaction.reply({
+                await interaction.editReply({
                     embeds: [embeds.success('Channel Unlocked', 'The @everyone role can now send messages in this channel again.')]
                 });
             }

@@ -493,6 +493,13 @@ module.exports = {
 
         // --- AUTHORIZED EXECUTION START ---
 
+        // 5a. Interaction Deferral
+        // Defer before non-critical writes so slow SQLite/disk I/O cannot expire
+        // the Discord interaction token for long-running commands.
+        if (command.longRunning) {
+            await interaction.deferReply({ flags: (command.deferEphemeral || command.devOnly) ? [MessageFlags.Ephemeral] : [] });
+        }
+
         // Update database tracking
         try {
             await dbLog.insert('users',
@@ -516,11 +523,6 @@ module.exports = {
 
         timestamps.set(interaction.user.id, now);
         setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
-
-        // 6. Interaction Deferral
-        if (command.longRunning) {
-            await interaction.deferReply({ flags: (command.ephemeral || command.devOnly) ? [MessageFlags.Ephemeral] : [] });
-        }
 
         // 7. Execution
         try {

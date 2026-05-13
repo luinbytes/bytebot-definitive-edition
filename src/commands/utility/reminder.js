@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { db } = require('../../database');
 const { reminders } = require('../../database/schema');
 const { eq, and, count } = require('drizzle-orm');
@@ -67,6 +67,9 @@ module.exports = {
                     )
             )),
 
+    longRunning: true,
+    deferEphemeral: true,
+
     async execute(interaction, client) {
         const subcommand = interaction.options.getSubcommand();
 
@@ -97,9 +100,8 @@ async function handleRemindMe(interaction, client) {
     // Parse time
     const parsedTime = parseTime(timeInput);
     if (!parsedTime.success) {
-        return interaction.reply({
-            embeds: [embeds.error('Invalid Time', parsedTime.error)],
-            flags: [MessageFlags.Ephemeral]
+        return interaction.editReply({
+            embeds: [embeds.error('Invalid Time', parsedTime.error)]
         });
     }
 
@@ -113,12 +115,11 @@ async function handleRemindMe(interaction, client) {
         .get();
 
     if (countResult.count >= MAX_REMINDERS_PER_USER) {
-        return interaction.reply({
+        return interaction.editReply({
             embeds: [embeds.error(
                 'Reminder Limit Reached',
                 `You have reached the maximum of ${MAX_REMINDERS_PER_USER} active reminders. Use \`/reminder list\` to manage them.`
-            )],
-            flags: [MessageFlags.Ephemeral]
+            )]
         });
     }
 
@@ -145,7 +146,7 @@ async function handleRemindMe(interaction, client) {
         );
         embed.setFooter({ text: `Reminder ID: ${result.id} • Use /reminder cancel ${result.id} to cancel` });
 
-        await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
+        await interaction.editReply({ embeds: [embed] });
 
     } catch (error) {
         await handleCommandError(error, interaction, 'creating reminder');
@@ -161,9 +162,8 @@ async function handleRemindHere(interaction, client) {
 
     // Check if in guild
     if (!interaction.guild) {
-        return interaction.reply({
-            embeds: [embeds.error('Guild Only', 'Channel reminders can only be set in servers. Use `/reminder me` for DM reminders.')],
-            flags: [MessageFlags.Ephemeral]
+        return interaction.editReply({
+            embeds: [embeds.error('Guild Only', 'Channel reminders can only be set in servers. Use `/reminder me` for DM reminders.')]
         });
     }
 
@@ -172,21 +172,19 @@ async function handleRemindHere(interaction, client) {
     const permissions = interaction.channel.permissionsFor(botMember);
 
     if (!permissions.has(PermissionFlagsBits.SendMessages)) {
-        return interaction.reply({
+        return interaction.editReply({
             embeds: [embeds.error(
                 'Missing Permissions',
                 "I don't have permission to send messages in this channel."
-            )],
-            flags: [MessageFlags.Ephemeral]
+            )]
         });
     }
 
     // Parse time
     const parsedTime = parseTime(timeInput);
     if (!parsedTime.success) {
-        return interaction.reply({
-            embeds: [embeds.error('Invalid Time', parsedTime.error)],
-            flags: [MessageFlags.Ephemeral]
+        return interaction.editReply({
+            embeds: [embeds.error('Invalid Time', parsedTime.error)]
         });
     }
 
@@ -200,12 +198,11 @@ async function handleRemindHere(interaction, client) {
         .get();
 
     if (countResult.count >= MAX_REMINDERS_PER_USER) {
-        return interaction.reply({
+        return interaction.editReply({
             embeds: [embeds.error(
                 'Reminder Limit Reached',
                 `You have reached the maximum of ${MAX_REMINDERS_PER_USER} active reminders. Use \`/reminder list\` to manage them.`
-            )],
-            flags: [MessageFlags.Ephemeral]
+            )]
         });
     }
 
@@ -232,7 +229,7 @@ async function handleRemindHere(interaction, client) {
         );
         embed.setFooter({ text: `Reminder ID: ${result.id} • Use /reminder cancel ${result.id} to cancel` });
 
-        await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
+        await interaction.editReply({ embeds: [embed] });
 
     } catch (error) {
         await handleCommandError(error, interaction, 'creating channel reminder');
@@ -254,12 +251,11 @@ async function handleList(interaction, client) {
             .all();
 
         if (userReminders.length === 0) {
-            return interaction.reply({
+            return interaction.editReply({
                 embeds: [embeds.warn(
                     'No Active Reminders',
                     'You have no active reminders. Use `/reminder me` or `/reminder here` to create one.'
-                )],
-                flags: [MessageFlags.Ephemeral]
+                )]
             });
         }
 
@@ -282,7 +278,7 @@ async function handleList(interaction, client) {
         embed.setDescription(lines.join('\n\n'));
         embed.setFooter({ text: `${userReminders.length}/${MAX_REMINDERS_PER_USER} active reminders • Use /reminder cancel [id] to remove` });
 
-        await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
+        await interaction.editReply({ embeds: [embed] });
 
     } catch (error) {
         await handleCommandError(error, interaction, 'fetching reminders');
@@ -297,9 +293,8 @@ async function handleCancel(interaction, client) {
 
     try {
         if (!client.reminderService) {
-            return interaction.reply({
-                embeds: [embeds.error('Service Unavailable', 'Reminder service is not available.')],
-                flags: [MessageFlags.Ephemeral]
+            return interaction.editReply({
+                embeds: [embeds.error('Service Unavailable', 'Reminder service is not available.')]
             });
         }
 
@@ -310,7 +305,7 @@ async function handleCancel(interaction, client) {
             `Reminder #${reminderId} has been cancelled.\n\n**Was:** ${cancelled.message}`
         );
 
-        await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
+        await interaction.editReply({ embeds: [embed] });
 
     } catch (error) {
         await handleCommandError(error, interaction, 'cancelling reminder');

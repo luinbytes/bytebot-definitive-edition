@@ -350,6 +350,8 @@ async function handleClear(interaction, userId) {
  * Handle clear confirmation button
  */
 async function handleClearConfirm(interaction) {
+    await interaction.deferUpdate();
+
     const userId = interaction.user.id;
 
     // Delete all bookmarks
@@ -370,13 +372,13 @@ async function handleClearConfirm(interaction) {
     );
 
     if (!result.success) {
-        return interaction.update({
+        return interaction.editReply({
             embeds: [embeds.error('Clear Failed', result.error)],
             components: [row]
         });
     }
 
-    return interaction.update({
+    return interaction.editReply({
         embeds: [embeds.success('Bookmarks Cleared', `Successfully deleted ${result.count} bookmark(s).`)],
         components: [row]
     });
