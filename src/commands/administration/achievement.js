@@ -201,12 +201,13 @@ async function handleSetup(interaction) {
         const cleanupOrphaned = interaction.options.getBoolean('cleanup_orphaned');
         const notifyOnEarn = interaction.options.getBoolean('notify_on_earn');
 
+        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
         // Check if at least one option was provided
         if (enabled === null && !prefix && useRarityColors === null &&
             cleanupOrphaned === null && notifyOnEarn === null) {
-            return interaction.reply({
-                embeds: [embeds.error('No Options', 'Please provide at least one setting to configure.')],
-                flags: [MessageFlags.Ephemeral]
+            return interaction.editReply({
+                embeds: [embeds.error('No Options', 'Please provide at least one setting to configure.')]
             });
         }
 
@@ -269,10 +270,7 @@ async function handleSetup(interaction) {
 
         embed.setDescription(changedSettings.join('\n'));
 
-        await interaction.reply({
-            embeds: [embed],
-            flags: [MessageFlags.Ephemeral]
-        });
+        await interaction.editReply({ embeds: [embed] });
 
         logger.success(`Achievement config updated in ${interaction.guild.name} by ${interaction.user.tag}`);
 
@@ -286,6 +284,8 @@ async function handleSetup(interaction) {
  */
 async function handleView(interaction) {
     try {
+        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
         const config = await dbLog.select('achievementRoleConfig',
             () => db.select()
                 .from(achievementRoleConfig)
@@ -320,10 +320,7 @@ async function handleView(interaction) {
 
         embed.setFooter({ text: 'Use /achievement setup to configure settings' });
 
-        await interaction.reply({
-            embeds: [embed],
-            flags: [MessageFlags.Ephemeral]
-        });
+        await interaction.editReply({ embeds: [embed] });
 
     } catch (error) {
         await handleCommandError(error, interaction, 'fetching achievement configuration');
@@ -646,6 +643,8 @@ async function handleRemove(interaction, client) {
  */
 async function handleDisable(interaction) {
     try {
+        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
         // Check current status
         const guild = await dbLog.select('guilds',
             () => db.select()
@@ -657,12 +656,11 @@ async function handleDisable(interaction) {
 
         // Check if already disabled
         if (guild && guild.achievementsEnabled === false) {
-            return interaction.reply({
+            return interaction.editReply({
                 embeds: [embeds.warn(
                     'Already Disabled',
                     'The achievement system is already disabled for this server.'
-                )],
-                flags: [MessageFlags.Ephemeral]
+                )]
             });
         }
 
@@ -700,10 +698,7 @@ async function handleDisable(interaction) {
             'Use `/achievement enable` to re-enable the system.'
         );
 
-        await interaction.reply({
-            embeds: [embed],
-            flags: [MessageFlags.Ephemeral]
-        });
+        await interaction.editReply({ embeds: [embed] });
 
         logger.success(`Achievement system disabled in ${interaction.guild.name} by ${interaction.user.tag}`);
 
@@ -717,6 +712,8 @@ async function handleDisable(interaction) {
  */
 async function handleEnable(interaction) {
     try {
+        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
         // Check current status
         const guild = await dbLog.select('guilds',
             () => db.select()
@@ -728,12 +725,11 @@ async function handleEnable(interaction) {
 
         // Check if already enabled (or never disabled)
         if (!guild || guild.achievementsEnabled !== false) {
-            return interaction.reply({
+            return interaction.editReply({
                 embeds: [embeds.warn(
                     'Already Enabled',
                     'The achievement system is already enabled for this server.'
-                )],
-                flags: [MessageFlags.Ephemeral]
+                )]
             });
         }
 
@@ -759,10 +755,7 @@ async function handleEnable(interaction) {
             'Use `/achievement setup` to configure role rewards.'
         );
 
-        await interaction.reply({
-            embeds: [embed],
-            flags: [MessageFlags.Ephemeral]
-        });
+        await interaction.editReply({ embeds: [embed] });
 
         logger.success(`Achievement system enabled in ${interaction.guild.name} by ${interaction.user.tag}`);
 
