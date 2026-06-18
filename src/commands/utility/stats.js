@@ -20,6 +20,7 @@ function formatDuration(totalSeconds) {
 }
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('stats')
         .setDescription('View server and bot statistics.')

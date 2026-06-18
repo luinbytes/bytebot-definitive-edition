@@ -3,6 +3,7 @@ const { deployCommands, checkExistingRegistrations } = require('../../utils/comm
 const embeds = require('../../utils/embeds');
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('deploy')
         .setDescription('Manually deploy/sync slash commands (Bot Owner only)')

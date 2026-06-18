@@ -7,6 +7,7 @@ const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
 const { upsert } = require('../../utils/dbUtil');
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('birthday')
         .setDescription('Birthday tracking and celebration system')

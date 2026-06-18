@@ -4,6 +4,7 @@ const logger = require('../../utils/logger');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('check-achievements')
         .setDescription('Manually trigger achievement check for users (Developer only)')

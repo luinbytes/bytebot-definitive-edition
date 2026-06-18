@@ -4,6 +4,7 @@ const logger = require('./logger');
 const { glob } = require('glob');
 const crypto = require('crypto');
 const fs = require('fs');
+const { shouldRegisterCommand } = require('./commandRegistration');
 
 const COMMAND_CACHE_FILE = '.command-cache.json';
 
@@ -23,7 +24,7 @@ async function loadCommands() {
         delete require.cache[filePath];
         const command = require(filePath);
 
-        if ('data' in command && 'execute' in command) {
+        if ('data' in command && 'execute' in command && shouldRegisterCommand(command)) {
             commands.push(command.data.toJSON());
         }
     }

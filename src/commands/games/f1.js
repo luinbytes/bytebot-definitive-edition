@@ -123,6 +123,7 @@ function formatDate(dateStr, gmtOffset) {
 }
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('f1')
         .setDescription('Formula 1 racing data and standings')

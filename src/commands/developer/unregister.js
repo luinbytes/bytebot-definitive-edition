@@ -5,6 +5,7 @@ const logger = require('../../utils/logger');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('unregister')
         .setDescription('Clear slash command registrations (Bot Owner only)')

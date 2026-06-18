@@ -3,6 +3,7 @@ const { buildAvatarEmbed } = require('../../utils/avatarUtil');
 const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('avatar')
         .setDescription('View a user\'s avatar')

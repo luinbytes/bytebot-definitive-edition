@@ -4,6 +4,7 @@ const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { PermissionOverwriteManager } = require('../../utils/discordApiUtil');
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('lockchannel')
         .setDescription('Lock or unlock the current channel')

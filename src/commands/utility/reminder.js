@@ -9,6 +9,7 @@ const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const MAX_REMINDERS_PER_USER = 25;
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('reminder')
         .setDescription('Set and manage reminders')

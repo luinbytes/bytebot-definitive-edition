@@ -4,6 +4,7 @@ const logger = require('../../utils/logger');
 const { getRarityEmoji } = require('../../utils/achievementUtils');
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('userinfo')
         .setDescription('Displays information about a user.')

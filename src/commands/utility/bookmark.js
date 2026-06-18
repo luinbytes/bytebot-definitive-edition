@@ -3,6 +3,7 @@ const embeds = require('../../utils/embeds');
 const bookmarkUtil = require('../../utils/bookmarkUtil');
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('bookmark')
         .setDescription('Manage your saved message bookmarks')

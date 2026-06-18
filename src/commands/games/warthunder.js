@@ -5,6 +5,7 @@ const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('warthunder')
         .setDescription('War Thunder statistics and tools')

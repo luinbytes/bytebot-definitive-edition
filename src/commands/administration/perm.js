@@ -7,6 +7,7 @@ const { eq, and } = require('drizzle-orm');
 const { dbLog } = require('../../utils/dbLogger');
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('perm')
         .setDescription('Manage custom command permissions for this server.')

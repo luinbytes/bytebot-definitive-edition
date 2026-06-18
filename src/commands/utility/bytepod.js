@@ -51,6 +51,7 @@ function getPodState(channel) {
 }
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('bytepod')
         .setDescription('Manage BytePod ephemeral voice channels.')
@@ -189,7 +190,7 @@ module.exports = {
             return interaction.editReply({
                 embeds: [embeds.success(
                     'BytePods Disabled',
-                    'BytePod creation has been disabled. Existing BytePods will remain active until members leave.\n\nTo re-enable, use `/bytepod setup` again.'
+                    'BytePod creation has been disabled. Existing BytePods will remain active until members leave.\n\nTo re-enable, use `/pod setup` again.'
                 )]
             });
         }
@@ -729,7 +730,7 @@ module.exports = {
                     // Notify and cleanup
                     await channel.send({
                         embeds: [embeds.success('Ownership Transferred', `<@${oldOwnerId}> accepted the request. <@${requesterId}> is now the owner.`)],
-                        content: `<@${requesterId}>, run \`/bytepod panel\` to access controls.`
+                        content: `<@${requesterId}>, run \`/pod panel\` to access controls.`
                     });
 
                     await interaction.message.delete().catch(() => { });
@@ -1019,12 +1020,12 @@ module.exports = {
             try {
                 if (!interaction.replied && !interaction.deferred) {
                     await interaction.reply({
-                        content: '❌ Something went wrong with this control. Please try `/bytepod panel` to get a fresh control panel.',
+                        content: '❌ Something went wrong with this control. Please try `/pod panel` to get a fresh control panel.',
                         flags: [MessageFlags.Ephemeral]
                     });
                 } else if (interaction.deferred) {
                     await interaction.editReply({
-                        content: '❌ Something went wrong with this control. Please try `/bytepod panel` to get a fresh control panel.'
+                        content: '❌ Something went wrong with this control. Please try `/pod panel` to get a fresh control panel.'
                     });
                 }
             } catch (e) {

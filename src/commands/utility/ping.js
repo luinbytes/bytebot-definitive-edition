@@ -3,6 +3,7 @@ const embeds = require('../../utils/embeds');
 const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('ping')
         .setDescription('Replies with Pong!')

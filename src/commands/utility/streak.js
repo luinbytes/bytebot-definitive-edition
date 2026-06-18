@@ -13,6 +13,7 @@ const {
 } = require('../../utils/achievementUtils');
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('streak')
         .setDescription('View activity streak information')
@@ -692,4 +693,3 @@ async function handleProgress(interaction, client) {
         await handleCommandError(error, interaction, 'loading progress data');
     }
 }
-

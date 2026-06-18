@@ -229,7 +229,7 @@ async function transferOwnership(channel, podData, newOwnerId, client) {
         logger.debug(`[Transfer] Step 9: Sending notification embed`);
         await channel.send({
             embeds: [embed],
-            content: `<@${newOwnerId}>, you are now the owner! Run \`/bytepod panel\` to access controls.`
+            content: `<@${newOwnerId}>, you are now the owner! Run \`/pod panel\` to access controls.`
         });
         logger.info(`BytePod ownership transferred: ${channel.id} from ${oldOwnerId} to ${newOwnerId}`);
         logger.debug(`[Transfer] Complete!`);
@@ -464,7 +464,7 @@ module.exports = {
 
                 // Send Welcome Message
                 await newChannel.send({
-                    embeds: [embeds.brand('Welcome to Your BytePod!', `Your personal voice channel has been created! 🎉\n\n**To manage your pod:** Run \`/bytepod panel\` to access controls (lock/unlock, whitelist, co-owners, etc.)`)],
+                    embeds: [embeds.brand('Welcome to Your BytePod!', `Your personal voice channel has been created! 🎉\n\n**To manage your pod:** Run \`/pod panel\` to access controls (lock/unlock, whitelist, co-owners, etc.)`)],
                     content: `Welcome, ${member}!`
                 });
 

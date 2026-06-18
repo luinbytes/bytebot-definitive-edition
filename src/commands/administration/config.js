@@ -7,6 +7,7 @@ const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { dbLog } = require('../../utils/dbLogger');
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('config')
         .setDescription('Manage server configuration.')

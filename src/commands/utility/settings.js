@@ -7,6 +7,7 @@ const { getUserPreference, setUserPreference } = require('../../utils/ephemeralH
 const logger = require('../../utils/logger');
 
 module.exports = {
+    register: false,
     category: 'Utility',
     data: new SlashCommandBuilder()
         .setName('settings')
@@ -226,7 +227,7 @@ async function handleView(interaction) {
                     name: 'BytePod Auto-Lock',
                     value: (autolock
                         ? '🔒 **Enabled** - New pods lock automatically'
-                        : '🔓 **Disabled** - New pods stay unlocked') + ' *(use `/bytepod autolock` to change)*',
+                        : '🔓 **Disabled** - New pods stay unlocked') + ' *(use `/pod settings autolock` to change)*',
                     inline: false
                 },
                 {
@@ -240,7 +241,7 @@ async function handleView(interaction) {
                     name: 'BytePod Name Style',
                     value: (podNameStyle === 'random'
                         ? '🎲 **Random** - Pods spawn with a funny random name'
-                        : '👤 **Username** - Pods spawn as "[Username]\'s Pod"') + ' *(use `/bytepod namestyle` to change)*',
+                        : '👤 **Username** - Pods spawn as "[Username]\'s Pod"') + ' *(use `/pod settings name-style` to change)*',
                     inline: false
                 }
             );

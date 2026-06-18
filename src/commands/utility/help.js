@@ -11,6 +11,7 @@ const categoryMetadata = {
 };
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('help')
         .setDescription('Browse all commands or get info about a specific command')

@@ -1,5 +1,6 @@
 const path = require('path');
 const { PermissionFlagsBits } = require('discord.js');
+const { loadCommands } = require('../src/utils/commandDeployer');
 
 function commandJson(commandPath) {
     return require(path.resolve(commandPath)).data.toJSON();
@@ -185,35 +186,90 @@ describe('Intent command hubs', () => {
         ]);
     });
 
-    test('legacy top-level commands remain registered during hub rollout', () => {
+    test('legacy top-level commands stay executable but are not registered after hub rollout', () => {
         const legacyCommandFiles = [
             'src/commands/utility/avatar.js',
             'src/commands/utility/userinfo.js',
             'src/commands/utility/settings.js',
             'src/commands/utility/reminder.js',
             'src/commands/utility/bookmark.js',
+            'src/commands/utility/birthday.js',
+            'src/commands/utility/streak.js',
+            'src/commands/utility/serverinfo.js',
+            'src/commands/utility/stats.js',
+            'src/commands/utility/help.js',
+            'src/commands/utility/ping.js',
             'src/commands/utility/bytepod.js',
+            'src/commands/administration/config.js',
+            'src/commands/administration/welcome.js',
+            'src/commands/administration/starboard.js',
             'src/commands/administration/suggestion.js',
+            'src/commands/administration/perm.js',
+            'src/commands/administration/achievement.js',
             'src/commands/moderation/clear.js',
             'src/commands/moderation/lockchannel.js',
             'src/commands/games/f1.js',
             'src/commands/games/warthunder.js',
-            'src/commands/developer/deploy.js'
+            'src/commands/developer/deploy.js',
+            'src/commands/developer/unregister.js',
+            'src/commands/developer/guild.js',
+            'src/commands/developer/check-achievements.js'
         ];
 
-        expect(legacyCommandFiles.map(file => commandJson(file).name)).toEqual([
+        expect(legacyCommandFiles.map(file => commandModule(file).data.name)).toEqual([
             'avatar',
             'userinfo',
             'settings',
             'reminder',
             'bookmark',
+            'birthday',
+            'streak',
+            'serverinfo',
+            'stats',
+            'help',
+            'ping',
             'bytepod',
+            'config',
+            'welcome',
+            'starboard',
             'suggestion',
+            'perm',
+            'achievement',
             'clear',
             'lockchannel',
             'f1',
             'warthunder',
-            'deploy'
+            'deploy',
+            'unregister',
+            'guild',
+            'check-achievements'
         ]);
+        legacyCommandFiles.forEach(file => {
+            const command = commandModule(file);
+            expect(command.execute).toEqual(expect.any(Function));
+            expect(command.register).toBe(false);
+        });
+    });
+
+    test('deployment payload excludes legacy aliases in favor of hub commands', async () => {
+        const { commands } = await loadCommands();
+        const publicCommandNames = commands.map(command => command.name);
+
+        expect(publicCommandNames).toEqual(expect.arrayContaining([
+            'me',
+            'server',
+            'pod',
+            'mod',
+            'game',
+            'bot'
+        ]));
+        expect(publicCommandNames).not.toEqual(expect.arrayContaining([
+            'bytepod',
+            'avatar',
+            'suggestion',
+            'clear',
+            'f1',
+            'deploy'
+        ]));
     });
 });

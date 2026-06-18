@@ -7,6 +7,7 @@ const { dbLog } = require('../../utils/dbLogger');
 const { fetchChannel, safeMessageFetch } = require('../../utils/discordApiUtil');
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('suggestion')
         .setDescription('Manage the suggestion system')

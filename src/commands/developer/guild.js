@@ -3,6 +3,7 @@ const embeds = require('../../utils/embeds');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('guild')
         .setDescription('View and manage guilds the bot is in')

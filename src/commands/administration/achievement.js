@@ -8,6 +8,7 @@ const { dbLog } = require('../../utils/dbLogger');
 const logger = require('../../utils/logger');
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('achievement')
         .setDescription('Manage achievement role rewards and custom achievements')

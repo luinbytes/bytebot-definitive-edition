@@ -92,6 +92,7 @@ function parseWelcomeMessage(message, member, guild) {
 }
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('welcome')
         .setDescription('Manage welcome messages for new members.')

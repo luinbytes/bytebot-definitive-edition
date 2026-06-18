@@ -7,6 +7,7 @@ const { dbLog } = require('../../utils/dbLogger');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('starboard')
         .setDescription('Configure the starboard system for popular messages')

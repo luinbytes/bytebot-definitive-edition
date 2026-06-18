@@ -5,6 +5,7 @@ const { db } = require('../../database/index');
 const { moderationLogs } = require('../../database/schema');
 
 module.exports = {
+    register: false,
     data: new SlashCommandBuilder()
         .setName('clear')
         .setDescription('Deletes a specified amount of messages.')

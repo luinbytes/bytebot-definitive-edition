@@ -4,6 +4,7 @@ const logger = require('../utils/logger');
 const { glob } = require('glob');
 const crypto = require('crypto');
 const fs = require('fs');
+const { shouldRegisterCommand } = require('../utils/commandRegistration');
 // Don't load .env here - index.js already loaded the correct environment file
 
 const COMMAND_CACHE_FILE = '.command-cache.json';
@@ -26,7 +27,9 @@ module.exports = async (client) => {
             command.category = category.charAt(0).toUpperCase() + category.slice(1);
 
             client.commands.set(command.data.name, command);
-            commands.push(command.data.toJSON());
+            if (shouldRegisterCommand(command)) {
+                commands.push(command.data.toJSON());
+            }
             loadedCommands.push(command.data.name);
         } else {
             logger.warn(`The command at ${file} is missing a required "data" or "execute" property.`);
