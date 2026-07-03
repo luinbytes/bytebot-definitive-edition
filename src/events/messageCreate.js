@@ -1,5 +1,6 @@
 const { Events } = require('discord.js');
 const logger = require('../utils/logger');
+const { handleHoneypotMessage } = require('../utils/honeypotUtil');
 
 module.exports = {
     name: Events.MessageCreate,
@@ -9,6 +10,12 @@ module.exports = {
 
         // Guild only (auto-responder doesn't work in DMs)
         if (!message.guild) return;
+
+        try {
+            if (await handleHoneypotMessage(message)) return;
+        } catch (error) {
+            logger.error('Honeypot handler error:', error);
+        }
 
         // Auto-responder check
         if (client.autoResponderService) {

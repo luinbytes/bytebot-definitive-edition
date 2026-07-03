@@ -200,6 +200,43 @@ const expectedSchema = {
         image_url: 'TEXT',
         posted_at: 'INTEGER NOT NULL'
     },
+    honeypot_config: {
+        guild_id: 'TEXT PRIMARY KEY',
+        category_id: 'TEXT',
+        channel_id: 'TEXT',
+        warning_message_id: 'TEXT',
+        shame_board_message_id: 'TEXT',
+        enabled: 'INTEGER DEFAULT 0 NOT NULL',
+        pin_warning_failed: 'INTEGER DEFAULT 0 NOT NULL',
+        created_at: 'INTEGER',
+        updated_at: 'INTEGER'
+    },
+    honeypot_exempt_users: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL'
+    },
+    honeypot_exempt_roles: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        role_id: 'TEXT NOT NULL'
+    },
+    honeypot_incidents: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        username: 'TEXT',
+        display_name: 'TEXT',
+        message_id: 'TEXT',
+        channel_id: 'TEXT NOT NULL',
+        snippet: 'TEXT',
+        attachment_summary: 'TEXT',
+        status: 'TEXT NOT NULL',
+        failure_reason: 'TEXT',
+        account_created_at: 'INTEGER',
+        joined_at: 'INTEGER',
+        triggered_at: 'INTEGER'
+    },
     reminders: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
         user_id: 'TEXT NOT NULL',

@@ -217,6 +217,59 @@ const starboardMessages = sqliteTable('starboard_messages', {
     authorGuildIdx: index('starboard_author_guild_idx').on(table.authorId, table.guildId),
 }));
 
+const honeypotConfig = sqliteTable('honeypot_config', {
+    guildId: text('guild_id').primaryKey(),
+    categoryId: text('category_id'),
+    channelId: text('channel_id').unique(),
+    warningMessageId: text('warning_message_id'),
+    shameBoardMessageId: text('shame_board_message_id'),
+    enabled: integer('enabled', { mode: 'boolean' }).default(false).notNull(),
+    pinWarningFailed: integer('pin_warning_failed', { mode: 'boolean' }).default(false).notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date()),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).default(new Date())
+}, (table) => ({
+    channelIdx: index('honeypot_config_channel_idx').on(table.channelId),
+    enabledChannelIdx: index('honeypot_config_enabled_channel_idx').on(table.enabled, table.channelId)
+}));
+
+const honeypotExemptUsers = sqliteTable('honeypot_exempt_users', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull()
+}, (table) => ({
+    guildUserUnique: unique().on(table.guildId, table.userId),
+    guildIdx: index('honeypot_exempt_users_guild_idx').on(table.guildId)
+}));
+
+const honeypotExemptRoles = sqliteTable('honeypot_exempt_roles', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    roleId: text('role_id').notNull()
+}, (table) => ({
+    guildRoleUnique: unique().on(table.guildId, table.roleId),
+    guildIdx: index('honeypot_exempt_roles_guild_idx').on(table.guildId)
+}));
+
+const honeypotIncidents = sqliteTable('honeypot_incidents', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    username: text('username'),
+    displayName: text('display_name'),
+    messageId: text('message_id'),
+    channelId: text('channel_id').notNull(),
+    snippet: text('snippet'),
+    attachmentSummary: text('attachment_summary'),
+    status: text('status').notNull(),
+    failureReason: text('failure_reason'),
+    accountCreatedAt: integer('account_created_at', { mode: 'timestamp' }),
+    joinedAt: integer('joined_at', { mode: 'timestamp' }),
+    triggeredAt: integer('triggered_at', { mode: 'timestamp' }).default(new Date()).notNull()
+}, (table) => ({
+    guildTriggeredIdx: index('honeypot_incidents_guild_triggered_idx').on(table.guildId, table.triggeredAt),
+    guildStatusIdx: index('honeypot_incidents_guild_status_idx').on(table.guildId, table.status)
+}));
+
 // Reminders (scheduled user notifications)
 const reminders = sqliteTable('reminders', {
     id: integer('id').primaryKey({ autoIncrement: true }),
@@ -437,6 +490,10 @@ module.exports = {
     autoResponses,
     starboardConfig,
     starboardMessages,
+    honeypotConfig,
+    honeypotExemptUsers,
+    honeypotExemptRoles,
+    honeypotIncidents,
     reminders,
     suggestionConfig,
     suggestions,
