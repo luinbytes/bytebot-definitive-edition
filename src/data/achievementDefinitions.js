@@ -1065,6 +1065,50 @@ const CORE_ACHIEVEMENTS = [
 ];
 
 /**
+ * Ordered views over existing achievement definitions. Chains introduce no
+ * rewards or persistence: a step is complete only after its achievement award
+ * is durable in activity_achievements.
+ */
+const ACHIEVEMENT_CHAINS = [
+    {
+        id: 'message_milestones',
+        title: 'Message Milestones',
+        description: 'Build your voice in the community.',
+        emoji: '💬',
+        steps: [
+            { achievementId: 'message_100' }, { achievementId: 'message_500' },
+            { achievementId: 'message_1000' }, { achievementId: 'message_5000' },
+            { achievementId: 'message_10000' }, { achievementId: 'message_25000' },
+            { achievementId: 'message_50000' }, { achievementId: 'message_100000' }
+        ]
+    },
+    {
+        id: 'voice_milestones',
+        title: 'Voice Milestones',
+        description: 'Make your mark in voice channels.',
+        emoji: '🎤',
+        steps: [
+            { achievementId: 'voice_10hrs' }, { achievementId: 'voice_50hrs' },
+            { achievementId: 'voice_100hrs' }, { achievementId: 'voice_250hrs' },
+            { achievementId: 'voice_500hrs' }, { achievementId: 'voice_1000hrs' },
+            { achievementId: 'voice_2500hrs' }, { achievementId: 'voice_5000hrs' }
+        ]
+    },
+    {
+        id: 'command_milestones',
+        title: 'Command Milestones',
+        description: 'Master ByteBot one command at a time.',
+        emoji: '⚙️',
+        steps: [
+            { achievementId: 'command_50' }, { achievementId: 'command_250' },
+            { achievementId: 'command_500' }, { achievementId: 'command_1000' },
+            { achievementId: 'command_2500' }, { achievementId: 'command_5000' },
+            { achievementId: 'command_10000' }
+        ]
+    }
+];
+
+/**
  * 16 Seasonal Achievement Definitions
  */
 const SEASONAL_ACHIEVEMENTS = [
@@ -1342,5 +1386,6 @@ const SEASONAL_ACHIEVEMENTS = [
 module.exports = {
     CORE_ACHIEVEMENTS,
     SEASONAL_ACHIEVEMENTS,
+    ACHIEVEMENT_CHAINS,
     ALL_ACHIEVEMENTS: [...CORE_ACHIEVEMENTS, ...SEASONAL_ACHIEVEMENTS]
 };

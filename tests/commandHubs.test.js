@@ -71,7 +71,8 @@ describe('Intent command hubs', () => {
             'birthday',
             'permissions',
             'achievement',
-            'streak'
+            'streak',
+            'community'
         ]));
 
         expect(optionNames(findOption(command, 'suggestion').options)).toEqual(expect.arrayContaining([
@@ -99,6 +100,7 @@ describe('Intent command hubs', () => {
         ]);
         expect(optionNames(findOption(command, 'achievement').options.find(option => option.name === 'enable').options)).toEqual([]);
         expect(optionNames(findOption(command, 'achievement').options.find(option => option.name === 'disable').options)).toEqual([]);
+        expect(optionNames(findOption(command, 'community').options)).toEqual(['view']);
     });
 
     test('pod and game hubs expose the accepted top-level areas', () => {
@@ -256,6 +258,7 @@ describe('Intent command hubs', () => {
         const publicCommandNames = commands.map(command => command.name);
 
         expect(publicCommandNames).toEqual(expect.arrayContaining([
+            'community',
             'me',
             'server',
             'pod',

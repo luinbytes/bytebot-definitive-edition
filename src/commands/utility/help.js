@@ -177,13 +177,14 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
         .setThumbnail(client.user.displayAvatarURL())
         .setDescription(
             '**Welcome to ByteBot!**\n\n' +
-            'Start with an intent hub: `/me`, `/server`, `/pod`, `/mod`, `/game`, `/fun`, or `/bot`.\n\n' +
+            'Start with an intent hub: `/community`, `/me`, `/server`, `/pod`, `/mod`, `/game`, `/fun`, or `/bot`.\n\n' +
             `📊 **${totalCommands}** commands • **${sortedCategories.length}** categories`
         )
         .addFields(
             {
                 name: 'Intent Hubs',
                 value:
+                    '`/community` member progress, achievements, BytePods, and community features\n' +
                     '`/me` personal settings, reminders, bookmarks, birthdays, streaks\n' +
                     '`/server` setup, stats, suggestions, welcome, starboard, achievements\n' +
                     '`/pod` BytePod actions and settings\n' +

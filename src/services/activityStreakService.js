@@ -17,6 +17,7 @@ const embeds = require('../utils/embeds');
 const { dbLog } = require('../utils/dbLogger');
 const { getOne } = require('../utils/dbUtil');
 const { fetchMember, RoleManager } = require('../utils/discordApiUtil');
+const { ACHIEVEMENT_CHAINS } = require('../data/achievementDefinitions');
 
 /**
  * Achievement Manager - Loads and caches achievement definitions from database
@@ -1515,6 +1516,79 @@ class ActivityStreakService {
     }
 
     /**
+     * Get ordered achievement-chain progress from durable achievement awards.
+     * This is read-only: chains are definition views, not a second unlock ledger.
+     * @param {string} userId
+     * @param {string} guildId
+     * @param {Array} chainDefinitions - Optional definitions, primarily for callers/tests
+     * @returns {Promise<Array>}
+     */
+    async getAchievementChainProgress(userId, guildId, chainDefinitions = ACHIEVEMENT_CHAINS) {
+        try {
+            const earned = await dbLog.select('activityAchievements',
+                () => db.select()
+                    .from(activityAchievements)
+                    .where(and(
+                        eq(activityAchievements.userId, userId),
+                        eq(activityAchievements.guildId, guildId)
+                    )),
+                { userId, guildId, operation: 'getAchievementChainProgress' }
+            );
+            const earnedIds = new Set((earned || []).map(achievement => achievement.achievementId));
+            const chains = Array.isArray(chainDefinitions) ? chainDefinitions : [];
+            const progress = [];
+
+            for (const chain of chains) {
+                if (!chain?.id || !chain?.title || !Array.isArray(chain.steps) || chain.steps.length === 0) {
+                    logger.warn('Skipping invalid achievement chain definition');
+                    continue;
+                }
+
+                const steps = [];
+                for (const step of chain.steps) {
+                    if (!step?.achievementId) {
+                        logger.warn(`Skipping invalid step in achievement chain ${chain.id}`);
+                        continue;
+                    }
+
+                    const definition = await this.achievementManager.getById(step.achievementId);
+                    const available = !!definition;
+                    steps.push({
+                        achievementId: step.achievementId,
+                        title: definition?.title || 'Unavailable achievement',
+                        emoji: definition?.emoji || '❓',
+                        available,
+                        complete: available && earnedIds.has(step.achievementId)
+                    });
+                }
+
+                if (steps.length === 0) {
+                    logger.warn(`Skipping achievement chain ${chain.id} with no valid steps`);
+                    continue;
+                }
+
+                const completedSteps = steps.filter(step => step.complete).length;
+                progress.push({
+                    id: chain.id,
+                    title: chain.title,
+                    description: chain.description || '',
+                    emoji: chain.emoji || '🏆',
+                    steps,
+                    completedSteps,
+                    totalSteps: steps.length,
+                    complete: completedSteps === steps.length,
+                    nextStep: steps.find(step => !step.complete) || null
+                });
+            }
+
+            return progress;
+        } catch (error) {
+            logger.error(`Error getting achievement chain progress for user ${userId}:`, error);
+            return [];
+        }
+    }
+
+    /**
      * Check if user has already earned an achievement
      * @param {string} userId - User ID
      * @param {string} guildId - Guild ID
@@ -1556,8 +1630,12 @@ class ActivityStreakService {
      */
     async _awardAchievementWithoutNotify(userId, guildId, achievementId, awardedBy = null) {
         try {
-            // Manual awards (awardedBy != null) bypass the per-guild enabled check.
+            // Automatic awards must respect both guild enablement and the
+            // user's global opt-out; explicit manual admin awards remain allowed.
             if (!awardedBy) {
+                if (await this.isUserOptedOut(userId)) {
+                    return null;
+                }
                 const achievementsEnabled = await this.isAchievementsEnabled(guildId);
                 if (!achievementsEnabled) {
                     return null;
@@ -1582,7 +1660,7 @@ class ActivityStreakService {
                 }
             }
 
-            await dbLog.insert('activityAchievements',
+            const insertResult = await dbLog.insert('activityAchievements',
                 () => db.insert(activityAchievements).values({
                     userId,
                     guildId,
@@ -1591,9 +1669,15 @@ class ActivityStreakService {
                     awardedBy,
                     notified: false,
                     earnedAt: new Date()
-                }),
+                }).onConflictDoNothing(),
                 { userId, guildId, achievementId, points: achievement.points }
             );
+
+            // The schema uniqueness constraint is the atomic duplicate guard.
+            // A conflicting insert must not trigger notification or role side effects.
+            if (insertResult?.changes === 0) {
+                return null;
+            }
 
             if (achievement.grantRole) {
                 // Role-grant failures must NOT poison the award flow. The DB row
