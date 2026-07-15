@@ -39,6 +39,7 @@ jest.mock('../src/utils/logger', () => ({
 }));
 
 const ActivityStreakService = require('../src/services/activityStreakService');
+const { db } = require('../src/database');
 const { dbLog } = require('../src/utils/dbLogger');
 
 function fakeAchievement(id, overrides = {}) {
@@ -224,6 +225,40 @@ describe('Achievement DM batching', () => {
         expect(sendMock).not.toHaveBeenCalled();
     });
 
+    test('opted-out automatic checks create no durable award or notification', async () => {
+        const def = fakeAchievement('automatic');
+        const { service, sendMock } = buildService({ achievements: { automatic: def } });
+        service.isUserOptedOut = jest.fn().mockResolvedValue(true);
+        dbLog.select.mockResolvedValue({ currentStreak: 1, totalActiveDays: 1 });
+        service.getUserTotals = jest.fn().mockResolvedValue({});
+        for (const check of [
+            'checkStreakAchievements',
+            'checkTotalDaysAchievements',
+            'checkCumulativeAchievements',
+            'checkComboAchievements',
+            'checkMetaAchievements'
+        ]) {
+            service[check] = jest.fn(async (_userId, _guildId, ...args) => args.at(-1).push('automatic'));
+        }
+
+        await service.checkAllAchievements('u1', 'g1');
+
+        expect(service.isUserOptedOut).toHaveBeenCalledWith('u1');
+        expect(dbLog.insert).not.toHaveBeenCalled();
+        expect(sendMock).not.toHaveBeenCalled();
+    });
+
+    test('opted-out users may still receive intentional manual admin awards', async () => {
+        const def = fakeAchievement('manual-optout');
+        const { service, sendMock } = buildService({ achievements: { 'manual-optout': def } });
+        service.isUserOptedOut = jest.fn().mockResolvedValue(true);
+
+        await service.awardAchievement('u1', 'g1', 'manual-optout', 'admin-id');
+
+        expect(dbLog.insert).toHaveBeenCalledTimes(1);
+        expect(sendMock).toHaveBeenCalledTimes(1);
+    });
+
     test('disabled-guild manual awards still insert and DM', async () => {
         const def = fakeAchievement('manual_only', { emoji: '🎖️', title: 'Manual' });
         const { service, sendMock } = buildService({ achievements: { manual_only: def }, isEnabled: false });
@@ -343,5 +378,64 @@ describe('Achievement DM batching', () => {
         expect(embedJson.title).toBe('✅ 🎯 Achievement Unlocked!');
         expect(embedJson.description).toContain('**Title b**');
         expect(embedJson.description).not.toContain('Title a');
+    });
+});
+
+describe('Achievement award idempotency', () => {
+    function useAtomicAchievementStore() {
+        const rows = new Map();
+
+        db.insert = jest.fn(() => ({
+            values: jest.fn((row) => ({
+                onConflictDoNothing: jest.fn(() => {
+                    const key = `${row.userId}:${row.guildId}:${row.achievementId}`;
+                    if (rows.has(key)) return { changes: 0 };
+                    rows.set(key, row);
+                    return { changes: 1 };
+                })
+            }))
+        }));
+        dbLog.insert.mockImplementation(async (_table, operation) => operation());
+
+        return rows;
+    }
+
+    test('concurrent public awards persist one record and send one notification and role reward', async () => {
+        const achievement = fakeAchievement('atomic', { grantRole: true });
+        const { service, sendMock } = buildService({ achievements: { atomic: achievement } });
+        const rows = useAtomicAchievementStore();
+
+        await Promise.all([
+            service.awardAchievement('u1', 'g1', 'atomic', 'admin-id'),
+            service.awardAchievement('u1', 'g1', 'atomic', 'admin-id')
+        ]);
+
+        expect(rows.size).toBe(1);
+        expect(sendMock).toHaveBeenCalledTimes(1);
+        expect(service.grantAchievementRole).toHaveBeenCalledTimes(1);
+    });
+
+    test('a failed notification leaves the publicly awarded record durable', async () => {
+        const achievement = fakeAchievement('durable');
+        const { service, sendMock } = buildService({ achievements: { durable: achievement } });
+        const rows = useAtomicAchievementStore();
+        sendMock.mockRejectedValueOnce(new Error('DM disabled'));
+
+        await service.awardAchievement('u1', 'g1', 'durable', 'admin-id');
+
+        expect(rows.size).toBe(1);
+        expect(sendMock).toHaveBeenCalledTimes(1);
+    });
+
+    test('a failed role reward leaves the publicly awarded record durable', async () => {
+        const achievement = fakeAchievement('role-durable', { grantRole: true });
+        const { service, sendMock } = buildService({ achievements: { 'role-durable': achievement } });
+        const rows = useAtomicAchievementStore();
+        service.grantAchievementRole.mockRejectedValueOnce(new Error('role grant denied'));
+
+        await service.awardAchievement('u1', 'g1', 'role-durable', 'admin-id');
+
+        expect(rows.size).toBe(1);
+        expect(sendMock).toHaveBeenCalledTimes(1);
     });
 });

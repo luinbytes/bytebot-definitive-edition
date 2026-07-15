@@ -72,4 +72,4 @@ async function checkUserPermissions(interaction, command) {
     return { allowed: true };
 }
 
-module.exports = { checkUserPermissions };
+module.exports = { checkUserPermissions, getPermissionNames };

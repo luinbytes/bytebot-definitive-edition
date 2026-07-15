@@ -12,7 +12,8 @@ const TARGETS = {
     birthday: { commandName: 'birthday', requirePath: 'src/commands/utility/birthday.js' },
     permissions: { commandName: 'perm', requirePath: 'src/commands/administration/perm.js' },
     achievement: { commandName: 'achievement', requirePath: 'src/commands/administration/achievement.js', map: { roles: 'list_roles' } },
-    streak: { commandName: 'streak', requirePath: 'src/commands/utility/streak.js', map: { top: 'leaderboard' } }
+    streak: { commandName: 'streak', requirePath: 'src/commands/utility/streak.js', map: { top: 'leaderboard' } },
+    community: { commandName: 'community-status', requirePath: 'src/commands/administration/community-status.js' }
 };
 
 function aliasFor(interaction) {
@@ -197,7 +198,13 @@ module.exports = {
             .addSubcommand(sub => sub
                 .setName('top')
                 .setDescription('View streak leaderboard')
-                .addStringOption(opt => opt.setName('type').setDescription('Leaderboard type')))),
+                .addStringOption(opt => opt.setName('type').setDescription('Leaderboard type'))))
+        .addSubcommandGroup(group => group
+            .setName('community')
+            .setDescription('Community feature setup status')
+            .addSubcommand(sub => sub
+                .setName('view')
+                .setDescription('View read-only community configuration status'))),
 
     async execute(interaction, client) {
         return executeAliasCommand(interaction, client, aliasFor(interaction));

@@ -6,6 +6,10 @@ const embeds = require('../../utils/embeds');
 const { dbLog } = require('../../utils/dbLogger');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 
+// The public Community Hub must not turn a leaderboard request into an
+// unbounded database read or one channel fetch per historical starboard row.
+const MAX_PUBLIC_STARBOARD_CANDIDATES = 100;
+
 module.exports = {
     register: false,
     data: new SlashCommandBuilder()
@@ -86,7 +90,9 @@ module.exports = {
                 await handleTop(interaction, client);
                 break;
         }
-    }
+    },
+
+    getTopStarboardEmbed
 };
 
 /**
@@ -345,63 +351,87 @@ async function handleEnable(interaction, client) {
  */
 async function handleTop(interaction, client) {
     const limit = interaction.options.getInteger('limit') || 10;
+    const embed = await getTopStarboardEmbed(interaction.guild, client, limit);
+    await interaction.editReply({ embeds: [embed] });
+}
 
+async function getTopStarboardEmbed(guild, client, limit = 10, requester = null) {
     const results = await dbLog.select('starboardConfig',
         () => db.select()
             .from(starboardConfig)
-            .where(eq(starboardConfig.guildId, interaction.guild.id))
+            .where(eq(starboardConfig.guildId, guild.id))
             .limit(1),
-        { guildId: interaction.guild.id }
+        { guildId: guild.id }
     );
     const config = results[0];
 
-    if (!config) {
-        return interaction.editReply({
-            embeds: [embeds.warn(
-                'Starboard Not Configured',
-                'Use `/starboard setup` to configure the starboard system.'
-            )]
-        });
+    // The public Community Hub only exposes an actively published starboard.
+    // The legacy administrator command deliberately continues to show its
+    // historical records while disabled, so admins can inspect them.
+    if (!config || (requester && !config.enabled)) {
+        return embeds.warn('Starboard Unavailable', 'This server has not published any starred messages.');
     }
 
-    // Get top starred messages
+    const messagesQuery = db.select()
+        .from(starboardMessages)
+        .where(eq(starboardMessages.guildId, guild.id))
+        .orderBy(desc(starboardMessages.starCount));
+    const candidateLimit = Math.min(MAX_PUBLIC_STARBOARD_CANDIDATES, Math.max(limit, limit * 10));
     const topMessages = await dbLog.select('starboardMessages',
-        () => db.select()
-            .from(starboardMessages)
-            .where(eq(starboardMessages.guildId, interaction.guild.id))
-            .orderBy(desc(starboardMessages.starCount))
-            .limit(limit)
-            .all(),
-        { guildId: interaction.guild.id, limit }
+        () => requester ? messagesQuery.limit(candidateLimit).all() : messagesQuery.limit(limit).all(),
+        { guildId: guild.id, ...(requester ? { limit: candidateLimit } : { limit }) }
     );
 
     if (topMessages.length === 0) {
-        return interaction.editReply({
-            embeds: [embeds.warn(
-                'No Starred Messages',
-                'No messages have been starred yet.'
-            )]
-        });
+        return embeds.warn('No Starred Messages', 'No messages have been starred yet.');
     }
 
     const embed = embeds.brand(`${config.emoji} Top Starred Messages`, null);
+    let visibleMessages;
+    if (requester) {
+        const channelById = new Map();
+        visibleMessages = [];
 
-    // Build leaderboard
-    const leaderboard = await Promise.all(topMessages.map(async (msg, index) => {
+        for (const msg of topMessages) {
+            if (visibleMessages.length >= limit) break;
+
+            let channel = channelById.get(msg.originalChannelId);
+            if (!channelById.has(msg.originalChannelId)) {
+                channel = guild.channels.cache?.get(msg.originalChannelId)
+                    || await guild.channels.fetch(msg.originalChannelId).catch(() => null);
+                channelById.set(msg.originalChannelId, channel);
+            }
+
+            // The public Community Hub must not reveal any detail from a channel the
+            // requesting member cannot view or read. The admin command intentionally
+            // omits requester context and retains its existing operational behavior.
+            const permissions = channel?.permissionsFor(requester);
+            if (!channel || !permissions?.has(PermissionFlagsBits.ViewChannel) || !permissions.has(PermissionFlagsBits.ReadMessageHistory)) continue;
+
+            visibleMessages.push({ msg, channel });
+        }
+    } else {
+        visibleMessages = await Promise.all(topMessages.map(async msg => ({
+            msg,
+            channel: await guild.channels.fetch(msg.originalChannelId).catch(() => null)
+        })));
+    }
+
+    const leaderboard = await Promise.all(visibleMessages.map(async ({ msg, channel }, index) => {
         const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `**${index + 1}.**`;
         const author = await client.users.fetch(msg.authorId).catch(() => null);
         const authorDisplay = author ? author.tag : 'Unknown User';
-        const channel = await interaction.guild.channels.fetch(msg.originalChannelId).catch(() => null);
         const channelDisplay = channel ? `#${channel.name}` : 'deleted-channel';
-
-        // Create message link
-        const messageLink = `https://discord.com/channels/${interaction.guild.id}/${msg.originalChannelId}/${msg.originalMessageId}`;
+        const messageLink = `https://discord.com/channels/${guild.id}/${msg.originalChannelId}/${msg.originalMessageId}`;
 
         return `${medal} **${msg.starCount}** ${config.emoji} • ${authorDisplay} in ${channelDisplay}\n[Jump to message](${messageLink})`;
     }));
 
-    embed.setDescription(leaderboard.join('\n\n'));
-    embed.setFooter({ text: `Showing top ${topMessages.length} starred messages` });
+    if (leaderboard.length === 0) {
+        return embeds.warn('No Visible Starred Messages', 'There are no starred messages you can view.');
+    }
 
-    await interaction.editReply({ embeds: [embed] });
+    embed.setDescription(leaderboard.join('\n\n'));
+    embed.setFooter({ text: `Showing top ${leaderboard.length} starred messages` });
+    return embed;
 }

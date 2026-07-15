@@ -635,9 +635,28 @@ async function handleProgress(interaction, client) {
             '📊 Achievement Progress',
             `Showing progress for ${targetUser.id === interaction.user.id ? 'you' : targetUser.username}`
         );
+        // Chains are a read-only projection of durable achievement awards, so
+        // they remain useful even if a streak or aggregate totals row is absent.
+        const chains = await client.activityStreakService.getAchievementChainProgress(
+            targetUser.id,
+            interaction.guild.id
+        );
 
         if (!streakData || !totals) {
             embed.setDescription('No activity data yet. Start your journey!');
+            if (chains.length > 0) {
+                const chainLines = chains.map(chain => {
+                    const status = chain.complete
+                        ? '✅ Complete'
+                        : `Next: ${chain.nextStep.emoji} **${chain.nextStep.title}**`;
+                    return `${chain.emoji} **${chain.title}** — ${chain.completedSteps}/${chain.totalSteps}\n${status}`;
+                });
+                embed.addFields({
+                    name: '🏆 Achievement Chains',
+                    value: chainLines.join('\n\n'),
+                    inline: false
+                });
+            }
             return interaction.editReply({ embeds: [embed] });
         }
 
@@ -683,6 +702,20 @@ async function handleProgress(interaction, client) {
             value: `**${achievementCount}**/82 achievements earned\n**${totalPoints.toLocaleString()}** total points`,
             inline: false
         });
+
+        if (chains.length > 0) {
+            const chainLines = chains.map(chain => {
+                const status = chain.complete
+                    ? '✅ Complete'
+                    : `Next: ${chain.nextStep.emoji} **${chain.nextStep.title}**`;
+                return `${chain.emoji} **${chain.title}** — ${chain.completedSteps}/${chain.totalSteps}\n${status}`;
+            });
+            embed.addFields({
+                name: '🏆 Achievement Chains',
+                value: chainLines.join('\n\n'),
+                inline: false
+            });
+        }
 
         embed.setThumbnail(targetUser.displayAvatarURL());
         embed.setFooter({ text: 'Keep up the great work!' });

@@ -122,6 +122,40 @@ module.exports = {
             return;
         }
 
+        // Handle Community Hub Button Interactions
+        if (interaction.isButton() && interaction.customId.startsWith('community_page_')) {
+            const command = client.commands.get('community');
+            const respondUnavailable = async () => {
+                try {
+                    const errorEmbed = embeds.error('Community Unavailable', 'This community action is temporarily unavailable. Open `/community` again later.');
+                    if (interaction.replied || interaction.deferred) {
+                        await interaction.followUp({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+                    } else {
+                        await interaction.reply({ embeds: [errorEmbed], flags: [MessageFlags.Ephemeral] });
+                    }
+                } catch (deliveryError) {
+                    logger.error('Failed to send community interaction fallback:', deliveryError);
+                }
+            };
+
+            if (!command || typeof command.handleInteraction !== 'function') {
+                await respondUnavailable();
+                return;
+            }
+
+            try {
+                await command.handleInteraction(interaction, client);
+            } catch (error) {
+                logger.errorContext('Community Hub Interaction Error', error, {
+                    customId: interaction.customId,
+                    userId: interaction.user?.id,
+                    guildId: interaction.guildId
+                });
+                await respondUnavailable();
+            }
+            return;
+        }
+
         // Handle Moderation Button Interactions
         if (interaction.isButton() && interaction.customId.startsWith('mod_')) {
             const modActionsMenu = client.contextMenus.get('Moderate User');
