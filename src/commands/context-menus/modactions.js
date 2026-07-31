@@ -2,7 +2,7 @@ const { ContextMenuCommandBuilder, ApplicationCommandType, ActionRowBuilder, But
 const embeds = require('../../utils/embeds');
 const { db } = require('../../database');
 const { moderationLogs } = require('../../database/schema');
-const { eq, desc } = require('drizzle-orm');
+const { eq, and, desc } = require('drizzle-orm');
 const { executeModerationAction, validateHierarchy } = require('../../utils/moderationUtil');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { fetchMember } = require('../../utils/discordApiUtil');
@@ -175,11 +175,9 @@ module.exports = {
                         target,
                         executor,
                         action: 'KICK',
-                        reason
+                        reason,
+                        perform: () => targetMember.kick(reason)
                     });
-
-                    // Perform the kick
-                    await targetMember.kick(reason);
 
                     return interaction.editReply({
                         embeds: [embeds.success('User Kicked', `${target.tag} has been kicked from the server.\n\n**Reason:** ${reason}`)]
@@ -193,11 +191,9 @@ module.exports = {
                         target,
                         executor,
                         action: 'BAN',
-                        reason
+                        reason,
+                        perform: () => guild.members.ban(userId, { reason, deleteMessageSeconds: 0 })
                     });
-
-                    // Perform the ban
-                    await guild.members.ban(userId, { reason: reason, deleteMessageSeconds: 0 });
 
                     return interaction.editReply({
                         embeds: [embeds.success('User Banned', `${target.tag} has been banned from the server.\n\n**Reason:** ${reason}`)]
@@ -240,7 +236,10 @@ async function showHistory(interaction, userId) {
 
     const logs = await db.select()
         .from(moderationLogs)
-        .where(eq(moderationLogs.targetId, userId))
+        .where(and(
+            eq(moderationLogs.guildId, interaction.guild.id),
+            eq(moderationLogs.targetId, userId)
+        ))
         .orderBy(desc(moderationLogs.timestamp))
         .limit(10)
         .all();

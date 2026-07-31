@@ -695,17 +695,23 @@ module.exports = {
             ])
             .setFooter({ text: `ID: ${suggestion.id} • React to vote!` });
 
-        // Send to suggestion channel
-        const message = await channel.send({ embeds: [suggestionEmbed] });
+        let message;
+        try {
+            message = await channel.send({ embeds: [suggestionEmbed] });
+            await db.update(suggestions)
+                .set({ messageId: message.id })
+                .where(eq(suggestions.id, suggestion.id));
+        } catch (error) {
+            if (message) await message.delete().catch(() => { });
+            await dbLog.delete('suggestions',
+                () => db.delete(suggestions).where(eq(suggestions.id, suggestion.id)),
+                { suggestionId: suggestion.id, operation: 'failedSubmissionRollback' }
+            );
+            throw error;
+        }
 
-        // Add voting reactions
-        await message.react('👍');
-        await message.react('👎');
-
-        // Update suggestion with message ID
-        await db.update(suggestions)
-            .set({ messageId: message.id })
-            .where(eq(suggestions.id, suggestion.id));
+        // Missing seed reactions should not orphan an otherwise valid suggestion.
+        await Promise.allSettled([message.react('👍'), message.react('👎')]);
 
         // Reply to user
         await interaction.editReply({

@@ -55,6 +55,11 @@ describe('Auto-Responder System', () => {
             expect(service.matchesTrigger('hello world', 'hello', 'wildcard')).toBe(false); // Must match fully
         });
 
+        test('wildcard match treats regex punctuation as literal text', () => {
+            expect(service.matchesTrigger('file[1].txt', 'file[1].*', 'wildcard')).toBe(true);
+            expect(service.matchesTrigger('file1.txt', 'file[1].*', 'wildcard')).toBe(false);
+        });
+
         test('regex match should work correctly', () => {
             expect(service.matchesTrigger('hello123', 'hello\\d+', 'regex')).toBe(true);
             expect(service.matchesTrigger('test@example.com', '\\S+@\\S+', 'regex')).toBe(true);

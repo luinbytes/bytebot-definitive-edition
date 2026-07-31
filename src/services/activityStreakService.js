@@ -10,7 +10,7 @@ const {
     guilds,
     users
 } = require('../database/schema');
-const { eq, and, desc } = require('drizzle-orm');
+const { eq, and, desc, sql } = require('drizzle-orm');
 const { PermissionFlagsBits, escapeMarkdown } = require('discord.js');
 const logger = require('../utils/logger');
 const embeds = require('../utils/embeds');
@@ -732,54 +732,30 @@ class ActivityStreakService {
     async recordActivity(userId, guildId, activityType, value = 1) {
         try {
             const today = this.getTodayDateString();
+            const increment = {
+                message: { messageCount: sql`${activityLogs.messageCount} + ${value}` },
+                voice: { voiceMinutes: sql`${activityLogs.voiceMinutes} + ${value}` },
+                command: { commandsRun: sql`${activityLogs.commandsRun} + ${value}` }
+            }[activityType];
+            if (!increment) return;
 
-            // Update activity log for today
-            const existingLog = await dbLog.select('activityLogs',
-                () => db.select()
-                    .from(activityLogs)
-                    .where(and(
-                        eq(activityLogs.userId, userId),
-                        eq(activityLogs.guildId, guildId),
-                        eq(activityLogs.activityDate, today)
-                    ))
-                    .get(),
-                { userId, guildId, activityDate: today }
+            await dbLog.insert('activityLogs',
+                () => db.insert(activityLogs)
+                    .values({
+                        userId,
+                        guildId,
+                        activityDate: today,
+                        messageCount: activityType === 'message' ? value : 0,
+                        voiceMinutes: activityType === 'voice' ? value : 0,
+                        commandsRun: activityType === 'command' ? value : 0,
+                        updatedAt: new Date()
+                    })
+                    .onConflictDoUpdate({
+                        target: [activityLogs.userId, activityLogs.guildId, activityLogs.activityDate],
+                        set: { ...increment, updatedAt: new Date() }
+                    }),
+                { userId, guildId, activityDate: today, activityType }
             );
-
-            if (existingLog) {
-                // Update existing log
-                const updates = { updatedAt: new Date() };
-                if (activityType === 'message') updates.messageCount = existingLog.messageCount + value;
-                if (activityType === 'voice') updates.voiceMinutes = existingLog.voiceMinutes + value;
-                if (activityType === 'command') updates.commandsRun = existingLog.commandsRun + value;
-
-                await dbLog.update('activityLogs',
-                    () => db.update(activityLogs)
-                        .set(updates)
-                        .where(and(
-                            eq(activityLogs.userId, userId),
-                            eq(activityLogs.guildId, guildId),
-                            eq(activityLogs.activityDate, today)
-                        )),
-                    { userId, guildId, activityDate: today, activityType }
-                );
-            } else {
-                // Create new log
-                const logData = {
-                    userId,
-                    guildId,
-                    activityDate: today,
-                    messageCount: activityType === 'message' ? value : 0,
-                    voiceMinutes: activityType === 'voice' ? value : 0,
-                    commandsRun: activityType === 'command' ? value : 0,
-                    updatedAt: new Date()
-                };
-
-                await dbLog.insert('activityLogs',
-                    () => db.insert(activityLogs).values(logData),
-                    { userId, guildId, activityDate: today, activityType }
-                );
-            }
 
             // Update streak
             await this.updateStreak(userId, guildId, today);
@@ -796,26 +772,7 @@ class ActivityStreakService {
      */
     async recordReaction(userId, guildId) {
         try {
-            const today = this.getTodayDateString();
-            const log = await this.getOrCreateTodayLog(userId, guildId, today);
-
-            await dbLog.update('activityLogs',
-                () => db.update(activityLogs)
-                    .set({
-                        reactionsGiven: log.reactionsGiven + 1,
-                        updatedAt: new Date()
-                    })
-                    .where(and(
-                        eq(activityLogs.userId, userId),
-                        eq(activityLogs.guildId, guildId),
-                        eq(activityLogs.activityDate, today)
-                    )),
-                { userId, guildId, activityDate: today, operation: 'reaction' }
-            );
-
-            // Update streak
-            await this.updateStreak(userId, guildId, today);
-
+            await this.incrementDailyCounter(userId, guildId, 'reactionsGiven', activityLogs.reactionsGiven, 'reaction');
         } catch (error) {
             logger.error(`Error recording reaction for user ${userId}:`, error);
         }
@@ -828,26 +785,7 @@ class ActivityStreakService {
      */
     async recordChannelJoin(userId, guildId) {
         try {
-            const today = this.getTodayDateString();
-            const log = await this.getOrCreateTodayLog(userId, guildId, today);
-
-            await dbLog.update('activityLogs',
-                () => db.update(activityLogs)
-                    .set({
-                        channelsJoined: log.channelsJoined + 1,
-                        updatedAt: new Date()
-                    })
-                    .where(and(
-                        eq(activityLogs.userId, userId),
-                        eq(activityLogs.guildId, guildId),
-                        eq(activityLogs.activityDate, today)
-                    )),
-                { userId, guildId, activityDate: today, operation: 'channelJoin' }
-            );
-
-            // Update streak
-            await this.updateStreak(userId, guildId, today);
-
+            await this.incrementDailyCounter(userId, guildId, 'channelsJoined', activityLogs.channelsJoined, 'channelJoin');
         } catch (error) {
             logger.error(`Error recording channel join for user ${userId}:`, error);
         }
@@ -860,29 +798,30 @@ class ActivityStreakService {
      */
     async recordBytepodCreation(userId, guildId) {
         try {
-            const today = this.getTodayDateString();
-            const log = await this.getOrCreateTodayLog(userId, guildId, today);
-
-            await dbLog.update('activityLogs',
-                () => db.update(activityLogs)
-                    .set({
-                        bytepodsCreated: log.bytepodsCreated + 1,
-                        updatedAt: new Date()
-                    })
-                    .where(and(
-                        eq(activityLogs.userId, userId),
-                        eq(activityLogs.guildId, guildId),
-                        eq(activityLogs.activityDate, today)
-                    )),
-                { userId, guildId, activityDate: today, operation: 'bytepod' }
-            );
-
-            // Update streak (now checks achievements for cumulative values)
-            await this.updateStreak(userId, guildId, today);
-
+            await this.incrementDailyCounter(userId, guildId, 'bytepodsCreated', activityLogs.bytepodsCreated, 'bytepod');
         } catch (error) {
             logger.error(`Error recording BytePod creation for user ${userId}:`, error);
         }
+    }
+
+    async incrementDailyCounter(userId, guildId, field, column, operation) {
+        const today = this.getTodayDateString();
+        await dbLog.insert('activityLogs',
+            () => db.insert(activityLogs)
+                .values({
+                    userId,
+                    guildId,
+                    activityDate: today,
+                    [field]: 1,
+                    updatedAt: new Date()
+                })
+                .onConflictDoUpdate({
+                    target: [activityLogs.userId, activityLogs.guildId, activityLogs.activityDate],
+                    set: { [field]: sql`${column} + 1`, updatedAt: new Date() }
+                }),
+            { userId, guildId, activityDate: today, operation }
+        );
+        await this.updateStreak(userId, guildId, today);
     }
 
     /**
@@ -894,35 +833,35 @@ class ActivityStreakService {
     async recordCommandUsage(userId, guildId, commandName) {
         try {
             const today = this.getTodayDateString();
-            const log = await this.getOrCreateTodayLog(userId, guildId, today);
-
-            // Parse existing unique commands
-            let uniqueCommands = [];
-            if (log.uniqueCommandsUsed) {
-                try {
-                    uniqueCommands = JSON.parse(log.uniqueCommandsUsed);
-                } catch (e) {
-                    uniqueCommands = [];
-                }
-            }
-
-            // Add command if not already in list
-            if (!uniqueCommands.includes(commandName)) {
-                uniqueCommands.push(commandName);
-            }
-
-            await dbLog.update('activityLogs',
-                () => db.update(activityLogs)
-                    .set({
-                        commandsRun: log.commandsRun + 1,
-                        uniqueCommandsUsed: JSON.stringify(uniqueCommands),
+            await dbLog.insert('activityLogs',
+                () => db.insert(activityLogs)
+                    .values({
+                        userId,
+                        guildId,
+                        activityDate: today,
+                        uniqueCommandsUsed: JSON.stringify([commandName]),
                         updatedAt: new Date()
                     })
-                    .where(and(
-                        eq(activityLogs.userId, userId),
-                        eq(activityLogs.guildId, guildId),
-                        eq(activityLogs.activityDate, today)
-                    )),
+                    .onConflictDoUpdate({
+                        target: [activityLogs.userId, activityLogs.guildId, activityLogs.activityDate],
+                        set: {
+                            uniqueCommandsUsed: sql`
+                                CASE
+                                    WHEN EXISTS (
+                                        SELECT 1
+                                        FROM json_each(COALESCE(${activityLogs.uniqueCommandsUsed}, '[]'))
+                                        WHERE value = ${commandName}
+                                    ) THEN COALESCE(${activityLogs.uniqueCommandsUsed}, '[]')
+                                    ELSE json_insert(
+                                        COALESCE(${activityLogs.uniqueCommandsUsed}, '[]'),
+                                        '$[#]',
+                                        ${commandName}
+                                    )
+                                END
+                            `,
+                            updatedAt: new Date()
+                        }
+                    }),
                 { userId, guildId, activityDate: today, commandName }
             );
 
@@ -943,41 +882,36 @@ class ActivityStreakService {
     async recordActiveHour(userId, guildId, hour) {
         try {
             const today = this.getTodayDateString();
-            const log = await this.getOrCreateTodayLog(userId, guildId, today);
-
-            // Parse existing active hours
-            let activeHours = [];
-            if (log.activeHours) {
-                try {
-                    activeHours = JSON.parse(log.activeHours);
-                } catch (e) {
-                    activeHours = [];
-                }
-            }
-
-            // Add hour if not already in list
-            if (!activeHours.includes(hour)) {
-                activeHours.push(hour);
-            }
-
-            // Update first/last activity times
             const now = Date.now();
-            const firstTime = log.firstActivityTime || now;
-            const lastTime = now;
-
-            await dbLog.update('activityLogs',
-                () => db.update(activityLogs)
-                    .set({
-                        activeHours: JSON.stringify(activeHours),
-                        firstActivityTime: firstTime,
-                        lastActivityTime: lastTime,
+            await dbLog.insert('activityLogs',
+                () => db.insert(activityLogs)
+                    .values({
+                        userId,
+                        guildId,
+                        activityDate: today,
+                        activeHours: JSON.stringify([hour]),
+                        firstActivityTime: now,
+                        lastActivityTime: now,
                         updatedAt: new Date()
                     })
-                    .where(and(
-                        eq(activityLogs.userId, userId),
-                        eq(activityLogs.guildId, guildId),
-                        eq(activityLogs.activityDate, today)
-                    )),
+                    .onConflictDoUpdate({
+                        target: [activityLogs.userId, activityLogs.guildId, activityLogs.activityDate],
+                        set: {
+                            activeHours: sql`
+                                CASE
+                                    WHEN EXISTS (
+                                        SELECT 1
+                                        FROM json_each(COALESCE(${activityLogs.activeHours}, '[]'))
+                                        WHERE value = ${hour}
+                                    ) THEN COALESCE(${activityLogs.activeHours}, '[]')
+                                    ELSE json_insert(COALESCE(${activityLogs.activeHours}, '[]'), '$[#]', ${hour})
+                                END
+                            `,
+                            firstActivityTime: sql`COALESCE(${activityLogs.firstActivityTime}, ${now})`,
+                            lastActivityTime: now,
+                            updatedAt: new Date()
+                        }
+                    }),
                 { userId, guildId, activityDate: today, hour }
             );
 

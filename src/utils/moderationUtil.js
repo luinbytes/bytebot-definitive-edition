@@ -138,9 +138,14 @@ function validateHierarchy(executor, target) {
  * @param {string} options.action - Action type (WARN, KICK, BAN)
  * @param {string} options.reason - Reason for action
  * @param {boolean} options.notify - Whether to send DM notification (default: true)
+ * @param {Function|null} options.perform - Discord action to complete before logging
  * @returns {Promise<void>}
  */
-async function executeModerationAction({ guildId, guildName, target, executor, action, reason, notify = true }) {
+async function executeModerationAction({ guildId, guildName, target, executor, action, reason, notify = true, perform = null }) {
+    if (perform) {
+        await perform();
+    }
+
     // Log to database
     await logModerationAction(guildId, target.id, executor.id, action, reason);
 

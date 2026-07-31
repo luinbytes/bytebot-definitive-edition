@@ -156,10 +156,9 @@ async function handleBan(interaction) {
             target: target.user,
             executor: interaction.member,
             action: 'BAN',
-            reason
+            reason,
+            perform: () => target.ban({ reason })
         });
-
-        await target.ban({ reason });
 
         await interaction.editReply({
             embeds: [embeds.success('Member Banned', `**${target.user.tag}** has been banned.\n**Reason:** ${reason}`)]
@@ -202,10 +201,9 @@ async function handleKick(interaction) {
             target: target.user,
             executor: interaction.member,
             action: 'KICK',
-            reason
+            reason,
+            perform: () => target.kick(reason)
         });
-
-        await target.kick(reason);
 
         await interaction.editReply({
             embeds: [embeds.success('Member Kicked', `**${target.user.tag}** has been kicked.\n**Reason:** ${reason}`)]

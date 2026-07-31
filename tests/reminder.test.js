@@ -86,7 +86,7 @@ describe('Reminder System', () => {
             expect(service.longDelayChecks.has(1)).toBe(false);
         });
 
-        test('should use setInterval for long delays', () => {
+        test('should fire long delays at the exact deadline', async () => {
             const ReminderService = require('../src/services/reminderService');
             const mockClient = {
                 channels: { fetch: jest.fn() },
@@ -94,18 +94,25 @@ describe('Reminder System', () => {
             };
             const service = new ReminderService(mockClient);
             serviceInstances.push(service);
+            service.fireReminder = jest.fn();
+
+            const maxTimeout = 2147483647;
+            jest.setSystemTime(new Date('2026-01-01T00:00:00Z'));
 
             const longReminder = {
                 id: 2,
                 userId: 'user2',
-                triggerAt: Date.now() + (30 * 86400000), // 30 days
+                triggerAt: Date.now() + maxTimeout + 60000,
                 message: 'Test'
             };
 
             service.scheduleReminder(longReminder);
 
-            expect(service.activeTimers.has(2)).toBe(false);
-            expect(service.longDelayChecks.has(2)).toBe(true);
+            await jest.advanceTimersByTimeAsync(maxTimeout);
+            expect(service.fireReminder).not.toHaveBeenCalled();
+
+            await jest.advanceTimersByTimeAsync(60000);
+            expect(service.fireReminder).toHaveBeenCalledTimes(1);
         });
     });
 

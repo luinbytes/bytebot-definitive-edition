@@ -301,19 +301,29 @@ class StarboardService {
                 }
             } else {
                 // Star count below threshold
+                const updates = { starCount };
                 if (entry && entry.starboardMessageId) {
                     // Remove from starboard
                     const starboardChannel = await this.client.channels.fetch(config.channelId).catch(() => null);
                     if (starboardChannel) {
-                        await starboardChannel.messages.delete(entry.starboardMessageId).catch(() => { });
+                        try {
+                            await starboardChannel.messages.delete(entry.starboardMessageId);
+                            updates.starboardMessageId = null;
+                        } catch (error) {
+                            // Unknown Message means it is already gone; transient failures should retry later.
+                            if (error?.code === 10008 || error?.rawError?.code === 10008) {
+                                updates.starboardMessageId = null;
+                            }
+                        }
                     }
+                }
 
-                    // Update DB (keep entry but clear starboard message ID)
+                if (entry) {
                     await dbLog.update('starboardMessages',
                         () => db.update(starboardMessages)
-                            .set({ starCount: starCount, starboardMessageId: null })
+                            .set(updates)
                             .where(eq(starboardMessages.id, entry.id)),
-                        { entryId: entry.id, messageId, starCount, operation: 'removeBelowThreshold' }
+                        { entryId: entry.id, messageId, starCount, operation: 'updateBelowThreshold' }
                     );
                 }
             }

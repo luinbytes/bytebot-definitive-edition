@@ -1,0 +1,107 @@
+const Database = require('better-sqlite3');
+const { drizzle } = require('drizzle-orm/better-sqlite3');
+const { Collection, ChannelType } = require('discord.js');
+
+let mockDb;
+const mockDbProxy = {
+    insert: (...args) => mockDb.insert(...args),
+    select: (...args) => mockDb.select(...args),
+    update: (...args) => mockDb.update(...args),
+    delete: (...args) => mockDb.delete(...args)
+};
+
+jest.mock('../src/database', () => ({ db: mockDbProxy }));
+jest.mock('../src/utils/ephemeralHelper', () => ({
+    shouldBeEphemeral: jest.fn().mockResolvedValue(false)
+}));
+
+const statsCommand = require('../src/commands/utility/stats');
+
+describe('/stats server', () => {
+    let sqlite;
+
+    beforeEach(() => {
+        sqlite = new Database(':memory:');
+        sqlite.exec(`
+            CREATE TABLE users (
+                id TEXT PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                commands_run INTEGER DEFAULT 0
+            );
+            CREATE TABLE activity_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                guild_id TEXT NOT NULL,
+                activity_date TEXT NOT NULL,
+                commands_run INTEGER DEFAULT 0 NOT NULL
+            );
+            CREATE TABLE moderation_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                executor_id TEXT NOT NULL,
+                action TEXT NOT NULL
+            );
+            CREATE TABLE bytepods (
+                channel_id TEXT PRIMARY KEY,
+                guild_id TEXT NOT NULL,
+                owner_id TEXT NOT NULL
+            );
+            CREATE TABLE bytepod_voice_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                guild_id TEXT NOT NULL,
+                total_seconds INTEGER DEFAULT 0,
+                session_count INTEGER DEFAULT 0
+            );
+
+            INSERT INTO users (id, guild_id, commands_run) VALUES
+                ('user-1', 'guild-a', 9),
+                ('user-2', 'guild-b', 4);
+            INSERT INTO activity_logs (user_id, guild_id, activity_date, commands_run) VALUES
+                ('user-1', 'guild-a', '2026-07-30', 2),
+                ('user-2', 'guild-a', '2026-07-30', 1),
+                ('user-1', 'guild-b', '2026-07-30', 7);
+        `);
+        mockDb = drizzle(sqlite);
+    });
+
+    afterEach(() => sqlite.close());
+
+    test('reports command activity from only the current guild', async () => {
+        const channels = new Collection([
+            ['text', { type: ChannelType.GuildText }],
+            ['voice', { type: ChannelType.GuildVoice }]
+        ]);
+        const editReply = jest.fn();
+        const interaction = {
+            options: {
+                getSubcommand: () => 'server',
+                getBoolean: () => null
+            },
+            guild: {
+                id: 'guild-a',
+                name: 'Guild A',
+                memberCount: 2,
+                channels: { cache: channels },
+                roles: { cache: new Collection([['everyone', {}]]) },
+                emojis: { cache: new Collection() },
+                premiumTier: 0,
+                premiumSubscriptionCount: 0,
+                verificationLevel: 0,
+                createdTimestamp: Date.UTC(2020, 0, 1),
+                iconURL: () => null,
+                fetchOwner: jest.fn().mockResolvedValue(null)
+            },
+            client: { users: { fetch: jest.fn() } },
+            deferReply: jest.fn(),
+            editReply
+        };
+
+        await statsCommand.execute(interaction);
+
+        const embed = editReply.mock.calls[0][0].embeds[0];
+        const commandsField = embed.data.fields.find(field => field.name === 'Commands Run');
+        expect(commandsField.value).toBe('3 (2 users)');
+    });
+});

@@ -32,6 +32,11 @@ DATABASE_LOGGING_GUIDE.md
 CLAUDE.md
 AGENTS.md
 
+# Local agent workspaces
+.agent/
+.agents/
+.codex/
+
 # Local configuration overrides
 config.local.json
 nul

@@ -1,4 +1,6 @@
 const { drizzle } = require('drizzle-orm/better-sqlite3');
+const { getTableConfig } = require('drizzle-orm/sqlite-core');
+const { readMigrationFiles } = require('drizzle-orm/migrator');
 const Database = require('better-sqlite3');
 const schema = require('./schema');
 const { isValidSQLIdentifier, isValidSQLType } = require('../utils/validationUtil');
@@ -35,6 +37,76 @@ function tableExists(tableName) {
         `SELECT name FROM sqlite_master WHERE type='table' AND name=?`
     ).get(tableName);
     return !!result;
+}
+
+function sqlIdentifier(identifier) {
+    return `"${identifier.replace(/"/g, '""')}"`;
+}
+
+function sqlDefault(value) {
+    if (value instanceof Date) return String(value.getTime());
+    if (typeof value === 'boolean') return value ? '1' : '0';
+    if (typeof value === 'number') return String(value);
+    return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function createFreshSchema() {
+    const tables = Object.values(schema).map(table => getTableConfig(table));
+    const migrations = readMigrationFiles({ migrationsFolder: './drizzle' });
+
+    sqlite.transaction(() => {
+        for (const table of tables) {
+            const compositePrimaryKeys = table.primaryKeys.map(key => key.columns);
+            const definitions = table.columns.map(column => {
+                const parts = [sqlIdentifier(column.name), column.getSQLType()];
+                if (column.primary) parts.push('PRIMARY KEY');
+                if (column.autoIncrement) parts.push('AUTOINCREMENT');
+                if (column.notNull) parts.push('NOT NULL');
+                if (column.default !== undefined) parts.push('DEFAULT', sqlDefault(column.default));
+                return parts.join(' ');
+            });
+
+            for (const columns of compositePrimaryKeys) {
+                definitions.push(`PRIMARY KEY (${columns.map(column => sqlIdentifier(column.name)).join(', ')})`);
+            }
+            for (const constraint of table.uniqueConstraints) {
+                definitions.push(`UNIQUE (${constraint.columns.map(column => sqlIdentifier(column.name)).join(', ')})`);
+            }
+
+            sqlite.exec(`CREATE TABLE ${sqlIdentifier(table.name)} (${definitions.join(', ')})`);
+        }
+
+        for (const table of tables) {
+            for (const index of table.indexes) {
+                const unique = index.config.unique ? 'UNIQUE ' : '';
+                const columns = index.config.columns.map(column => sqlIdentifier(column.name)).join(', ');
+                sqlite.exec(`CREATE ${unique}INDEX ${sqlIdentifier(index.config.name)} ON ${sqlIdentifier(table.name)} (${columns})`);
+            }
+        }
+
+        sqlite.exec(`CREATE TABLE "__drizzle_migrations" (
+            id SERIAL PRIMARY KEY,
+            hash TEXT NOT NULL,
+            created_at NUMERIC
+        )`);
+        const recordMigration = sqlite.prepare(
+            'INSERT INTO "__drizzle_migrations" (hash, created_at) VALUES (?, ?)'
+        );
+        for (const migration of migrations) {
+            recordMigration.run(migration.hash, migration.folderMillis);
+        }
+    })();
+}
+
+function hasApplicationTables() {
+    return sqlite.prepare(`
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name NOT LIKE 'sqlite_%'
+          AND name != '__drizzle_migrations'
+        LIMIT 1
+    `).get() !== undefined;
 }
 
 /**
@@ -528,12 +600,34 @@ function validateAndFixSchema() {
 }
 
 const runMigrations = async () => {
-    // First, validate and fix schema to prevent Drizzle migration failures
     const logger = require('../utils/logger');
     const config = require('../utils/config');
 
     const dbLoggingEnabled = config.logging?.database !== false;
 
+    if (!hasApplicationTables()) {
+        createFreshSchema();
+        if (dbLoggingEnabled) {
+            logger.info('Fresh database schema created successfully', 'Database');
+        }
+        return;
+    }
+
+    // Run authoritative migrations before compatibility repairs so fresh databases
+    // receive every primary key, unique constraint, and index from the SQL files.
+    try {
+        await migrate(db, { migrationsFolder: './drizzle' });
+        if (dbLoggingEnabled) {
+            logger.info('Database migrations completed successfully', 'Database');
+        }
+    } catch (error) {
+        if (dbLoggingEnabled) {
+            logger.warn(`Drizzle migration warning; applying compatibility repairs: ${error.message}`, 'Database');
+        }
+    }
+
+    // Older installations may predate the migration journal. Preserve their data by
+    // adding missing tables/columns after the migration attempt instead of rebuilding.
     try {
         const fixes = validateAndFixSchema();
         if (fixes.length > 0) {
@@ -541,27 +635,12 @@ const runMigrations = async () => {
                 logger.info('Database schema fixes applied:', 'Database');
                 fixes.forEach(fix => logger.info(`  → ${fix}`, 'Database'));
             }
-        } else {
-            if (dbLoggingEnabled) {
-                logger.debug('Database schema is up to date', 'Database');
-            }
+        } else if (dbLoggingEnabled) {
+            logger.debug('Database schema is up to date', 'Database');
         }
     } catch (error) {
         if (dbLoggingEnabled) {
             logger.error(`Schema validation error: ${error.message}`, 'Database');
-        }
-    }
-
-    // Now run Drizzle migrations (should work since schema is fixed)
-    try {
-        await migrate(db, { migrationsFolder: './drizzle' });
-        if (dbLoggingEnabled) {
-            logger.info('Database migrations completed successfully', 'Database');
-        }
-    } catch (error) {
-        // If Drizzle migration still fails, log but don't crash - we've already fixed the schema
-        if (dbLoggingEnabled) {
-            logger.warn(`Drizzle migration warning (schema should be fixed): ${error.message}`, 'Database');
         }
     }
 };

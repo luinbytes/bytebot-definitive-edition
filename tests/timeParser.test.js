@@ -43,6 +43,11 @@ describe('Time Parser Utility', () => {
             });
         });
 
+        test('should reject inputs with unparsed text or signs', () => {
+            expect(parseTime('10mxyz').success).toBe(false);
+            expect(parseTime('1h -30m').success).toBe(false);
+        });
+
         test('should reject durations exceeding 1 year', () => {
             const result = parseTime('400d');
             expect(result.success).toBe(false);

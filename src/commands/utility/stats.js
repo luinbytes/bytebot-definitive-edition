@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, ChannelType, MessageFlags } = require('discord.js');
 const { db } = require('../../database');
-const { users, moderationLogs, bytepods, bytepodVoiceStats } = require('../../database/schema');
+const { activityLogs, moderationLogs, bytepods, bytepodVoiceStats } = require('../../database/schema');
 const { eq, sql, desc } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
@@ -64,11 +64,11 @@ module.exports = {
             const verificationLevel = verificationLevels[guild.verificationLevel] || 'Unknown';
 
             // --- Gather Database Stats ---
-            // Command usage (sum of all commandsRun for this guild)
+            // Command usage from per-guild daily activity logs
             const commandStats = await db.select({
-                totalCommands: sql`SUM(${users.commandsRun})`,
-                uniqueUsers: sql`COUNT(DISTINCT ${users.id})`
-            }).from(users).where(eq(users.guildId, guild.id)).get();
+                totalCommands: sql`SUM(${activityLogs.commandsRun})`,
+                uniqueUsers: sql`COUNT(DISTINCT ${activityLogs.userId})`
+            }).from(activityLogs).where(eq(activityLogs.guildId, guild.id)).get();
 
             const totalCommands = commandStats?.totalCommands || 0;
             const uniqueUsers = commandStats?.uniqueUsers || 0;

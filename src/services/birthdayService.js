@@ -26,6 +26,9 @@ class BirthdayService {
 
         logger.info(`Birthday system initialized. First check in ${Math.round(msUntilMidnight / 60000)} minutes (at midnight UTC)`);
 
+        // Recover role-removal timers lost while the bot was offline.
+        this.cleanupExpiredBirthdayRoles();
+
         // Check for missed birthdays on startup
         this.checkMissedBirthdays();
 
@@ -38,6 +41,50 @@ class BirthdayService {
                 this.checkAllGuilds();
             }, 86400000); // 24 hours
         }, msUntilMidnight);
+    }
+
+    async cleanupExpiredBirthdayRoles() {
+        try {
+            const configs = await dbLog.select('birthdayConfig',
+                () => db.select().from(birthdayConfig).where(eq(birthdayConfig.enabled, 1)),
+                { operation: 'birthdayRoleRecovery' }
+            );
+            const today = new Date();
+            const month = today.getUTCMonth() + 1;
+            const day = today.getUTCDate();
+            const year = today.getUTCFullYear();
+            const includeLeapDay = month === 2 && day === 28 &&
+                !(year % 4 === 0 && year % 100 !== 0 || year % 400 === 0);
+
+            for (const config of configs.filter(item => item.roleId)) {
+                const guild = await this.client.guilds.fetch(config.guildId).catch(() => null);
+                const role = guild?.roles.cache.get(config.roleId);
+                if (!role) continue;
+
+                const todaysBirthdays = await dbLog.select('birthdays',
+                    () => db.select().from(birthdays).where(and(
+                        eq(birthdays.guildId, config.guildId),
+                        eq(birthdays.month, month),
+                        includeLeapDay
+                            ? or(eq(birthdays.day, 28), eq(birthdays.day, 29))
+                            : eq(birthdays.day, day)
+                    )),
+                    { guildId: config.guildId, operation: 'birthdayRoleRecovery' }
+                );
+                const birthdayUsers = new Set(todaysBirthdays.map(item => item.userId));
+
+                for (const member of role.members.values()) {
+                    if (!birthdayUsers.has(member.id)) {
+                        await RoleManager.removeRole(member, role, {
+                            reason: 'Expired birthday role recovered after restart',
+                            logContext: 'birthday-role-recovery'
+                        });
+                    }
+                }
+            }
+        } catch (error) {
+            logger.error('Error recovering expired birthday roles:', error);
+        }
     }
 
     /**

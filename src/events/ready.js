@@ -4,6 +4,18 @@ const { db } = require('../database');
 const { bytepodActiveSessions, bytepodVoiceStats, bytepods } = require('../database/schema');
 const { eq, and } = require('drizzle-orm');
 const { dbLog } = require('../utils/dbLogger');
+const { scheduleOwnershipTransfer } = require('./voiceStateUpdate');
+
+async function fetchDiscordResource(fetch, unknownCode) {
+    try {
+        return { resource: await fetch(), missing: false };
+    } catch (error) {
+        if (error?.code === unknownCode || error?.rawError?.code === unknownCode) {
+            return { resource: null, missing: true };
+        }
+        throw error;
+    }
+}
 
 // Helper to finalize a stale voice session
 async function finalizeStaleSession(session, client) {
@@ -75,6 +87,24 @@ module.exports = {
         logger.success(`Ready! Logged in as ${client.user.tag}`);
         logger.info(`Bot is active in ${client.guilds.cache.size} guilds.`);
 
+        // Voice-session recovery below records activity, so this service must exist first.
+        try {
+            const ActivityStreakService = require('../services/activityStreakService');
+            client.activityStreakService = new ActivityStreakService(client);
+            client.activityStreakService.startDailyCheck();
+            logger.success('Activity streak service initialized');
+
+            await client.activityStreakService.cleanupOrphanedRoles();
+            setInterval(() => {
+                client.activityStreakService.cleanupOrphanedRoles().catch((error) => {
+                    logger.error('Scheduled role cleanup failed:', error);
+                });
+            }, 86400000);
+            logger.success('Achievement role cleanup scheduled');
+        } catch (e) {
+            logger.error(`Failed to initialize activity streak service: ${e}`);
+        }
+
         // --- Validate Active BytePod Sessions (Restart Resilience) ---
         try {
             const activeSessions = await dbLog.select('bytepodActiveSessions',
@@ -86,21 +116,29 @@ module.exports = {
 
             for (const session of activeSessions) {
                 try {
-                    const guild = await client.guilds.fetch(session.guildId).catch(() => null);
-                    if (!guild) {
+                    const guildResult = await fetchDiscordResource(
+                        () => client.guilds.fetch(session.guildId),
+                        10004
+                    );
+                    if (guildResult.missing) {
                         // Guild no longer accessible, cleanup session
                         await finalizeStaleSession(session, client);
                         finalized++;
                         continue;
                     }
+                    const guild = guildResult.resource;
 
-                    const channel = await guild.channels.fetch(session.podId).catch(() => null);
-                    if (!channel) {
+                    const channelResult = await fetchDiscordResource(
+                        () => guild.channels.fetch(session.podId),
+                        10003
+                    );
+                    if (channelResult.missing) {
                         // Channel deleted while bot was offline, finalize session
                         await finalizeStaleSession(session, client);
                         finalized++;
                         continue;
                     }
+                    const channel = channelResult.resource;
 
                     const member = channel.members.get(session.userId);
                     if (!member) {
@@ -113,12 +151,6 @@ module.exports = {
                     }
                 } catch (e) {
                     logger.error(`Session validation error for session ${session.id}: ${e}`);
-                    // On error, cleanup the session to prevent orphans
-                    await dbLog.delete('bytepodActiveSessions',
-                        () => db.delete(bytepodActiveSessions)
-                            .where(eq(bytepodActiveSessions.id, session.id)),
-                        { sessionId: session.id, operation: 'cleanupError' }
-                    );
                 }
             }
 
@@ -141,8 +173,11 @@ module.exports = {
 
             for (const pod of allPods) {
                 try {
-                    const guild = await client.guilds.fetch(pod.guildId).catch(() => null);
-                    if (!guild) {
+                    const guildResult = await fetchDiscordResource(
+                        () => client.guilds.fetch(pod.guildId),
+                        10004
+                    );
+                    if (guildResult.missing) {
                         // Guild no longer accessible, remove DB record
                         await dbLog.delete('bytepods',
                             () => db.delete(bytepods).where(eq(bytepods.channelId, pod.channelId)),
@@ -151,9 +186,13 @@ module.exports = {
                         orphaned++;
                         continue;
                     }
+                    const guild = guildResult.resource;
 
-                    const channel = await guild.channels.fetch(pod.channelId).catch(() => null);
-                    if (!channel) {
+                    const channelResult = await fetchDiscordResource(
+                        () => guild.channels.fetch(pod.channelId),
+                        10003
+                    );
+                    if (channelResult.missing) {
                         // Channel was deleted while bot was offline, cleanup DB
                         await dbLog.delete('bytepods',
                             () => db.delete(bytepods).where(eq(bytepods.channelId, pod.channelId)),
@@ -162,11 +201,12 @@ module.exports = {
                         orphaned++;
                         continue;
                     }
+                    const channel = channelResult.resource;
 
                     // Channel exists - check if empty
                     if (channel.members.size === 0) {
                         // Empty pod, delete it
-                        await channel.delete('BytePod cleanup: Empty on bot restart').catch(() => null);
+                        await channel.delete('BytePod cleanup: Empty on bot restart');
                         await dbLog.delete('bytepods',
                             () => db.delete(bytepods).where(eq(bytepods.channelId, pod.channelId)),
                             { podId: pod.channelId, guildId: pod.guildId, operation: 'emptyPod' }
@@ -175,15 +215,13 @@ module.exports = {
                     } else {
                         // Pod has members, keep it
                         active++;
+                        if (pod.ownerLeftAt) {
+                            const remainingDelay = pod.ownerLeftAt + (5 * 60 * 1000) - Date.now();
+                            scheduleOwnershipTransfer(guild, pod.channelId, remainingDelay);
+                        }
                     }
                 } catch (e) {
                     logger.error(`BytePod cleanup error for ${pod.channelId}: ${e.message}`);
-                    // On error, try to cleanup the DB record to prevent permanent orphans
-                    await dbLog.delete('bytepods',
-                        () => db.delete(bytepods).where(eq(bytepods.channelId, pod.channelId)).catch(() => { }),
-                        { podId: pod.channelId, operation: 'cleanupError' }
-                    );
-                    orphaned++;
                 }
             }
 
@@ -230,28 +268,6 @@ module.exports = {
             logger.success('Reminder service initialized');
         } catch (e) {
             logger.error(`Failed to initialize reminder service: ${e}`);
-        }
-
-        // --- Initialize Activity Streak Service ---
-        try {
-            const ActivityStreakService = require('../services/activityStreakService');
-            client.activityStreakService = new ActivityStreakService(client);
-            client.activityStreakService.startDailyCheck();
-            logger.success('Activity streak service initialized');
-
-            // Run orphaned role cleanup on startup
-            await client.activityStreakService.cleanupOrphanedRoles();
-
-            // Schedule daily cleanup (24 hours)
-            setInterval(() => {
-                client.activityStreakService.cleanupOrphanedRoles().catch((error) => {
-                    logger.error('Scheduled role cleanup failed:', error);
-                });
-            }, 86400000); // 24 hours
-
-            logger.success('Achievement role cleanup scheduled');
-        } catch (e) {
-            logger.error(`Failed to initialize activity streak service: ${e}`);
         }
 
         // --- Rich Presence Rotation ---

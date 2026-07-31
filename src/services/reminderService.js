@@ -8,8 +8,8 @@ const { fetchMember, fetchChannel, safeDMUser } = require('../utils/discordApiUt
 
 // Max safe timeout for setTimeout (24.8 days in ms)
 const MAX_SAFE_TIMEOUT = 2147483647;
-const ONE_DAY = 86400000;
 const GRACE_PERIOD = 5 * 60 * 1000; // 5 minutes
+const RETRY_DELAY = 60 * 1000;
 
 /**
  * ReminderService - Handles scheduled user notifications
@@ -92,31 +92,19 @@ class ReminderService {
             return;
         }
 
-        if (delay > MAX_SAFE_TIMEOUT) {
-            // Long delay - use interval check
-            logger.debug(`Scheduling long-delay reminder ${reminder.id} (checking daily)`);
+        const timeoutDelay = Math.min(delay, MAX_SAFE_TIMEOUT);
+        logger.debug(`Scheduling reminder ${reminder.id} in ${Math.round(timeoutDelay / 1000)}s`);
 
-            const intervalId = setInterval(async () => {
-                if (Date.now() >= reminder.triggerAt) {
-                    await this.fireReminder(reminder.id);
-                    clearInterval(intervalId);
-                    this.longDelayChecks.delete(reminder.id);
-                }
-            }, ONE_DAY); // Check daily
-
-            this.longDelayChecks.set(reminder.id, intervalId);
-
-        } else {
-            // Normal setTimeout
-            logger.debug(`Scheduling reminder ${reminder.id} in ${Math.round(delay / 1000)}s`);
-
-            const timeoutId = setTimeout(async () => {
+        const timeoutId = setTimeout(async () => {
+            this.activeTimers.delete(reminder.id);
+            if (Date.now() < reminder.triggerAt) {
+                this.scheduleReminder(reminder);
+            } else {
                 await this.fireReminder(reminder.id);
-                this.activeTimers.delete(reminder.id);
-            }, delay);
+            }
+        }, timeoutDelay);
 
-            this.activeTimers.set(reminder.id, timeoutId);
-        }
+        this.activeTimers.set(reminder.id, timeoutId);
     }
 
     /**
@@ -151,12 +139,26 @@ class ReminderService {
             embed.setTimestamp(reminder.createdAt);
 
             // Determine where to send
+            let delivered;
             if (reminder.channelId) {
                 // Channel reminder
-                await this.sendChannelReminder(reminder, embed);
+                delivered = await this.sendChannelReminder(reminder, embed);
             } else {
                 // DM reminder
-                await this.sendDMReminder(reminder, embed);
+                delivered = await this.sendDMReminder(reminder, embed);
+            }
+
+            if (!delivered) {
+                const retryAt = new Date(Date.now() + RETRY_DELAY);
+                await dbLog.update('reminders',
+                    () => db.update(reminders)
+                        .set({ active: true, triggerAt: retryAt })
+                        .where(eq(reminders.id, reminderId)),
+                    { reminderId, operation: 'retryDelivery' }
+                );
+                this.scheduleReminder({ ...reminder, active: true, triggerAt: retryAt });
+                logger.warn(`Reminder ${reminderId} delivery failed; retrying in 60s`);
+                return false;
             }
 
             logger.info(`Fired reminder ${reminderId} for user ${reminder.userId}`);
@@ -164,6 +166,7 @@ class ReminderService {
             // Clear from active timers
             this.activeTimers.delete(reminderId);
             this.longDelayChecks.delete(reminderId);
+            return true;
 
         } catch (error) {
             logger.error(`Failed to fire reminder ${reminderId}:`, error);
@@ -180,8 +183,7 @@ class ReminderService {
             if (!channel) {
                 // Channel deleted, send DM instead
                 logger.warn(`Channel ${reminder.channelId} deleted, sending reminder to user DM`);
-                await this.sendDMReminder(reminder, embed);
-                return;
+                return this.sendDMReminder(reminder, embed);
             }
 
             // Check if bot has permissions
@@ -189,8 +191,7 @@ class ReminderService {
             if (!botMember || !channel.permissionsFor(botMember).has('SendMessages')) {
                 // Lost permissions, send DM instead
                 logger.warn(`Lost permissions in channel ${reminder.channelId}, sending reminder to user DM`);
-                await this.sendDMReminder(reminder, embed);
-                return;
+                return this.sendDMReminder(reminder, embed);
             }
 
             // Fetch user to mention
@@ -201,16 +202,11 @@ class ReminderService {
                 content: mention,
                 embeds: [embed]
             });
+            return true;
 
         } catch (error) {
             logger.error(`Failed to send channel reminder:`, error);
-
-            // Fallback to DM
-            try {
-                await this.sendDMReminder(reminder, embed);
-            } catch (dmError) {
-                logger.error(`Failed to send fallback DM for reminder ${reminder.id}:`, dmError);
-            }
+            return this.sendDMReminder(reminder, embed);
         }
     }
 
@@ -240,9 +236,11 @@ class ReminderService {
             if (!dmResult) {
                 logger.warn(`Failed to send DM reminder to user ${reminder.userId} (DMs disabled or blocked)`);
             }
+            return Boolean(dmResult);
 
         } catch (error) {
             logger.error(`Failed to send DM reminder to user ${reminder.userId}:`, error);
+            return false;
         }
     }
 

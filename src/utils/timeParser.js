@@ -18,11 +18,19 @@ const ONE_YEAR = 31536000000;
  * @returns {Object} - { success: boolean, timestamp?: number, duration?: number, error?: string }
  */
 function parseTime(input) {
+    const normalized = input.toLowerCase().trim();
+    if (!/^(?:\d+[smhdw]\s*)+$/.test(normalized)) {
+        return {
+            success: false,
+            error: 'Invalid time format. Examples: `10m`, `2h`, `3d`, `1w`, `2h 30m`'
+        };
+    }
+
     const regex = /(\d+)([smhdw])/g;
     let totalMs = 0;
     let match;
 
-    while ((match = regex.exec(input.toLowerCase())) !== null) {
+    while ((match = regex.exec(normalized)) !== null) {
         const value = parseInt(match[1]);
         const unit = match[2];
 

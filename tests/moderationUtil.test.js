@@ -263,6 +263,32 @@ describe('Moderation Utility', () => {
     });
 
     describe('executeModerationAction', () => {
+        test('does not log or notify when the Discord action fails', async () => {
+            const mockUser = {
+                send: jest.fn().mockResolvedValue({}),
+                tag: 'Target#1234',
+                id: '456'
+            };
+            const mockExecutor = {
+                id: '789',
+                user: { tag: 'Mod#5678' }
+            };
+            const perform = jest.fn().mockRejectedValue(new Error('Discord rejected action'));
+
+            await expect(executeModerationAction({
+                guildId: 'guild123',
+                guildName: 'Test Guild',
+                target: mockUser,
+                executor: mockExecutor,
+                action: 'BAN',
+                reason: 'Test reason',
+                perform
+            })).rejects.toThrow('Discord rejected action');
+
+            expect(db.insert).not.toHaveBeenCalled();
+            expect(mockUser.send).not.toHaveBeenCalled();
+        });
+
         test('should log and notify by default', async () => {
             const mockUser = {
                 send: jest.fn().mockResolvedValue({}),

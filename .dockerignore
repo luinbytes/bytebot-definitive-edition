@@ -1,0 +1,10 @@
+.git
+.agent
+.agents
+.codex
+.env*
+node_modules
+*.db
+*.sqlite
+*.sqlt
+eee.zip

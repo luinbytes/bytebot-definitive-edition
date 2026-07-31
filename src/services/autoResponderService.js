@@ -147,7 +147,10 @@ class AutoResponderService {
 
             case 'wildcard':
                 // Convert wildcard to regex: "test*" -> /^test.*$/
-                const pattern = '^' + triggerLower.replace(/\*/g, '.*').replace(/\?/g, '.') + '$';
+                const pattern = '^' + triggerLower
+                    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+                    .replace(/\*/g, '.*')
+                    .replace(/\?/g, '.') + '$';
                 return new RegExp(pattern).test(contentLower);
 
             case 'regex':

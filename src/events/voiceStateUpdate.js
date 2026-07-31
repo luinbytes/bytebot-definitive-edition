@@ -251,8 +251,57 @@ async function transferOwnership(channel, podData, newOwnerId, client) {
     }
 }
 
+function scheduleOwnershipTransfer(guild, channelId, delayMs = OWNERSHIP_TRANSFER_DELAY_MS) {
+    const existingTimeout = pendingOwnershipTransfers.get(channelId);
+    if (existingTimeout) clearTimeout(existingTimeout);
+
+    const timeoutId = setTimeout(async () => {
+        pendingOwnershipTransfers.delete(channelId);
+
+        try {
+            logger.debug(`[Transfer Timeout] Checking pod ${channelId} for transfer`);
+            const currentPodData = await dbLog.select('bytepods',
+                () => db.select().from(bytepods).where(eq(bytepods.channelId, channelId)).get(),
+                { podId: channelId, operation: 'transferTimeoutCheck' }
+            );
+            if (!currentPodData?.ownerLeftAt) return;
+
+            const currentChannel = await guild.channels.fetch(channelId).catch(() => null);
+            if (!currentChannel || currentChannel.members.size === 0) return;
+
+            if (currentChannel.members.has(currentPodData.ownerId)) {
+                await dbLog.update('bytepods',
+                    () => db.update(bytepods)
+                        .set({ ownerLeftAt: null })
+                        .where(eq(bytepods.channelId, channelId)),
+                    { podId: channelId, operation: 'cancelTransferOwnerReturned' }
+                );
+                return;
+            }
+
+            const newOwner = currentChannel.members.find(member => !member.user.bot);
+            if (newOwner) {
+                await transferOwnership(currentChannel, currentPodData, newOwner.id, guild.client);
+            } else {
+                await dbLog.update('bytepods',
+                    () => db.update(bytepods)
+                        .set({ ownerLeftAt: null })
+                        .where(eq(bytepods.channelId, channelId)),
+                    { podId: channelId, operation: 'cancelTransferNoEligibleOwner' }
+                );
+            }
+        } catch (error) {
+            logger.errorContext('Ownership transfer timeout failed', error, { channelId });
+        }
+    }, Math.max(0, delayMs));
+
+    pendingOwnershipTransfers.set(channelId, timeoutId);
+    return timeoutId;
+}
+
 module.exports = {
     name: Events.VoiceStateUpdate,
+    scheduleOwnershipTransfer,
     async execute(oldState, newState) {
         const member = newState.member;
         const guild = newState.guild;
@@ -910,67 +959,7 @@ module.exports = {
                         { podId: leftChannelId, userId: member.id, operation: 'ownerLeft' }
                     );
 
-                    // Schedule transfer after 5 minutes
-                    const timeoutId = setTimeout(async () => {
-                        pendingOwnershipTransfers.delete(leftChannelId);
-
-                        try {
-                            logger.debug(`[Transfer Timeout] Checking pod ${leftChannelId} for transfer`);
-
-                            // Re-fetch pod data and channel state
-                            const currentPodData = await dbLog.select('bytepods',
-                                () => db.select().from(bytepods).where(eq(bytepods.channelId, leftChannelId)).get(),
-                                { podId: leftChannelId, operation: 'transferTimeoutCheck' }
-                            );
-                            if (!currentPodData || !currentPodData.ownerLeftAt) {
-                                logger.debug(`[Transfer Timeout] Skipping - pod deleted or owner returned (ownerLeftAt: ${currentPodData?.ownerLeftAt})`);
-                                return;
-                            }
-
-                            const currentChannel = await guild.channels.fetch(leftChannelId).catch(() => null);
-                            if (!currentChannel || currentChannel.members.size === 0) {
-                                logger.debug(`[Transfer Timeout] Skipping - channel deleted or empty (exists: ${!!currentChannel}, members: ${currentChannel?.members.size || 0})`);
-                                return; // Channel deleted or empty
-                            }
-
-                            // Defensive check: Verify owner is still absent before transferring
-                            if (currentChannel.members.has(currentPodData.ownerId)) {
-                                logger.warn(`[Transfer Timeout] Owner ${currentPodData.ownerId} is back in channel ${leftChannelId}, cancelling transfer`);
-                                logger.debug(`[Transfer Timeout] Channel members: ${Array.from(currentChannel.members.keys()).join(', ')}`);
-                                // Clear ownerLeftAt since they're back
-                                await dbLog.update('bytepods',
-                                    () => db.update(bytepods)
-                                        .set({ ownerLeftAt: null })
-                                        .where(eq(bytepods.channelId, leftChannelId)),
-                                    { podId: leftChannelId, operation: 'cancelTransferOwnerReturned' }
-                                );
-                                return;
-                            }
-
-                            // Pick the first member in the channel as new owner
-                            const newOwner = currentChannel.members.first();
-                            if (newOwner && !newOwner.user.bot) {
-                                logger.debug(`[Transfer Timeout] Transferring ownership to ${newOwner.id}`);
-                                await transferOwnership(currentChannel, currentPodData, newOwner.id, guild.client);
-                            } else {
-                                // No eligible members found (only old owner or bots remain)
-                                // Clear the ownerLeftAt since owner is still the only eligible person
-                                await dbLog.update('bytepods',
-                                    () => db.update(bytepods)
-                                        .set({ ownerLeftAt: null })
-                                        .where(eq(bytepods.channelId, leftChannelId)),
-                                    { podId: leftChannelId, operation: 'cancelTransferNoEligibleOwner' }
-                                );
-                                logger.debug(`[Transfer Timeout] No eligible new owner found - only old owner or bots remain`);
-                            }
-                        } catch (error) {
-                            logger.errorContext('Ownership transfer timeout failed', error, {
-                                channelId: leftChannelId
-                            });
-                        }
-                    }, OWNERSHIP_TRANSFER_DELAY_MS);
-
-                    pendingOwnershipTransfers.set(leftChannelId, timeoutId);
+                    scheduleOwnershipTransfer(guild, leftChannelId);
                 }
             }
         }

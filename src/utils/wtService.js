@@ -17,8 +17,7 @@ class WTService {
         try {
             const response = await axios.get(`${BASE_URL}/users/direct/search/`, {
                 params: { nick: nickname, limit: 2 },
-                timeout: API_TIMEOUT,
-                validateStatus: (status) => status < 500 // Retry on 5xx errors
+                timeout: API_TIMEOUT
             });
 
             if (response.data && response.data.length > 0) {
@@ -41,8 +40,7 @@ class WTService {
     async getPlayerStats(userid) {
         try {
             const response = await axios.get(`${BASE_URL}/users/direct/${userid}`, {
-                timeout: API_TIMEOUT,
-                validateStatus: (status) => status < 500 // Retry on 5xx errors
+                timeout: API_TIMEOUT
             });
             const data = response.data;
 
