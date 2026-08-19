@@ -431,29 +431,6 @@ module.exports = {
                     ]
                 });
 
-                // Apply Auto-Whitelist Presets
-                const presets = await dbLog.select('bytepodAutoWhitelist',
-                    () => db.select().from(bytepodAutoWhitelist).where(and(
-                        eq(bytepodAutoWhitelist.userId, member.id),
-                        eq(bytepodAutoWhitelist.guildId, guild.id)
-                    )),
-                    { userId: member.id, guildId: guild.id }
-                );
-                for (const preset of presets) {
-                    try {
-                        const targetMember = await guild.members.fetch(preset.targetUserId).catch(() => null);
-                        const targetUser = targetMember ? targetMember.user : await guild.client.users.fetch(preset.targetUserId).catch(() => null);
-
-                        if (targetUser) {
-                            await newChannel.permissionOverwrites.edit(targetUser, { Connect: true });
-                        } else {
-                            logger.warn(`Could not find user ${preset.targetUserId} for whitelist preset.`);
-                        }
-                    } catch (e) {
-                        logger.error(`Failed to apply whitelist preset for ${preset.targetUserId}: ${e}`);
-                    }
-                }
-
                 // Race guard: user may have left the hub during the async work above.
                 // Calling setChannel() on a disconnected user throws DiscordAPIError[40032].
                 // Voice state lives in guild.voiceStates.cache (kept fresh by gateway
@@ -510,6 +487,29 @@ module.exports = {
                     visitors: new Set([member.id]),
                     userDurations: new Map()  // accumulated per-user voice time (seconds)
                 });
+
+                // Apply Auto-Whitelist Presets after the latency-sensitive move and state setup.
+                const presets = await dbLog.select('bytepodAutoWhitelist',
+                    () => db.select().from(bytepodAutoWhitelist).where(and(
+                        eq(bytepodAutoWhitelist.userId, member.id),
+                        eq(bytepodAutoWhitelist.guildId, guild.id)
+                    )),
+                    { userId: member.id, guildId: guild.id }
+                );
+                for (const preset of presets) {
+                    try {
+                        const targetMember = await guild.members.fetch(preset.targetUserId).catch(() => null);
+                        const targetUser = targetMember ? targetMember.user : await guild.client.users.fetch(preset.targetUserId).catch(() => null);
+
+                        if (targetUser) {
+                            await newChannel.permissionOverwrites.edit(targetUser, { Connect: true });
+                        } else {
+                            logger.warn(`Could not find user ${preset.targetUserId} for whitelist preset.`);
+                        }
+                    } catch (e) {
+                        logger.error(`Failed to apply whitelist preset for ${preset.targetUserId}: ${e}`);
+                    }
+                }
 
                 // Send Welcome Message
                 await newChannel.send({
