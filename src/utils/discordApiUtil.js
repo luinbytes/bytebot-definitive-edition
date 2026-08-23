@@ -1,4 +1,7 @@
 const { PermissionFlagsBits } = require('discord.js');
+const { eq } = require('drizzle-orm');
+const { db } = require('../database');
+const { deniedRolePermissions } = require('../database/schema');
 const logger = require('./logger');
 
 /**
@@ -223,6 +226,17 @@ class RoleManager {
             if (member.roles.cache.has(roleObject.id)) {
                 logger.debug(`[${logContext}] Member ${member.user.tag} already has role ${roleObject.name}`);
                 return { success: true }; // Not an error, just already has it
+            }
+
+            const deniedPermissions = await db.select().from(deniedRolePermissions)
+                .where(eq(deniedRolePermissions.guildId, member.guild.id));
+            const blocked = deniedPermissions.find(({ permission }) =>
+                roleObject.permissions?.has(PermissionFlagsBits[permission]));
+            if (blocked) {
+                return {
+                    success: false,
+                    error: `Cannot assign ${roleObject.name} because it carries the blocked permission ${blocked.permission}`
+                };
             }
 
             // Validate hierarchy

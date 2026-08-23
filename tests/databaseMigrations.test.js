@@ -55,7 +55,7 @@ describe('database migrations', () => {
             'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)'
         );
         const migrations = readMigrationFiles({ migrationsFolder: './drizzle' });
-        migrations.slice(0, -1).forEach(migration => {
+        migrations.slice(0, -2).forEach(migration => {
             appliedMigration.run(migration.hash, migration.folderMillis);
         });
         seed.close();
@@ -77,5 +77,46 @@ describe('database migrations', () => {
         expect(() => database.sqlite.prepare(
             "INSERT INTO uwu_lock_members (guild_id, user_id, state) VALUES ('guild2', 'user1', 'target')"
         ).run()).not.toThrow();
+    });
+
+    test('access-control state is guild-scoped and rejects duplicate rules', async () => {
+        database = require('../src/database');
+        await database.runMigrations();
+
+        database.sqlite.prepare(`
+            INSERT INTO command_access_rules
+                (guild_id, command_path, effect, scope_type, scope_id)
+            VALUES ('guild1', 'mod user ban', 'deny', 'role', 'role1')
+        `).run();
+        database.sqlite.prepare(`
+            INSERT INTO fake_permissions (guild_id, role_id, permission)
+            VALUES ('guild1', 'role1', 'BanMembers')
+        `).run();
+        database.sqlite.prepare(`
+            INSERT INTO protected_targets (guild_id, target_type, target_id)
+            VALUES ('guild1', 'member', 'user1')
+        `).run();
+        database.sqlite.prepare(`
+            INSERT INTO denied_role_permissions (guild_id, permission)
+            VALUES ('guild1', 'Administrator')
+        `).run();
+
+        expect(() => database.sqlite.prepare(`
+            INSERT INTO command_access_rules
+                (guild_id, command_path, effect, scope_type, scope_id)
+            VALUES ('guild1', 'mod user ban', 'deny', 'role', 'role1')
+        `).run()).toThrow();
+        expect(() => database.sqlite.prepare(`
+            INSERT INTO fake_permissions (guild_id, role_id, permission)
+            VALUES ('guild1', 'role1', 'BanMembers')
+        `).run()).toThrow();
+        expect(() => database.sqlite.prepare(`
+            INSERT INTO protected_targets (guild_id, target_type, target_id)
+            VALUES ('guild1', 'member', 'user1')
+        `).run()).toThrow();
+        expect(() => database.sqlite.prepare(`
+            INSERT INTO denied_role_permissions (guild_id, permission)
+            VALUES ('guild1', 'Administrator')
+        `).run()).toThrow();
     });
 });

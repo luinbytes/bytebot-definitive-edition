@@ -82,6 +82,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | Capability | Issue | Ledger impact | Verification |
 | --- | --- | --- | --- |
 | `uwuify`; `uwulock add/remove/list`; `uwulock protect add/remove/list` | #35 | Advances the live Fun/Utility and pinned `fun`/`utility` rows; each remains `partial` because other mapped issues are still open. | `tests/uwuLock.test.js`, `tests/uwuLockCommands.test.js`, `tests/uwuLockReplay.test.js`, and `tests/databaseMigrations.test.js` |
+| Command disable/enable/whitelist, allow/deny/unrestrict, fake permissions, blocked role permissions, and protected moderation targets | #36 | Advances the live Settings/Moderation and pinned `settings`/`moderation` rows; each remains `partial` because other mapped issues are still open. | `tests/accessControlCommands.test.js`, `tests/permissions.test.js`, and `tests/databaseMigrations.test.js` |
 
 ## Update rule
 

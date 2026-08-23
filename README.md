@@ -49,7 +49,8 @@ Files in `src/commands/[category]/` are automatically categorized based on the f
     - `cooldown`: Numerical seconds (defaults to 3).
     - `devOnly`: Set to `true` to restrict usage to IDs in `config.json`.
     - `longRunning`: Set to `true` to automatically defer the reply (essential for APIs).
-    - `permissions`: Array of `PermissionFlagsBits` required for the user. [Overridable by DB]
+    - `permissions`: Real Discord `PermissionFlagsBits` required for the user. Database rules cannot grant them.
+    - `virtualPermissions`: ByteBot-only permission labels that real or configured fake permissions can satisfy.
 
 ### 2. Command Execution Lifecycle
 The `interactionCreate` event follows a strict safety pipeline:
@@ -57,8 +58,10 @@ The `interactionCreate` event follows a strict safety pipeline:
 2. **Bot Permissions**: Verifies `SendMessages` and `EmbedLinks` before attempting any response.
 3. **Security**: Validates `devOnly` status.
 4. **Permissions System**:
-    - **Database Overrides**: Checks `commandPermissions` table. If overrides exist, the user *must* have one of the whitelisted roles (or be Admin). Standard `permissions` are IGNORED.
-    - **Default Permissions**: If no overrides exist, enforces the code-defined `permissions` array.
+    - **Discord permissions**: Enforces code-defined `permissions` first; no ByteBot rule can bypass them.
+    - **Scoped access**: Applies root or exact-path disable, allow, and deny rules for the guild, channel, role, or member.
+    - **Virtual permissions**: Applies fake role permissions only to explicitly declared `virtualPermissions` checks.
+    - **Role allowlists**: Applies compatible `commandPermissions` role restrictions after the checks above.
 5. **Cooldowns**: Enforces per-user rate limiting.
 6. **Database Logging**: Updates `commandsRun` and `lastSeen` only after all security checks pass.
 7. **Execution**: Wraps the command in a try/catch with automatic error reporting.
@@ -72,11 +75,7 @@ await interaction.reply({ content: '...', flags: [MessageFlags.Ephemeral] });
 ```
 
 ### 4. Custom Permissions (RBAC)
-Admins can use the `/perm` command to manage granular permissions:
-- `/perm add [command] [role]`: Whitelist a role.
-- `/perm remove [command] [role]`: Remove a role.
-- `/perm reset [command]`: Revert to default code permissions.
-- `/perm list`: View all active overrides.
+Admins use `/server permissions` to manage granular permissions. The group provides legacy role allowlists (`add`, `remove`), scoped rules (`disable`, `enable`, `allow`, `deny`, `unrestrict`), virtual permission labels (`fake`), dangerous role-permission blocks (`denyperm`), protected moderation targets (`protect`), and inspect/reset paths (`list`, `reset`). See [`docs/features/command-access-controls.md`](docs/features/command-access-controls.md).
 
 ### 4. Visual Consistency & Branding
 Always use the `src/utils/embeds.js` utility for bot responses to maintain the "ByteBot Purple" theme.

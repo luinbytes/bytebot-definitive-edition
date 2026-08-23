@@ -3,7 +3,7 @@ const embeds = require('../../utils/embeds');
 const { db } = require('../../database');
 const { moderationLogs } = require('../../database/schema');
 const { eq, and, desc } = require('drizzle-orm');
-const { executeModerationAction, validateHierarchy } = require('../../utils/moderationUtil');
+const { executeModerationAction, validateHierarchy, validateProtectedTarget } = require('../../utils/moderationUtil');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { fetchMember } = require('../../utils/discordApiUtil');
 
@@ -140,14 +140,15 @@ module.exports = {
             });
         }
 
-        // Validate hierarchy using centralized utility
-        if (targetMember) {
-            const validation = validateHierarchy(executor, targetMember);
-            if (!validation.valid) {
-                return interaction.editReply({
-                    embeds: [embeds.error('Cannot Moderate', validation.error)]
-                });
-            }
+        // Validate hierarchy using centralized utility. Member protection still
+        // applies if a user leaves between opening the menu and submitting it.
+        const validation = targetMember
+            ? validateHierarchy(executor, targetMember)
+            : validateProtectedTarget(guild.id, userId);
+        if (!validation.valid) {
+            return interaction.editReply({
+                embeds: [embeds.error('Cannot Moderate', validation.error)]
+            });
         }
 
         try {

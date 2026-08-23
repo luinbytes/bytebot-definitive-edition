@@ -4,7 +4,7 @@
  */
 
 const { PermissionFlagsBits } = require('discord.js');
-const { db } = require('../database');
+const { db, sqlite } = require('../database');
 const { moderationLogs } = require('../database/schema');
 const logger = require('./logger');
 const embeds = require('./embeds');
@@ -74,8 +74,37 @@ async function notifyUser(user, action, guildName, reason, executorTag) {
 }
 
 /**
- * Validate role hierarchy for moderation actions
- * Ensures executor has permission to moderate target
+ * Check persisted member and role protection without requiring a live member.
+ * @param {string} guildId
+ * @param {string} targetId
+ * @param {Iterable<string>} roleIds
+ * @returns {Object} - { valid: boolean, error?: string }
+ */
+function validateProtectedTarget(guildId, targetId, roleIds = []) {
+    try {
+        if (!sqlite?.prepare) throw new Error('Database connection unavailable');
+
+        const memberProtected = sqlite.prepare(`
+            SELECT 1 FROM protected_targets
+            WHERE guild_id = ? AND target_type = 'member' AND target_id = ?
+        `).get(guildId, targetId);
+        const protectedRoles = sqlite.prepare(`
+            SELECT target_id FROM protected_targets
+            WHERE guild_id = ? AND target_type = 'role'
+        `).all(guildId);
+        const memberRoleIds = new Set(roleIds);
+
+        return memberProtected || protectedRoles.some(role => memberRoleIds.has(role.target_id))
+            ? { valid: false, error: 'This member is protected from moderation.' }
+            : { valid: true };
+    } catch (error) {
+        logger.error(`Protected-target check failed in ${guildId}: ${error.message}`);
+        return { valid: false, error: 'Protection state is unavailable, so moderation is blocked.' };
+    }
+}
+
+/**
+ * Validate role hierarchy for moderation actions.
  * @param {GuildMember} executor - The moderator performing the action
  * @param {GuildMember} target - The member being moderated
  * @returns {Object} - { valid: boolean, error?: string }
@@ -104,6 +133,9 @@ function validateHierarchy(executor, target) {
             error: 'You cannot moderate the server owner.'
         };
     }
+
+    const protection = validateProtectedTarget(target.guild.id, target.id, target.roles.cache?.keys() || []);
+    if (!protection.valid) return protection;
 
     // Role hierarchy check (administrators bypass this)
     if (!executor.permissions.has(PermissionFlagsBits.Administrator)) {
@@ -158,6 +190,7 @@ async function executeModerationAction({ guildId, guildName, target, executor, a
 module.exports = {
     logModerationAction,
     notifyUser,
+    validateProtectedTarget,
     validateHierarchy,
     executeModerationAction
 };

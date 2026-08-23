@@ -89,9 +89,29 @@ describe('Intent command hubs', () => {
             'add',
             'remove',
             'list',
-            'reset'
+            'reset',
+            'disable',
+            'enable',
+            'allow',
+            'deny',
+            'unrestrict',
+            'fake',
+            'denyperm',
+            'protect'
         ]);
         expect(findOption(findOption(command, 'permissions').options.find(option => option.name === 'add'), 'command').autocomplete).toBe(true);
+        expect(optionNames(findOption(command, 'permissions').options.find(option => option.name === 'disable').options)).toEqual([
+            'command', 'channel', 'role', 'member'
+        ]);
+        expect(optionNames(findOption(command, 'permissions').options.find(option => option.name === 'fake').options)).toEqual([
+            'action', 'role', 'permissions'
+        ]);
+        expect(optionNames(findOption(command, 'permissions').options.find(option => option.name === 'denyperm').options)).toEqual([
+            'action', 'permission'
+        ]);
+        expect(optionNames(findOption(command, 'permissions').options.find(option => option.name === 'protect').options)).toEqual([
+            'action', 'member', 'role'
+        ]);
         expect(optionNames(findOption(command, 'achievement').options.find(option => option.name === 'setup').options)).toEqual([
             'enabled',
             'prefix',
