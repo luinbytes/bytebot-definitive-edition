@@ -1,6 +1,14 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags, PermissionFlagsBits } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
+const { checkUserPermissions } = require('../../utils/permissions');
+const {
+    getUwuLockState,
+    listUwuLockMembers,
+    removeUwuLockState,
+    setUwuLockState,
+    uwuifyText
+} = require('../../utils/uwuLockUtil');
 const axios = require('axios');
 
 // 8-ball responses
@@ -51,12 +59,52 @@ module.exports = {
                 .setMaxValue(100)))
         .addSubcommand(sub => sub
             .setName('joke')
-            .setDescription('Get a random joke')),
+            .setDescription('Get a random joke'))
+        .addSubcommand(sub => sub
+            .setName('uwuify')
+            .setDescription('Make supplied text uwuified')
+            .addStringOption(opt => opt
+                .setName('text')
+                .setDescription('Text to uwuify')
+                .setRequired(true)
+                .setMaxLength(2000)))
+        .addSubcommandGroup(group => group
+            .setName('uwulock')
+            .setDescription('Manage Server: control automatic UwU Lock')
+            .addSubcommand(sub => sub
+                .setName('add')
+                .setDescription('Add a member to UwU Lock')
+                .addUserOption(opt => opt.setName('member').setDescription('Member to target').setRequired(true)))
+            .addSubcommand(sub => sub
+                .setName('remove')
+                .setDescription('Remove a member from UwU Lock')
+                .addUserOption(opt => opt.setName('member').setDescription('Member to remove').setRequired(true)))
+            .addSubcommand(sub => sub
+                .setName('list')
+                .setDescription('List UwU Lock targets'))
+            .addSubcommand(sub => sub
+                .setName('protect')
+                .setDescription('Manage UwU-protected members')
+                .addStringOption(opt => opt
+                    .setName('action')
+                    .setDescription('Protection action')
+                    .setRequired(true)
+                    .addChoices(
+                        { name: 'Add', value: 'add' },
+                        { name: 'Remove', value: 'remove' },
+                        { name: 'List', value: 'list' }
+                    ))
+                .addUserOption(opt => opt.setName('member').setDescription('Member for add or remove')))),
 
     cooldown: 3,
 
     async execute(interaction) {
+        const group = interaction.options.getSubcommandGroup(false);
         const subcommand = interaction.options.getSubcommand();
+
+        if (group === 'uwulock') {
+            return handleUwuLock(interaction, subcommand);
+        }
 
         switch (subcommand) {
             case '8ball':
@@ -71,9 +119,118 @@ module.exports = {
             case 'joke':
                 await handleJoke(interaction);
                 break;
+            case 'uwuify':
+                await interaction.reply({
+                    content: uwuifyText(interaction.options.getString('text')),
+                    allowedMentions: { parse: [], repliedUser: false }
+                });
+                break;
         }
     }
 };
+
+async function handleUwuLock(interaction, subcommand) {
+    if (!interaction.guild) {
+        return interaction.reply({
+            embeds: [embeds.error('Server Only', 'UwU Lock can only be managed in a server.')],
+            flags: [MessageFlags.Ephemeral]
+        });
+    }
+
+    const permission = await checkUserPermissions(interaction, {
+        data: { name: 'fun' },
+        permissions: [PermissionFlagsBits.ManageGuild]
+    });
+    if (!permission.allowed) {
+        return interaction.reply({ embeds: [permission.error], flags: [MessageFlags.Ephemeral] });
+    }
+
+    const target = interaction.options.getUser('member');
+
+    if (subcommand === 'list') {
+        return replyUwuList(interaction, 'target');
+    }
+
+    if (subcommand === 'add') {
+        if (target.bot || target.id === interaction.guild.ownerId || target.id === interaction.client.user.id) {
+            return interaction.reply({
+                embeds: [embeds.error('Invalid Target', 'Owners, ByteBot, and bots cannot be targeted.')],
+                flags: [MessageFlags.Ephemeral]
+            });
+        }
+
+        if (getUwuLockState(interaction.guild.id, target.id)?.state === 'protected') {
+            return interaction.reply({
+                embeds: [embeds.error('Member Protected', 'Remove UwU protection before targeting this member.')],
+                flags: [MessageFlags.Ephemeral]
+            });
+        }
+
+        setUwuLockState(interaction.guild.id, target.id, 'target');
+        return interaction.reply({
+            embeds: [embeds.success('UwU Lock Added', `<@${target.id}> is now targeted by UwU Lock.`)],
+            flags: [MessageFlags.Ephemeral]
+        });
+    }
+
+    if (subcommand === 'remove') {
+        removeUwuLockState(interaction.guild.id, target.id, 'target');
+        return interaction.reply({
+            embeds: [embeds.success('UwU Lock Removed', `<@${target.id}> is no longer targeted.`)],
+            flags: [MessageFlags.Ephemeral]
+        });
+    }
+
+    const protectAction = interaction.options.getString('action');
+    if (subcommand === 'protect' && protectAction === 'list') {
+        return replyUwuList(interaction, 'protected');
+    }
+
+    if (subcommand === 'protect' && protectAction === 'add') {
+        if (!target) {
+            return interaction.reply({
+                embeds: [embeds.error('Member Required', 'Choose a member to protect.')],
+                flags: [MessageFlags.Ephemeral]
+            });
+        }
+
+        setUwuLockState(interaction.guild.id, target.id, 'protected');
+        return interaction.reply({
+            embeds: [embeds.success('UwU Protection Added', `<@${target.id}> is protected from UwU Lock.`)],
+            flags: [MessageFlags.Ephemeral]
+        });
+    }
+
+    if (subcommand === 'protect' && protectAction === 'remove') {
+        if (!target) {
+            return interaction.reply({
+                embeds: [embeds.error('Member Required', 'Choose a member to unprotect.')],
+                flags: [MessageFlags.Ephemeral]
+            });
+        }
+
+        removeUwuLockState(interaction.guild.id, target.id, 'protected');
+        return interaction.reply({
+            embeds: [embeds.success('UwU Protection Removed', `<@${target.id}> can now be targeted.`)],
+            flags: [MessageFlags.Ephemeral]
+        });
+    }
+}
+
+function replyUwuList(interaction, state) {
+    const members = listUwuLockMembers(interaction.guild.id, state);
+    const protectedList = state === 'protected';
+    const title = protectedList ? 'UwU-Protected Members' : 'UwU Lock Targets';
+    const empty = protectedList ? 'No members are protected.' : 'No members are targeted.';
+    const description = members.length
+        ? members.map(member => `<@${member.userId}>`).join('\n')
+        : empty;
+
+    return interaction.reply({
+        embeds: [embeds.brand(title, description)],
+        flags: [MessageFlags.Ephemeral]
+    });
+}
 
 /**
  * Handle /fun 8ball

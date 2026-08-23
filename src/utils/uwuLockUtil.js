@@ -1,0 +1,138 @@
+const { MessageType, PermissionFlagsBits } = require('discord.js');
+const { and, eq } = require('drizzle-orm');
+const { db } = require('../database');
+const { uwuLockMembers } = require('../database/schema');
+const logger = require('./logger');
+
+const FUNCTIONAL_TOKEN = /```[\s\S]*?```|`[^`\n]*`|https?:\/\/[^\s<>()]+|<[^>\n]+>/g;
+const WEBHOOK_NAME = 'ByteBot UwU Lock';
+const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const MAX_ATTACHMENTS = 10;
+
+function uwuifyText(text) {
+    const input = String(text ?? '');
+    let cursor = 0;
+    let result = '';
+
+    for (const match of input.matchAll(FUNCTIONAL_TOKEN)) {
+        result += input.slice(cursor, match.index).replace(/[rl]/g, 'w').replace(/[RL]/g, 'W');
+        result += match[0];
+        cursor = match.index + match[0].length;
+    }
+
+    return result + input.slice(cursor).replace(/[rl]/g, 'w').replace(/[RL]/g, 'W');
+}
+
+function getUwuLockState(guildId, userId) {
+    return db.select()
+        .from(uwuLockMembers)
+        .where(and(eq(uwuLockMembers.guildId, guildId), eq(uwuLockMembers.userId, userId)))
+        .get();
+}
+
+function setUwuLockState(guildId, userId, state) {
+    if (state !== 'target' && state !== 'protected') {
+        throw new Error(`Invalid UwU Lock state: ${state}`);
+    }
+
+    return db.insert(uwuLockMembers)
+        .values({ guildId, userId, state })
+        .onConflictDoUpdate({
+            target: [uwuLockMembers.guildId, uwuLockMembers.userId],
+            set: { state }
+        })
+        .run();
+}
+
+function removeUwuLockState(guildId, userId, state) {
+    return db.delete(uwuLockMembers)
+        .where(and(
+            eq(uwuLockMembers.guildId, guildId),
+            eq(uwuLockMembers.userId, userId),
+            eq(uwuLockMembers.state, state)
+        ))
+        .run();
+}
+
+function listUwuLockMembers(guildId, state) {
+    return db.select()
+        .from(uwuLockMembers)
+        .where(and(eq(uwuLockMembers.guildId, guildId), eq(uwuLockMembers.state, state)))
+        .orderBy(uwuLockMembers.userId)
+        .all();
+}
+
+async function handleUwuLockMessage(message) {
+    if (!message.guild || message.author?.bot || message.webhookId || message.system) return false;
+    if (message.author.id === message.guild.ownerId || message.author.id === message.client.user.id) return false;
+    if (getUwuLockState(message.guild.id, message.author.id)?.state !== 'target') return false;
+    if (message.type !== MessageType.Default || message.reference || message.poll) return false;
+    if (message.components?.length || message.stickers?.size) return false;
+
+    const attachments = Array.from(message.attachments?.values?.() || []);
+    const attachmentBytes = attachments.reduce((total, attachment) => total + (attachment.size || 0), 0);
+    if (attachments.length > MAX_ATTACHMENTS || attachmentBytes > MAX_ATTACHMENT_BYTES) return false;
+    if (attachments.some(attachment => !attachment.url || !attachment.name || !attachment.size)) return false;
+
+    const sourceChannel = message.channel;
+    const webhookChannel = sourceChannel.isThread?.() ? sourceChannel.parent : sourceChannel;
+    const botMember = message.guild.members.me;
+    const sourcePermissions = sourceChannel.permissionsFor?.(botMember);
+    const webhookPermissions = webhookChannel?.permissionsFor?.(botMember);
+    if (!webhookChannel || !message.deletable) return false;
+    if (!sourcePermissions?.has(PermissionFlagsBits.ManageMessages)) return false;
+    if (!webhookPermissions?.has(PermissionFlagsBits.ManageWebhooks)) return false;
+
+    let replay;
+    try {
+        const webhooks = await webhookChannel.fetchWebhooks();
+        const webhook = Array.from(webhooks.values()).find(item =>
+            item.owner?.id === message.client.user.id && item.name === WEBHOOK_NAME
+        ) || await webhookChannel.createWebhook({
+            name: WEBHOOK_NAME,
+            reason: 'UwU Lock message replay'
+        });
+        const payload = {
+            content: uwuifyText(message.content),
+            username: (message.member?.displayName || message.author.username).slice(0, 80),
+            avatarURL: message.author.displayAvatarURL({ extension: 'png', size: 256 }),
+            allowedMentions: { parse: [], repliedUser: false }
+        };
+
+        if (attachments.length) {
+            payload.files = attachments.map(attachment => ({
+                attachment: attachment.url,
+                name: attachment.name
+            }));
+        }
+        if (sourceChannel.isThread?.()) payload.threadId = sourceChannel.id;
+
+        replay = await webhook.send(payload);
+    } catch (error) {
+        logger.warn(`UwU Lock replay failed for message ${message.id}: ${error.message}`);
+        return true;
+    }
+
+    try {
+        await message.delete();
+        logger.info(`UwU Lock replayed message ${message.id} in guild ${message.guild.id}`);
+    } catch (error) {
+        logger.warn(`UwU Lock original delete failed for message ${message.id}: ${error.message}`);
+        try {
+            await replay.delete();
+        } catch (cleanupError) {
+            logger.warn(`UwU Lock replay cleanup failed for message ${message.id}: ${cleanupError.message}`);
+        }
+    }
+
+    return true;
+}
+
+module.exports = {
+    getUwuLockState,
+    handleUwuLockMessage,
+    listUwuLockMembers,
+    removeUwuLockState,
+    setUwuLockState,
+    uwuifyText
+};

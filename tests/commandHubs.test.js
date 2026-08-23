@@ -188,6 +188,22 @@ describe('Intent command hubs', () => {
         ]);
     });
 
+    test('fun hub exposes UwUify and the Manage Server UwU Lock paths', () => {
+        const command = commandJson('src/commands/fun/fun.js');
+        const uwuLock = findOption(command, 'uwulock');
+        const protect = findOption(uwuLock, 'protect');
+
+        expect(optionNames(command.options)).toEqual([
+            '8ball', 'coin', 'dice', 'joke', 'uwuify', 'uwulock'
+        ]);
+        expect(uwuLock.description).toContain('Manage Server');
+        expect(optionNames(uwuLock.options)).toEqual(['add', 'remove', 'list', 'protect']);
+        expect(optionNames(protect.options)).toEqual(['action', 'member']);
+        expect(findOption(protect, 'action').choices.map(choice => choice.value)).toEqual([
+            'add', 'remove', 'list'
+        ]);
+    });
+
     test('legacy top-level commands stay executable but are not registered after hub rollout', () => {
         const legacyCommandFiles = [
             'src/commands/utility/avatar.js',

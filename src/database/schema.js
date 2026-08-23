@@ -41,6 +41,16 @@ const commandPermissions = sqliteTable('command_permissions', {
     roleId: text('role_id').notNull(),
 });
 
+const uwuLockMembers = sqliteTable('uwu_lock_members', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    state: text('state').notNull(), // target | protected
+}, (table) => ({
+    guildUserUnique: unique().on(table.guildId, table.userId),
+    guildStateIdx: index('uwu_lock_members_guild_state_idx').on(table.guildId, table.state),
+}));
+
 const bytepods = sqliteTable('bytepods', {
     channelId: text('channel_id').primaryKey(),
     guildId: text('guild_id').notNull(),
@@ -477,6 +487,7 @@ module.exports = {
     users,
     moderationLogs,
     commandPermissions,
+    uwuLockMembers,
     bytepods,
     bytepodAutoWhitelist,
     bytepodUserSettings,

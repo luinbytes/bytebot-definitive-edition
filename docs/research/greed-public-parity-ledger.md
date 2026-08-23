@@ -77,6 +77,12 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | #63 | Highest public caps and small-VPS packaging |
 | #64 | Final reconciliation of all entries and source drift |
 
+## Delivered slices
+
+| Capability | Issue | Ledger impact | Verification |
+| --- | --- | --- | --- |
+| `uwuify`; `uwulock add/remove/list`; `uwulock protect add/remove/list` | #35 | Advances the live Fun/Utility and pinned `fun`/`utility` rows; each remains `partial` because other mapped issues are still open. | `tests/uwuLock.test.js`, `tests/uwuLockCommands.test.js`, `tests/uwuLockReplay.test.js`, and `tests/databaseMigrations.test.js` |
+
 ## Update rule
 
 Each feature PR updates only the rows it materially advances and links fresh verification. A row becomes `complete` only when all its mapped issues are closed or its remaining subfamilies have explicit terminal entries. Numeric subtraction between the live 945 total and the 912-file registry is never used to invent commands.

@@ -1,6 +1,7 @@
 const { Events } = require('discord.js');
 const logger = require('../utils/logger');
 const { handleHoneypotMessage } = require('../utils/honeypotUtil');
+const { handleUwuLockMessage } = require('../utils/uwuLockUtil');
 
 module.exports = {
     name: Events.MessageCreate,
@@ -15,6 +16,12 @@ module.exports = {
             if (await handleHoneypotMessage(message)) return;
         } catch (error) {
             logger.error('Honeypot handler error:', error);
+        }
+
+        try {
+            if (await handleUwuLockMessage(message)) return;
+        } catch (error) {
+            logger.error('UwU Lock handler error:', error);
         }
 
         // Auto-responder check
