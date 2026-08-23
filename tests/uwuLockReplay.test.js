@@ -127,6 +127,10 @@ describe('UwU Lock message replay', () => {
 
         await messageCreate.execute(message, {});
 
+        expect(message.channel.messages.fetch).toHaveBeenCalledWith({
+            message: 'message1',
+            force: true
+        });
         expect(replay.delete).toHaveBeenCalledTimes(1);
     });
 

@@ -118,7 +118,7 @@ async function handleUwuLockMessage(message) {
         logger.info(`UwU Lock replayed message ${message.id} in guild ${message.guild.id}`);
     } catch (error) {
         logger.warn(`UwU Lock original delete failed for message ${message.id}: ${error.message}`);
-        const originalStillExists = await sourceChannel.messages?.fetch(message.id)
+        const originalStillExists = await sourceChannel.messages?.fetch({ message: message.id, force: true })
             .then(() => true)
             .catch(() => false);
         if (!originalStillExists) {
