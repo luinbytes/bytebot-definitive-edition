@@ -14,6 +14,19 @@ const guilds = sqliteTable('guilds', {
     achievementsEnabled: integer('achievements_enabled', { mode: 'boolean' }).default(true), // Guild-level achievement toggle
 });
 
+const lifecycleMessages = sqliteTable('lifecycle_messages', {
+    guildId: text('guild_id').notNull(),
+    type: text('type').notNull(),
+    channelId: text('channel_id'),
+    template: text('template'),
+    enabled: integer('enabled', { mode: 'boolean' }).default(false).notNull(),
+    format: text('format').default('embed').notNull(),
+    deleteAfterSeconds: integer('delete_after_seconds'),
+    updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.guildId, table.type] }),
+}));
+
 const users = sqliteTable('users', {
     id: text('id').primaryKey(),
     guildId: text('guild_id').notNull(),
@@ -827,6 +840,7 @@ const customAchievements = sqliteTable('custom_achievements', {
 
 module.exports = {
     guilds,
+    lifecycleMessages,
     users,
     moderationLogs,
     moderationCases,

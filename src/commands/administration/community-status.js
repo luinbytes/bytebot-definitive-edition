@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags, ChannelType } = require('discord.js');
 const { db } = require('../../database');
-const { guilds, birthdayConfig, starboardConfig, suggestionConfig, achievementRoleConfig, achievementRoles } = require('../../database/schema');
+const { guilds, lifecycleMessages, birthdayConfig, starboardConfig, suggestionConfig, achievementRoleConfig, achievementRoles } = require('../../database/schema');
 const { eq } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const { getPermissionNames } = require('../../utils/permissions');
@@ -15,8 +15,9 @@ const CHANNEL_REQUIREMENTS = {
 const EMBED_FIELD_VALUE_LIMIT = 1024;
 
 async function getGuildConfiguration(guildId) {
-    const [guildRows, birthdayRows, starboardRows, suggestionRows, achievementRoleRows, achievementRoleResourceRows] = await Promise.all([
+    const [guildRows, lifecycleRows, birthdayRows, starboardRows, suggestionRows, achievementRoleRows, achievementRoleResourceRows] = await Promise.all([
         db.select().from(guilds).where(eq(guilds.id, guildId)),
+        db.select().from(lifecycleMessages).where(eq(lifecycleMessages.guildId, guildId)),
         db.select().from(birthdayConfig).where(eq(birthdayConfig.guildId, guildId)),
         db.select().from(starboardConfig).where(eq(starboardConfig.guildId, guildId)),
         db.select().from(suggestionConfig).where(eq(suggestionConfig.guildId, guildId)),
@@ -26,6 +27,10 @@ async function getGuildConfiguration(guildId) {
 
     return {
         guild: guildRows[0],
+        welcome: lifecycleRows.find(row => row.type === 'welcome') || (guildRows[0] && {
+            enabled: guildRows[0].welcomeEnabled,
+            channelId: guildRows[0].welcomeChannel
+        }),
         birthday: birthdayRows[0],
         starboard: starboardRows[0],
         suggestions: suggestionRows[0],
@@ -128,7 +133,7 @@ module.exports = {
 
         if (!guildConfig) missingConfiguration.push('Guild settings');
         if (!guildConfig?.voiceHubChannelId) missingConfiguration.push('BytePods hub channel');
-        if (guildConfig?.welcomeEnabled && !guildConfig.welcomeChannel) missingConfiguration.push('Welcome channel');
+        if (config.welcome?.enabled && !config.welcome.channelId) missingConfiguration.push('Welcome channel');
         if (config.birthday?.enabled && !config.birthday.channelId) missingConfiguration.push('Birthday announcement channel');
         if (config.starboard?.enabled && !config.starboard.channelId) missingConfiguration.push('Starboard channel');
         if (config.suggestions?.enabled && !config.suggestions.channelId) missingConfiguration.push('Suggestion channel');
@@ -184,7 +189,7 @@ module.exports = {
         }
 
         const configuredChannels = [
-            ['Welcome', guildConfig?.welcomeEnabled, guildConfig?.welcomeChannel, CHANNEL_REQUIREMENTS.welcome],
+            ['Welcome', config.welcome?.enabled, config.welcome?.channelId, CHANNEL_REQUIREMENTS.welcome],
             ['Birthdays', config.birthday?.enabled, config.birthday?.channelId, CHANNEL_REQUIREMENTS.birthday],
             ['Starboard', config.starboard?.enabled, config.starboard?.channelId, CHANNEL_REQUIREMENTS.starboard],
             ['Suggestions', config.suggestions?.enabled, config.suggestions?.channelId, CHANNEL_REQUIREMENTS.suggestions]
@@ -221,7 +226,7 @@ module.exports = {
                 { name: 'Activity Streaks', value: status(true, true), inline: true },
                 { name: 'Achievement Roles', value: status(achievementRoles.enabled, true), inline: true },
                 { name: 'BytePods', value: status(bytePodsUsable, Boolean(guildConfig?.voiceHubChannelId)), inline: true },
-                { name: 'Welcome', value: status(guildConfig?.welcomeEnabled, Boolean(guildConfig?.welcomeChannel)), inline: true },
+                { name: 'Welcome', value: status(config.welcome?.enabled, Boolean(config.welcome?.channelId)), inline: true },
                 { name: 'Birthdays', value: status(config.birthday?.enabled, Boolean(config.birthday)), inline: true },
                 { name: 'Starboard', value: status(config.starboard?.enabled, Boolean(config.starboard)), inline: true },
                 { name: 'Suggestions', value: status(config.suggestions?.enabled, Boolean(config.suggestions)), inline: true },

@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
 const { db } = require('../../database/index');
-const { guilds } = require('../../database/schema');
-const { eq } = require('drizzle-orm');
+const { guilds, lifecycleMessages } = require('../../database/schema');
+const { and, eq } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { dbLog } = require('../../utils/dbLogger');
@@ -60,12 +60,18 @@ module.exports = {
                 });
             }
 
+            const [welcomeRow] = await db.select().from(lifecycleMessages)
+                .where(and(eq(lifecycleMessages.guildId, interaction.guild.id), eq(lifecycleMessages.type, 'welcome')));
+            const welcome = welcomeRow || {
+                channelId: config.welcomeChannel,
+                enabled: config.welcomeEnabled
+            };
             const embed = embeds.brand(`${interaction.guild.name} Configuration`, null)
                 .addFields(
                     { name: 'Prefix', value: `\`${config.prefix}\``, inline: true },
                     { name: 'Log Channel', value: config.logChannel ? `<#${config.logChannel}>` : 'Not set', inline: true },
-                    { name: 'Welcome Channel', value: config.welcomeChannel ? `<#${config.welcomeChannel}>` : 'Not set', inline: true },
-                    { name: 'Welcome Messages', value: config.welcomeEnabled ? '✅ Enabled' : '❌ Disabled', inline: true }
+                    { name: 'Welcome Channel', value: welcome?.channelId ? `<#${welcome.channelId}>` : 'Not set', inline: true },
+                    { name: 'Welcome Messages', value: welcome?.enabled ? '✅ Enabled' : '❌ Disabled', inline: true }
                 );
 
             return interaction.editReply({

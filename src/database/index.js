@@ -127,6 +127,16 @@ const expectedSchema = {
         voice_hub_category_id: 'TEXT',
         achievements_enabled: 'INTEGER DEFAULT 1'
     },
+    lifecycle_messages: {
+        guild_id: 'TEXT NOT NULL',
+        type: 'TEXT NOT NULL',
+        channel_id: 'TEXT',
+        template: 'TEXT',
+        enabled: 'INTEGER DEFAULT 0 NOT NULL',
+        format: "TEXT DEFAULT 'embed' NOT NULL",
+        delete_after_seconds: 'INTEGER',
+        updated_at: 'INTEGER NOT NULL'
+    },
     users: {
         id: 'TEXT PRIMARY KEY',
         guild_id: 'TEXT NOT NULL',
@@ -702,6 +712,7 @@ const expectedSchema = {
 };
 
 const compatibilityUniqueKeys = {
+    lifecycle_messages: ['guild_id', 'type'],
     lockdown_ignores: ['guild_id', 'channel_id'],
     lockdown_states: ['guild_id', 'channel_id'],
     forced_nicknames: ['guild_id', 'user_id'],
@@ -904,6 +915,18 @@ function validateAndFixSchema() {
     return fixes;
 }
 
+function backfillLegacyWelcome() {
+    if (!tableExists('guilds') || !tableExists('lifecycle_messages')) return 0;
+    return sqlite.prepare(`
+        INSERT INTO lifecycle_messages (guild_id, type, channel_id, template, enabled, format, updated_at)
+        SELECT id, 'welcome', welcome_channel, welcome_message, welcome_enabled,
+               CASE WHEN welcome_use_embed = 1 THEN 'embed' ELSE 'text' END, ?
+        FROM guilds
+        WHERE welcome_channel IS NOT NULL OR welcome_message IS NOT NULL OR welcome_enabled = 1
+        ON CONFLICT (guild_id, type) DO NOTHING
+    `).run(Date.now()).changes;
+}
+
 const runMigrations = async () => {
     const logger = require('../utils/logger');
     const config = require('../utils/config');
@@ -935,6 +958,7 @@ const runMigrations = async () => {
     // adding missing tables/columns after the migration attempt instead of rebuilding.
     try {
         const fixes = validateAndFixSchema();
+        backfillLegacyWelcome();
         if (fixes.length > 0) {
             if (dbLoggingEnabled) {
                 logger.info('Database schema fixes applied:', 'Database');
