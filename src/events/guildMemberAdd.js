@@ -6,7 +6,7 @@ const { sendLifecycleMessage } = require('../services/lifecycleMessageService');
 
 module.exports = {
     name: Events.GuildMemberAdd,
-    async execute(member) {
+    async execute(member, client) {
         try {
             const incident = await handleMemberJoin(member);
             if (incident?.status === 'punished') return;
@@ -15,7 +15,12 @@ module.exports = {
             } catch (error) {
                 logger.error(`AutoMod nickname handler failed for joining member ${member.id}: ${error.message}`);
             }
-            await sendLifecycleMessage('welcome', member);
+            try {
+                await sendLifecycleMessage('welcome', member);
+            } catch (error) {
+                logger.error(`Welcome delivery failed for joining member ${member.id}: ${error.message}`);
+            }
+            if (client.automationService) await client.automationService.handleMemberAdd(member);
         } catch (error) {
             logger.error(`Failed to process member join in guild ${member.guild.id}:`, error);
         }

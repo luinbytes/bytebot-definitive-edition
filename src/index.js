@@ -15,6 +15,7 @@ const client = new Client({
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildVoiceStates,
         GatewayIntentBits.GuildMessageReactions,
+        GatewayIntentBits.GuildPresences,
         GatewayIntentBits.AutoModerationConfiguration,
         GatewayIntentBits.AutoModerationExecution,
     ],
@@ -52,6 +53,9 @@ const shutdown = async (signal) => {
         }
         if (client.autoResponderService && client.autoResponderService.cleanup) {
             await client.autoResponderService.cleanup();
+        }
+        if (client.automationService?.cleanup) {
+            await client.automationService.cleanup();
         }
         await require('./services/automodService').cleanup();
         require('./services/antiraidService').clearWindows();

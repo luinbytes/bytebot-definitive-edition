@@ -3,6 +3,7 @@ const { autoResponses } = require('../database/schema');
 const { eq, and, sql } = require('drizzle-orm');
 const logger = require('../utils/logger');
 const { dbLog } = require('../utils/dbLogger');
+const { parseEmbedScript } = require('./lifecycleMessageService');
 
 /**
  * Auto-Responder Service
@@ -64,8 +65,10 @@ class AutoResponderService {
 
         // Check each response
         for (const response of responses) {
+            const channelIds = JSON.parse(response.channelIds || '[]');
+            const roleIds = JSON.parse(response.roleIds || '[]');
             // Channel restriction
-            if (response.channelId && response.channelId !== message.channel.id) {
+            if ((response.channelId && response.channelId !== message.channel.id) || (channelIds.length && !channelIds.includes(message.channel.id))) {
                 continue;
             }
 
@@ -76,6 +79,7 @@ class AutoResponderService {
                     continue;
                 }
             }
+            if (roleIds.length && !roleIds.some(roleId => message.member?.roles.cache.has(roleId))) continue;
 
             // Cooldown check
             const cooldownKey = `${response.id}_${message.channel.id}`;
@@ -95,7 +99,40 @@ class AutoResponderService {
             const parsedResponse = this.parseResponse(response.response, message);
 
             try {
-                await message.channel.send(parsedResponse);
+                const mentionType = ['everyone', 'users', 'roles'].includes(response.mentionPolicy) ? response.mentionPolicy : null;
+                const allowedMentions = { parse: mentionType ? [mentionType] : [], repliedUser: false };
+                const payload = /\{embed\}/i.test(parsedResponse)
+                    ? { ...parseEmbedScript(parsedResponse), allowedMentions }
+                    : { content: parsedResponse, allowedMentions };
+                const sent = response.reply ? await message.reply(payload) : await message.channel.send(payload);
+                if (response.deleteTrigger) await message.delete().catch(() => null);
+                if (response.actionRoleId && message.member) {
+                    const actionRole = message.guild.roles.cache.get(response.actionRoleId);
+                    if (actionRole?.editable && !actionRole.managed) {
+                        const hasRole = message.member.roles.cache.has(response.actionRoleId);
+                        const mode = response.actionRoleMode === 'remove' || (response.actionRoleMode === 'toggle' && hasRole) ? 'remove' : 'add';
+                        await message.member.roles[mode](response.actionRoleId, 'Auto-responder role action').catch(() => null);
+                    }
+                }
+                for (const action of JSON.parse(response.actionRoles || '[]')) {
+                    const actionRole = message.guild.roles.cache.get(action.roleId);
+                    if (!actionRole?.editable || actionRole.managed) continue;
+                    const hasRole = message.member?.roles.cache.has(action.roleId);
+                    const mode = action.mode === 'remove' || (action.mode === 'toggle' && hasRole) ? 'remove' : 'add';
+                    await message.member?.roles[mode](action.roleId, 'Auto-responder role action').catch(() => null);
+                }
+                if (response.selfDestructSeconds) {
+                    if (this.client.automationService) {
+                        await this.client.automationService.upsert({
+                            guildId: message.guild.id, kind: 'delete-message', key: sent.id,
+                            config: { channelId: message.channel.id, messageId: sent.id },
+                            nextRunAt: Date.now() + response.selfDestructSeconds * 1000, createdBy: response.creatorId
+                        });
+                    } else {
+                        const timeout = setTimeout(() => sent.delete().catch(() => null), response.selfDestructSeconds * 1000);
+                        timeout.unref?.();
+                    }
+                }
 
                 // Update cooldown
                 this.cooldowns.set(cooldownKey, now + (response.cooldown * 1000));

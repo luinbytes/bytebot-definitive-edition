@@ -525,9 +525,35 @@ const expectedSchema = {
         cooldown: 'INTEGER DEFAULT 60',
         match_type: 'TEXT DEFAULT contains NOT NULL',
         require_role_id: 'TEXT',
+        reply: 'INTEGER DEFAULT 0 NOT NULL',
+        delete_trigger: 'INTEGER DEFAULT 0 NOT NULL',
+        self_destruct_seconds: 'INTEGER',
+        mention_policy: "TEXT DEFAULT 'none' NOT NULL",
+        action_role_id: 'TEXT',
+        action_role_mode: 'TEXT',
+        channel_ids: "TEXT DEFAULT '[]' NOT NULL",
+        role_ids: "TEXT DEFAULT '[]' NOT NULL",
+        action_roles: "TEXT DEFAULT '[]' NOT NULL",
         use_count: 'INTEGER DEFAULT 0',
         created_at: 'INTEGER',
         last_used: 'INTEGER'
+    },
+    automation_rules: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        kind: 'TEXT NOT NULL',
+        key: 'TEXT NOT NULL',
+        config: "TEXT DEFAULT '{}' NOT NULL",
+        enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        next_run_at: 'INTEGER',
+        last_run_at: 'INTEGER',
+        last_message_id: 'TEXT',
+        run_count: 'INTEGER DEFAULT 0 NOT NULL',
+        lease_token: 'TEXT',
+        lease_expires_at: 'INTEGER',
+        created_by: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
     },
     starboard_config: {
         guild_id: 'TEXT PRIMARY KEY',
@@ -730,7 +756,8 @@ const compatibilityUniqueKeys = {
     automod_exemptions: ['guild_id', 'target_type', 'target_id'],
     automod_strike_levels: ['guild_id', 'level'],
     automod_strikes: ['guild_id', 'user_id'],
-    automod_incidents: ['guild_id', 'message_id']
+    automod_incidents: ['guild_id', 'message_id'],
+    automation_rules: ['guild_id', 'kind', 'key']
 };
 
 function hasUniqueKey(tableName, columns) {
@@ -910,6 +937,11 @@ function validateAndFixSchema() {
         const indexName = `${tableName}_guild_target_unique`;
         sqlite.exec(`CREATE UNIQUE INDEX ${sqlIdentifier(indexName)} ON ${sqlIdentifier(tableName)} (${columns.map(sqlIdentifier).join(', ')})`);
         fixes.push(`Added unique key: ${tableName}(${columns.join(', ')})`);
+    }
+
+    if (tableExists('automation_rules')) {
+        sqlite.exec('CREATE INDEX IF NOT EXISTS automation_due_idx ON automation_rules (enabled, next_run_at)');
+        sqlite.exec('CREATE INDEX IF NOT EXISTS automation_guild_kind_idx ON automation_rules (guild_id, kind)');
     }
 
     return fixes;

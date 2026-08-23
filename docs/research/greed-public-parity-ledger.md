@@ -47,7 +47,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 
 | Registry directory | English JSON files | ByteBot issues | Status |
 | --- | ---: | --- | --- |
-| `auto` | 55 | #42 | `partial` |
+| `auto` | 55 | #42 | `complete` — responders, reactions, member roles, tracking, vanity, and join notification families are reconciled |
 | `boosters` | 3 | #43 | `tracked` |
 | `developer` | 4 | #64 | `evidence-gap` — absent from the live public category list and may be internal-only |
 | `economy` | 50 | #48, #49 | `tracked` |
@@ -88,6 +88,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | Global and per-module AntiNuke configuration, 27 destructive audit-action modules, explicit admins/whitelist, rolling thresholds, six punishments, durable incidents, and logs | #39 | Advances live Security/Logs and pinned `security`/`logs`; each remains `partial` until #40 and the other mapped logging issues close. | `tests/antinuke.test.js`, `tests/commandHubs.test.js`, and `tests/databaseMigrations.test.js` |
 | AntiRaid join/account/avatar/username/bot/mention protection, reversible lockdown and cleanup, 15 AutoMod filters, keywords/domains/allowlists, isolated regex, strikes, exemptions, punishments, and owned Discord migration | #40 | Completes live and pinned Security. Logs remains `partial` until #50; current public sources expose no local NSFW classifier contract, so Discord's owned sexual-content preset is the recorded provider boundary. | `tests/securityAutomation.test.js`, `tests/commandHubs.test.js`, and `tests/databaseMigrations.test.js` |
 | Welcome, goodbye, boost, and Discord-native system messages; validated variables and embed scripts; tests, formats, auto-delete, exact public aliases, and legacy welcome migration | #41 | Advances live Server/Settings and pinned `server`/`settings`; both remain `partial` because other mapped issues are still open. | `tests/lifecycleMessaging.test.js`, `tests/lifecycleEvents.test.js`, `tests/commandHubs.test.js`, and `tests/databaseMigrations.test.js` |
+| Autoresponders, autoreactions, member/bot autoroles, timers, bump reminders, sticky/revive messages, username/vanity tracking, counters, vanity rewards, and join notifications | #42 | Completes pinned `auto` and advances live Auto/Utility plus pinned `utility`; those broader rows remain `partial` where other mapped issues remain. | `tests/automationPlatform.test.js`, `tests/autoResponder.test.js`, `tests/events.test.js`, and `tests/databaseMigrations.test.js` |
 
 ## Update rule
 
