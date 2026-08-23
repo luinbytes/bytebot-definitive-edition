@@ -262,6 +262,105 @@ const expectedSchema = {
         audit_entry_id: 'TEXT NOT NULL',
         created_at: 'INTEGER NOT NULL'
     },
+    antiraid_config: {
+        guild_id: 'TEXT PRIMARY KEY',
+        enabled: 'INTEGER DEFAULT 0 NOT NULL',
+        punishment: 'TEXT DEFAULT "kick" NOT NULL',
+        username_punishment: 'TEXT DEFAULT "kick" NOT NULL',
+        unverifiedbot_punishment: 'TEXT DEFAULT "kick" NOT NULL',
+        massmention_threshold: 'INTEGER DEFAULT 5 NOT NULL',
+        massmention_punishment: 'TEXT DEFAULT "timeout" NOT NULL',
+        massmention_lockdown_seconds: 'INTEGER DEFAULT 0 NOT NULL',
+        lockdown_enabled: 'INTEGER DEFAULT 0 NOT NULL',
+        lockdown_expires_at: 'INTEGER'
+    },
+    antiraid_modules: {
+        guild_id: 'TEXT NOT NULL',
+        module: 'TEXT NOT NULL',
+        enabled: 'INTEGER DEFAULT 0 NOT NULL',
+        threshold: 'INTEGER DEFAULT 5 NOT NULL',
+        window_seconds: 'INTEGER DEFAULT 60 NOT NULL',
+        punishment: 'TEXT',
+        lock_channels: 'INTEGER DEFAULT 0 NOT NULL',
+        punish_members: 'INTEGER DEFAULT 0 NOT NULL'
+    },
+    antiraid_username_patterns: {
+        guild_id: 'TEXT NOT NULL',
+        pattern: 'TEXT NOT NULL',
+        punishment: 'TEXT',
+        created_at: 'INTEGER DEFAULT 0 NOT NULL'
+    },
+    antiraid_exemptions: {
+        guild_id: 'TEXT NOT NULL',
+        target_type: 'TEXT NOT NULL',
+        target_id: 'TEXT NOT NULL',
+        created_at: 'INTEGER DEFAULT 0 NOT NULL'
+    },
+    antiraid_incidents: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        module: 'TEXT NOT NULL',
+        action_count: 'INTEGER DEFAULT 1 NOT NULL',
+        punishment: 'TEXT NOT NULL',
+        status: 'TEXT NOT NULL',
+        error: 'TEXT',
+        created_at: 'INTEGER NOT NULL'
+    },
+    automod_config: {
+        guild_id: 'TEXT PRIMARY KEY',
+        enabled: 'INTEGER DEFAULT 0 NOT NULL',
+        timeout_ms: 'INTEGER DEFAULT 300000 NOT NULL',
+        strikes_enabled: 'INTEGER DEFAULT 0 NOT NULL',
+        strike_decay_hours: 'INTEGER DEFAULT 24 NOT NULL',
+        strike_cap: 'INTEGER DEFAULT 10 NOT NULL',
+        native_rule_id: 'TEXT',
+        native_nsfw_rule_id: 'TEXT'
+    },
+    automod_filters: {
+        guild_id: 'TEXT NOT NULL',
+        filter: 'TEXT NOT NULL',
+        enabled: 'INTEGER DEFAULT 0 NOT NULL',
+        threshold: 'INTEGER DEFAULT 5 NOT NULL',
+        secondary_threshold: 'INTEGER DEFAULT 0 NOT NULL',
+        action: 'TEXT DEFAULT "delete" NOT NULL'
+    },
+    automod_rules: {
+        guild_id: 'TEXT NOT NULL',
+        kind: 'TEXT NOT NULL',
+        name: 'TEXT NOT NULL',
+        value: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    automod_exemptions: {
+        guild_id: 'TEXT NOT NULL',
+        target_type: 'TEXT NOT NULL',
+        target_id: 'TEXT NOT NULL',
+        created_at: 'INTEGER DEFAULT 0 NOT NULL'
+    },
+    automod_strike_levels: {
+        guild_id: 'TEXT NOT NULL',
+        level: 'INTEGER NOT NULL',
+        action: 'TEXT NOT NULL',
+        duration_ms: 'INTEGER'
+    },
+    automod_strikes: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        count: 'INTEGER DEFAULT 0 NOT NULL',
+        last_strike_at: 'INTEGER NOT NULL'
+    },
+    automod_incidents: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        message_id: 'TEXT NOT NULL',
+        filter: 'TEXT NOT NULL',
+        action: 'TEXT NOT NULL',
+        status: 'TEXT NOT NULL',
+        error: 'TEXT',
+        created_at: 'INTEGER NOT NULL'
+    },
     moderation_templates: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
         guild_id: 'TEXT NOT NULL',
@@ -611,7 +710,16 @@ const compatibilityUniqueKeys = {
     antinuke_admins: ['guild_id', 'user_id'],
     antinuke_whitelist: ['guild_id', 'user_id'],
     antinuke_actions: ['guild_id', 'audit_entry_id'],
-    antinuke_incidents: ['guild_id', 'audit_entry_id']
+    antinuke_incidents: ['guild_id', 'audit_entry_id'],
+    antiraid_modules: ['guild_id', 'module'],
+    antiraid_username_patterns: ['guild_id', 'pattern'],
+    antiraid_exemptions: ['guild_id', 'target_type', 'target_id'],
+    automod_filters: ['guild_id', 'filter'],
+    automod_rules: ['guild_id', 'kind', 'name'],
+    automod_exemptions: ['guild_id', 'target_type', 'target_id'],
+    automod_strike_levels: ['guild_id', 'level'],
+    automod_strikes: ['guild_id', 'user_id'],
+    automod_incidents: ['guild_id', 'message_id']
 };
 
 function hasUniqueKey(tableName, columns) {

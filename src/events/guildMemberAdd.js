@@ -6,6 +6,8 @@ const embeds = require('../utils/embeds');
 const logger = require('../utils/logger');
 const { dbLog } = require('../utils/dbLogger');
 const { fetchChannel, safeChannelSend } = require('../utils/discordApiUtil');
+const { handleMemberJoin } = require('../services/antiraidService');
+const { handleMemberUpdate: handleAutomodMemberUpdate } = require('../services/automodService');
 
 /**
  * Get ordinal suffix for a number (1st, 2nd, 3rd, etc.)
@@ -96,6 +98,14 @@ module.exports = {
 
     async execute(member) {
         try {
+            const incident = await handleMemberJoin(member);
+            if (incident?.status === 'punished') return;
+            try {
+                await handleAutomodMemberUpdate({ displayName: null, nickname: null }, member);
+            } catch (error) {
+                logger.error(`AutoMod nickname handler failed for joining member ${member.id}: ${error.message}`);
+            }
+
             // Fetch guild config
             const [config] = await dbLog.select('guilds',
                 () => db.select()

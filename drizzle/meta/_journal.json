@@ -127,6 +127,13 @@
       "when": 1787503000000,
       "tag": "0017_antinuke",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1787504000000,
+      "tag": "0018_antiraid_automod",
+      "breakpoints": true
     }
   ]
 }

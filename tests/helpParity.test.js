@@ -28,4 +28,6 @@ test('/bot help discovers every public Greed category without advertising unfini
     expect(commonPaths.value).toContain('/fun uwuify');
     expect(commonPaths.value).toContain('/fun uwulock add');
     expect(commonPaths.value).toContain('/server security antinuke-settings');
+    expect(commonPaths.value).toContain('/server antiraid settings');
+    expect(commonPaths.value).toContain('/server automod filter');
 });

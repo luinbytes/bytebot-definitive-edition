@@ -7,6 +7,8 @@ const { dbLog } = require('../utils/dbLogger');
 const { scheduleOwnershipTransfer } = require('./voiceStateUpdate');
 const { reconcileForcedNicknamesWithRetry } = require('../services/roleModerationService');
 const { recoverPendingIncidents } = require('../services/antinukeService');
+const { recoverLockdowns, recoverPendingIncidents: recoverPendingAntiraidIncidents } = require('../services/antiraidService');
+const { reconcileNativeRules, recoverPendingIncidents: recoverPendingAutomodIncidents } = require('../services/automodService');
 
 async function fetchDiscordResource(fetch, unknownCode) {
     try {
@@ -31,6 +33,21 @@ async function recoverAntinuke(client) {
         }
     } catch (error) {
         logger.error(`Failed to recover AntiNuke incidents on startup: ${error.message}`);
+    }
+}
+
+async function reconcileAutomod(client) {
+    try {
+        const result = await reconcileNativeRules(client);
+        result.failures.forEach(failure => logger.error(`AutoMod migration reconciliation failed for ${failure}`));
+        if (result.failures.length) {
+            const timer = setTimeout(() => reconcileAutomod(client), 30000);
+            timer.unref?.();
+        }
+    } catch (error) {
+        logger.error(`Failed to reconcile AutoMod migration: ${error.message}`);
+        const timer = setTimeout(() => reconcileAutomod(client), 30000);
+        timer.unref?.();
     }
 }
 
@@ -105,6 +122,14 @@ module.exports = {
         logger.info(`Bot is active in ${client.guilds.cache.size} guilds.`);
 
         await recoverAntinuke(client);
+
+        const interruptedSecurityIncidents = recoverPendingAntiraidIncidents() + recoverPendingAutomodIncidents();
+        if (interruptedSecurityIncidents) logger.warn(`Marked ${interruptedSecurityIncidents} interrupted security incidents as failed.`);
+
+        recoverLockdowns(client).then(result => {
+            result.failures.forEach(failure => logger.error(`AntiRaid lockdown recovery failed for ${failure}`));
+        }).catch(error => logger.error(`Failed to recover AntiRaid lockdowns: ${error.message}`));
+        reconcileAutomod(client);
 
         reconcileForcedNicknamesWithRetry(client).then(result => {
             if (result.reconciled) logger.info(`Forced nicknames reconciled: ${result.reconciled}`);

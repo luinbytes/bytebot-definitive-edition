@@ -199,6 +199,8 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/me reminder add` • `/me bookmark search` • `/pod panel`\n' +
                     '`/server suggestion submit` • `/server welcome setup`\n' +
                     '`/server security antinuke-settings` • `/server security antinuke-module`\n' +
+                    '`/server antiraid settings` • `/server antiraid module`\n' +
+                    '`/server automod settings` • `/server automod filter`\n' +
                     '`/server permissions disable` • `/server permissions denyperm` • `/server permissions protect`\n' +
                     '`/mod user warn` • `/mod case view` • `/mod config setup`\n' +
                     '`/mod template set` • `/game warthunder stats`\n' +
