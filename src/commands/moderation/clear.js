@@ -1,8 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
-const { db } = require('../../database/index');
-const { moderationLogs } = require('../../database/schema');
+const { recordCompletedCase } = require('../../services/moderationService');
 
 module.exports = {
     register: false,
@@ -28,13 +27,12 @@ module.exports = {
             const deleted = await interaction.channel.bulkDelete(amount, true);
 
             // Log to database
-            await db.insert(moderationLogs).values({
+            recordCompletedCase({
                 guildId: interaction.guild.id,
                 targetId: interaction.channel.id, // Using channel ID as target for CLEAR
                 executorId: interaction.user.id,
                 action: 'CLEAR',
-                reason: `Deleted ${deleted.size} messages`,
-                timestamp: new Date()
+                reason: `Deleted ${deleted.size} messages`
             });
 
             // Reply AFTER deletion to avoid our reply being caught in bulkDelete

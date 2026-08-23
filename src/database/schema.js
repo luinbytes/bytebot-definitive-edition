@@ -34,6 +34,89 @@ const moderationLogs = sqliteTable('moderation_logs', {
     timestamp: integer('timestamp', { mode: 'timestamp' }).default(new Date()),
 });
 
+const moderationCases = sqliteTable('moderation_cases', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    caseNumber: integer('case_number').notNull(),
+    targetId: text('target_id').notNull(),
+    executorId: text('executor_id').notNull(),
+    action: text('action').notNull(),
+    reason: text('reason'),
+    status: text('status').notNull(), // pending | completed | failed | undo_pending | undone | cleanup_required
+    durationMs: integer('duration_ms'),
+    metadata: text('metadata'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    undoneBy: text('undone_by'),
+    undoReason: text('undo_reason'),
+}, (table) => ({
+    guildCaseUnique: unique().on(table.guildId, table.caseNumber),
+    targetIdx: index('moderation_cases_guild_target_idx').on(table.guildId, table.targetId, table.caseNumber),
+    executorIdx: index('moderation_cases_guild_executor_idx').on(table.guildId, table.executorId, table.caseNumber),
+}));
+
+const moderationConfig = sqliteTable('moderation_config', {
+    guildId: text('guild_id').primaryKey(),
+    nextCaseNumber: integer('next_case_number').default(1).notNull(),
+    logChannelId: text('log_channel_id'),
+    imageMuteRoleId: text('image_mute_role_id'),
+    reactionMuteRoleId: text('reaction_mute_role_id'),
+    jailRoleId: text('jail_role_id'),
+    jailChannelId: text('jail_channel_id'),
+    managedResources: text('managed_resources'),
+    setupStatus: text('setup_status'),
+});
+
+const moderationHardbans = sqliteTable('moderation_hardbans', {
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    caseNumber: integer('case_number').notNull(),
+    reason: text('reason'),
+    state: text('state').notNull(), // pending | active | removing
+    createdAt: integer('created_at').notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.guildId, table.userId] }),
+}));
+
+const moderationJailState = sqliteTable('moderation_jail_state', {
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    caseNumber: integer('case_number').notNull(),
+    previousRoleIds: text('previous_role_ids').notNull(),
+    state: text('state').notNull(), // pending | active | removing
+    createdAt: integer('created_at').notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.guildId, table.userId] }),
+}));
+
+const moderationTemplates = sqliteTable('moderation_templates', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    action: text('action').notNull(),
+    messageType: text('message_type').notNull(), // dm | message
+    template: text('template').notNull(),
+}, (table) => ({
+    templateUnique: unique().on(table.guildId, table.action, table.messageType),
+}));
+
+const moderationStaffRoles = sqliteTable('moderation_staff_roles', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    roleId: text('role_id').notNull(),
+}, (table) => ({
+    staffRoleUnique: unique().on(table.guildId, table.roleId),
+}));
+
+const warningPunishments = sqliteTable('warning_punishments', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    threshold: integer('threshold').notNull(),
+    action: text('action').notNull(),
+    durationMs: integer('duration_ms'),
+}, (table) => ({
+    thresholdUnique: unique().on(table.guildId, table.threshold),
+}));
+
 const commandPermissions = sqliteTable('command_permissions', {
     id: integer('id').primaryKey({ autoIncrement: true }),
     guildId: text('guild_id').notNull(),
@@ -527,6 +610,13 @@ module.exports = {
     guilds,
     users,
     moderationLogs,
+    moderationCases,
+    moderationConfig,
+    moderationHardbans,
+    moderationJailState,
+    moderationTemplates,
+    moderationStaffRoles,
+    warningPunishments,
     commandPermissions,
     commandAccessRules,
     fakePermissions,

@@ -31,7 +31,7 @@ const logger = require('./logger');
  * @returns {Promise<GuildMember|null>} - GuildMember or null if not found/error
  */
 async function fetchMember(guild, userId, options = {}) {
-    const { cache = true, force = false, logContext = 'fetchMember' } = options;
+    const { cache = true, force = false, logContext = 'fetchMember', throwOnError = false } = options;
 
     try {
         const member = await guild.members.fetch({ user: userId, cache, force });
@@ -43,6 +43,7 @@ async function fetchMember(guild, userId, options = {}) {
             logger.debug(`[${logContext}] User ${userId} not found in guild ${guild.name}`);
         } else {
             logger.warn(`[${logContext}] Failed to fetch member ${userId} in guild ${guild.name}:`, error.message);
+            if (throwOnError) throw error;
         }
         return null;
     }

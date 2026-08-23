@@ -21,7 +21,10 @@ jest.mock('../src/utils/embeds', () => ({
     warn: jest.fn(() => ({}))
 }));
 
+jest.mock('../src/services/moderationService', () => ({ recordCompletedCase: jest.fn() }));
+
 const { db } = require('../src/database');
+const { recordCompletedCase } = require('../src/services/moderationService');
 const { handleHoneypotMessage, DELETE_MESSAGE_SECONDS } = require('../src/utils/honeypotUtil');
 
 function chain(result) {
@@ -113,6 +116,9 @@ describe('Honeypot enforcement behavior', () => {
             deleteMessageSeconds: DELETE_MESSAGE_SECONDS,
             reason: expect.stringContaining('Honeypot trap triggered')
         }));
-        expect(db.insert).toHaveBeenCalledTimes(2);
+        expect(db.insert).toHaveBeenCalledTimes(1);
+        expect(recordCompletedCase).toHaveBeenCalledWith(expect.objectContaining({
+            guildId: 'guild1', targetId: 'user1', executorId: 'bot1', action: 'BAN'
+        }));
     });
 });

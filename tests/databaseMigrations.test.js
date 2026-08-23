@@ -44,6 +44,15 @@ describe('database migrations', () => {
         const seed = new Database(process.env.DATABASE_URL);
         seed.exec(`
             CREATE TABLE legacy_sentinel (value TEXT NOT NULL);
+            CREATE TABLE moderation_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                executor_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                reason TEXT,
+                timestamp INTEGER
+            );
             CREATE TABLE __drizzle_migrations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 hash TEXT NOT NULL,
@@ -55,7 +64,7 @@ describe('database migrations', () => {
             'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)'
         );
         const migrations = readMigrationFiles({ migrationsFolder: './drizzle' });
-        migrations.slice(0, -2).forEach(migration => {
+        migrations.slice(0, -3).forEach(migration => {
             appliedMigration.run(migration.hash, migration.folderMillis);
         });
         seed.close();
@@ -118,5 +127,20 @@ describe('database migrations', () => {
             INSERT INTO denied_role_permissions (guild_id, permission)
             VALUES ('guild1', 'Administrator')
         `).run()).toThrow();
+    });
+
+    test('moderation cases and configuration preserve guild-local numbering', async () => {
+        database = require('../src/database');
+        await database.runMigrations();
+
+        const insertCase = database.sqlite.prepare(`
+            INSERT INTO moderation_cases
+                (guild_id, case_number, target_id, executor_id, action, status, created_at, updated_at)
+            VALUES (?, 1, 'user1', 'mod1', 'WARN', 'completed', 1, 1)
+        `);
+        insertCase.run('guild1');
+
+        expect(() => insertCase.run('guild1')).toThrow();
+        expect(() => insertCase.run('guild2')).not.toThrow();
     });
 });

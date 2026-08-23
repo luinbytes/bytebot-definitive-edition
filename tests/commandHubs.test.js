@@ -165,24 +165,60 @@ describe('Intent command hubs', () => {
         expect(mod.permissions).toEqual([PermissionFlagsBits.ModerateMembers]);
         expect(optionNames(command.options)).toEqual([
             'user',
+            'status',
+            'bulk',
             'logs',
-            'channel'
+            'channel',
+            'case',
+            'template',
+            'config'
         ]);
         expect(optionNames(findOption(command, 'user').options)).toEqual([
             'ban',
             'kick',
+            'timeout',
+            'untimeout',
+            'softban',
+            'hardban',
+            'unban',
+            'imute',
+            'iunmute',
+            'rmute',
+            'runmute',
+            'jail',
+            'unjail',
             'warn',
             'unwarn',
+            'warn-clear',
+            'strip',
+            'staffstrip',
             'history'
+        ]);
+        expect(optionNames(findOption(command, 'status').options)).toEqual([
+            'hardbans', 'jailed', 'image-muted', 'reaction-muted', 'timeouts', 'warnings'
+        ]);
+        expect(optionNames(findOption(command, 'bulk').options)).toEqual([
+            'unban-all', 'untimeout-all', 'unjail-all'
         ]);
         expect(optionNames(findOption(command, 'logs').options)).toEqual([
             'recent',
-            'by-moderator'
+            'by-moderator',
+            'audit'
         ]);
         expect(optionNames(findOption(command, 'channel').options)).toEqual([
             'clear',
             'lock',
             'unlock'
+        ]);
+        expect(optionNames(findOption(command, 'case').options)).toEqual([
+            'view', 'undo', 'reset'
+        ]);
+        expect(optionNames(findOption(command, 'template').options)).toEqual([
+            'set', 'remove', 'view', 'reset', 'list', 'test', 'variables'
+        ]);
+        expect(optionNames(findOption(command, 'config').options)).toEqual([
+            'view', 'setup', 'reset', 'modlog', 'imuted', 'rmuted', 'jail',
+            'staff-add', 'staff-remove', 'staff-list', 'warn-add', 'warn-remove', 'warn-list'
         ]);
     });
 

@@ -6,6 +6,8 @@
 const { PermissionFlagsBits } = require('discord.js');
 const { logModerationAction, notifyUser, validateHierarchy, executeModerationAction } = require('../src/utils/moderationUtil');
 
+jest.mock('../src/services/moderationService', () => ({ recordCompletedCase: jest.fn() }));
+
 // Mock database
 jest.mock('../src/database', () => ({
     db: {
@@ -39,7 +41,7 @@ jest.mock('../src/utils/errorHandlerUtil', () => ({
     handleDMError: jest.fn()
 }));
 
-const { db } = require('../src/database');
+const { recordCompletedCase } = require('../src/services/moderationService');
 const logger = require('../src/utils/logger');
 
 describe('Moderation Utility', () => {
@@ -51,23 +53,20 @@ describe('Moderation Utility', () => {
         test('should log moderation action to database', async () => {
             await logModerationAction('guild123', 'user456', 'mod789', 'WARN', 'Test reason');
 
-            expect(db.insert).toHaveBeenCalled();
+            expect(recordCompletedCase).toHaveBeenCalled();
             expect(logger.info).toHaveBeenCalled();
         });
 
         test('should include all required fields', async () => {
-            const insertMock = db.insert().values;
-
             await logModerationAction('guild123', 'user456', 'mod789', 'BAN', 'Spam');
 
-            expect(insertMock).toHaveBeenCalledWith(
+            expect(recordCompletedCase).toHaveBeenCalledWith(
                 expect.objectContaining({
                     guildId: 'guild123',
                     targetId: 'user456',
                     executorId: 'mod789',
                     action: 'BAN',
-                    reason: 'Spam',
-                    timestamp: expect.any(Date)
+                    reason: 'Spam'
                 })
             );
         });
@@ -164,10 +163,14 @@ describe('Moderation Utility', () => {
         });
 
         test('should allow bot moderation by admins', () => {
+            const guild = {
+                ownerId: '999',
+                members: { me: { roles: { highest: { position: 20 } } } }
+            };
             const executor = {
                 id: '123',
                 user: { bot: false },
-                guild: { ownerId: '999' },
+                guild,
                 roles: { highest: { position: 10 } },
                 permissions: { has: (perm) => perm === PermissionFlagsBits.Administrator }
             };
@@ -175,14 +178,35 @@ describe('Moderation Utility', () => {
             const target = {
                 id: '456',
                 user: { bot: true },
-                guild: { ownerId: '999' },
-                roles: { highest: { position: 5 } },
+                guild,
+                roles: { cache: new Map(), highest: { position: 5 } },
                 permissions: { has: () => false }
             };
 
             const result = validateHierarchy(executor, target);
 
             expect(result.valid).toBe(true);
+        });
+
+        test('should reject targets above the bot even when the executor is an admin', () => {
+            const guild = {
+                ownerId: '999',
+                members: { me: { roles: { highest: { position: 4 } } } }
+            };
+            const executor = {
+                id: '123', user: { bot: false }, guild,
+                roles: { highest: { position: 20 } },
+                permissions: { has: perm => perm === PermissionFlagsBits.Administrator }
+            };
+            const target = {
+                id: '456', user: { bot: false }, guild,
+                roles: { cache: new Map(), highest: { position: 5 } }
+            };
+
+            expect(validateHierarchy(executor, target)).toEqual({
+                valid: false,
+                error: 'I cannot moderate this user. They have a higher or equal role than me.'
+            });
         });
 
         test('should reject guild owner moderation', () => {
@@ -291,7 +315,7 @@ describe('Moderation Utility', () => {
                 perform
             })).rejects.toThrow('Discord rejected action');
 
-            expect(db.insert).not.toHaveBeenCalled();
+            expect(recordCompletedCase).not.toHaveBeenCalled();
             expect(mockUser.send).not.toHaveBeenCalled();
         });
 
@@ -316,7 +340,7 @@ describe('Moderation Utility', () => {
                 reason: 'Test reason'
             });
 
-            expect(db.insert).toHaveBeenCalled();
+            expect(recordCompletedCase).toHaveBeenCalled();
             expect(mockUser.send).toHaveBeenCalled();
         });
 
@@ -342,7 +366,7 @@ describe('Moderation Utility', () => {
                 notify: false
             });
 
-            expect(db.insert).toHaveBeenCalled();
+            expect(recordCompletedCase).toHaveBeenCalled();
             expect(mockUser.send).not.toHaveBeenCalled();
         });
     });

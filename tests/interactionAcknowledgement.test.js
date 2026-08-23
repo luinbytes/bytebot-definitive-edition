@@ -46,7 +46,7 @@ describe('Interaction acknowledgement timing', () => {
         const body = functionBody(readFile('src/commands/context-menus/modactions.js'), 'showHistory');
 
         expect(body.indexOf('await interaction.deferReply')).toBeGreaterThan(-1);
-        expect(body.indexOf('await interaction.deferReply')).toBeLessThan(body.indexOf('db.select()'));
+        expect(body.indexOf('await interaction.deferReply')).toBeLessThan(body.indexOf('sqlite.prepare'));
         expect(body).not.toContain('interaction.reply({');
     });
 

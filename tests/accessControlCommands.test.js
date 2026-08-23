@@ -331,6 +331,33 @@ describe('server command access controls', () => {
         expect(absentReply.mock.calls[0][0].embeds[0].data.description).toContain('protected from moderation');
     });
 
+    test('context-menu moderation aborts when member revalidation has an operational failure', async () => {
+        const ban = jest.fn();
+        const editReply = jest.fn();
+        await modActions.handleModal({
+            customId: 'modal_ban_user1',
+            fields: { getTextInputValue: jest.fn().mockReturnValue('reason') },
+            guild: {
+                id: 'guild1', name: 'Guild',
+                members: {
+                    me: { permissions: { has: jest.fn().mockReturnValue(true) } },
+                    fetch: jest.fn().mockRejectedValue(Object.assign(new Error('Discord unavailable'), { code: 500 })),
+                    ban
+                }
+            },
+            member: {
+                id: 'admin1', user: { tag: 'Admin' },
+                permissions: { has: jest.fn().mockReturnValue(true) },
+                roles: { highest: { position: 10 } }
+            },
+            deferReply: jest.fn(),
+            editReply
+        }, { users: { fetch: jest.fn().mockResolvedValue({ id: 'user1', tag: 'Target' }) } });
+
+        expect(ban).not.toHaveBeenCalled();
+        expect(editReply.mock.calls[0][0].embeds[0].data.title).toContain('Moderation Check Failed');
+    });
+
     test('scoped rules are listed and command reset clears them', async () => {
         await server.execute(adminInteraction('disable', {
             command: 'fun uwuify',

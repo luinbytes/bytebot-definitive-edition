@@ -188,7 +188,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/me` personal settings, reminders, bookmarks, birthdays, streaks\n' +
                     '`/server` setup, stats, suggestions, welcome, starboard, achievements\n' +
                     '`/pod` BytePod actions and settings\n' +
-                    '`/mod` user actions, logs, and channel controls\n' +
+                    '`/mod` member actions, cases, invoke templates, setup, logs, and channel controls\n' +
                     '`/game` F1 and War Thunder\n' +
                     '`/bot` help, health, deployment, and developer tools',
                 inline: false
@@ -199,7 +199,8 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/me reminder add` • `/me bookmark search` • `/pod panel`\n' +
                     '`/server suggestion submit` • `/server welcome setup`\n' +
                     '`/server permissions disable` • `/server permissions denyperm` • `/server permissions protect`\n' +
-                    '`/mod user warn` • `/game warthunder stats`\n' +
+                    '`/mod user warn` • `/mod case view` • `/mod config setup`\n' +
+                    '`/mod template set` • `/game warthunder stats`\n' +
                     '`/fun uwuify` • `/fun uwulock add`',
                 inline: false
             },
