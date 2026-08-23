@@ -91,6 +91,7 @@ describe('Intent command hubs', () => {
             'list',
             'reset'
         ]);
+        expect(findOption(findOption(command, 'permissions').options.find(option => option.name === 'add'), 'command').autocomplete).toBe(true);
         expect(optionNames(findOption(command, 'achievement').options.find(option => option.name === 'setup').options)).toEqual([
             'enabled',
             'prefix',
@@ -185,6 +186,22 @@ describe('Intent command hubs', () => {
         ]);
         expect(optionNames(findOption(command, 'achievement').options)).toEqual([
             'check'
+        ]);
+    });
+
+    test('fun hub exposes UwUify and the Manage Server UwU Lock paths', () => {
+        const command = commandJson('src/commands/fun/fun.js');
+        const uwuLock = findOption(command, 'uwulock');
+        const protect = findOption(uwuLock, 'protect');
+
+        expect(optionNames(command.options)).toEqual([
+            '8ball', 'coin', 'dice', 'joke', 'uwuify', 'uwulock'
+        ]);
+        expect(uwuLock.description).toContain('Manage Server');
+        expect(optionNames(uwuLock.options)).toEqual(['add', 'remove', 'list', 'protect']);
+        expect(optionNames(protect.options)).toEqual(['action', 'member']);
+        expect(findOption(protect, 'action').choices.map(choice => choice.value)).toEqual([
+            'add', 'remove', 'list'
         ]);
     });
 

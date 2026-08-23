@@ -169,10 +169,10 @@ module.exports = {
         .addSubcommandGroup(group => group
             .setName('permissions')
             .setDescription('Command role permissions')
-            .addSubcommand(sub => sub.setName('add').setDescription('Allow a role to use a command').addStringOption(opt => opt.setName('command').setDescription('Command name').setRequired(true)).addRoleOption(opt => opt.setName('role').setDescription('Allowed role').setRequired(true)))
-            .addSubcommand(sub => sub.setName('remove').setDescription('Remove a command role').addStringOption(opt => opt.setName('command').setDescription('Command name').setRequired(true)).addRoleOption(opt => opt.setName('role').setDescription('Allowed role').setRequired(true)))
+            .addSubcommand(sub => sub.setName('add').setDescription('Allow a role to use a command').addStringOption(opt => opt.setName('command').setDescription('Command path').setRequired(true).setAutocomplete(true)).addRoleOption(opt => opt.setName('role').setDescription('Allowed role').setRequired(true)))
+            .addSubcommand(sub => sub.setName('remove').setDescription('Remove a command role').addStringOption(opt => opt.setName('command').setDescription('Command path').setRequired(true).setAutocomplete(true)).addRoleOption(opt => opt.setName('role').setDescription('Allowed role').setRequired(true)))
             .addSubcommand(sub => sub.setName('list').setDescription('List command role permissions'))
-            .addSubcommand(sub => sub.setName('reset').setDescription('Reset command role permissions').addStringOption(opt => opt.setName('command').setDescription('Command name').setRequired(true))))
+            .addSubcommand(sub => sub.setName('reset').setDescription('Reset command role permissions').addStringOption(opt => opt.setName('command').setDescription('Command path').setRequired(true).setAutocomplete(true))))
         .addSubcommandGroup(group => group
             .setName('achievement')
             .setDescription('Server achievement administration')
@@ -205,6 +205,13 @@ module.exports = {
             .addSubcommand(sub => sub
                 .setName('view')
                 .setDescription('View read-only community configuration status'))),
+
+    async autocomplete(interaction, client) {
+        if (interaction.options.getSubcommandGroup(false) === 'permissions') {
+            return require('./perm').autocomplete(interaction, client);
+        }
+        return interaction.respond([]);
+    },
 
     async execute(interaction, client) {
         return executeAliasCommand(interaction, client, aliasFor(interaction));

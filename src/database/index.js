@@ -151,6 +151,12 @@ const expectedSchema = {
         command_name: 'TEXT NOT NULL',
         role_id: 'TEXT NOT NULL'
     },
+    uwu_lock_members: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        state: 'TEXT NOT NULL'
+    },
     bytepods: {
         channel_id: 'TEXT PRIMARY KEY',
         guild_id: 'TEXT NOT NULL',
