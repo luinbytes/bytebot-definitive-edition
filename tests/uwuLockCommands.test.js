@@ -1,7 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { PermissionFlagsBits } = require('discord.js');
+const { Collection, PermissionFlagsBits } = require('discord.js');
 
 function interaction({ subcommand, action = null, member, hasManageGuild = true, roleIds = [] }) {
     return {
@@ -30,6 +30,7 @@ describe('UwU Lock commands', () => {
     let tempDir;
     let database;
     let fun;
+    let server;
 
     beforeEach(async () => {
         jest.resetModules();
@@ -38,6 +39,7 @@ describe('UwU Lock commands', () => {
         database = require('../src/database');
         await database.runMigrations();
         fun = require('../src/commands/fun/fun');
+        server = require('../src/commands/administration/server');
     });
 
     afterEach(() => {
@@ -104,16 +106,58 @@ describe('UwU Lock commands', () => {
         });
     });
 
-    test('UwU Lock defaults to Manage Server but accepts an exact path role override', async () => {
-        database.sqlite.prepare(`
-            INSERT INTO command_permissions (guild_id, command_name, role_id)
-            VALUES ('guild1', 'fun uwulock add', 'uwuAdmin')
-        `).run();
+    test('Manage Server and an exact path role override are both enforced end to end', async () => {
+        const role = { id: 'uwuAdmin' };
+        const permissionReply = jest.fn();
+        await server.execute({
+            commandName: 'server',
+            guild: { id: 'guild1' },
+            user: { id: 'admin1' },
+            member: {
+                roles: { cache: new Map() },
+                permissions: {
+                    has: jest.fn(permission => Array.isArray(permission)
+                        ? permission.includes(PermissionFlagsBits.Administrator)
+                        : permission === PermissionFlagsBits.Administrator)
+                }
+            },
+            options: {
+                getSubcommandGroup: jest.fn().mockReturnValue('permissions'),
+                getSubcommand: jest.fn().mockReturnValue('add'),
+                getString: jest.fn().mockReturnValue('fun uwulock add'),
+                getRole: jest.fn().mockReturnValue(role)
+            },
+            deferReply: jest.fn(),
+            editReply: permissionReply,
+            reply: jest.fn(),
+            deferred: false,
+            replied: false
+        }, {
+            commands: new Collection([['fun', fun]])
+        });
+
+        expect(database.sqlite.prepare(`
+            SELECT role_id FROM command_permissions
+            WHERE guild_id = 'guild1' AND command_name = 'fun uwulock add'
+        `).get().role_id).toBe('uwuAdmin');
+        expect(permissionReply.mock.calls[0][0].embeds[0].data.title).toContain('Permission Added');
+
+        const autocompleteReply = jest.fn();
+        await server.autocomplete({
+            options: {
+                getSubcommandGroup: jest.fn().mockReturnValue('permissions'),
+                getFocused: jest.fn().mockReturnValue('fun uwu')
+            },
+            respond: autocompleteReply
+        }, { commands: new Collection([['fun', fun]]) });
+        expect(autocompleteReply.mock.calls[0][0]).toContainEqual({
+            name: 'fun uwulock add',
+            value: 'fun uwulock add'
+        });
 
         const allowed = interaction({
             subcommand: 'add',
             member: { id: 'user1', bot: false },
-            hasManageGuild: false,
             roleIds: ['uwuAdmin']
         });
         await fun.execute(allowed);
@@ -121,13 +165,14 @@ describe('UwU Lock commands', () => {
             "SELECT state FROM uwu_lock_members WHERE guild_id = 'guild1' AND user_id = 'user1'"
         ).get().state).toBe('target');
 
-        const denied = interaction({
+        const virtualOnly = interaction({
             subcommand: 'add',
             member: { id: 'user2', bot: false },
-            hasManageGuild: false
+            hasManageGuild: false,
+            roleIds: ['uwuAdmin']
         });
-        await fun.execute(denied);
-        expect(denied.reply.mock.calls[0][0].embeds[0].data.title).toContain('Access Denied');
+        await fun.execute(virtualOnly);
+        expect(virtualOnly.reply.mock.calls[0][0].embeds[0].data.title).toContain('Insufficient Permissions');
         expect(database.sqlite.prepare(
             "SELECT state FROM uwu_lock_members WHERE guild_id = 'guild1' AND user_id = 'user2'"
         ).get()).toBeUndefined();

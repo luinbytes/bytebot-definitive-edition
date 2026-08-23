@@ -4,7 +4,7 @@ const { db } = require('../database');
 const { uwuLockMembers } = require('../database/schema');
 const logger = require('./logger');
 
-const FUNCTIONAL_TOKEN = /```[\s\S]*?```|`[^`\n]*`|https?:\/\/[^\s<>()]+|<[^>\n]+>/g;
+const FUNCTIONAL_TOKEN = /```[\s\S]*?```|`[^`\n]*`|https?:\/\/\S+|<[^>\n]+>/g;
 const WEBHOOK_NAME = 'ByteBot UwU Lock';
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_ATTACHMENTS = 10;
@@ -118,6 +118,13 @@ async function handleUwuLockMessage(message) {
         logger.info(`UwU Lock replayed message ${message.id} in guild ${message.guild.id}`);
     } catch (error) {
         logger.warn(`UwU Lock original delete failed for message ${message.id}: ${error.message}`);
+        const originalStillExists = await sourceChannel.messages?.fetch(message.id)
+            .then(() => true)
+            .catch(() => false);
+        if (!originalStillExists) {
+            logger.warn(`UwU Lock kept replay ${message.id} because original state is unknown`);
+            return true;
+        }
         try {
             await replay.delete();
         } catch (cleanupError) {

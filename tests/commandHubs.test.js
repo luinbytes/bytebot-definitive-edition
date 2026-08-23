@@ -91,6 +91,7 @@ describe('Intent command hubs', () => {
             'list',
             'reset'
         ]);
+        expect(findOption(findOption(command, 'permissions').options.find(option => option.name === 'add'), 'command').autocomplete).toBe(true);
         expect(optionNames(findOption(command, 'achievement').options.find(option => option.name === 'setup').options)).toEqual([
             'enabled',
             'prefix',

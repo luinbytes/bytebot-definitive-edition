@@ -123,10 +123,21 @@ describe('UwU Lock message replay', () => {
     test('deletes the replay when deleting the original fails', async () => {
         const { message, replay } = createMessage();
         message.delete.mockRejectedValue(new Error('delete failed'));
+        message.channel.messages = { fetch: jest.fn().mockResolvedValue(message) };
 
         await messageCreate.execute(message, {});
 
         expect(replay.delete).toHaveBeenCalledTimes(1);
+    });
+
+    test('keeps the replay when a failed delete leaves the original state unknown', async () => {
+        const { message, replay } = createMessage();
+        message.delete.mockRejectedValue(new Error('connection lost'));
+        message.channel.messages = { fetch: jest.fn().mockRejectedValue(new Error('connection lost')) };
+
+        await messageCreate.execute(message, {});
+
+        expect(replay.delete).not.toHaveBeenCalled();
     });
 
     test('replays bounded attachments and leaves unsupported payloads untouched', async () => {

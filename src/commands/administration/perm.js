@@ -1,10 +1,28 @@
-const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { ApplicationCommandOptionType, SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const { db } = require('../../database/index');
 const { commandPermissions } = require('../../database/schema');
 const embeds = require('../../utils/embeds');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { eq, and } = require('drizzle-orm');
 const { dbLog } = require('../../utils/dbLogger');
+
+function commandPaths(command) {
+    const data = command.data.toJSON();
+    const paths = [data.name];
+
+    for (const option of data.options || []) {
+        if (option.type === ApplicationCommandOptionType.Subcommand) {
+            paths.push(`${data.name} ${option.name}`);
+        }
+        if (option.type === ApplicationCommandOptionType.SubcommandGroup) {
+            for (const subcommand of option.options || []) {
+                paths.push(`${data.name} ${option.name} ${subcommand.name}`);
+            }
+        }
+    }
+
+    return paths;
+}
 
 module.exports = {
     register: false,
@@ -55,9 +73,8 @@ module.exports = {
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     async autocomplete(interaction, client) {
-        const focusedValue = interaction.options.getFocused();
-        // filter commands that are slash commands
-        const choices = client.commands.map(c => c.data.name);
+        const focusedValue = interaction.options.getFocused().trim().toLowerCase();
+        const choices = Array.from(client.commands.values()).flatMap(commandPaths);
         const filtered = choices.filter(choice => choice.startsWith(focusedValue));
         await interaction.respond(
             filtered.map(choice => ({ name: choice, value: choice })).slice(0, 25)
@@ -66,15 +83,15 @@ module.exports = {
 
     async execute(interaction, client) {
         const subcommand = interaction.options.getSubcommand();
-        const commandName = interaction.options.getString('command');
+        const commandName = interaction.options.getString('command')?.trim().replace(/\s+/g, ' ');
         const role = interaction.options.getRole('role');
 
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
         try {
             if (commandName) {
-                const cmd = client.commands.get(commandName);
-                if (!cmd) {
+                const rootCommand = client.commands.get(commandName.split(' ')[0]);
+                if (!rootCommand || !commandPaths(rootCommand).includes(commandName)) {
                     return interaction.editReply({
                         embeds: [embeds.error('Invalid Command', `The command \`${commandName}\` does not exist.`)]
                     });

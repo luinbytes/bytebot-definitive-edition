@@ -137,6 +137,13 @@ async function handleUwuLock(interaction, subcommand) {
         });
     }
 
+    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        return interaction.reply({
+            embeds: [embeds.error('Insufficient Permissions', 'You need Manage Server to manage UwU Lock.')],
+            flags: [MessageFlags.Ephemeral]
+        });
+    }
+
     const permission = await checkUserPermissions(interaction, {
         data: { name: 'fun' },
         permissions: [PermissionFlagsBits.ManageGuild]
