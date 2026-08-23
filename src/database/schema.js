@@ -194,6 +194,120 @@ const antinukeIncidents = sqliteTable('antinuke_incidents', {
     statusIdx: index('antinuke_incidents_status_idx').on(table.status, table.id),
 }));
 
+const antiraidConfig = sqliteTable('antiraid_config', {
+    guildId: text('guild_id').primaryKey(),
+    enabled: integer('enabled', { mode: 'boolean' }).default(false).notNull(),
+    punishment: text('punishment').default('kick').notNull(),
+    usernamePunishment: text('username_punishment').default('kick').notNull(),
+    unverifiedbotPunishment: text('unverifiedbot_punishment').default('kick').notNull(),
+    massmentionThreshold: integer('massmention_threshold').default(5).notNull(),
+    massmentionPunishment: text('massmention_punishment').default('timeout').notNull(),
+    massmentionLockdownSeconds: integer('massmention_lockdown_seconds').default(0).notNull(),
+    lockdownEnabled: integer('lockdown_enabled', { mode: 'boolean' }).default(false).notNull(),
+    lockdownExpiresAt: integer('lockdown_expires_at'),
+});
+
+const antiraidModules = sqliteTable('antiraid_modules', {
+    guildId: text('guild_id').notNull(),
+    module: text('module').notNull(),
+    enabled: integer('enabled', { mode: 'boolean' }).default(false).notNull(),
+    threshold: integer('threshold').default(5).notNull(),
+    windowSeconds: integer('window_seconds').default(60).notNull(),
+    punishment: text('punishment'),
+    lockChannels: integer('lock_channels', { mode: 'boolean' }).default(false).notNull(),
+    punishMembers: integer('punish_members', { mode: 'boolean' }).default(false).notNull(),
+}, (table) => ({ pk: primaryKey({ columns: [table.guildId, table.module] }) }));
+
+const antiraidUsernamePatterns = sqliteTable('antiraid_username_patterns', {
+    guildId: text('guild_id').notNull(),
+    pattern: text('pattern').notNull(),
+    punishment: text('punishment'),
+    createdAt: integer('created_at').default(0).notNull(),
+}, (table) => ({ pk: primaryKey({ columns: [table.guildId, table.pattern] }) }));
+
+const antiraidExemptions = sqliteTable('antiraid_exemptions', {
+    guildId: text('guild_id').notNull(),
+    targetType: text('target_type').notNull(),
+    targetId: text('target_id').notNull(),
+    createdAt: integer('created_at').default(0).notNull(),
+}, (table) => ({ pk: primaryKey({ columns: [table.guildId, table.targetType, table.targetId] }) }));
+
+const antiraidIncidents = sqliteTable('antiraid_incidents', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    module: text('module').notNull(),
+    actionCount: integer('action_count').default(1).notNull(),
+    punishment: text('punishment').notNull(),
+    status: text('status').notNull(),
+    error: text('error'),
+    createdAt: integer('created_at').notNull(),
+}, (table) => ({ guildCreatedIdx: index('antiraid_incidents_guild_created_idx').on(table.guildId, table.createdAt) }));
+
+const automodConfig = sqliteTable('automod_config', {
+    guildId: text('guild_id').primaryKey(),
+    enabled: integer('enabled', { mode: 'boolean' }).default(false).notNull(),
+    timeoutMs: integer('timeout_ms').default(300000).notNull(),
+    strikesEnabled: integer('strikes_enabled', { mode: 'boolean' }).default(false).notNull(),
+    strikeDecayHours: integer('strike_decay_hours').default(24).notNull(),
+    strikeCap: integer('strike_cap').default(10).notNull(),
+    nativeRuleId: text('native_rule_id'),
+    nativeNsfwRuleId: text('native_nsfw_rule_id'),
+});
+
+const automodFilters = sqliteTable('automod_filters', {
+    guildId: text('guild_id').notNull(),
+    filter: text('filter').notNull(),
+    enabled: integer('enabled', { mode: 'boolean' }).default(false).notNull(),
+    threshold: integer('threshold').default(5).notNull(),
+    secondaryThreshold: integer('secondary_threshold').default(0).notNull(),
+    action: text('action').default('delete').notNull(),
+}, (table) => ({ pk: primaryKey({ columns: [table.guildId, table.filter] }) }));
+
+const automodRules = sqliteTable('automod_rules', {
+    guildId: text('guild_id').notNull(),
+    kind: text('kind').notNull(),
+    name: text('name').notNull(),
+    value: text('value').notNull(),
+    createdAt: integer('created_at').notNull(),
+}, (table) => ({ pk: primaryKey({ columns: [table.guildId, table.kind, table.name] }) }));
+
+const automodExemptions = sqliteTable('automod_exemptions', {
+    guildId: text('guild_id').notNull(),
+    targetType: text('target_type').notNull(),
+    targetId: text('target_id').notNull(),
+    createdAt: integer('created_at').default(0).notNull(),
+}, (table) => ({ pk: primaryKey({ columns: [table.guildId, table.targetType, table.targetId] }) }));
+
+const automodStrikeLevels = sqliteTable('automod_strike_levels', {
+    guildId: text('guild_id').notNull(),
+    level: integer('level').notNull(),
+    action: text('action').notNull(),
+    durationMs: integer('duration_ms'),
+}, (table) => ({ pk: primaryKey({ columns: [table.guildId, table.level] }) }));
+
+const automodStrikes = sqliteTable('automod_strikes', {
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    count: integer('count').default(0).notNull(),
+    lastStrikeAt: integer('last_strike_at').notNull(),
+}, (table) => ({ pk: primaryKey({ columns: [table.guildId, table.userId] }) }));
+
+const automodIncidents = sqliteTable('automod_incidents', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    messageId: text('message_id').notNull(),
+    filter: text('filter').notNull(),
+    action: text('action').notNull(),
+    status: text('status').notNull(),
+    error: text('error'),
+    createdAt: integer('created_at').notNull(),
+}, (table) => ({
+    messageUnique: unique().on(table.guildId, table.messageId),
+    guildCreatedIdx: index('automod_incidents_guild_created_idx').on(table.guildId, table.createdAt),
+}));
+
 const moderationTemplates = sqliteTable('moderation_templates', {
     id: integer('id').primaryKey({ autoIncrement: true }),
     guildId: text('guild_id').notNull(),
@@ -729,6 +843,18 @@ module.exports = {
     antinukeWhitelist,
     antinukeActions,
     antinukeIncidents,
+    antiraidConfig,
+    antiraidModules,
+    antiraidUsernamePatterns,
+    antiraidExemptions,
+    antiraidIncidents,
+    automodConfig,
+    automodFilters,
+    automodRules,
+    automodExemptions,
+    automodStrikeLevels,
+    automodStrikes,
+    automodIncidents,
     moderationTemplates,
     moderationStaffRoles,
     warningPunishments,

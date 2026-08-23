@@ -27,7 +27,7 @@ Source: [Greed commands](https://greed.best/commands), researched 2026-08-23. Th
 | Fun | 55 | #35, #54, #56 | `partial` |
 | Economy | 38 | #48, #49 | `tracked` |
 | Roleplay | 3 | #54 | `tracked` |
-| Security | 82 | #36, #39, #40 | `partial` |
+| Security | 82 | #36, #39, #40 | `complete` — all mapped public protection surfaces are implemented |
 | LastFM | 65 | #57 | `tracked` |
 | Logs | 5 | #37, #39, #40, #50 | `partial` |
 | Voice | 29 | #58, #59 | `partial` |
@@ -60,7 +60,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | `moderation` | 101 | #37, #38 | `partial` |
 | `music` | 9 | #58 | `tracked` |
 | `roleplay` | 1 | #54 | `tracked` |
-| `security` | 102 | #39, #40 | `partial` |
+| `security` | 102 | #39, #40 | `complete` — all pinned public security families are reconciled |
 | `server` | 214 | #41, #43, #44, #45, #46, #47, #50 | `partial` |
 | `settings` | 42 | #36, #37, #41, #43, #54, #57, #58 | `partial` |
 | `snipe` | 5 | #54 | `tracked` |
@@ -86,6 +86,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | Core member moderation, setup, cases/history, hardban enforcement, invoke templates, staff roles, and warning punishments | #37 | Advances live Moderation/Logs/Settings and pinned `moderation`/`logs`/`settings`; each remains `partial` because #38 and other mapped issues remain open. | `tests/moderationWorkflow.test.js`, `tests/moderationHistory.test.js`, `tests/moderationUtil.test.js`, and `tests/databaseMigrations.test.js` |
 | Cleanup, selfpurge, all purge filters, reversible lockdown, slowmode/topic/NSFW, nickname enforcement, and member/bulk/managed role operations | #38 | Completes the moderation command family mapped to #38; live and pinned Moderation remain `partial` until all mapped moderation/security issues close. | `tests/channelRoleModeration.test.js`, `tests/commandHubs.test.js`, `tests/commands.test.js`, and `tests/databaseMigrations.test.js` |
 | Global and per-module AntiNuke configuration, 27 destructive audit-action modules, explicit admins/whitelist, rolling thresholds, six punishments, durable incidents, and logs | #39 | Advances live Security/Logs and pinned `security`/`logs`; each remains `partial` until #40 and the other mapped logging issues close. | `tests/antinuke.test.js`, `tests/commandHubs.test.js`, and `tests/databaseMigrations.test.js` |
+| AntiRaid join/account/avatar/username/bot/mention protection, reversible lockdown and cleanup, 15 AutoMod filters, keywords/domains/allowlists, isolated regex, strikes, exemptions, punishments, and owned Discord migration | #40 | Completes live and pinned Security. Logs remains `partial` until #50; current public sources expose no local NSFW classifier contract, so Discord's owned sexual-content preset is the recorded provider boundary. | `tests/securityAutomation.test.js`, `tests/commandHubs.test.js`, and `tests/databaseMigrations.test.js` |
 
 ## Update rule
 

@@ -7,6 +7,9 @@ const {
     MODULES, PUNISHMENTS, ensureConfig, isTrustedManager, upsertModule
 } = require('../../services/antinukeService');
 const config = require('../../../config.json');
+const {
+    addAntiraidGroup, addAutomodGroup, executeAntiraid, executeAutomod
+} = require('../../utils/securityAutomationCommand');
 
 const MODULE_CHOICES = MODULES.map(value => ({ name: value, value }));
 const PUNISHMENT_CHOICES = PUNISHMENTS.map(value => ({ name: value, value }));
@@ -218,8 +221,7 @@ async function executeSecurity(interaction) {
     }
 }
 
-module.exports = {
-    data: new SlashCommandBuilder()
+const serverBuilder = new SlashCommandBuilder()
         .setName('server')
         .setDescription('Server information, setup, and community systems')
         .setDMPermission(false)
@@ -446,7 +448,13 @@ module.exports = {
             .setDescription('Community feature setup status')
             .addSubcommand(sub => sub
                 .setName('view')
-                .setDescription('View read-only community configuration status'))),
+                .setDescription('View read-only community configuration status')));
+
+addAntiraidGroup(serverBuilder);
+addAutomodGroup(serverBuilder);
+
+module.exports = {
+    data: serverBuilder,
 
     async autocomplete(interaction, client) {
         if (interaction.options.getSubcommandGroup(false) === 'permissions') {
@@ -464,6 +472,8 @@ module.exports = {
 
     async execute(interaction, client) {
         if (interaction.options.getSubcommandGroup(false) === 'security') return executeSecurity(interaction);
+        if (interaction.options.getSubcommandGroup(false) === 'antiraid') return executeAntiraid(interaction);
+        if (interaction.options.getSubcommandGroup(false) === 'automod') return executeAutomod(interaction);
         return executeAliasCommand(interaction, client, aliasFor(interaction));
     }
 };

@@ -64,7 +64,7 @@ describe('database migrations', () => {
             'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)'
         );
         const migrations = readMigrationFiles({ migrationsFolder: './drizzle' });
-        migrations.slice(0, -5).forEach(migration => {
+        migrations.filter(migration => migration.folderMillis < 1787445064215).forEach(migration => {
             appliedMigration.run(migration.hash, migration.folderMillis);
         });
         seed.close();
@@ -174,6 +174,26 @@ describe('database migrations', () => {
         actionInsert.run('guild1');
         expect(() => actionInsert.run('guild1')).toThrow();
         expect(() => actionInsert.run('guild2')).not.toThrow();
+    });
+
+    test('antiraid and automod rules are guild scoped and duplicate safe', async () => {
+        database = require('../src/database');
+        await database.runMigrations();
+
+        const moduleInsert = database.sqlite.prepare(`
+            INSERT INTO antiraid_modules (guild_id, module) VALUES (?, 'massjoin')
+        `);
+        moduleInsert.run('guild1');
+        expect(() => moduleInsert.run('guild1')).toThrow();
+        expect(() => moduleInsert.run('guild2')).not.toThrow();
+
+        const ruleInsert = database.sqlite.prepare(`
+            INSERT INTO automod_rules (guild_id, kind, name, value, created_at)
+            VALUES (?, 'keyword', 'blocked', 'blocked', 1)
+        `);
+        ruleInsert.run('guild1');
+        expect(() => ruleInsert.run('guild1')).toThrow();
+        expect(() => ruleInsert.run('guild2')).not.toThrow();
     });
 
     test('compatibility repair preserves the AntiNuke consumed default', async () => {

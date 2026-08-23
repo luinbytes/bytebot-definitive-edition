@@ -2,6 +2,8 @@ const { Events } = require('discord.js');
 const logger = require('../utils/logger');
 const { handleHoneypotMessage } = require('../utils/honeypotUtil');
 const { handleUwuLockMessage } = require('../utils/uwuLockUtil');
+const { handleMassMention } = require('../services/antiraidService');
+const { handleMessage: handleAutomodMessage } = require('../services/automodService');
 
 module.exports = {
     name: Events.MessageCreate,
@@ -16,6 +18,18 @@ module.exports = {
             if (await handleHoneypotMessage(message)) return;
         } catch (error) {
             logger.error('Honeypot handler error:', error);
+        }
+
+        try {
+            if (await handleMassMention(message)) return;
+        } catch (error) {
+            logger.error('AntiRaid message handler error:', error);
+        }
+
+        try {
+            if (await handleAutomodMessage(message)) return;
+        } catch (error) {
+            logger.error('AutoMod message handler error:', error);
         }
 
         try {

@@ -136,6 +136,14 @@ describe('Intent command hubs', () => {
         ]);
         const moduleOption = findOption(findOption(command, 'security').options.find(option => option.name === 'antinuke-module'), 'module');
         expect(moduleOption.autocomplete).toBe(true);
+        expect(optionNames(findOption(command, 'antiraid').options)).toEqual([
+            'settings', 'toggle', 'punishment', 'module', 'username', 'massmention',
+            'unverifiedbots', 'lockdown', 'whitelist', 'cleanup'
+        ]);
+        expect(optionNames(findOption(command, 'automod').options)).toEqual([
+            'settings', 'toggle', 'timeout', 'filter', 'keywords', 'regex',
+            'blacklist', 'allowlinks', 'allowwords', 'strikes', 'whitelist', 'migration'
+        ]);
     });
 
     test('pod and game hubs expose the accepted top-level areas', () => {

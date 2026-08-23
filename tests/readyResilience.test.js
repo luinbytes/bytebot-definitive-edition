@@ -33,6 +33,14 @@ jest.mock('../src/events/voiceStateUpdate', () => ({
 jest.mock('../src/services/antinukeService', () => ({
     recoverPendingIncidents: mockRecoverPendingIncidents
 }));
+jest.mock('../src/services/antiraidService', () => ({
+    recoverLockdowns: jest.fn().mockResolvedValue({ recovered: 0, failures: [] }),
+    recoverPendingIncidents: jest.fn().mockReturnValue(0)
+}));
+jest.mock('../src/services/automodService', () => ({
+    reconcileNativeRules: jest.fn().mockResolvedValue({ reconciled: 0, failures: [] }),
+    recoverPendingIncidents: jest.fn().mockReturnValue(0)
+}));
 
 const ready = require('../src/events/ready');
 
