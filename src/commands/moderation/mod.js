@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags, ChannelType } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
-const { validateHierarchy } = require('../../utils/moderationUtil');
+const { validateHierarchy, validateProtectedTarget } = require('../../utils/moderationUtil');
 const { sqlite } = require('../../database/index');
 const { createCommandAliasInteraction, executeAliasCommand } = require('../../utils/commandAlias');
 const { checkUserPermissions } = require('../../utils/permissions');
@@ -437,6 +437,9 @@ async function handleChannelModeration(interaction, subcommand) {
         }
         if (subcommand === 'lockdown-role') {
             const role = interaction.options.getRole('role');
+            const protection = validateProtectedTarget(interaction.guild.id, '', [role.id]);
+            if (!protection.valid) throw new Error(protection.error);
+            if (role.id !== interaction.guild.id) validateRole(interaction.member, interaction.guild, role);
             await executeRecordedAction({
                 guildId: interaction.guild.id, targetId: role.id, executorId: interaction.member.id,
                 action: 'LOCKDOWN_ROLE', reason,
@@ -574,7 +577,9 @@ async function handleRoleModeration(interaction, subcommand) {
                     throw new Error('Role icon URLs must use Discord CDN; attachments must be images up to 256 KiB.');
                 }
             }
-            perform = async () => role.setIcon(url ? await fetchDiscordRoleIcon(url) : image?.url || emoji, reason);
+            perform = emoji
+                ? () => role.setUnicodeEmoji(emoji, reason)
+                : async () => role.setIcon(url ? await fetchDiscordRoleIcon(url) : image.url, reason);
         }
         await executeRecordedAction({
             guildId: guild.id, targetId: role.id, executorId: interaction.member.id,

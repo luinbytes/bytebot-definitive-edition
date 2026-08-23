@@ -40,7 +40,8 @@ function role(id, position = 2, dangerous = false) {
         id, name: id, position, managed: false,
         permissions: { has: jest.fn(permission => dangerous && permission === PermissionFlagsBits.Administrator) },
         colors: { primaryColor: 0, secondaryColor: null, tertiaryColor: null },
-        setColors: jest.fn(), setHoist: jest.fn(), setMentionable: jest.fn(), setName: jest.fn(), setIcon: jest.fn(), delete: jest.fn(),
+        setColors: jest.fn(), setHoist: jest.fn(), setMentionable: jest.fn(), setName: jest.fn(),
+        setIcon: jest.fn(), setUnicodeEmoji: jest.fn(), delete: jest.fn(),
         toString: () => `<@&${id}>`
     };
 }
@@ -347,6 +348,9 @@ describe('channel and role moderation parity', () => {
         await mod.execute(oversized, {});
         expect(oversized.editReply.mock.calls[0][0].embeds[0].data.description).toContain('256 KiB');
         expect(managedRole.setIcon).toHaveBeenCalledTimes(1);
+
+        await mod.execute(interaction({ guild, member: moderator, group: 'role', subcommand: 'icon', values: { role: managedRole, emoji: '🛡️' } }), {});
+        expect(managedRole.setUnicodeEmoji).toHaveBeenCalledWith('🛡️', expect.any(String));
     });
 
     test('forced nicknames persist, reapply on member updates, and cancel cleanly', async () => {
@@ -392,5 +396,27 @@ describe('channel and role moderation parity', () => {
         await Promise.all([first, second]);
 
         expect(database.sqlite.prepare('SELECT nickname FROM forced_nicknames').get().nickname).toBe('Second');
+    });
+
+    test('forced nickname enforcement events share the command lock', async () => {
+        const target = member(guild);
+        target.nickname = 'Changed';
+        let releaseCommand;
+        target.setNickname.mockImplementationOnce(nickname => new Promise(resolve => {
+            releaseCommand = () => { target.nickname = nickname; resolve(); };
+        })).mockResolvedValueOnce();
+        const command = mod.execute(interaction({
+            guild, member: actor([PermissionFlagsBits.ManageNicknames]), group: 'user',
+            subcommand: 'nickname-force', values: { target, name: 'Locked' }
+        }), {});
+        await new Promise(resolve => setImmediate(resolve));
+        const event = require('../src/events/guildMemberUpdate').execute({ nickname: 'Old' }, target);
+        await new Promise(resolve => setImmediate(resolve));
+        expect(target.setNickname).toHaveBeenCalledTimes(1);
+
+        releaseCommand();
+        await Promise.all([command, event]);
+
+        expect(target.setNickname).toHaveBeenNthCalledWith(1, 'Locked', expect.any(String));
     });
 });

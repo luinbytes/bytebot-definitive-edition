@@ -151,18 +151,33 @@ async function setNicknameUnlocked({ guild, executor, member, nickname, force = 
     });
 }
 
-function setNickname(options) {
-    const key = `${options.guild.id}:${options.member.id}`;
+function withNicknameLock(guildId, userId, action) {
+    const key = `${guildId}:${userId}`;
     const previous = nicknameLocks.get(key) || Promise.resolve();
     // ponytail: process-local serialization; use DB operation tokens if nickname enforcement becomes multi-process.
-    const queued = previous.catch(() => {}).then(() => setNicknameUnlocked(options));
+    const queued = previous.catch(() => {}).then(action);
     nicknameLocks.set(key, queued);
     return queued.finally(() => {
         if (nicknameLocks.get(key) === queued) nicknameLocks.delete(key);
     });
 }
 
+function setNickname(options) {
+    return withNicknameLock(options.guild.id, options.member.id, () => setNicknameUnlocked(options));
+}
+
+function enforceForcedNickname(member) {
+    return withNicknameLock(member.guild.id, member.id, async () => {
+        const forced = sqlite.prepare('SELECT nickname FROM forced_nicknames WHERE guild_id = ? AND user_id = ?')
+            .get(member.guild.id, member.id);
+        if (forced && member.nickname !== forced.nickname) {
+            await member.setNickname(forced.nickname, 'ByteBot forced nickname enforcement');
+        }
+    });
+}
+
 module.exports = {
     MAX_BULK_MEMBERS, validateRole, changeMemberRole, restoreMemberRoles, bulkRole, setNickname,
+    enforceForcedNickname,
     fetchDiscordRoleIcon
 };
