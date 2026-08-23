@@ -170,7 +170,8 @@ const expectedSchema = {
         jail_role_id: 'TEXT',
         jail_channel_id: 'TEXT',
         managed_resources: 'TEXT',
-        setup_status: 'TEXT'
+        setup_status: 'TEXT',
+        lock_role_id: 'TEXT'
     },
     moderation_hardbans: {
         guild_id: 'TEXT NOT NULL',
@@ -187,6 +188,30 @@ const expectedSchema = {
         previous_role_ids: 'TEXT NOT NULL',
         state: 'TEXT NOT NULL',
         created_at: 'INTEGER NOT NULL'
+    },
+    lockdown_ignores: {
+        guild_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL'
+    },
+    lockdown_states: {
+        guild_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        role_id: 'TEXT NOT NULL',
+        prior_send_messages: 'INTEGER NOT NULL',
+        state: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    forced_nicknames: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        nickname: 'TEXT NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    member_role_snapshots: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        role_ids: 'TEXT NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
     },
     moderation_templates: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
@@ -528,6 +553,20 @@ const expectedSchema = {
     }
 };
 
+const compatibilityUniqueKeys = {
+    lockdown_ignores: ['guild_id', 'channel_id'],
+    lockdown_states: ['guild_id', 'channel_id'],
+    forced_nicknames: ['guild_id', 'user_id'],
+    member_role_snapshots: ['guild_id', 'user_id']
+};
+
+function hasUniqueKey(tableName, columns) {
+    return sqlite.prepare(`PRAGMA index_list(${sqlIdentifier(tableName)})`).all()
+        .filter(index => index.unique)
+        .some(index => sqlite.prepare(`PRAGMA index_info(${sqlIdentifier(index.name)})`).all()
+            .map(column => column.name).join(',') === columns.join(','));
+}
+
 /**
  * Fix bytepod_user_settings table to use composite primary key
  * This is a one-time fix for the migration issue
@@ -687,6 +726,13 @@ function validateAndFixSchema() {
                 }
             }
         }
+    }
+
+    for (const [tableName, columns] of Object.entries(compatibilityUniqueKeys)) {
+        if (!tableExists(tableName) || hasUniqueKey(tableName, columns)) continue;
+        const indexName = `${tableName}_guild_target_unique`;
+        sqlite.exec(`CREATE UNIQUE INDEX ${sqlIdentifier(indexName)} ON ${sqlIdentifier(tableName)} (${columns.map(sqlIdentifier).join(', ')})`);
+        fixes.push(`Added unique key: ${tableName}(${columns.join(', ')})`);
     }
 
     return fixes;

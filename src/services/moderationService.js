@@ -1,6 +1,6 @@
 const { sqlite } = require('../database');
 const { PermissionFlagsBits } = require('discord.js');
-const { validateHierarchy, validateProtectedTarget } = require('../utils/moderationUtil');
+const { validateHierarchy, validateProtectedTarget, validateManageableRole } = require('../utils/moderationUtil');
 const { RoleManager } = require('../utils/discordApiUtil');
 const { deliverTemplates } = require('./moderationTemplateService');
 
@@ -35,7 +35,9 @@ const ACTION_PERMISSIONS = {
     JAIL: PermissionFlagsBits.ManageRoles,
     UNJAIL: PermissionFlagsBits.ManageRoles,
     STRIP: PermissionFlagsBits.ManageRoles,
-    STAFFSTRIP: PermissionFlagsBits.ManageRoles
+    STAFFSTRIP: PermissionFlagsBits.ManageRoles,
+    ROLE_ADD: PermissionFlagsBits.ManageRoles,
+    ROLE_REMOVE: PermissionFlagsBits.ManageRoles
 };
 
 function validateActionPermissions(guild, executor, action, { actor = true } = {}) {
@@ -94,6 +96,18 @@ function recordCompletedCase({ guildId, targetId, executorId, action, reason }) 
     const caseNumber = createPendingCase({ guildId, targetId, executorId, action, reason });
     setCaseStatus(guildId, caseNumber, 'completed');
     return getCase(guildId, caseNumber);
+}
+
+async function executeRecordedAction({ guildId, targetId, executorId, action, reason, metadata, perform }) {
+    const caseNumber = createPendingCase({ guildId, targetId, executorId, action, reason, metadata });
+    try {
+        const result = await perform(caseNumber);
+        setCaseStatus(guildId, caseNumber, 'completed');
+        return result;
+    } catch (error) {
+        setCaseStatus(guildId, caseNumber, 'failed');
+        throw error;
+    }
 }
 
 async function executeMemberAction({ guild, executor, target, action, reason, durationMs, historyDays, automated = false }) {
@@ -446,7 +460,7 @@ async function undoCase({ guild, executor, caseNumber, reason }) {
     if (moderationCase.action === 'TIMEOUT' || moderationCase.action === 'WARN'
         || metadata.roleOperation || metadata.strippedRoleIds || metadata.jailRoleId) {
         target = await guild.members.fetch(moderationCase.target_id);
-        const hierarchy = validateHierarchy(executor, target);
+        const hierarchy = validateHierarchy(executor, target, { allowBots: Boolean(metadata.roleOperation) });
         if (!hierarchy.valid) throw new Error(hierarchy.error);
     } else {
         const protection = validateProtectedTarget(guild.id, moderationCase.target_id);
@@ -517,7 +531,9 @@ async function undoCase({ guild, executor, caseNumber, reason }) {
             }
         } else {
             const operation = metadata.roleOperation === 'add' ? 'removeRole' : 'addRole';
-            const result = await RoleManager[operation](target, metadata.roleId, { reason, logContext: `moderation:undo:${moderationCase.action}` });
+            const role = guild.roles.cache.get(metadata.roleId);
+            validateManageableRole(executor, guild, role, { adding: operation === 'addRole' });
+            const result = await RoleManager[operation](target, role, { reason, logContext: `moderation:undo:${moderationCase.action}` });
             if (!result.success) throw new Error(result.error);
         }
         if (hardbanClaimed) {
@@ -575,5 +591,5 @@ async function undoCase({ guild, executor, caseNumber, reason }) {
 
 module.exports = {
     executeMemberAction, executeUserAction, clearWarnings, getCase, undoCase,
-    recordCompletedCase, requiredPermissionForAction
+    recordCompletedCase, executeRecordedAction, requiredPermissionForAction
 };

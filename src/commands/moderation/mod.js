@@ -1,16 +1,23 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags, ChannelType } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
-const { validateHierarchy } = require('../../utils/moderationUtil');
+const { validateHierarchy, validateProtectedTarget } = require('../../utils/moderationUtil');
 const { sqlite } = require('../../database/index');
 const { createCommandAliasInteraction, executeAliasCommand } = require('../../utils/commandAlias');
 const { checkUserPermissions } = require('../../utils/permissions');
 const { parseTime } = require('../../utils/timeParser');
 const {
-    executeMemberAction, executeUserAction, clearWarnings, getCase, undoCase, requiredPermissionForAction
+    executeMemberAction, executeUserAction, clearWarnings, getCase, undoCase,
+    executeRecordedAction, requiredPermissionForAction
 } = require('../../services/moderationService');
 const { VARIABLES, validateTemplate, renderTemplate } = require('../../services/moderationTemplateService');
 const { setupModeration, resetModeration } = require('../../services/moderationSetupService');
+const {
+    purgeMessages, lockdownChannel, unlockdownChannel, lockdownAll
+} = require('../../services/channelModerationService');
+const {
+    validateRole, changeMemberRole, restoreMemberRoles, bulkRole, setNickname, fetchDiscordRoleIcon
+} = require('../../services/roleModerationService');
 
 const MODERATION_ACTIONS = [
     'ban', 'kick', 'timeout', 'softban', 'hardban', 'unban', 'imute', 'rmute',
@@ -25,6 +32,33 @@ const STATUS_PERMISSIONS = {
     'unban-all': PermissionFlagsBits.BanMembers,
     'unjail-all': PermissionFlagsBits.ManageRoles
 };
+const CHANNEL_PERMISSIONS = {
+    selfpurge: PermissionFlagsBits.ManageMessages,
+    clear: PermissionFlagsBits.ManageMessages,
+    cleanup: PermissionFlagsBits.ManageMessages,
+    purge: PermissionFlagsBits.ManageMessages,
+    lock: PermissionFlagsBits.ManageChannels,
+    unlock: PermissionFlagsBits.ManageChannels,
+    lockdown: PermissionFlagsBits.ManageChannels,
+    unlockdown: PermissionFlagsBits.ManageChannels,
+    'lockdown-all': PermissionFlagsBits.ManageChannels,
+    'unlockdown-all': PermissionFlagsBits.ManageChannels,
+    'lockdown-role': PermissionFlagsBits.ManageChannels,
+    'lockdown-ignore': PermissionFlagsBits.ManageChannels,
+    'lockdown-unignore': PermissionFlagsBits.ManageChannels,
+    'lockdown-ignored': PermissionFlagsBits.ManageChannels,
+    slowmode: PermissionFlagsBits.ManageChannels,
+    'slowmode-disable': PermissionFlagsBits.ManageChannels,
+    topic: PermissionFlagsBits.ManageChannels,
+    'topic-remove': PermissionFlagsBits.ManageChannels,
+    nsfw: PermissionFlagsBits.ManageChannels
+};
+const NICKNAME_ACTIONS = new Set(['nickname', 'nickname-remove', 'nickname-force', 'nickname-unforce']);
+const PURGE_FILTERS = [
+    'all', 'activity', 'after', 'before', 'between', 'bots', 'contains', 'embeds',
+    'emojis', 'endswith', 'except', 'files', 'humans', 'images', 'invites', 'links',
+    'mentions', 'reactions', 'startswith', 'stickers', 'system', 'voice', 'webhooks', 'user'
+];
 
 function addReasonOption(command, description = 'Audit reason', required = false) {
     return command.addStringOption(option => option.setName('reason').setDescription(description)
@@ -61,7 +95,6 @@ module.exports = {
         .setName('mod')
         .setDescription('Moderation commands')
         .setDMPermission(false)
-        .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
         .addSubcommandGroup(group => group
             .setName('user')
             .setDescription('Moderate members')
@@ -87,6 +120,10 @@ module.exports = {
             .addSubcommand(sub => addTargetReason(sub.setName('warn-clear').setDescription('Clear all active warnings')))
             .addSubcommand(sub => addTargetReason(sub.setName('strip').setDescription('Remove roles carrying dangerous permissions')))
             .addSubcommand(sub => addTargetReason(sub.setName('staffstrip').setDescription('Remove configured staff roles')))
+            .addSubcommand(sub => addReasonOption(sub.setName('nickname').setDescription('Change a member nickname').addUserOption(opt => opt.setName('target').setDescription('Member to rename').setRequired(true)).addStringOption(opt => opt.setName('name').setDescription('New nickname').setRequired(true).setMinLength(1).setMaxLength(32))))
+            .addSubcommand(sub => addReasonOption(sub.setName('nickname-remove').setDescription('Reset a member nickname').addUserOption(opt => opt.setName('target').setDescription('Member to reset').setRequired(true))))
+            .addSubcommand(sub => addReasonOption(sub.setName('nickname-force').setDescription('Force a member nickname').addUserOption(opt => opt.setName('target').setDescription('Member to rename').setRequired(true)).addStringOption(opt => opt.setName('name').setDescription('Forced nickname').setRequired(true).setMinLength(1).setMaxLength(32))))
+            .addSubcommand(sub => addReasonOption(sub.setName('nickname-unforce').setDescription('Cancel a forced nickname').addUserOption(opt => opt.setName('target').setDescription('Member to release').setRequired(true))))
             .addSubcommand(sub => sub
                 .setName('history')
                 .setDescription('View moderation history for a user')
@@ -121,7 +158,49 @@ module.exports = {
             .setDescription('Moderate the current channel')
             .addSubcommand(sub => sub.setName('clear').setDescription('Delete recent messages').addIntegerOption(opt => opt.setName('amount').setDescription('Number of messages to delete').setRequired(true).setMinValue(1).setMaxValue(100)))
             .addSubcommand(sub => sub.setName('lock').setDescription('Lock the current channel'))
-            .addSubcommand(sub => sub.setName('unlock').setDescription('Unlock the current channel')))
+            .addSubcommand(sub => sub.setName('unlock').setDescription('Unlock the current channel'))
+            .addSubcommand(sub => sub.setName('cleanup').setDescription('Remove bot messages and invocations').addIntegerOption(opt => opt.setName('amount').setDescription('Messages to scan').setRequired(true).setMinValue(1).setMaxValue(2000)).addChannelOption(opt => opt.setName('channel').setDescription('Target channel')))
+            .addSubcommand(sub => sub.setName('selfpurge').setDescription('Delete your own messages in this channel').addIntegerOption(opt => opt.setName('amount').setDescription('Messages to delete').setRequired(true).setMinValue(1).setMaxValue(50)))
+            .addSubcommand(sub => sub.setName('purge').setDescription('Delete messages matching a filter')
+                .addStringOption(opt => opt.setName('filter').setDescription('Message filter').setRequired(true).addChoices(...PURGE_FILTERS.map(filter => ({ name: filter, value: filter }))))
+                .addIntegerOption(opt => opt.setName('amount').setDescription('Matching messages to delete').setRequired(true).setMinValue(1).setMaxValue(2000))
+                .addUserOption(opt => opt.setName('member').setDescription('Member for user/except filters'))
+                .addStringOption(opt => opt.setName('text').setDescription('Text for contains/starts/ends').setMaxLength(1000))
+                .addStringOption(opt => opt.setName('start_id').setDescription('Message ID for after/before/between').setMaxLength(20))
+                .addStringOption(opt => opt.setName('end_id').setDescription('Second message ID for between').setMaxLength(20))
+                .addChannelOption(opt => opt.setName('channel').setDescription('Target channel')))
+            .addSubcommand(sub => addReasonOption(sub.setName('lockdown').setDescription('Lock one channel').addChannelOption(opt => opt.setName('channel').setDescription('Target channel'))))
+            .addSubcommand(sub => addReasonOption(sub.setName('unlockdown').setDescription('Unlock one channel').addChannelOption(opt => opt.setName('channel').setDescription('Target channel'))))
+            .addSubcommand(sub => addReasonOption(sub.setName('lockdown-all').setDescription('Lock all non-ignored text channels').addBooleanOption(opt => opt.setName('confirm').setDescription('Confirm server lockdown').setRequired(true))))
+            .addSubcommand(sub => addReasonOption(sub.setName('unlockdown-all').setDescription('Unlock all ByteBot-locked channels').addBooleanOption(opt => opt.setName('confirm').setDescription('Confirm server unlock').setRequired(true))))
+            .addSubcommand(sub => sub.setName('lockdown-role').setDescription('Set the lockdown role').addRoleOption(opt => opt.setName('role').setDescription('Role denied send messages').setRequired(true)))
+            .addSubcommand(sub => sub.setName('lockdown-ignore').setDescription('Ignore a channel during bulk lockdown').addChannelOption(opt => opt.setName('channel').setDescription('Channel to ignore').setRequired(true)))
+            .addSubcommand(sub => sub.setName('lockdown-unignore').setDescription('Remove a lockdown ignore').addChannelOption(opt => opt.setName('channel').setDescription('Channel to include').setRequired(true)))
+            .addSubcommand(sub => sub.setName('lockdown-ignored').setDescription('List lockdown ignores'))
+            .addSubcommand(sub => addReasonOption(sub.setName('slowmode').setDescription('Set channel slowmode').addStringOption(opt => opt.setName('duration').setDescription('0 seconds through 6 hours').setRequired(true)).addChannelOption(opt => opt.setName('channel').setDescription('Target channel'))))
+            .addSubcommand(sub => addReasonOption(sub.setName('slowmode-disable').setDescription('Disable channel slowmode').addChannelOption(opt => opt.setName('channel').setDescription('Target channel'))))
+            .addSubcommand(sub => addReasonOption(sub.setName('topic').setDescription('Set a channel topic').addStringOption(opt => opt.setName('text').setDescription('New topic').setRequired(true).setMaxLength(1024)).addChannelOption(opt => opt.setName('channel').setDescription('Target channel'))))
+            .addSubcommand(sub => addReasonOption(sub.setName('topic-remove').setDescription('Remove a channel topic').addChannelOption(opt => opt.setName('channel').setDescription('Target channel'))))
+            .addSubcommand(sub => addReasonOption(sub.setName('nsfw').setDescription('Mark a text channel NSFW or SFW').addBooleanOption(opt => opt.setName('enabled').setDescription('Whether NSFW is enabled').setRequired(true)).addChannelOption(opt => opt.setName('channel').setDescription('Target channel')))))
+        .addSubcommandGroup(group => group
+            .setName('role')
+            .setDescription('Manage member roles and role settings')
+            .addSubcommand(sub => addReasonOption(sub.setName('add').setDescription('Add a role to a member').addUserOption(opt => opt.setName('target').setDescription('Member').setRequired(true)).addRoleOption(opt => opt.setName('role').setDescription('Role').setRequired(true))))
+            .addSubcommand(sub => addReasonOption(sub.setName('remove').setDescription('Remove a role from a member').addUserOption(opt => opt.setName('target').setDescription('Member').setRequired(true)).addRoleOption(opt => opt.setName('role').setDescription('Role').setRequired(true))))
+            .addSubcommand(sub => addReasonOption(sub.setName('restore').setDescription('Restore a member role snapshot').addUserOption(opt => opt.setName('target').setDescription('Member').setRequired(true))))
+            .addSubcommand(sub => addReasonOption(sub.setName('bulk').setDescription('Apply or remove a role in bulk')
+                .addStringOption(opt => opt.setName('action').setDescription('Add or remove').setRequired(true).addChoices({ name: 'add', value: 'add' }, { name: 'remove', value: 'remove' }))
+                .addStringOption(opt => opt.setName('scope').setDescription('Members to change').setRequired(true).addChoices({ name: 'all', value: 'all' }, { name: 'bots', value: 'bots' }, { name: 'humans', value: 'humans' }, { name: 'members with role', value: 'has' }))
+                .addRoleOption(opt => opt.setName('role').setDescription('Role to apply/remove').setRequired(true))
+                .addRoleOption(opt => opt.setName('target_role').setDescription('Required for has scope'))
+                .addBooleanOption(opt => opt.setName('confirm').setDescription('Confirm bulk mutation').setRequired(true))))
+            .addSubcommand(sub => addReasonOption(sub.setName('create').setDescription('Create a role').addStringOption(opt => opt.setName('name').setDescription('Role name').setRequired(true).setMinLength(1).setMaxLength(100))))
+            .addSubcommand(sub => addReasonOption(sub.setName('delete').setDescription('Delete a role').addRoleOption(opt => opt.setName('role').setDescription('Role').setRequired(true)).addBooleanOption(opt => opt.setName('confirm').setDescription('Confirm irreversible deletion').setRequired(true))))
+            .addSubcommand(sub => addReasonOption(sub.setName('color').setDescription('Set a role color tier').addRoleOption(opt => opt.setName('role').setDescription('Role').setRequired(true)).addStringOption(opt => opt.setName('color').setDescription('Hex or decimal color').setRequired(true).setMaxLength(10)).addIntegerOption(opt => opt.setName('tier').setDescription('Color tier').setRequired(true).setMinValue(1).setMaxValue(3))))
+            .addSubcommand(sub => addReasonOption(sub.setName('hoist').setDescription('Set role hoisting').addRoleOption(opt => opt.setName('role').setDescription('Role').setRequired(true)).addBooleanOption(opt => opt.setName('enabled').setDescription('Hoist status').setRequired(true))))
+            .addSubcommand(sub => addReasonOption(sub.setName('mentionable').setDescription('Set role mentionability').addRoleOption(opt => opt.setName('role').setDescription('Role').setRequired(true)).addBooleanOption(opt => opt.setName('enabled').setDescription('Mentionable status').setRequired(true))))
+            .addSubcommand(sub => addReasonOption(sub.setName('rename').setDescription('Rename a role').addRoleOption(opt => opt.setName('role').setDescription('Role').setRequired(true)).addStringOption(opt => opt.setName('name').setDescription('New role name').setRequired(true).setMinLength(1).setMaxLength(100))))
+            .addSubcommand(sub => addReasonOption(sub.setName('icon').setDescription('Set a role icon').addRoleOption(opt => opt.setName('role').setDescription('Role').setRequired(true)).addAttachmentOption(opt => opt.setName('image').setDescription('Image up to 256 KiB')).addStringOption(opt => opt.setName('url').setDescription('Discord CDN image URL').setMaxLength(500)).addStringOption(opt => opt.setName('emoji').setDescription('Unicode emoji').setMaxLength(16)))))
         .addSubcommandGroup(group => group
             .setName('case')
             .setDescription('Inspect and undo moderation cases')
@@ -155,7 +234,7 @@ module.exports = {
             .addSubcommand(sub => sub.setName('warn-remove').setDescription('Remove a warning punishment').addIntegerOption(opt => opt.setName('threshold').setDescription('Warning threshold').setRequired(true).setMinValue(1)))
             .addSubcommand(sub => sub.setName('warn-list').setDescription('List warning punishments'))),
 
-    permissions: [PermissionFlagsBits.ModerateMembers],
+    permissions: [],
     cooldown: 3,
     longRunning: true,
 
@@ -164,7 +243,7 @@ module.exports = {
         const subcommand = interaction.options.getSubcommand();
 
         // channel-group enforces target-command perms (ManageMessages/ManageChannels), not ModerateMembers
-        if (group === 'channel') {
+        if (group === 'channel' && ['clear', 'lock', 'unlock'].includes(subcommand)) {
             if (subcommand === 'clear') {
                 return executeAliasCommand(interaction, client, {
                     commandName: 'clear',
@@ -182,9 +261,20 @@ module.exports = {
             });
         }
 
+        const requiredPermission = group === 'config' && ['setup', 'reset'].includes(subcommand)
+            ? PermissionFlagsBits.Administrator
+                : group === 'case' && subcommand === 'undo' ? null
+                    : group === 'config' || group === 'template' || (group === 'case' && subcommand === 'reset')
+                ? PermissionFlagsBits.ManageGuild
+                : group === 'logs' ? PermissionFlagsBits.ViewAuditLog
+                    : group === 'channel' ? CHANNEL_PERMISSIONS[subcommand]
+                        : group === 'role' ? PermissionFlagsBits.ManageRoles
+                            : NICKNAME_ACTIONS.has(subcommand) ? PermissionFlagsBits.ManageNicknames
+                                : STATUS_PERMISSIONS[subcommand] || requiredPermissionForAction(subcommand)
+                                    || PermissionFlagsBits.ModerateMembers;
         const permissionCheck = await checkUserPermissions(interaction, {
             data: { name: 'mod' },
-            permissions: [PermissionFlagsBits.ModerateMembers]
+            permissions: requiredPermission ? [requiredPermission] : []
         });
 
         if (!permissionCheck.allowed) {
@@ -196,25 +286,6 @@ module.exports = {
                 embeds: [permissionCheck.error],
                 flags: [MessageFlags.Ephemeral]
             });
-        }
-
-        const requiredPermission = group === 'config' && ['setup', 'reset'].includes(subcommand)
-            ? PermissionFlagsBits.Administrator
-            : group === 'config' || group === 'template' || (group === 'case' && subcommand === 'reset')
-            ? PermissionFlagsBits.ManageGuild
-            : group === 'logs' ? PermissionFlagsBits.ViewAuditLog
-            : STATUS_PERMISSIONS[subcommand] || requiredPermissionForAction(subcommand);
-        if (requiredPermission) {
-            const actionPermission = await checkUserPermissions(interaction, {
-                data: { name: 'mod' },
-                permissions: [requiredPermission]
-            });
-            if (!actionPermission.allowed) {
-                if (interaction.deferred || interaction.replied) {
-                    return interaction.editReply({ embeds: [actionPermission.error] });
-                }
-                return interaction.reply({ embeds: [actionPermission.error], flags: [MessageFlags.Ephemeral] });
-            }
         }
 
         if (!interaction.deferred && !interaction.replied) {
@@ -229,6 +300,12 @@ module.exports = {
         }
         if (group === 'template') {
             return handleTemplate(interaction, subcommand);
+        }
+        if (group === 'channel') {
+            return handleChannelModeration(interaction, subcommand);
+        }
+        if (group === 'role') {
+            return handleRoleModeration(interaction, subcommand);
         }
 
         const legacyInteraction = createCommandAliasInteraction(interaction, {
@@ -280,6 +357,12 @@ module.exports = {
             case 'staffstrip':
                 await handleRoleAction(legacyInteraction, legacyInteraction.options.getSubcommand().toUpperCase());
                 break;
+            case 'nickname':
+            case 'nickname-remove':
+            case 'nickname-force':
+            case 'nickname-unforce':
+                await handleNickname(legacyInteraction, legacyInteraction.options.getSubcommand());
+                break;
             case 'warn':
                 await handleWarn(legacyInteraction);
                 break;
@@ -312,6 +395,222 @@ function caseDescription(moderationCase) {
         + `Target: <@${moderationCase.target_id}>\n`
         + `Moderator: <@${moderationCase.executor_id}>\n`
         + `Reason: ${reason}`;
+}
+
+async function handleChannelModeration(interaction, subcommand) {
+    const channel = interaction.options.getChannel('channel') || interaction.channel;
+    const reason = interaction.options.getString('reason') || `Requested by ${interaction.user.tag || interaction.user.id}`;
+    try {
+        if (!interaction.guild.members.me.permissions.has(CHANNEL_PERMISSIONS[subcommand])) {
+            throw new Error('My Discord permissions do not allow this channel action.');
+        }
+        if (subcommand === 'purge' || subcommand === 'cleanup' || subcommand === 'selfpurge') {
+            const count = await purgeMessages({
+                guild: interaction.guild,
+                channel,
+                executor: interaction.member,
+                interactionId: interaction.id,
+                amount: interaction.options.getInteger('amount'),
+                filter: subcommand === 'cleanup' ? 'cleanup' : subcommand === 'selfpurge' ? 'user' : interaction.options.getString('filter'),
+                text: interaction.options.getString('text'),
+                memberId: subcommand === 'selfpurge' ? interaction.user.id : interaction.options.getUser('member')?.id,
+                startId: interaction.options.getString('start_id'),
+                endId: interaction.options.getString('end_id'),
+                prefix: sqlite.prepare('SELECT prefix FROM guilds WHERE id = ?').get(interaction.guild.id)?.prefix || '!'
+            });
+            const title = subcommand === 'cleanup' ? 'Cleanup Complete' : subcommand === 'selfpurge' ? 'Self Purge Complete' : 'Purge Complete';
+            return interaction.editReply({ embeds: [embeds.success(title, `Removed **${count}** matching ${subcommand === 'purge' && interaction.options.getString('filter') === 'reactions' ? 'reactions' : 'messages'}.`)] });
+        }
+        if (subcommand === 'lockdown' || subcommand === 'unlockdown') {
+            await (subcommand === 'lockdown' ? lockdownChannel : unlockdownChannel)({
+                guild: interaction.guild, channel, executor: interaction.member, reason
+            });
+            return interaction.editReply({ embeds: [embeds.success('Channel Updated', `${channel} was ${subcommand === 'lockdown' ? 'locked' : 'unlocked'}.`)] });
+        }
+        if (subcommand === 'lockdown-all' || subcommand === 'unlockdown-all') {
+            if (!interaction.options.getBoolean('confirm')) throw new Error('Set confirm to true for a server-wide lockdown change.');
+            const count = await lockdownAll({
+                guild: interaction.guild, executor: interaction.member, reason,
+                unlock: subcommand === 'unlockdown-all'
+            });
+            return interaction.editReply({ embeds: [embeds.success('Server Lockdown Updated', `Changed **${count}** channels.`)] });
+        }
+        if (subcommand === 'lockdown-role') {
+            const role = interaction.options.getRole('role');
+            const protection = validateProtectedTarget(interaction.guild.id, '', [role.id]);
+            if (!protection.valid) throw new Error(protection.error);
+            if (role.id !== interaction.guild.id) validateRole(interaction.member, interaction.guild, role);
+            await executeRecordedAction({
+                guildId: interaction.guild.id, targetId: role.id, executorId: interaction.member.id,
+                action: 'LOCKDOWN_ROLE', reason,
+                perform: async () => sqlite.prepare(`
+                    INSERT INTO moderation_config (guild_id, lock_role_id) VALUES (?, ?)
+                    ON CONFLICT (guild_id) DO UPDATE SET lock_role_id = excluded.lock_role_id
+                `).run(interaction.guild.id, role.id)
+            });
+            return interaction.editReply({ embeds: [embeds.success('Lockdown Role Set', `${role} will be denied Send Messages.`)] });
+        }
+        if (subcommand === 'lockdown-ignore' || subcommand === 'lockdown-unignore') {
+            const target = interaction.options.getChannel('channel');
+            await executeRecordedAction({
+                guildId: interaction.guild.id, targetId: target.id, executorId: interaction.member.id,
+                action: subcommand === 'lockdown-ignore' ? 'LOCKDOWN_IGNORE' : 'LOCKDOWN_UNIGNORE', reason,
+                perform: async () => subcommand === 'lockdown-ignore'
+                    ? sqlite.prepare('INSERT INTO lockdown_ignores (guild_id, channel_id) VALUES (?, ?) ON CONFLICT DO NOTHING')
+                        .run(interaction.guild.id, target.id)
+                    : sqlite.prepare('DELETE FROM lockdown_ignores WHERE guild_id = ? AND channel_id = ?')
+                        .run(interaction.guild.id, target.id)
+            });
+            return interaction.editReply({ embeds: [embeds.success('Lockdown Ignore Updated', `${target} was ${subcommand === 'lockdown-ignore' ? 'added to' : 'removed from'} the ignore list.`)] });
+        }
+        if (subcommand === 'lockdown-ignored') {
+            const ignored = sqlite.prepare('SELECT channel_id FROM lockdown_ignores WHERE guild_id = ? ORDER BY channel_id')
+                .all(interaction.guild.id);
+            return interaction.editReply({ embeds: [embeds.info('Lockdown Ignores', ignored.length
+                ? ignored.map(item => `<#${item.channel_id}>`).join('\n').slice(0, 4000)
+                : 'No channels are ignored.')] });
+        }
+        if (!channel?.isTextBased?.() || channel.isThread?.()) throw new Error('This action requires a guild text channel.');
+        if (subcommand === 'slowmode' || subcommand === 'slowmode-disable') {
+            const duration = interaction.options.getString('duration')?.trim();
+            const parsed = subcommand === 'slowmode-disable' || /^0(?:s|sec|secs|second|seconds)?$/i.test(duration)
+                ? { success: true, duration: 0 }
+                : parseTime(duration);
+            if (!parsed.success || parsed.duration < 0 || parsed.duration > 6 * 3600000) throw new Error('Slowmode must be between 0 seconds and 6 hours.');
+            await executeRecordedAction({
+                guildId: interaction.guild.id, targetId: channel.id, executorId: interaction.member.id,
+                action: subcommand.toUpperCase().replaceAll('-', '_'), reason,
+                perform: async () => channel.setRateLimitPerUser(Math.floor(parsed.duration / 1000), reason)
+            });
+        } else if (subcommand === 'topic' || subcommand === 'topic-remove') {
+            await executeRecordedAction({
+                guildId: interaction.guild.id, targetId: channel.id, executorId: interaction.member.id,
+                action: subcommand.toUpperCase().replaceAll('-', '_'), reason,
+                perform: async () => channel.setTopic(subcommand === 'topic-remove' ? null : interaction.options.getString('text'), reason)
+            });
+        } else if (subcommand === 'nsfw') {
+            await executeRecordedAction({
+                guildId: interaction.guild.id, targetId: channel.id, executorId: interaction.member.id,
+                action: 'NSFW', reason,
+                perform: async () => channel.setNSFW(interaction.options.getBoolean('enabled'), reason)
+            });
+        }
+        return interaction.editReply({ embeds: [embeds.success('Channel Updated', `${channel} was updated.`)] });
+    } catch (error) {
+        return interaction.editReply({ embeds: [embeds.error('Channel Moderation Failed', error.message)] });
+    }
+}
+
+async function handleRoleModeration(interaction, subcommand) {
+    const reason = interaction.options.getString('reason') || `Requested by ${interaction.user.tag || interaction.user.id}`;
+    const guild = interaction.guild;
+    try {
+        if (!guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('I need Manage Roles for this action.');
+        if (subcommand === 'add' || subcommand === 'remove') {
+            await changeMemberRole({
+                guild, executor: interaction.member, member: interaction.options.getMember('target'),
+                role: interaction.options.getRole('role'), add: subcommand === 'add', reason
+            });
+            return interaction.editReply({ embeds: [embeds.success('Member Role Updated', 'The member role change completed.')] });
+        }
+        if (subcommand === 'restore') {
+            const count = await restoreMemberRoles({
+                guild, executor: interaction.member, member: interaction.options.getMember('target'), reason
+            });
+            return interaction.editReply({ embeds: [embeds.success('Roles Restored', `Restored **${count}** roles.`)] });
+        }
+        if (subcommand === 'bulk') {
+            if (!interaction.options.getBoolean('confirm')) throw new Error('Set confirm to true for a bulk role action.');
+            const scope = interaction.options.getString('scope');
+            const targetRole = interaction.options.getRole('target_role');
+            if (scope === 'has' && !targetRole) throw new Error('The has scope requires target_role.');
+            const result = await bulkRole({
+                guild, executor: interaction.member, role: interaction.options.getRole('role'),
+                add: interaction.options.getString('action') === 'add', scope, targetRole, reason
+            });
+            return interaction.editReply({ embeds: [embeds.success('Bulk Role Updated', `Changed **${result.changed}** members; skipped **${result.skipped}**.`)] });
+        }
+        if (subcommand === 'create') {
+            const role = await executeRecordedAction({
+                guildId: guild.id, targetId: guild.id, executorId: interaction.member.id, action: 'ROLE_CREATE', reason,
+                perform: async () => guild.roles.create({ name: interaction.options.getString('name'), reason })
+            });
+            return interaction.editReply({ embeds: [embeds.success('Role Created', `${role} was created.`)] });
+        }
+        const role = interaction.options.getRole('role');
+        validateRole(interaction.member, guild, role);
+        if (subcommand === 'delete' && !interaction.options.getBoolean('confirm')) throw new Error('Set confirm to true to delete this role.');
+        let perform;
+        if (subcommand === 'delete') {
+            perform = () => role.delete(reason);
+        } else if (subcommand === 'color') {
+            const color = interaction.options.getString('color');
+            const parsedColor = /^#[\da-f]{6}$/i.test(color) ? Number.parseInt(color.slice(1), 16)
+                : /^\d{1,8}$/.test(color) ? Number.parseInt(color, 10) : NaN;
+            if (!Number.isInteger(parsedColor) || parsedColor > 0xFFFFFF) {
+                throw new Error('Color must be #RRGGBB or a decimal value from 0 to 16777215.');
+            }
+            const tier = interaction.options.getInteger('tier');
+            const colors = {
+                primaryColor: role.colors?.primaryColor || 0,
+                secondaryColor: role.colors?.secondaryColor || null,
+                tertiaryColor: role.colors?.tertiaryColor || null
+            };
+            colors[{ 1: 'primaryColor', 2: 'secondaryColor', 3: 'tertiaryColor' }[tier]] = parsedColor;
+            perform = () => role.setColors(colors, reason);
+        } else if (subcommand === 'hoist') {
+            perform = () => role.setHoist(interaction.options.getBoolean('enabled'), reason);
+        } else if (subcommand === 'mentionable') {
+            perform = () => role.setMentionable(interaction.options.getBoolean('enabled'), reason);
+        } else if (subcommand === 'rename') {
+            perform = () => role.setName(interaction.options.getString('name'), reason);
+        } else if (subcommand === 'icon') {
+            const image = interaction.options.getAttachment('image');
+            const url = interaction.options.getString('url');
+            const emoji = interaction.options.getString('emoji');
+            if ([image, url, emoji].filter(Boolean).length !== 1) throw new Error('Provide exactly one image, URL, or emoji.');
+            if (image || url) {
+                const iconUrl = image?.url || url;
+                const host = new URL(iconUrl).hostname;
+                if (!['cdn.discordapp.com', 'media.discordapp.net'].includes(host)
+                    || (image && (!image.contentType?.startsWith('image/') || image.size > 262144))) {
+                    throw new Error('Role icon URLs must use Discord CDN; attachments must be images up to 256 KiB.');
+                }
+            }
+            perform = emoji
+                ? () => role.setUnicodeEmoji(emoji, reason)
+                : async () => role.setIcon(url ? await fetchDiscordRoleIcon(url) : image.url, reason);
+        }
+        await executeRecordedAction({
+            guildId: guild.id, targetId: role.id, executorId: interaction.member.id,
+            action: `ROLE_${subcommand.toUpperCase()}`, reason, perform
+        });
+        return interaction.editReply({ embeds: [embeds.success('Role Updated', `Role action **${subcommand}** completed.`)] });
+    } catch (error) {
+        return interaction.editReply({ embeds: [embeds.error('Role Moderation Failed', error.message)] });
+    }
+}
+
+async function handleNickname(interaction, subcommand) {
+    const member = interaction.options.getMember('target');
+    try {
+        if (!interaction.guild.members.me.permissions.has(PermissionFlagsBits.ManageNicknames)) {
+            throw new Error('I need Manage Nicknames for this action.');
+        }
+        await setNickname({
+            guild: interaction.guild,
+            executor: interaction.member,
+            member,
+            nickname: interaction.options.getString('name'),
+            force: subcommand === 'nickname-force',
+            remove: subcommand === 'nickname-remove',
+            cancel: subcommand === 'nickname-unforce',
+            reason: interaction.options.getString('reason') || `Requested by ${interaction.user.tag || interaction.user.id}`
+        });
+        return interaction.editReply({ embeds: [embeds.success('Nickname Updated', `${member} was updated.`)] });
+    } catch (error) {
+        return interaction.editReply({ embeds: [embeds.error('Nickname Failed', error.message)] });
+    }
 }
 
 async function handleTemplate(interaction, subcommand) {

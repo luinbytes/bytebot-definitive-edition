@@ -96,13 +96,34 @@ function validateProtectedTarget(guildId, targetId, roleIds = []) {
     }
 }
 
+const DANGEROUS_ROLE_PERMISSIONS = [
+    PermissionFlagsBits.Administrator, PermissionFlagsBits.ManageGuild,
+    PermissionFlagsBits.ManageRoles, PermissionFlagsBits.ManageChannels,
+    PermissionFlagsBits.BanMembers, PermissionFlagsBits.KickMembers,
+    PermissionFlagsBits.ModerateMembers, PermissionFlagsBits.ManageWebhooks,
+    PermissionFlagsBits.MentionEveryone
+];
+
+function validateManageableRole(executor, guild, role, { adding = false } = {}) {
+    if (!role || role.id === guild.id || role.managed) throw new Error('That role cannot be managed.');
+    if (role.position >= guild.members.me.roles.highest.position) throw new Error('That role is higher than or equal to my highest role.');
+    if (!executor.permissions.has(PermissionFlagsBits.Administrator) && role.position >= executor.roles.highest.position) {
+        throw new Error('That role is higher than or equal to your highest role.');
+    }
+    const protection = validateProtectedTarget(guild.id, '', [role.id]);
+    if (!protection.valid) throw new Error(protection.error);
+    if (adding && DANGEROUS_ROLE_PERMISSIONS.some(permission => role.permissions?.has(permission))) {
+        throw new Error('Roles with administrator, moderation, or management permissions cannot be assigned.');
+    }
+}
+
 /**
  * Validate role hierarchy for moderation actions.
  * @param {GuildMember} executor - The moderator performing the action
  * @param {GuildMember} target - The member being moderated
  * @returns {Object} - { valid: boolean, error?: string }
  */
-function validateHierarchy(executor, target) {
+function validateHierarchy(executor, target, { allowBots = false } = {}) {
     // Can't moderate self
     if (executor.id === target.id) {
         return {
@@ -112,7 +133,7 @@ function validateHierarchy(executor, target) {
     }
 
     // Can't moderate bots unless admin
-    if (target.user.bot && !executor.permissions.has(PermissionFlagsBits.Administrator)) {
+    if (target.user.bot && !allowBots && !executor.permissions.has(PermissionFlagsBits.Administrator)) {
         return {
             valid: false,
             error: 'Only administrators can moderate bots.'
@@ -185,5 +206,6 @@ module.exports = {
     notifyUser,
     validateProtectedTarget,
     validateHierarchy,
+    validateManageableRole,
     executeModerationAction
 };

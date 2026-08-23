@@ -1,0 +1,220 @@
+const { sqlite } = require('../database');
+const { RoleManager } = require('../utils/discordApiUtil');
+const { validateHierarchy, validateManageableRole } = require('../utils/moderationUtil');
+const { executeRecordedAction } = require('./moderationService');
+
+const MAX_BULK_MEMBERS = 5000;
+const MAX_ROLE_ICON_BYTES = 262144;
+const nicknameLocks = new Map();
+
+async function fetchDiscordRoleIcon(url) {
+    const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(5000) });
+    if (!response.ok || !response.headers.get('content-type')?.startsWith('image/')) {
+        throw new Error('The role icon URL did not return an image.');
+    }
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of response.body) {
+        size += chunk.length;
+        if (size > MAX_ROLE_ICON_BYTES) throw new Error('Role icons must be no larger than 256 KiB.');
+        chunks.push(Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+}
+
+const validateRole = validateManageableRole;
+
+function snapshotRoles(member) {
+    const roleIds = [...member.roles.cache.values()]
+        .filter(role => role.id !== member.guild.id && !role.managed)
+        .map(role => role.id);
+    sqlite.prepare(`
+        INSERT INTO member_role_snapshots (guild_id, user_id, role_ids, updated_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT (guild_id, user_id) DO NOTHING
+    `).run(member.guild.id, member.id, JSON.stringify(roleIds), Date.now());
+}
+
+async function changeMemberRole({ guild, executor, member, role, add, reason }) {
+    const hierarchy = validateHierarchy(executor, member, { allowBots: true });
+    if (!hierarchy.valid) throw new Error(hierarchy.error);
+    validateRole(executor, guild, role, { adding: add });
+    await executeRecordedAction({
+        guildId: guild.id, targetId: member.id, executorId: executor.id,
+        action: add ? 'ROLE_ADD' : 'ROLE_REMOVE', reason: `${reason} (${role.id})`,
+        metadata: { roleId: role.id, roleOperation: add ? 'add' : 'remove' },
+        perform: async () => {
+            if (!add) snapshotRoles(member);
+            const result = await RoleManager[add ? 'addRole' : 'removeRole'](member, role, {
+                reason,
+                logContext: `moderation:role:${add ? 'add' : 'remove'}`
+            });
+            if (!result.success) throw new Error(result.error);
+        }
+    });
+}
+
+async function restoreMemberRoles({ guild, executor, member, reason }) {
+    const hierarchy = validateHierarchy(executor, member, { allowBots: true });
+    if (!hierarchy.valid) throw new Error(hierarchy.error);
+    const snapshot = sqlite.prepare('SELECT role_ids FROM member_role_snapshots WHERE guild_id = ? AND user_id = ?')
+        .get(guild.id, member.id);
+    if (!snapshot) throw new Error('This member has no saved roles to restore.');
+    const roles = JSON.parse(snapshot.role_ids).map(id => guild.roles.cache.get(id)).filter(Boolean);
+    return executeRecordedAction({
+        guildId: guild.id, targetId: member.id, executorId: executor.id, action: 'ROLE_RESTORE', reason,
+        perform: async () => {
+            let restored = 0;
+            for (const role of roles) {
+                validateRole(executor, guild, role, { adding: true });
+                if (!member.roles.cache.has(role.id)) {
+                    const result = await RoleManager.addRole(member, role, { reason, logContext: 'moderation:role:restore' });
+                    if (!result.success) throw new Error(`Restored ${restored} roles; ${result.error}. Retry is safe.`);
+                    restored++;
+                }
+            }
+            sqlite.prepare('DELETE FROM member_role_snapshots WHERE guild_id = ? AND user_id = ?').run(guild.id, member.id);
+            return restored;
+        }
+    });
+}
+
+async function bulkRole({ guild, executor, role, add, scope, targetRole, reason }) {
+    validateRole(executor, guild, role, { adding: add });
+    const fetched = await guild.members.fetch();
+    let members = [...fetched.values()].filter(member => {
+        if (scope === 'bots') return member.user.bot;
+        if (scope === 'humans') return !member.user.bot;
+        if (scope === 'has') return member.roles.cache.has(targetRole.id);
+        return true;
+    });
+    if (members.length > MAX_BULK_MEMBERS) throw new Error(`Bulk role actions are capped at ${MAX_BULK_MEMBERS} members.`);
+    members = members.filter(member => add ? !member.roles.cache.has(role.id) : member.roles.cache.has(role.id));
+    return executeRecordedAction({
+        guildId: guild.id, targetId: role.id, executorId: executor.id,
+        action: add ? 'ROLE_BULK_ADD' : 'ROLE_BULK_REMOVE', reason: `${reason}; scope=${scope}`,
+        perform: async () => {
+            let changed = 0;
+            let skipped = 0;
+            for (let index = 0; index < members.length; index += 5) {
+                const results = await Promise.all(members.slice(index, index + 5).map(async member => {
+                    const hierarchy = validateHierarchy(executor, member, { allowBots: true });
+                    if (!hierarchy.valid) return false;
+                    if (!add) snapshotRoles(member);
+                    const result = await RoleManager[add ? 'addRole' : 'removeRole'](member, role, {
+                        reason, logContext: 'moderation:role:bulk'
+                    });
+                    return result.success;
+                }));
+                changed += results.filter(Boolean).length;
+                skipped += results.filter(result => !result).length;
+            }
+            return { changed, skipped };
+        }
+    });
+}
+
+async function setNicknameUnlocked({ guild, executor, member, nickname, force = false, remove = false, cancel = false, reason }) {
+    const hierarchy = validateHierarchy(executor, member, { allowBots: true });
+    if (!hierarchy.valid) throw new Error(hierarchy.error);
+    const forced = sqlite.prepare('SELECT nickname FROM forced_nicknames WHERE guild_id = ? AND user_id = ?').get(guild.id, member.id);
+    if (cancel) {
+        if (!forced) throw new Error('This member does not have a forced nickname.');
+        return executeRecordedAction({
+            guildId: guild.id, targetId: member.id, executorId: executor.id, action: 'NICKNAME_UNFORCE', reason,
+            perform: async () => sqlite.prepare('DELETE FROM forced_nicknames WHERE guild_id = ? AND user_id = ?').run(guild.id, member.id)
+        });
+    }
+    if (forced && !force) throw new Error('Cancel the forced nickname first.');
+    if (!remove && (!nickname || nickname.length > 32)) throw new Error('Nickname must be 1–32 characters.');
+    return executeRecordedAction({
+        guildId: guild.id, targetId: member.id, executorId: executor.id,
+        action: force ? 'NICKNAME_FORCE' : remove ? 'NICKNAME_REMOVE' : 'NICKNAME', reason,
+        perform: async () => {
+            if (force) {
+                sqlite.prepare(`
+                    INSERT INTO forced_nicknames (guild_id, user_id, nickname, updated_at) VALUES (?, ?, ?, ?)
+                    ON CONFLICT (guild_id, user_id) DO UPDATE SET nickname = excluded.nickname, updated_at = excluded.updated_at
+                `).run(guild.id, member.id, nickname, Date.now());
+            }
+            try {
+                await member.setNickname(remove ? null : nickname, reason);
+            } catch (error) {
+                if (force && forced) {
+                    sqlite.prepare('UPDATE forced_nicknames SET nickname = ?, updated_at = ? WHERE guild_id = ? AND user_id = ?')
+                        .run(forced.nickname, Date.now(), guild.id, member.id);
+                } else if (force) {
+                    sqlite.prepare('DELETE FROM forced_nicknames WHERE guild_id = ? AND user_id = ?').run(guild.id, member.id);
+                }
+                throw error;
+            }
+        }
+    });
+}
+
+function withNicknameLock(guildId, userId, action) {
+    const key = `${guildId}:${userId}`;
+    const previous = nicknameLocks.get(key) || Promise.resolve();
+    // ponytail: process-local serialization; use DB operation tokens if nickname enforcement becomes multi-process.
+    const queued = previous.catch(() => {}).then(action);
+    nicknameLocks.set(key, queued);
+    return queued.finally(() => {
+        if (nicknameLocks.get(key) === queued) nicknameLocks.delete(key);
+    });
+}
+
+function setNickname(options) {
+    return withNicknameLock(options.guild.id, options.member.id, () => setNicknameUnlocked(options));
+}
+
+function enforceForcedNickname(member) {
+    return withNicknameLock(member.guild.id, member.id, async () => {
+        const forced = sqlite.prepare('SELECT nickname FROM forced_nicknames WHERE guild_id = ? AND user_id = ?')
+            .get(member.guild.id, member.id);
+        if (forced && member.nickname !== forced.nickname) {
+            await member.setNickname(forced.nickname, 'ByteBot forced nickname enforcement');
+        }
+    });
+}
+
+async function reconcileForcedNicknames(client) {
+    const rows = sqlite.prepare('SELECT guild_id, user_id FROM forced_nicknames ORDER BY guild_id, user_id').all();
+    let reconciled = 0;
+    const failures = [];
+    for (const row of rows) {
+        try {
+            const guild = client.guilds.cache.get(row.guild_id);
+            if (!guild) throw new Error('guild unavailable');
+            const member = await guild.members.fetch(row.user_id);
+            await enforceForcedNickname(member);
+            reconciled++;
+        } catch (error) {
+            failures.push(`${row.guild_id}/${row.user_id}: ${error.message}`);
+        }
+    }
+    return { reconciled, failures };
+}
+
+function retryDelay(milliseconds) {
+    return new Promise(resolve => {
+        const timer = setTimeout(resolve, milliseconds);
+        timer.unref?.();
+    });
+}
+
+async function reconcileForcedNicknamesWithRetry(client, {
+    delays = [30000, 120000, 600000], wait = retryDelay
+} = {}) {
+    let result;
+    for (let attempt = 0; attempt <= delays.length; attempt++) {
+        result = await reconcileForcedNicknames(client);
+        if (!result.failures.length || attempt === delays.length) return result;
+        await wait(delays[attempt]);
+    }
+    return result;
+}
+
+module.exports = {
+    MAX_BULK_MEMBERS, validateRole, changeMemberRole, restoreMemberRoles, bulkRole, setNickname,
+    enforceForcedNickname, reconcileForcedNicknames, reconcileForcedNicknamesWithRetry,
+    fetchDiscordRoleIcon
+};

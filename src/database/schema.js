@@ -65,6 +65,7 @@ const moderationConfig = sqliteTable('moderation_config', {
     jailChannelId: text('jail_channel_id'),
     managedResources: text('managed_resources'),
     setupStatus: text('setup_status'),
+    lockRoleId: text('lock_role_id'),
 });
 
 const moderationHardbans = sqliteTable('moderation_hardbans', {
@@ -85,6 +86,42 @@ const moderationJailState = sqliteTable('moderation_jail_state', {
     previousRoleIds: text('previous_role_ids').notNull(),
     state: text('state').notNull(), // pending | active | removing
     createdAt: integer('created_at').notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.guildId, table.userId] }),
+}));
+
+const lockdownIgnores = sqliteTable('lockdown_ignores', {
+    guildId: text('guild_id').notNull(),
+    channelId: text('channel_id').notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.guildId, table.channelId] }),
+}));
+
+const lockdownStates = sqliteTable('lockdown_states', {
+    guildId: text('guild_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    roleId: text('role_id').notNull(),
+    priorSendMessages: integer('prior_send_messages').notNull(), // -1 deny | 0 unset | 1 allow
+    state: text('state').notNull(), // pending | active
+    createdAt: integer('created_at').notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.guildId, table.channelId] }),
+}));
+
+const forcedNicknames = sqliteTable('forced_nicknames', {
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    nickname: text('nickname').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.guildId, table.userId] }),
+}));
+
+const memberRoleSnapshots = sqliteTable('member_role_snapshots', {
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    roleIds: text('role_ids').notNull(),
+    updatedAt: integer('updated_at').notNull(),
 }, (table) => ({
     pk: primaryKey({ columns: [table.guildId, table.userId] }),
 }));
@@ -614,6 +651,10 @@ module.exports = {
     moderationConfig,
     moderationHardbans,
     moderationJailState,
+    lockdownIgnores,
+    lockdownStates,
+    forcedNicknames,
+    memberRoleSnapshots,
     moderationTemplates,
     moderationStaffRoles,
     warningPunishments,

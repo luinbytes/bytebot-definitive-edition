@@ -89,12 +89,19 @@ describe('Grouped Slash Command Appearance', () => {
             user: [
                 'ban', 'kick', 'timeout', 'untimeout', 'softban', 'hardban', 'unban',
                 'imute', 'iunmute', 'rmute', 'runmute', 'jail', 'unjail', 'warn',
-                'unwarn', 'warn-clear', 'strip', 'staffstrip', 'history'
+                'unwarn', 'warn-clear', 'strip', 'staffstrip', 'nickname', 'nickname-remove',
+                'nickname-force', 'nickname-unforce', 'history'
             ],
             status: ['hardbans', 'jailed', 'image-muted', 'reaction-muted', 'timeouts', 'warnings'],
             bulk: ['unban-all', 'untimeout-all', 'unjail-all'],
             logs: ['recent', 'by-moderator', 'audit'],
-            channel: ['clear', 'lock', 'unlock'],
+            channel: [
+                'clear', 'lock', 'unlock', 'cleanup', 'selfpurge', 'purge', 'lockdown', 'unlockdown',
+                'lockdown-all', 'unlockdown-all', 'lockdown-role', 'lockdown-ignore',
+                'lockdown-unignore', 'lockdown-ignored', 'slowmode', 'slowmode-disable',
+                'topic', 'topic-remove', 'nsfw'
+            ],
+            role: ['add', 'remove', 'restore', 'bulk', 'create', 'delete', 'color', 'hoist', 'mentionable', 'rename', 'icon'],
             case: ['view', 'undo', 'reset'],
             template: ['set', 'remove', 'view', 'reset', 'list', 'test', 'variables'],
             config: [
