@@ -176,8 +176,26 @@ function enforceForcedNickname(member) {
     });
 }
 
+async function reconcileForcedNicknames(client) {
+    const rows = sqlite.prepare('SELECT guild_id, user_id FROM forced_nicknames ORDER BY guild_id, user_id').all();
+    let reconciled = 0;
+    const failures = [];
+    for (const row of rows) {
+        try {
+            const guild = client.guilds.cache.get(row.guild_id);
+            if (!guild) throw new Error('guild unavailable');
+            const member = await guild.members.fetch(row.user_id);
+            await enforceForcedNickname(member);
+            reconciled++;
+        } catch (error) {
+            failures.push(`${row.guild_id}/${row.user_id}: ${error.message}`);
+        }
+    }
+    return { reconciled, failures };
+}
+
 module.exports = {
     MAX_BULK_MEMBERS, validateRole, changeMemberRole, restoreMemberRoles, bulkRole, setNickname,
-    enforceForcedNickname,
+    enforceForcedNickname, reconcileForcedNicknames,
     fetchDiscordRoleIcon
 };

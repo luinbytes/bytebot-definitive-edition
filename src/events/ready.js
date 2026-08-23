@@ -5,6 +5,7 @@ const { bytepodActiveSessions, bytepodVoiceStats, bytepods } = require('../datab
 const { eq, and } = require('drizzle-orm');
 const { dbLog } = require('../utils/dbLogger');
 const { scheduleOwnershipTransfer } = require('./voiceStateUpdate');
+const { reconcileForcedNicknames } = require('../services/roleModerationService');
 
 async function fetchDiscordResource(fetch, unknownCode) {
     try {
@@ -86,6 +87,14 @@ module.exports = {
     async execute(client) {
         logger.success(`Ready! Logged in as ${client.user.tag}`);
         logger.info(`Bot is active in ${client.guilds.cache.size} guilds.`);
+
+        try {
+            const result = await reconcileForcedNicknames(client);
+            if (result.reconciled) logger.info(`Forced nicknames reconciled: ${result.reconciled}`);
+            result.failures.forEach(failure => logger.error(`Forced nickname reconciliation failed for ${failure}`));
+        } catch (error) {
+            logger.error(`Failed to reconcile forced nicknames on startup: ${error.message}`);
+        }
 
         // Voice-session recovery below records activity, so this service must exist first.
         try {

@@ -419,4 +419,20 @@ describe('channel and role moderation parity', () => {
 
         expect(target.setNickname).toHaveBeenNthCalledWith(1, 'Locked', expect.any(String));
     });
+
+    test('startup reconciliation closes the persisted forced-nickname crash window', async () => {
+        const target = member(guild);
+        target.nickname = 'Changed';
+        database.sqlite.prepare(`
+            INSERT INTO forced_nicknames (guild_id, user_id, nickname, updated_at)
+            VALUES ('guild1', 'user1', 'Locked', 1)
+        `).run();
+        guild.members.fetch.mockResolvedValue(target);
+        const { reconcileForcedNicknames } = require('../src/services/roleModerationService');
+
+        const result = await reconcileForcedNicknames({ guilds: { cache: new Map([[guild.id, guild]]) } });
+
+        expect(result).toEqual({ reconciled: 1, failures: [] });
+        expect(target.setNickname).toHaveBeenCalledWith('Locked', 'ByteBot forced nickname enforcement');
+    });
 });
