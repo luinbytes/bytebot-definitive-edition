@@ -435,4 +435,25 @@ describe('channel and role moderation parity', () => {
         expect(result).toEqual({ reconciled: 1, failures: [] });
         expect(target.setNickname).toHaveBeenCalledWith('Locked', 'ByteBot forced nickname enforcement');
     });
+
+    test('startup reconciliation retries transient member fetch failures', async () => {
+        const target = member(guild);
+        target.nickname = 'Changed';
+        database.sqlite.prepare(`
+            INSERT INTO forced_nicknames (guild_id, user_id, nickname, updated_at)
+            VALUES ('guild1', 'user1', 'Locked', 1)
+        `).run();
+        guild.members.fetch.mockRejectedValueOnce(new Error('Discord unavailable')).mockResolvedValueOnce(target);
+        const { reconcileForcedNicknamesWithRetry } = require('../src/services/roleModerationService');
+        const wait = jest.fn().mockResolvedValue();
+
+        const result = await reconcileForcedNicknamesWithRetry(
+            { guilds: { cache: new Map([[guild.id, guild]]) } },
+            { delays: [0], wait }
+        );
+
+        expect(result).toEqual({ reconciled: 1, failures: [] });
+        expect(wait).toHaveBeenCalledWith(0);
+        expect(guild.members.fetch).toHaveBeenCalledTimes(2);
+    });
 });

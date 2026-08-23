@@ -194,8 +194,27 @@ async function reconcileForcedNicknames(client) {
     return { reconciled, failures };
 }
 
+function retryDelay(milliseconds) {
+    return new Promise(resolve => {
+        const timer = setTimeout(resolve, milliseconds);
+        timer.unref?.();
+    });
+}
+
+async function reconcileForcedNicknamesWithRetry(client, {
+    delays = [30000, 120000, 600000], wait = retryDelay
+} = {}) {
+    let result;
+    for (let attempt = 0; attempt <= delays.length; attempt++) {
+        result = await reconcileForcedNicknames(client);
+        if (!result.failures.length || attempt === delays.length) return result;
+        await wait(delays[attempt]);
+    }
+    return result;
+}
+
 module.exports = {
     MAX_BULK_MEMBERS, validateRole, changeMemberRole, restoreMemberRoles, bulkRole, setNickname,
-    enforceForcedNickname, reconcileForcedNicknames,
+    enforceForcedNickname, reconcileForcedNicknames, reconcileForcedNicknamesWithRetry,
     fetchDiscordRoleIcon
 };
