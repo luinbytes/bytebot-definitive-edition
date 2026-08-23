@@ -364,4 +364,23 @@ describe('server command access controls', () => {
             }
         }, fun)).allowed).toBe(true);
     });
+
+    test('large permission audits stay within Discord embed limits and report omissions', async () => {
+        const insert = database.sqlite.prepare(`
+            INSERT INTO fake_permissions (guild_id, role_id, permission)
+            VALUES ('guild1', ?, 'Administrator')
+        `);
+        database.sqlite.transaction(() => {
+            for (let index = 0; index < 250; index += 1) {
+                insert.run(`role-${index.toString().padStart(3, '0')}-with-a-long-display-id`);
+            }
+        })();
+
+        const list = adminInteraction('fake', { action: 'list' });
+        await server.execute(list, client);
+        const description = list.editReply.mock.calls[0][0].embeds[0].data.description;
+
+        expect(description.length).toBeLessThanOrEqual(4096);
+        expect(description).toMatch(/… and \d+ more/);
+    });
 });

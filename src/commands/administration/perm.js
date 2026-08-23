@@ -28,6 +28,21 @@ const PERMISSION_NAMES = Object.keys(PermissionFlagsBits);
 const canonicalPermission = input => input && PERMISSION_NAMES
     .find(name => name.toLowerCase() === input.trim().toLowerCase());
 
+function boundedDescription(lines, empty) {
+    if (lines.length === 0) return empty;
+
+    const included = [];
+    for (const line of lines) {
+        const remaining = lines.length - included.length - 1;
+        const suffix = remaining > 0 ? `… and ${remaining} more` : '';
+        if ([...included, line, suffix].filter(Boolean).join('\n').length > 4000) break;
+        included.push(line);
+    }
+
+    const omitted = lines.length - included.length;
+    return [...included, omitted > 0 ? `… and ${omitted} more` : ''].filter(Boolean).join('\n');
+}
+
 module.exports = {
     register: false,
     data: new SlashCommandBuilder()
@@ -176,9 +191,10 @@ module.exports = {
                         : eq(fakePermissions.guildId, interaction.guild.id)),
                     { guildId: interaction.guild.id, roleId: role?.id }
                 );
-                const description = labels.length
-                    ? labels.map(label => `<@&${label.roleId}>: \`${label.permission}\``).join('\n')
-                    : 'No virtual permission labels are configured.';
+                const description = boundedDescription(
+                    labels.map(label => `<@&${label.roleId}>: \`${label.permission}\``),
+                    'No virtual permission labels are configured.'
+                );
                 return interaction.editReply({
                     embeds: [embeds.info('Fake Permissions', description)]
                 });
@@ -264,11 +280,12 @@ module.exports = {
                             .where(eq(protectedTargets.guildId, interaction.guild.id)),
                         { guildId: interaction.guild.id }
                     );
-                    const description = protectedRows.length
-                        ? protectedRows.map(target => target.targetType === 'member'
+                    const description = boundedDescription(
+                        protectedRows.map(target => target.targetType === 'member'
                             ? `<@${target.targetId}> (member)`
-                            : `<@&${target.targetId}> (role)`).join('\n')
-                        : 'No members or roles are protected from moderation.';
+                            : `<@&${target.targetId}> (role)`),
+                        'No members or roles are protected from moderation.'
+                    );
                     return interaction.editReply({
                         embeds: [embeds.info('Protected Targets', description)]
                     });
@@ -494,16 +511,8 @@ module.exports = {
                     });
                 }
 
-                // Group by command
-                const grouped = perms.reduce((acc, curr) => {
-                    if (!acc[curr.commandName]) acc[curr.commandName] = [];
-                    acc[curr.commandName].push(`<@&${curr.roleId}>`);
-                    return acc;
-                }, {});
-
-                const roleLines = Object.entries(grouped).map(([cmd, roles]) => {
-                    return `**/${cmd}**: ${roles.join(', ')}`;
-                });
+                const roleLines = perms.map(permission =>
+                    `**/${permission.commandName}**: <@&${permission.roleId}> (legacy allow)`);
                 const scopeLabel = rule => ({
                     guild: 'this server',
                     channel: `<#${rule.scopeId}>`,
@@ -516,7 +525,10 @@ module.exports = {
                         : `${rule.effect === 'allow' ? 'allowed' : 'denied'} for`;
                     return `**/${rule.commandPath}**: ${action} ${scopeLabel(rule)}`;
                 });
-                const description = [...roleLines, ...ruleLines].join('\n');
+                const description = boundedDescription(
+                    [...roleLines, ...ruleLines],
+                    'This server checks default bot permissions for all commands.'
+                );
 
                 return interaction.editReply({
                     embeds: [embeds.info('Command Permissions', description)]
