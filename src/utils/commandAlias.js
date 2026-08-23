@@ -65,7 +65,7 @@ async function executeAliasCommand(interaction, client, alias) {
     }
 
     if (interaction.guild) {
-        const { allowed, error } = await checkUserPermissions(aliasedInteraction, command);
+        const { allowed, error } = await checkUserPermissions(interaction, command);
         if (!allowed) {
             return interaction.reply({
                 embeds: [error],

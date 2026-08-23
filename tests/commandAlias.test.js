@@ -1,4 +1,12 @@
+const { PermissionFlagsBits } = require('discord.js');
 const { createCommandAliasInteraction, executeAliasCommand } = require('../src/utils/commandAlias');
+const { db } = require('../src/database');
+
+jest.mock('../src/database', () => ({
+    db: {
+        select: jest.fn()
+    }
+}));
 
 function createInteraction() {
     const options = {
@@ -16,6 +24,10 @@ function createInteraction() {
 }
 
 describe('command alias interaction proxy', () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+    });
+
     test('overrides command path while preserving option readers', () => {
         const interaction = createInteraction();
         const alias = createCommandAliasInteraction(interaction, {
@@ -89,5 +101,44 @@ describe('command alias interaction proxy', () => {
         expect(command.execute).toHaveBeenCalledTimes(1);
         expect(interaction.reply).toHaveBeenCalledTimes(1);
         expect(interaction.reply.mock.calls[0][0].embeds[0].data.title).toContain('Cooldown Active');
+    });
+
+    test('keeps the public intent-hub path when authorizing a delegated command', async () => {
+        db.select.mockReturnValue({
+            from: jest.fn().mockReturnValue({
+                where: jest.fn().mockResolvedValue([
+                    { roleId: 'configRole', commandName: 'server config view', guildId: 'guild123' }
+                ])
+            })
+        });
+
+        const command = {
+            data: { name: 'config' },
+            permissions: [PermissionFlagsBits.Administrator],
+            execute: jest.fn()
+        };
+        const interaction = {
+            commandName: 'server',
+            guild: { id: 'guild123' },
+            user: { id: 'user-1' },
+            member: {
+                roles: { cache: new Map([['configRole', {}]]) },
+                permissions: { has: jest.fn().mockReturnValue(false) }
+            },
+            options: {
+                getSubcommandGroup: jest.fn().mockReturnValue('config'),
+                getSubcommand: jest.fn().mockReturnValue('view')
+            },
+            reply: jest.fn()
+        };
+
+        await executeAliasCommand(interaction, { commands: new Map([['config', command]]) }, {
+            commandName: 'config',
+            subcommand: 'view',
+            subcommandGroup: null
+        });
+
+        expect(command.execute).toHaveBeenCalledTimes(1);
+        expect(interaction.reply).not.toHaveBeenCalled();
     });
 });

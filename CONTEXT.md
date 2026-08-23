@@ -19,3 +19,23 @@ _Avoid_: Whitelist
 **Shame Board**:
 The public honeypot status embed that names recent honeypot bans, shows useful account-risk details, and proves the trap is actively protecting the server.
 _Avoid_: Recent bans, log embed
+
+**Public Parity Contract**:
+The Greed behavior and command surface evidenced by its public command catalog, official documentation, and pinned official English localization registry. Undocumented live behavior is not part of the contract.
+_Avoid_: Exact clone, runtime parity
+
+**Intent Hub**:
+A top-level slash command that groups actions by what a member is trying to do, such as `/me`, `/server`, or `/fun`.
+_Avoid_: Category command, module command
+
+**UwU Lock**:
+A server rule that replaces a targeted member's messages with an uwuified replay wherever ByteBot can safely do so.
+_Avoid_: Impersonation, user lock
+
+**UwU-Protected Member**:
+A server member whom administrators have exempted from UwU Lock targeting.
+_Avoid_: Whitelisted user, immune user
+
+**Replayed Message**:
+A webhook-authored replacement that uses the original member's visible name and avatar while remaining identifiable by Discord as an app/webhook message.
+_Avoid_: Original message, impersonated message

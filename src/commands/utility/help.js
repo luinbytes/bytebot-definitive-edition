@@ -200,6 +200,17 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/server suggestion submit` • `/server welcome setup`\n' +
                     '`/mod user warn` • `/game warthunder stats`',
                 inline: false
+            },
+            {
+                name: 'Public Parity Map',
+                value:
+                    'Greed source categories route through ByteBot\'s existing hubs as features land:\n' +
+                    '`/community` Levels, Socials • `/me` Information, Utility\n' +
+                    '`/server` Auto, Logs, Server, Settings • `/mod` Moderation, Security\n' +
+                    '`/fun` Fun, Manipulation, Roleplay, Snipe\n' +
+                    '**Not yet available (planned):** Economy, LastFM, Voice\n' +
+                    '**Registry-only evidence gaps:** Boosters, Developer, Music',
+                inline: false
             }
         );
 
