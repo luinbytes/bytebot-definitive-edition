@@ -208,7 +208,8 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/community` Levels, Socials • `/me` Information, Utility\n' +
                     '`/server` Auto, Logs, Server, Settings • `/mod` Moderation, Security\n' +
                     '`/fun` Fun, Manipulation, Roleplay, Snipe\n' +
-                    '**Not yet available (planned):** Economy, LastFM, Voice',
+                    '**Not yet available (planned):** Economy, LastFM, Voice\n' +
+                    '**Registry-only evidence gaps:** Boosters, Developer, Music',
                 inline: false
             }
         );

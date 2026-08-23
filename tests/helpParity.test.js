@@ -18,7 +18,7 @@ test('/bot help discovers every public Greed category without advertising unfini
     const publicCategories = [
         'Auto', 'Economy', 'Fun', 'Information', 'LastFM', 'Levels', 'Logs',
         'Manipulation', 'Moderation', 'Roleplay', 'Security', 'Server', 'Settings',
-        'Snipe', 'Socials', 'Utility', 'Voice'
+        'Snipe', 'Socials', 'Utility', 'Voice', 'Boosters', 'Developer', 'Music'
     ];
 
     expect(parityField.value).toContain('planned');

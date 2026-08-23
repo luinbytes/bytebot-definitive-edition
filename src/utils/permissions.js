@@ -33,7 +33,7 @@ function getPermissionNames(permissions) {
  * @returns {Promise<{ allowed: boolean, error?: any }>}
  */
 async function checkUserPermissions(interaction, command) {
-    const rootCommand = command.data.name;
+    const rootCommand = interaction.commandName || command.data.name;
     const group = interaction.options?.getSubcommandGroup?.(false);
     const subcommand = interaction.options?.getSubcommand?.(false);
     const commandPath = [rootCommand, group, subcommand].filter(Boolean).join(' ');
