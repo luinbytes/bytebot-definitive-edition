@@ -8,7 +8,7 @@ const { checkUserPermissions } = require('../../utils/permissions');
 const { parseTime } = require('../../utils/timeParser');
 const {
     executeMemberAction, executeUserAction, clearWarnings, getCase, undoCase,
-    recordCompletedCase, requiredPermissionForAction
+    executeRecordedAction, requiredPermissionForAction
 } = require('../../services/moderationService');
 const { VARIABLES, validateTemplate, renderTemplate } = require('../../services/moderationTemplateService');
 const { setupModeration, resetModeration } = require('../../services/moderationSetupService');
@@ -33,7 +33,7 @@ const STATUS_PERMISSIONS = {
     'unjail-all': PermissionFlagsBits.ManageRoles
 };
 const CHANNEL_PERMISSIONS = {
-    selfpurge: null,
+    selfpurge: PermissionFlagsBits.ManageMessages,
     clear: PermissionFlagsBits.ManageMessages,
     cleanup: PermissionFlagsBits.ManageMessages,
     purge: PermissionFlagsBits.ManageMessages,
@@ -273,7 +273,7 @@ module.exports = {
                                     || PermissionFlagsBits.ModerateMembers;
         const permissionCheck = await checkUserPermissions(interaction, {
             data: { name: 'mod' },
-            permissions: requiredPermission ? [requiredPermission] : []
+            permissions: [requiredPermission]
         });
 
         if (!permissionCheck.allowed) {
@@ -400,8 +400,7 @@ async function handleChannelModeration(interaction, subcommand) {
     const channel = interaction.options.getChannel('channel') || interaction.channel;
     const reason = interaction.options.getString('reason') || `Requested by ${interaction.user.tag || interaction.user.id}`;
     try {
-        const botPermission = subcommand === 'selfpurge' ? PermissionFlagsBits.ManageMessages : CHANNEL_PERMISSIONS[subcommand];
-        if (!interaction.guild.members.me.permissions.has(botPermission)) {
+        if (!interaction.guild.members.me.permissions.has(CHANNEL_PERMISSIONS[subcommand])) {
             throw new Error('My Discord permissions do not allow this channel action.');
         }
         if (subcommand === 'purge' || subcommand === 'cleanup' || subcommand === 'selfpurge') {
@@ -463,18 +462,29 @@ async function handleChannelModeration(interaction, subcommand) {
         }
         if (!channel?.isTextBased?.() || channel.isThread?.()) throw new Error('This action requires a guild text channel.');
         if (subcommand === 'slowmode' || subcommand === 'slowmode-disable') {
-            const parsed = subcommand === 'slowmode-disable' ? { success: true, duration: 0 } : parseTime(interaction.options.getString('duration'));
+            const duration = interaction.options.getString('duration')?.trim();
+            const parsed = subcommand === 'slowmode-disable' || /^0(?:s|sec|secs|second|seconds)?$/i.test(duration)
+                ? { success: true, duration: 0 }
+                : parseTime(duration);
             if (!parsed.success || parsed.duration < 0 || parsed.duration > 6 * 3600000) throw new Error('Slowmode must be between 0 seconds and 6 hours.');
-            await channel.setRateLimitPerUser(Math.floor(parsed.duration / 1000), reason);
+            await executeRecordedAction({
+                guildId: interaction.guild.id, targetId: channel.id, executorId: interaction.member.id,
+                action: subcommand.toUpperCase().replaceAll('-', '_'), reason,
+                perform: async () => channel.setRateLimitPerUser(Math.floor(parsed.duration / 1000), reason)
+            });
         } else if (subcommand === 'topic' || subcommand === 'topic-remove') {
-            await channel.setTopic(subcommand === 'topic-remove' ? null : interaction.options.getString('text'), reason);
+            await executeRecordedAction({
+                guildId: interaction.guild.id, targetId: channel.id, executorId: interaction.member.id,
+                action: subcommand.toUpperCase().replaceAll('-', '_'), reason,
+                perform: async () => channel.setTopic(subcommand === 'topic-remove' ? null : interaction.options.getString('text'), reason)
+            });
         } else if (subcommand === 'nsfw') {
-            await channel.setNSFW(interaction.options.getBoolean('enabled'), reason);
+            await executeRecordedAction({
+                guildId: interaction.guild.id, targetId: channel.id, executorId: interaction.member.id,
+                action: 'NSFW', reason,
+                perform: async () => channel.setNSFW(interaction.options.getBoolean('enabled'), reason)
+            });
         }
-        recordCompletedCase({
-            guildId: interaction.guild.id, targetId: channel.id, executorId: interaction.member.id,
-            action: subcommand.toUpperCase().replaceAll('-', '_'), reason
-        });
         return interaction.editReply({ embeds: [embeds.success('Channel Updated', `${channel} was updated.`)] });
     } catch (error) {
         return interaction.editReply({ embeds: [embeds.error('Channel Moderation Failed', error.message)] });
@@ -511,15 +521,18 @@ async function handleRoleModeration(interaction, subcommand) {
             return interaction.editReply({ embeds: [embeds.success('Bulk Role Updated', `Changed **${result.changed}** members; skipped **${result.skipped}**.`)] });
         }
         if (subcommand === 'create') {
-            const role = await guild.roles.create({ name: interaction.options.getString('name'), reason });
-            recordCompletedCase({ guildId: guild.id, targetId: role.id, executorId: interaction.member.id, action: 'ROLE_CREATE', reason });
+            const role = await executeRecordedAction({
+                guildId: guild.id, targetId: guild.id, executorId: interaction.member.id, action: 'ROLE_CREATE', reason,
+                perform: async () => guild.roles.create({ name: interaction.options.getString('name'), reason })
+            });
             return interaction.editReply({ embeds: [embeds.success('Role Created', `${role} was created.`)] });
         }
         const role = interaction.options.getRole('role');
         validateRole(interaction.member, guild, role);
+        if (subcommand === 'delete' && !interaction.options.getBoolean('confirm')) throw new Error('Set confirm to true to delete this role.');
+        let perform;
         if (subcommand === 'delete') {
-            if (!interaction.options.getBoolean('confirm')) throw new Error('Set confirm to true to delete this role.');
-            await role.delete(reason);
+            perform = () => role.delete(reason);
         } else if (subcommand === 'color') {
             const color = interaction.options.getString('color');
             if (!/^#[\da-f]{6}$/i.test(color)) throw new Error('Color must be a six-digit hex value such as #FF0000.');
@@ -530,13 +543,13 @@ async function handleRoleModeration(interaction, subcommand) {
                 tertiaryColor: role.colors?.tertiaryColor || null
             };
             colors[{ 1: 'primaryColor', 2: 'secondaryColor', 3: 'tertiaryColor' }[tier]] = Number.parseInt(color.slice(1), 16);
-            await role.setColors(colors, reason);
+            perform = () => role.setColors(colors, reason);
         } else if (subcommand === 'hoist') {
-            await role.setHoist(interaction.options.getBoolean('enabled'), reason);
+            perform = () => role.setHoist(interaction.options.getBoolean('enabled'), reason);
         } else if (subcommand === 'mentionable') {
-            await role.setMentionable(interaction.options.getBoolean('enabled'), reason);
+            perform = () => role.setMentionable(interaction.options.getBoolean('enabled'), reason);
         } else if (subcommand === 'rename') {
-            await role.setName(interaction.options.getString('name'), reason);
+            perform = () => role.setName(interaction.options.getString('name'), reason);
         } else if (subcommand === 'icon') {
             const image = interaction.options.getAttachment('image');
             const emoji = interaction.options.getString('emoji');
@@ -548,11 +561,11 @@ async function handleRoleModeration(interaction, subcommand) {
                     throw new Error('Role icons must be a Discord-hosted image up to 256 KiB.');
                 }
             }
-            await role.setIcon(image?.url || emoji, reason);
+            perform = () => role.setIcon(image?.url || emoji, reason);
         }
-        recordCompletedCase({
+        await executeRecordedAction({
             guildId: guild.id, targetId: role.id, executorId: interaction.member.id,
-            action: `ROLE_${subcommand.toUpperCase()}`, reason
+            action: `ROLE_${subcommand.toUpperCase()}`, reason, perform
         });
         return interaction.editReply({ embeds: [embeds.success('Role Updated', `Role action **${subcommand}** completed.`)] });
     } catch (error) {

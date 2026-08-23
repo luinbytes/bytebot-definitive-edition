@@ -96,6 +96,18 @@ function recordCompletedCase({ guildId, targetId, executorId, action, reason }) 
     return getCase(guildId, caseNumber);
 }
 
+async function executeRecordedAction({ guildId, targetId, executorId, action, reason, perform }) {
+    const caseNumber = createPendingCase({ guildId, targetId, executorId, action, reason });
+    try {
+        const result = await perform(caseNumber);
+        setCaseStatus(guildId, caseNumber, 'completed');
+        return result;
+    } catch (error) {
+        setCaseStatus(guildId, caseNumber, 'failed');
+        throw error;
+    }
+}
+
 async function executeMemberAction({ guild, executor, target, action, reason, durationMs, historyDays, automated = false }) {
     validateActionPermissions(guild, executor, action, { actor: !automated });
     const hierarchy = validateHierarchy(executor, target);
@@ -575,5 +587,5 @@ async function undoCase({ guild, executor, caseNumber, reason }) {
 
 module.exports = {
     executeMemberAction, executeUserAction, clearWarnings, getCase, undoCase,
-    recordCompletedCase, requiredPermissionForAction
+    recordCompletedCase, executeRecordedAction, requiredPermissionForAction
 };

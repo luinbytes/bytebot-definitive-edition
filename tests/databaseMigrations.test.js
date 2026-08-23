@@ -129,6 +129,33 @@ describe('database migrations', () => {
         `).run()).toThrow();
     });
 
+    test('compatibility-created moderation state keeps composite uniqueness', async () => {
+        const seed = new Database(process.env.DATABASE_URL);
+        seed.exec(`
+            CREATE TABLE legacy_sentinel (value TEXT NOT NULL);
+            CREATE TABLE __drizzle_migrations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                hash TEXT NOT NULL,
+                created_at NUMERIC
+            );
+        `);
+        const appliedMigration = seed.prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)');
+        readMigrationFiles({ migrationsFolder: './drizzle' }).forEach(migration => {
+            appliedMigration.run(migration.hash, migration.folderMillis);
+        });
+        seed.close();
+
+        database = require('../src/database');
+        await database.runMigrations();
+        const insert = database.sqlite.prepare(`
+            INSERT INTO forced_nicknames (guild_id, user_id, nickname, updated_at)
+            VALUES ('guild1', 'user1', ?, 1)
+        `);
+
+        insert.run('first');
+        expect(() => insert.run('duplicate')).toThrow();
+    });
+
     test('moderation cases and configuration preserve guild-local numbering', async () => {
         database = require('../src/database');
         await database.runMigrations();

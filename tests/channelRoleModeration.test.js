@@ -115,11 +115,16 @@ describe('channel and role moderation parity', () => {
         expect(database.sqlite.prepare("SELECT action FROM moderation_cases").get().action).toBe('PURGE');
     });
 
-    test('selfpurge needs no moderator permission and only deletes the caller messages', async () => {
+    test('selfpurge requires Manage Messages and only deletes the caller messages', async () => {
         const ownMessage = { id: '200', author: { id: 'user1', bot: false }, createdTimestamp: Date.now() };
         const otherMessage = { id: '199', author: { id: 'user2', bot: false }, createdTimestamp: Date.now() };
         channel.messages.fetch.mockResolvedValueOnce(new Map([[ownMessage.id, ownMessage], [otherMessage.id, otherMessage]]));
-        const caller = actor([]);
+        const denied = interaction({ guild, member: actor([]), group: 'channel', subcommand: 'selfpurge', values: { amount: 50 } });
+        await mod.execute(denied, {});
+        expect(denied.reply).toHaveBeenCalled();
+        expect(channel.bulkDelete).not.toHaveBeenCalled();
+
+        const caller = actor([PermissionFlagsBits.ManageMessages]);
         caller.id = 'user1';
         caller.user.id = 'user1';
         const command = interaction({ guild, member: caller, group: 'channel', subcommand: 'selfpurge', values: { amount: 50 } });
@@ -128,6 +133,28 @@ describe('channel and role moderation parity', () => {
 
         expect(channel.bulkDelete).toHaveBeenCalledWith([ownMessage], true);
         expect(command.editReply.mock.calls[0][0].embeds[0].data.title).toContain('Self Purge Complete');
+    });
+
+    test('reaction purge skips messages without reactions', async () => {
+        const reacted = { id: '200', author: { id: 'user1' }, reactions: { cache: new Map([['x', {}]]), removeAll: jest.fn() } };
+        const plain = { id: '199', author: { id: 'user2' }, reactions: { cache: new Map(), removeAll: jest.fn() } };
+        channel.messages.fetch.mockResolvedValueOnce(new Map([[reacted.id, reacted], [plain.id, plain]]));
+        const command = interaction({ guild, member: actor([PermissionFlagsBits.ManageMessages]), group: 'channel', subcommand: 'purge', values: { filter: 'reactions', amount: 10 } });
+
+        await mod.execute(command, {});
+
+        expect(reacted.reactions.removeAll).toHaveBeenCalled();
+        expect(plain.reactions.removeAll).not.toHaveBeenCalled();
+    });
+
+    test('message-boundary purge rejects an ID from another channel', async () => {
+        channel.messages.fetch.mockResolvedValueOnce({ id: '200', channelId: 'other-channel' });
+        const command = interaction({ guild, member: actor([PermissionFlagsBits.ManageMessages]), group: 'channel', subcommand: 'purge', values: { filter: 'after', amount: 10, start_id: '200' } });
+
+        await mod.execute(command, {});
+
+        expect(command.editReply.mock.calls[0][0].embeds[0].data.description).toContain('not from this channel');
+        expect(channel.bulkDelete).not.toHaveBeenCalled();
     });
 
     test('lockdown restores the exact prior Send Messages overwrite and respects ignores', async () => {
@@ -155,10 +182,15 @@ describe('channel and role moderation parity', () => {
 
     test('slowmode, topic, and NSFW channel mutations use Discord bounds and audit reasons', async () => {
         const moderator = actor([PermissionFlagsBits.ManageChannels]);
+        channel.setTopic.mockImplementation(() => {
+            expect(database.sqlite.prepare("SELECT status FROM moderation_cases WHERE action = 'TOPIC'").get().status).toBe('pending');
+        });
         await mod.execute(interaction({ guild, member: moderator, group: 'channel', subcommand: 'slowmode', values: { duration: '6h', reason: 'traffic' } }), {});
+        await mod.execute(interaction({ guild, member: moderator, group: 'channel', subcommand: 'slowmode', values: { duration: '0s', reason: 'open' } }), {});
         await mod.execute(interaction({ guild, member: moderator, group: 'channel', subcommand: 'topic', values: { text: 'Rules', reason: 'refresh' } }), {});
         await mod.execute(interaction({ guild, member: moderator, group: 'channel', subcommand: 'nsfw', values: { enabled: true, reason: 'classification' } }), {});
         expect(channel.setRateLimitPerUser).toHaveBeenCalledWith(21600, 'traffic');
+        expect(channel.setRateLimitPerUser).toHaveBeenCalledWith(0, 'open');
         expect(channel.setTopic).toHaveBeenCalledWith('Rules', 'refresh');
         expect(channel.setNSFW).toHaveBeenCalledWith(true, 'classification');
     });
@@ -175,7 +207,7 @@ describe('channel and role moderation parity', () => {
         const moderator = actor([PermissionFlagsBits.ManageRoles]);
 
         await mod.execute(interaction({ guild, member: moderator, group: 'role', subcommand: 'remove', values: { target, role: removedRole, reason: 'temporary' } }), {});
-        target.roles.cache.delete(memberRole.id);
+        await mod.execute(interaction({ guild, member: moderator, group: 'role', subcommand: 'remove', values: { target, role: memberRole, reason: 'temporary' } }), {});
         await mod.execute(interaction({ guild, member: moderator, group: 'role', subcommand: 'restore', values: { target, reason: 'restore' } }), {});
         expect(target.roles.add).toHaveBeenCalledWith(memberRole, 'restore');
         expect(target.roles.add).toHaveBeenCalledWith(removedRole, 'restore');
@@ -185,6 +217,20 @@ describe('channel and role moderation parity', () => {
         } });
         await mod.execute(bulk, {});
         expect(bulk.editReply.mock.calls[0][0].embeds[0].data.description).toContain('cannot be assigned');
+    });
+
+    test('Manage Roles staff can use the bot bulk scope without Administrator', async () => {
+        const botRole = role('bot-role');
+        guild.roles.cache.set(botRole.id, botRole);
+        const target = member(guild, 'bot-user', true);
+        guild.members.fetch.mockResolvedValue(new Map([[target.id, target]]));
+        const command = interaction({ guild, member: actor([PermissionFlagsBits.ManageRoles]), group: 'role', subcommand: 'bulk', values: {
+            action: 'add', scope: 'bots', role: botRole, confirm: true
+        } });
+
+        await mod.execute(command, {});
+
+        expect(target.roles.add).toHaveBeenCalledWith(botRole, expect.any(String));
     });
 
     test('forced nicknames persist, reapply on member updates, and cancel cleanly', async () => {

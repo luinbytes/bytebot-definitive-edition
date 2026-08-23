@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
-const { recordCompletedCase } = require('../../services/moderationService');
+const { executeRecordedAction } = require('../../services/moderationService');
 
 module.exports = {
     register: false,
@@ -23,16 +23,13 @@ module.exports = {
         const amount = interaction.options.getInteger('amount');
 
         try {
-            // Delete messages first (before replying to avoid deleting our own reply)
-            const deleted = await interaction.channel.bulkDelete(amount, true);
-
-            // Log to database
-            recordCompletedCase({
+            const deleted = await executeRecordedAction({
                 guildId: interaction.guild.id,
-                targetId: interaction.channel.id, // Using channel ID as target for CLEAR
+                targetId: interaction.channel.id,
                 executorId: interaction.user.id,
                 action: 'CLEAR',
-                reason: `Deleted ${deleted.size} messages`
+                reason: `Delete up to ${amount} messages`,
+                perform: async () => interaction.channel.bulkDelete(amount, true)
             });
 
             // Reply AFTER deletion to avoid our reply being caught in bulkDelete

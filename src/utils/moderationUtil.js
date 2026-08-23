@@ -102,7 +102,7 @@ function validateProtectedTarget(guildId, targetId, roleIds = []) {
  * @param {GuildMember} target - The member being moderated
  * @returns {Object} - { valid: boolean, error?: string }
  */
-function validateHierarchy(executor, target) {
+function validateHierarchy(executor, target, { allowBots = false } = {}) {
     // Can't moderate self
     if (executor.id === target.id) {
         return {
@@ -112,7 +112,7 @@ function validateHierarchy(executor, target) {
     }
 
     // Can't moderate bots unless admin
-    if (target.user.bot && !executor.permissions.has(PermissionFlagsBits.Administrator)) {
+    if (target.user.bot && !allowBots && !executor.permissions.has(PermissionFlagsBits.Administrator)) {
         return {
             valid: false,
             error: 'Only administrators can moderate bots.'

@@ -552,6 +552,20 @@ const expectedSchema = {
     }
 };
 
+const compatibilityUniqueKeys = {
+    lockdown_ignores: ['guild_id', 'channel_id'],
+    lockdown_states: ['guild_id', 'channel_id'],
+    forced_nicknames: ['guild_id', 'user_id'],
+    member_role_snapshots: ['guild_id', 'user_id']
+};
+
+function hasUniqueKey(tableName, columns) {
+    return sqlite.prepare(`PRAGMA index_list(${sqlIdentifier(tableName)})`).all()
+        .filter(index => index.unique)
+        .some(index => sqlite.prepare(`PRAGMA index_info(${sqlIdentifier(index.name)})`).all()
+            .map(column => column.name).join(',') === columns.join(','));
+}
+
 /**
  * Fix bytepod_user_settings table to use composite primary key
  * This is a one-time fix for the migration issue
@@ -711,6 +725,13 @@ function validateAndFixSchema() {
                 }
             }
         }
+    }
+
+    for (const [tableName, columns] of Object.entries(compatibilityUniqueKeys)) {
+        if (!tableExists(tableName) || hasUniqueKey(tableName, columns)) continue;
+        const indexName = `${tableName}_guild_target_unique`;
+        sqlite.exec(`CREATE UNIQUE INDEX ${sqlIdentifier(indexName)} ON ${sqlIdentifier(tableName)} (${columns.map(sqlIdentifier).join(', ')})`);
+        fixes.push(`Added unique key: ${tableName}(${columns.join(', ')})`);
     }
 
     return fixes;

@@ -1,6 +1,6 @@
 const { MessageFlags, PermissionFlagsBits } = require('discord.js');
 const { sqlite } = require('../database');
-const { recordCompletedCase } = require('./moderationService');
+const { executeRecordedAction } = require('./moderationService');
 
 const MAX_PURGE = 2000;
 const MAX_LOCKDOWN_CHANNELS = 500;
@@ -34,6 +34,7 @@ function matches(message, filter, options) {
         case 'links': return LINK_RE.test(content);
         case 'mentions': return (message.mentions?.users?.size || 0) > 0 || (message.mentions?.roles?.size || 0) > 0
             || message.mentions?.everyone;
+        case 'reactions': return (message.reactions?.cache?.size || 0) > 0;
         case 'startswith': return content.toLowerCase().startsWith(options.text.toLowerCase());
         case 'stickers': return (message.stickers?.size || 0) > 0;
         case 'system': return Boolean(message.system);
@@ -41,6 +42,19 @@ function matches(message, filter, options) {
         case 'webhooks': return Boolean(message.webhookId);
         case 'user': return message.author?.id === options.memberId;
         default: return true;
+    }
+}
+
+async function validateBoundaryMessages(channel, { filter, startId, endId }) {
+    if (!['after', 'before', 'between'].includes(filter)) return;
+    for (const id of new Set([startId, endId].filter(Boolean))) {
+        let message;
+        try {
+            message = await channel.messages.fetch(id);
+        } catch {
+            throw new Error(`Message ${id} does not exist or is not accessible.`);
+        }
+        if (!message || message.channelId !== channel.id) throw new Error(`Message ${id} is not from this channel.`);
     }
 }
 
@@ -74,7 +88,7 @@ async function collectMessages(channel, options) {
             if (['after', 'between'].includes(options.filter) && BigInt(message.id) <= BigInt(options.startId)) {
                 return selected;
             }
-            const effectiveFilter = ['after', 'before', 'between', 'reactions'].includes(options.filter) ? 'all' : options.filter;
+            const effectiveFilter = ['after', 'before', 'between'].includes(options.filter) ? 'all' : options.filter;
             if (matches(message, effectiveFilter, options)) selected.push(message);
             if (selected.length === options.amount) break;
         }
@@ -87,29 +101,36 @@ async function collectMessages(channel, options) {
 async function purgeMessages({ guild, channel, executor, interactionId, amount, filter = 'all', text, memberId, startId, endId }) {
     const options = { amount, filter, text, memberId, startId, endId, interactionId };
     validatePurgeOptions(options);
+    await validateBoundaryMessages(channel, options);
     const messages = await collectMessages(channel, options);
     if (!messages.length) throw new Error('No messages matched the purge criteria.');
 
-    if (filter === 'reactions') {
-        let count = 0;
-        for (const message of messages) {
-            count += message.reactions?.cache?.size || 0;
-            await message.reactions?.removeAll();
+    return executeRecordedAction({
+        guildId: guild.id,
+        targetId: channel.id,
+        executorId: executor.id,
+        action: filter === 'reactions' ? 'PURGE_REACTIONS' : 'PURGE',
+        reason: filter === 'reactions' ? `Remove reactions from ${messages.length} messages` : `Delete ${messages.length} messages (${filter})`,
+        perform: async () => {
+            if (filter === 'reactions') {
+                let count = 0;
+                for (const message of messages) {
+                    count += message.reactions.cache.size;
+                    await message.reactions.removeAll();
+                }
+                return count;
+            }
+            const recent = messages.filter(message => !message.createdTimestamp || Date.now() - message.createdTimestamp < 14 * 86400000);
+            const old = messages.filter(message => !recent.includes(message));
+            for (let index = 0; index < recent.length; index += 100) {
+                await channel.bulkDelete(recent.slice(index, index + 100), true);
+            }
+            for (let index = 0; index < old.length; index += 5) {
+                await Promise.all(old.slice(index, index + 5).map(message => message.delete()));
+            }
+            return messages.length;
         }
-        recordCompletedCase({ guildId: guild.id, targetId: channel.id, executorId: executor.id, action: 'PURGE_REACTIONS', reason: `Removed ${count} reactions from ${messages.length} messages` });
-        return count;
-    }
-
-    const recent = messages.filter(message => !message.createdTimestamp || Date.now() - message.createdTimestamp < 14 * 86400000);
-    const old = messages.filter(message => !recent.includes(message));
-    for (let index = 0; index < recent.length; index += 100) {
-        await channel.bulkDelete(recent.slice(index, index + 100), true);
-    }
-    for (let index = 0; index < old.length; index += 5) {
-        await Promise.all(old.slice(index, index + 5).map(message => message.delete()));
-    }
-    recordCompletedCase({ guildId: guild.id, targetId: channel.id, executorId: executor.id, action: 'PURGE', reason: `Deleted ${messages.length} messages (${filter})` });
-    return messages.length;
+    });
 }
 
 function priorSendMessages(channel, roleId) {
@@ -125,30 +146,38 @@ async function lockdownChannel({ guild, channel, executor, reason }) {
     if (sqlite.prepare('SELECT 1 FROM lockdown_ignores WHERE guild_id = ? AND channel_id = ?').get(guild.id, channel.id)) {
         throw new Error('This channel is ignored from lockdown.');
     }
-    try {
-        sqlite.prepare(`
-            INSERT INTO lockdown_states (guild_id, channel_id, role_id, prior_send_messages, created_at)
-            VALUES (?, ?, ?, ?, ?)
-        `).run(guild.id, channel.id, config.lock_role_id, priorSendMessages(channel, config.lock_role_id), Date.now());
-    } catch (error) {
-        throw new Error('This channel is already locked down.');
-    }
-    try {
-        await channel.permissionOverwrites.edit(config.lock_role_id, { SendMessages: false }, { reason });
-    } catch (error) {
-        sqlite.prepare('DELETE FROM lockdown_states WHERE guild_id = ? AND channel_id = ?').run(guild.id, channel.id);
-        throw error;
-    }
-    recordCompletedCase({ guildId: guild.id, targetId: channel.id, executorId: executor.id, action: 'LOCKDOWN', reason });
+    await executeRecordedAction({
+        guildId: guild.id, targetId: channel.id, executorId: executor.id, action: 'LOCKDOWN', reason,
+        perform: async () => {
+            try {
+                sqlite.prepare(`
+                    INSERT INTO lockdown_states (guild_id, channel_id, role_id, prior_send_messages, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                `).run(guild.id, channel.id, config.lock_role_id, priorSendMessages(channel, config.lock_role_id), Date.now());
+            } catch {
+                throw new Error('This channel is already locked down.');
+            }
+            try {
+                await channel.permissionOverwrites.edit(config.lock_role_id, { SendMessages: false }, { reason });
+            } catch (error) {
+                sqlite.prepare('DELETE FROM lockdown_states WHERE guild_id = ? AND channel_id = ?').run(guild.id, channel.id);
+                throw error;
+            }
+        }
+    });
 }
 
 async function unlockdownChannel({ guild, channel, executor, reason }) {
     const state = sqlite.prepare('SELECT * FROM lockdown_states WHERE guild_id = ? AND channel_id = ?').get(guild.id, channel.id);
     if (!state) throw new Error('This channel is not locked down.');
     const value = state.prior_send_messages === 1 ? true : state.prior_send_messages === -1 ? false : null;
-    await channel.permissionOverwrites.edit(state.role_id, { SendMessages: value }, { reason });
-    sqlite.prepare('DELETE FROM lockdown_states WHERE guild_id = ? AND channel_id = ?').run(guild.id, channel.id);
-    recordCompletedCase({ guildId: guild.id, targetId: channel.id, executorId: executor.id, action: 'UNLOCKDOWN', reason });
+    await executeRecordedAction({
+        guildId: guild.id, targetId: channel.id, executorId: executor.id, action: 'UNLOCKDOWN', reason,
+        perform: async () => {
+            await channel.permissionOverwrites.edit(state.role_id, { SendMessages: value }, { reason });
+            sqlite.prepare('DELETE FROM lockdown_states WHERE guild_id = ? AND channel_id = ?').run(guild.id, channel.id);
+        }
+    });
 }
 
 async function lockdownAll({ guild, executor, reason, unlock = false }) {

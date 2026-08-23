@@ -2,6 +2,7 @@ const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { PermissionOverwriteManager } = require('../../utils/discordApiUtil');
+const { executeRecordedAction } = require('../../services/moderationService');
 
 module.exports = {
     register: false,
@@ -25,31 +26,26 @@ module.exports = {
         const subcommand = interaction.options.getSubcommand();
 
         try {
-            if (subcommand === 'lock') {
-                const result = await PermissionOverwriteManager.lockChannel(
-                    interaction.channel,
-                    interaction.guild.id,
-                    { reason: `Channel locked by ${interaction.user.tag}`, logContext: 'lockchannel-lock' }
-                );
-
-                if (!result.success) {
-                    return await handleCommandError(new Error(result.error), interaction, 'locking the channel', { ephemeral: false });
+            await executeRecordedAction({
+                guildId: interaction.guild.id,
+                targetId: interaction.channel.id,
+                executorId: interaction.user.id,
+                action: subcommand === 'lock' ? 'CHANNEL_LOCK' : 'CHANNEL_UNLOCK',
+                reason: `Channel ${subcommand}ed by ${interaction.user.tag}`,
+                perform: async () => {
+                    const result = await PermissionOverwriteManager[subcommand === 'lock' ? 'lockChannel' : 'unlockChannel'](
+                        interaction.channel,
+                        interaction.guild.id,
+                        { reason: `Channel ${subcommand}ed by ${interaction.user.tag}`, logContext: `lockchannel-${subcommand}` }
+                    );
+                    if (!result.success) throw new Error(result.error);
                 }
-
+            });
+            if (subcommand === 'lock') {
                 await interaction.editReply({
                     embeds: [embeds.success('Channel Locked', 'The @everyone role can no longer send messages in this channel.')]
                 });
-            } else if (subcommand === 'unlock') {
-                const result = await PermissionOverwriteManager.unlockChannel(
-                    interaction.channel,
-                    interaction.guild.id,
-                    { reason: `Channel unlocked by ${interaction.user.tag}`, logContext: 'lockchannel-unlock' }
-                );
-
-                if (!result.success) {
-                    return await handleCommandError(new Error(result.error), interaction, 'unlocking the channel', { ephemeral: false });
-                }
-
+            } else {
                 await interaction.editReply({
                     embeds: [embeds.success('Channel Unlocked', 'The @everyone role can now send messages in this channel again.')]
                 });
