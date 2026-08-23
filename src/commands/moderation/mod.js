@@ -437,22 +437,27 @@ async function handleChannelModeration(interaction, subcommand) {
         }
         if (subcommand === 'lockdown-role') {
             const role = interaction.options.getRole('role');
-            validateRole(interaction.member, interaction.guild, role);
-            sqlite.prepare(`
-                INSERT INTO moderation_config (guild_id, lock_role_id) VALUES (?, ?)
-                ON CONFLICT (guild_id) DO UPDATE SET lock_role_id = excluded.lock_role_id
-            `).run(interaction.guild.id, role.id);
+            await executeRecordedAction({
+                guildId: interaction.guild.id, targetId: role.id, executorId: interaction.member.id,
+                action: 'LOCKDOWN_ROLE', reason,
+                perform: async () => sqlite.prepare(`
+                    INSERT INTO moderation_config (guild_id, lock_role_id) VALUES (?, ?)
+                    ON CONFLICT (guild_id) DO UPDATE SET lock_role_id = excluded.lock_role_id
+                `).run(interaction.guild.id, role.id)
+            });
             return interaction.editReply({ embeds: [embeds.success('Lockdown Role Set', `${role} will be denied Send Messages.`)] });
         }
         if (subcommand === 'lockdown-ignore' || subcommand === 'lockdown-unignore') {
             const target = interaction.options.getChannel('channel');
-            if (subcommand === 'lockdown-ignore') {
-                sqlite.prepare('INSERT INTO lockdown_ignores (guild_id, channel_id) VALUES (?, ?) ON CONFLICT DO NOTHING')
-                    .run(interaction.guild.id, target.id);
-            } else {
-                sqlite.prepare('DELETE FROM lockdown_ignores WHERE guild_id = ? AND channel_id = ?')
-                    .run(interaction.guild.id, target.id);
-            }
+            await executeRecordedAction({
+                guildId: interaction.guild.id, targetId: target.id, executorId: interaction.member.id,
+                action: subcommand === 'lockdown-ignore' ? 'LOCKDOWN_IGNORE' : 'LOCKDOWN_UNIGNORE', reason,
+                perform: async () => subcommand === 'lockdown-ignore'
+                    ? sqlite.prepare('INSERT INTO lockdown_ignores (guild_id, channel_id) VALUES (?, ?) ON CONFLICT DO NOTHING')
+                        .run(interaction.guild.id, target.id)
+                    : sqlite.prepare('DELETE FROM lockdown_ignores WHERE guild_id = ? AND channel_id = ?')
+                        .run(interaction.guild.id, target.id)
+            });
             return interaction.editReply({ embeds: [embeds.success('Lockdown Ignore Updated', `${target} was ${subcommand === 'lockdown-ignore' ? 'added to' : 'removed from'} the ignore list.`)] });
         }
         if (subcommand === 'lockdown-ignored') {

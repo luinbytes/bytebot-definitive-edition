@@ -198,6 +198,7 @@ const expectedSchema = {
         channel_id: 'TEXT NOT NULL',
         role_id: 'TEXT NOT NULL',
         prior_send_messages: 'INTEGER NOT NULL',
+        state: 'TEXT NOT NULL',
         created_at: 'INTEGER NOT NULL'
     },
     forced_nicknames: {

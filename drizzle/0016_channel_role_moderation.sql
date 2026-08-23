@@ -11,6 +11,7 @@ CREATE TABLE `lockdown_states` (
 	`channel_id` text NOT NULL,
 	`role_id` text NOT NULL,
 	`prior_send_messages` integer NOT NULL,
+	`state` text NOT NULL,
 	`created_at` integer NOT NULL,
 	PRIMARY KEY(`guild_id`, `channel_id`)
 );

@@ -148,23 +148,22 @@ async function lockdownChannel({ guild, channel, executor, reason }) {
     if (sqlite.prepare('SELECT 1 FROM lockdown_ignores WHERE guild_id = ? AND channel_id = ?').get(guild.id, channel.id)) {
         throw new Error('This channel is ignored from lockdown.');
     }
+    const existing = sqlite.prepare('SELECT * FROM lockdown_states WHERE guild_id = ? AND channel_id = ?').get(guild.id, channel.id);
+    if (existing?.state === 'active') throw new Error('This channel is already locked down.');
     await executeRecordedAction({
         guildId: guild.id, targetId: channel.id, executorId: executor.id, action: 'LOCKDOWN', reason,
         perform: async () => {
-            try {
+            const state = existing || (() => {
                 sqlite.prepare(`
-                    INSERT INTO lockdown_states (guild_id, channel_id, role_id, prior_send_messages, created_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO lockdown_states (guild_id, channel_id, role_id, prior_send_messages, state, created_at)
+                    VALUES (?, ?, ?, ?, 'pending', ?)
                 `).run(guild.id, channel.id, config.lock_role_id, priorSendMessages(channel, config.lock_role_id), Date.now());
-            } catch {
-                throw new Error('This channel is already locked down.');
-            }
-            try {
-                await channel.permissionOverwrites.edit(config.lock_role_id, { SendMessages: false }, { reason });
-            } catch (error) {
-                sqlite.prepare('DELETE FROM lockdown_states WHERE guild_id = ? AND channel_id = ?').run(guild.id, channel.id);
-                throw error;
-            }
+                return sqlite.prepare('SELECT * FROM lockdown_states WHERE guild_id = ? AND channel_id = ?').get(guild.id, channel.id);
+            })();
+            await channel.permissionOverwrites.edit(state.role_id, { SendMessages: false }, { reason });
+            const activated = sqlite.prepare("UPDATE lockdown_states SET state = 'active' WHERE guild_id = ? AND channel_id = ? AND state = 'pending'")
+                .run(guild.id, channel.id);
+            if (activated.changes !== 1) throw new Error('Lockdown state could not be activated; retry is safe.');
         }
     });
 }

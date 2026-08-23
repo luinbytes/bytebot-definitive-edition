@@ -1,18 +1,11 @@
-const { PermissionFlagsBits } = require('discord.js');
 const { sqlite } = require('../database');
 const { RoleManager } = require('../utils/discordApiUtil');
-const { validateHierarchy, validateProtectedTarget } = require('../utils/moderationUtil');
+const { validateHierarchy, validateManageableRole } = require('../utils/moderationUtil');
 const { executeRecordedAction } = require('./moderationService');
 
 const MAX_BULK_MEMBERS = 5000;
 const MAX_ROLE_ICON_BYTES = 262144;
-const DANGEROUS = [
-    PermissionFlagsBits.Administrator, PermissionFlagsBits.ManageGuild,
-    PermissionFlagsBits.ManageRoles, PermissionFlagsBits.ManageChannels,
-    PermissionFlagsBits.BanMembers, PermissionFlagsBits.KickMembers,
-    PermissionFlagsBits.ModerateMembers, PermissionFlagsBits.ManageWebhooks,
-    PermissionFlagsBits.MentionEveryone
-];
+const nicknameLocks = new Map();
 
 async function fetchDiscordRoleIcon(url) {
     const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(5000) });
@@ -29,18 +22,7 @@ async function fetchDiscordRoleIcon(url) {
     return Buffer.concat(chunks);
 }
 
-function validateRole(executor, guild, role, { adding = false } = {}) {
-    if (!role || role.id === guild.id || role.managed) throw new Error('That role cannot be managed.');
-    if (role.position >= guild.members.me.roles.highest.position) throw new Error('That role is higher than or equal to my highest role.');
-    if (!executor.permissions.has(PermissionFlagsBits.Administrator) && role.position >= executor.roles.highest.position) {
-        throw new Error('That role is higher than or equal to your highest role.');
-    }
-    const protection = validateProtectedTarget(guild.id, '', [role.id]);
-    if (!protection.valid) throw new Error(protection.error);
-    if (adding && DANGEROUS.some(permission => role.permissions?.has(permission))) {
-        throw new Error('Roles with administrator, moderation, or management permissions cannot be assigned.');
-    }
-}
+const validateRole = validateManageableRole;
 
 function snapshotRoles(member) {
     const roleIds = [...member.roles.cache.values()]
@@ -98,7 +80,6 @@ async function restoreMemberRoles({ guild, executor, member, reason }) {
 
 async function bulkRole({ guild, executor, role, add, scope, targetRole, reason }) {
     validateRole(executor, guild, role, { adding: add });
-    if (targetRole) validateRole(executor, guild, targetRole);
     const fetched = await guild.members.fetch();
     let members = [...fetched.values()].filter(member => {
         if (scope === 'bots') return member.user.bot;
@@ -132,7 +113,7 @@ async function bulkRole({ guild, executor, role, add, scope, targetRole, reason 
     });
 }
 
-async function setNickname({ guild, executor, member, nickname, force = false, remove = false, cancel = false, reason }) {
+async function setNicknameUnlocked({ guild, executor, member, nickname, force = false, remove = false, cancel = false, reason }) {
     const hierarchy = validateHierarchy(executor, member, { allowBots: true });
     if (!hierarchy.valid) throw new Error(hierarchy.error);
     const forced = sqlite.prepare('SELECT nickname FROM forced_nicknames WHERE guild_id = ? AND user_id = ?').get(guild.id, member.id);
@@ -167,6 +148,17 @@ async function setNickname({ guild, executor, member, nickname, force = false, r
                 throw error;
             }
         }
+    });
+}
+
+function setNickname(options) {
+    const key = `${options.guild.id}:${options.member.id}`;
+    const previous = nicknameLocks.get(key) || Promise.resolve();
+    // ponytail: process-local serialization; use DB operation tokens if nickname enforcement becomes multi-process.
+    const queued = previous.catch(() => {}).then(() => setNicknameUnlocked(options));
+    nicknameLocks.set(key, queued);
+    return queued.finally(() => {
+        if (nicknameLocks.get(key) === queued) nicknameLocks.delete(key);
     });
 }
 

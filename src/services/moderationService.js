@@ -1,6 +1,6 @@
 const { sqlite } = require('../database');
 const { PermissionFlagsBits } = require('discord.js');
-const { validateHierarchy, validateProtectedTarget } = require('../utils/moderationUtil');
+const { validateHierarchy, validateProtectedTarget, validateManageableRole } = require('../utils/moderationUtil');
 const { RoleManager } = require('../utils/discordApiUtil');
 const { deliverTemplates } = require('./moderationTemplateService');
 
@@ -531,7 +531,9 @@ async function undoCase({ guild, executor, caseNumber, reason }) {
             }
         } else {
             const operation = metadata.roleOperation === 'add' ? 'removeRole' : 'addRole';
-            const result = await RoleManager[operation](target, metadata.roleId, { reason, logContext: `moderation:undo:${moderationCase.action}` });
+            const role = guild.roles.cache.get(metadata.roleId);
+            validateManageableRole(executor, guild, role, { adding: operation === 'addRole' });
+            const result = await RoleManager[operation](target, role, { reason, logContext: `moderation:undo:${moderationCase.action}` });
             if (!result.success) throw new Error(result.error);
         }
         if (hardbanClaimed) {

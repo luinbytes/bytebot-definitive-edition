@@ -102,6 +102,7 @@ const lockdownStates = sqliteTable('lockdown_states', {
     channelId: text('channel_id').notNull(),
     roleId: text('role_id').notNull(),
     priorSendMessages: integer('prior_send_messages').notNull(), // -1 deny | 0 unset | 1 allow
+    state: text('state').notNull(), // pending | active
     createdAt: integer('created_at').notNull(),
 }, (table) => ({
     pk: primaryKey({ columns: [table.guildId, table.channelId] }),

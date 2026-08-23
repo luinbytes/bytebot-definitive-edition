@@ -96,6 +96,27 @@ function validateProtectedTarget(guildId, targetId, roleIds = []) {
     }
 }
 
+const DANGEROUS_ROLE_PERMISSIONS = [
+    PermissionFlagsBits.Administrator, PermissionFlagsBits.ManageGuild,
+    PermissionFlagsBits.ManageRoles, PermissionFlagsBits.ManageChannels,
+    PermissionFlagsBits.BanMembers, PermissionFlagsBits.KickMembers,
+    PermissionFlagsBits.ModerateMembers, PermissionFlagsBits.ManageWebhooks,
+    PermissionFlagsBits.MentionEveryone
+];
+
+function validateManageableRole(executor, guild, role, { adding = false } = {}) {
+    if (!role || role.id === guild.id || role.managed) throw new Error('That role cannot be managed.');
+    if (role.position >= guild.members.me.roles.highest.position) throw new Error('That role is higher than or equal to my highest role.');
+    if (!executor.permissions.has(PermissionFlagsBits.Administrator) && role.position >= executor.roles.highest.position) {
+        throw new Error('That role is higher than or equal to your highest role.');
+    }
+    const protection = validateProtectedTarget(guild.id, '', [role.id]);
+    if (!protection.valid) throw new Error(protection.error);
+    if (adding && DANGEROUS_ROLE_PERMISSIONS.some(permission => role.permissions?.has(permission))) {
+        throw new Error('Roles with administrator, moderation, or management permissions cannot be assigned.');
+    }
+}
+
 /**
  * Validate role hierarchy for moderation actions.
  * @param {GuildMember} executor - The moderator performing the action
@@ -185,5 +206,6 @@ module.exports = {
     notifyUser,
     validateProtectedTarget,
     validateHierarchy,
+    validateManageableRole,
     executeModerationAction
 };

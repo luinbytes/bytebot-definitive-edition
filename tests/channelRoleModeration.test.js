@@ -176,6 +176,7 @@ describe('channel and role moderation parity', () => {
         guild.roles.cache.set(lockRole.id, lockRole);
         const moderator = actor([PermissionFlagsBits.ManageChannels]);
         await mod.execute(interaction({ guild, member: moderator, group: 'channel', subcommand: 'lockdown-role', values: { role: lockRole } }), {});
+        expect(database.sqlite.prepare("SELECT status FROM moderation_cases WHERE action = 'LOCKDOWN_ROLE'").get().status).toBe('completed');
         channel.permissionOverwrites.cache.set(lockRole.id, {
             allow: { has: permission => permission === PermissionFlagsBits.SendMessages },
             deny: { has: () => false }
@@ -189,9 +190,24 @@ describe('channel and role moderation parity', () => {
         expect(database.sqlite.prepare('SELECT COUNT(*) AS count FROM lockdown_states').get().count).toBe(0);
 
         await mod.execute(interaction({ guild, member: moderator, group: 'channel', subcommand: 'lockdown-ignore', values: { channel } }), {});
+        expect(database.sqlite.prepare("SELECT status FROM moderation_cases WHERE action = 'LOCKDOWN_IGNORE'").get().status).toBe('completed');
         const ignored = interaction({ guild, member: moderator, group: 'channel', subcommand: 'lockdown' });
         await mod.execute(ignored, {});
         expect(ignored.editReply.mock.calls[0][0].embeds[0].data.description).toContain('ignored');
+    });
+
+    test('a failed lockdown remains pending and a retry activates the same durable state', async () => {
+        const lockRole = role('lock-role');
+        const moderator = actor([PermissionFlagsBits.ManageChannels]);
+        await mod.execute(interaction({ guild, member: moderator, group: 'channel', subcommand: 'lockdown-role', values: { role: lockRole } }), {});
+        channel.permissionOverwrites.edit.mockRejectedValueOnce(new Error('Discord unavailable')).mockResolvedValueOnce();
+
+        await mod.execute(interaction({ guild, member: moderator, group: 'channel', subcommand: 'lockdown' }), {});
+        expect(database.sqlite.prepare('SELECT state FROM lockdown_states').get().state).toBe('pending');
+        await mod.execute(interaction({ guild, member: moderator, group: 'channel', subcommand: 'lockdown' }), {});
+
+        expect(database.sqlite.prepare('SELECT state FROM lockdown_states').get().state).toBe('active');
+        expect(channel.permissionOverwrites.edit).toHaveBeenCalledTimes(2);
     });
 
     test('server lockdown fails explicitly rather than silently truncating an oversized set', async () => {
@@ -259,6 +275,24 @@ describe('channel and role moderation parity', () => {
         expect(target.roles.add).toHaveBeenCalledWith(botRole, expect.any(String));
     });
 
+    test('has bulk scope can read a managed higher role as its selector', async () => {
+        const addedRole = role('added-role');
+        const selector = role('integration-role', 100);
+        selector.managed = true;
+        guild.roles.cache.set(addedRole.id, addedRole);
+        guild.roles.cache.set(selector.id, selector);
+        const target = member(guild);
+        target.roles.cache.set(selector.id, selector);
+        guild.members.fetch.mockResolvedValue(new Map([[target.id, target]]));
+        const command = interaction({ guild, member: actor([PermissionFlagsBits.ManageRoles]), group: 'role', subcommand: 'bulk', values: {
+            action: 'add', scope: 'has', target_role: selector, role: addedRole, confirm: true
+        } });
+
+        await mod.execute(command, {});
+
+        expect(target.roles.add).toHaveBeenCalledWith(addedRole, expect.any(String));
+    });
+
     test('single role cases carry enough metadata for action-specific case undo', async () => {
         const assignedRole = role('assigned-role');
         guild.roles.cache.set(assignedRole.id, assignedRole);
@@ -272,6 +306,24 @@ describe('channel and role moderation parity', () => {
         await mod.execute(interaction({ guild, member: moderator, group: 'case', subcommand: 'undo', values: { number: moderationCase.case_number, reason: 'restore' } }), {});
 
         expect(target.roles.add).toHaveBeenCalledWith(assignedRole, 'restore');
+    });
+
+    test('case undo revalidates a role that became dangerous after removal', async () => {
+        const assignedRole = role('assigned-role');
+        guild.roles.cache.set(assignedRole.id, assignedRole);
+        const target = member(guild);
+        target.roles.cache.set(assignedRole.id, assignedRole);
+        guild.members.fetch.mockResolvedValue(target);
+        const moderator = actor([PermissionFlagsBits.ManageRoles]);
+        await mod.execute(interaction({ guild, member: moderator, group: 'role', subcommand: 'remove', values: { target, role: assignedRole } }), {});
+        const moderationCase = database.sqlite.prepare("SELECT case_number FROM moderation_cases WHERE action = 'ROLE_REMOVE'").get();
+        assignedRole.permissions.has.mockImplementation(permission => permission === PermissionFlagsBits.Administrator);
+        const undo = interaction({ guild, member: moderator, group: 'case', subcommand: 'undo', values: { number: moderationCase.case_number, reason: 'restore' } });
+
+        await mod.execute(undo, {});
+
+        expect(undo.editReply.mock.calls[0][0].embeds[0].data.description).toContain('cannot be assigned');
+        expect(target.roles.add).not.toHaveBeenCalled();
     });
 
     test('role color accepts decimal values and role icon accepts Discord CDN URLs', async () => {
@@ -323,5 +375,22 @@ describe('channel and role moderation parity', () => {
 
         expect(database.sqlite.prepare('SELECT COUNT(*) AS count FROM forced_nicknames').get().count).toBe(0);
         expect(database.sqlite.prepare("SELECT status FROM moderation_cases WHERE action = 'NICKNAME_FORCE'").get().status).toBe('failed');
+    });
+
+    test('concurrent forced nickname updates serialize per member', async () => {
+        const target = member(guild);
+        const moderator = actor([PermissionFlagsBits.ManageNicknames]);
+        let releaseFirst;
+        target.setNickname.mockImplementationOnce(() => new Promise(resolve => { releaseFirst = resolve; })).mockResolvedValueOnce();
+        const first = mod.execute(interaction({ guild, member: moderator, group: 'user', subcommand: 'nickname-force', values: { target, name: 'First' } }), {});
+        await new Promise(resolve => setImmediate(resolve));
+        const second = mod.execute(interaction({ guild, member: moderator, group: 'user', subcommand: 'nickname-force', values: { target, name: 'Second' } }), {});
+        await new Promise(resolve => setImmediate(resolve));
+        expect(target.setNickname).toHaveBeenCalledTimes(1);
+
+        releaseFirst();
+        await Promise.all([first, second]);
+
+        expect(database.sqlite.prepare('SELECT nickname FROM forced_nicknames').get().nickname).toBe('Second');
     });
 });
