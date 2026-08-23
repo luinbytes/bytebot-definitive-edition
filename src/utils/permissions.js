@@ -26,7 +26,8 @@ function getPermissionNames(permissions) {
 
 /**
  * Checks if a user has permission to execute a command.
- * Priority: Database Overrides > Default Command Permissions.
+ * Real Discord permissions are mandatory; ByteBot rules can only add restrictions
+ * or satisfy explicitly virtual permission checks.
  *
  * @param {import('discord.js').Interaction} interaction
  * @param {object} command

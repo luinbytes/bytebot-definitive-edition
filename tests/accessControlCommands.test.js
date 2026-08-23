@@ -203,6 +203,40 @@ describe('server command access controls', () => {
         }, client);
 
         expect(roleReply.mock.calls[0][0].embeds[0].data.description).toContain('protected from moderation');
+
+        const ban = jest.fn();
+        const absentReply = jest.fn();
+        await modActions.handleModal({
+            customId: 'modal_ban_user1',
+            fields: { getTextInputValue: jest.fn().mockReturnValue('reason') },
+            guild: {
+                id: 'guild1',
+                name: 'Guild',
+                members: {
+                    fetch: jest.fn().mockRejectedValue({ code: 10007 }),
+                    ban
+                }
+            },
+            member: {
+                id: 'admin1',
+                user: { tag: 'Admin' },
+                permissions: { has: jest.fn().mockReturnValue(true) },
+                roles: { highest: { position: 10 } }
+            },
+            deferReply: jest.fn(),
+            editReply: absentReply
+        }, {
+            users: {
+                fetch: jest.fn().mockResolvedValue({
+                    id: 'user1',
+                    tag: 'Target',
+                    send: jest.fn().mockResolvedValue({})
+                })
+            }
+        });
+
+        expect(ban).not.toHaveBeenCalled();
+        expect(absentReply.mock.calls[0][0].embeds[0].data.description).toContain('protected from moderation');
     });
 
     test('scoped rules are listed and command reset clears them', async () => {

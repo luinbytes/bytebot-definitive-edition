@@ -80,6 +80,24 @@ async function notifyUser(user, action, guildName, reason, executorTag) {
  * @param {GuildMember} target - The member being moderated
  * @returns {Object} - { valid: boolean, error?: string }
  */
+function validateProtectedTarget(guildId, targetId, roleIds = []) {
+    if (!sqlite?.prepare) return { valid: true };
+
+    const memberProtected = sqlite.prepare(`
+        SELECT 1 FROM protected_targets
+        WHERE guild_id = ? AND target_type = 'member' AND target_id = ?
+    `).get(guildId, targetId);
+    const protectedRoles = sqlite.prepare(`
+        SELECT target_id FROM protected_targets
+        WHERE guild_id = ? AND target_type = 'role'
+    `).all(guildId);
+    const memberRoleIds = new Set(roleIds);
+
+    return memberProtected || protectedRoles.some(role => memberRoleIds.has(role.target_id))
+        ? { valid: false, error: 'This member is protected from moderation.' }
+        : { valid: true };
+}
+
 function validateHierarchy(executor, target) {
     // Can't moderate self
     if (executor.id === target.id) {
@@ -105,23 +123,8 @@ function validateHierarchy(executor, target) {
         };
     }
 
-    if (sqlite?.prepare) {
-        const memberProtected = sqlite.prepare(`
-            SELECT 1 FROM protected_targets
-            WHERE guild_id = ? AND target_type = 'member' AND target_id = ?
-        `).get(target.guild.id, target.id);
-        const protectedRoles = sqlite.prepare(`
-            SELECT target_id FROM protected_targets
-            WHERE guild_id = ? AND target_type = 'role'
-        `).all(target.guild.id);
-
-        if (memberProtected || protectedRoles.some(role => target.roles.cache.has(role.target_id))) {
-            return {
-                valid: false,
-                error: 'This member is protected from moderation.'
-            };
-        }
-    }
+    const protection = validateProtectedTarget(target.guild.id, target.id, target.roles.cache?.keys() || []);
+    if (!protection.valid) return protection;
 
     // Role hierarchy check (administrators bypass this)
     if (!executor.permissions.has(PermissionFlagsBits.Administrator)) {
@@ -176,6 +179,7 @@ async function executeModerationAction({ guildId, guildName, target, executor, a
 module.exports = {
     logModerationAction,
     notifyUser,
+    validateProtectedTarget,
     validateHierarchy,
     executeModerationAction
 };
