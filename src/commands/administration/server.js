@@ -10,6 +10,7 @@ const config = require('../../../config.json');
 const {
     addAntiraidGroup, addAutomodGroup, executeAntiraid, executeAutomod
 } = require('../../utils/securityAutomationCommand');
+const { addLifecycleGroups, executeLifecycle } = require('../../utils/lifecycleMessageCommand');
 
 const MODULE_CHOICES = MODULES.map(value => ({ name: value, value }));
 const PUNISHMENT_CHOICES = PUNISHMENTS.map(value => ({ name: value, value }));
@@ -19,7 +20,6 @@ const TARGETS = {
     stats: { commandName: 'stats', requirePath: 'src/commands/utility/stats.js', subcommand: 'server' },
     config: { commandName: 'config', requirePath: 'src/commands/administration/config.js' },
     logs: { commandName: 'config', requirePath: 'src/commands/administration/config.js', map: { set: 'logs' } },
-    welcome: { commandName: 'welcome', requirePath: 'src/commands/administration/welcome.js', map: { enable: 'toggle', disable: 'toggle', format: 'embed' } },
     starboard: { commandName: 'starboard', requirePath: 'src/commands/administration/starboard.js', map: { view: 'config' } },
     suggestion: { commandName: 'suggestion', requirePath: 'src/commands/administration/suggestion.js', map: { top: 'leaderboard' } },
     birthday: { commandName: 'birthday', requirePath: 'src/commands/utility/birthday.js' },
@@ -44,14 +44,6 @@ function aliasFor(interaction) {
     const target = TARGETS[group];
     const legacySubcommand = target.map?.[subcommand] || subcommand;
     const optionValues = {};
-
-    if (group === 'welcome' && (subcommand === 'enable' || subcommand === 'disable')) {
-        optionValues.enabled = subcommand === 'enable';
-    }
-
-    if (group === 'welcome' && subcommand === 'format') {
-        optionValues.use_embed = interaction.options.getBoolean('use_embed');
-    }
 
     return {
         ...target,
@@ -246,26 +238,6 @@ const serverBuilder = new SlashCommandBuilder()
                     .addChannelTypes(ChannelType.GuildText)
                     .setRequired(true))))
         .addSubcommandGroup(group => group
-            .setName('welcome')
-            .setDescription('Welcome message system')
-            .addSubcommand(sub => sub
-                .setName('setup')
-                .setDescription('Set the welcome channel')
-                .addChannelOption(opt => opt.setName('channel').setDescription('Welcome channel').addChannelTypes(ChannelType.GuildText).setRequired(true)))
-            .addSubcommand(sub => sub
-                .setName('message')
-                .setDescription('Set the welcome message')
-                .addStringOption(opt => opt.setName('text').setDescription('Message text').setRequired(true).setMaxLength(2000)))
-            .addSubcommand(sub => sub.setName('enable').setDescription('Enable welcome messages'))
-            .addSubcommand(sub => sub.setName('disable').setDescription('Disable welcome messages'))
-            .addSubcommand(sub => sub
-                .setName('format')
-                .setDescription('Set welcome message format')
-                .addBooleanOption(opt => opt.setName('use_embed').setDescription('Send as an embed?').setRequired(true)))
-            .addSubcommand(sub => sub.setName('variables').setDescription('View welcome variables'))
-            .addSubcommand(sub => sub.setName('test').setDescription('Send a test welcome message'))
-            .addSubcommand(sub => sub.setName('view').setDescription('View welcome settings')))
-        .addSubcommandGroup(group => group
             .setName('starboard')
             .setDescription('Starboard system')
             .addSubcommand(sub => sub
@@ -452,6 +424,7 @@ const serverBuilder = new SlashCommandBuilder()
 
 addAntiraidGroup(serverBuilder);
 addAutomodGroup(serverBuilder);
+addLifecycleGroups(serverBuilder);
 
 module.exports = {
     data: serverBuilder,
@@ -474,6 +447,7 @@ module.exports = {
         if (interaction.options.getSubcommandGroup(false) === 'security') return executeSecurity(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'antiraid') return executeAntiraid(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'automod') return executeAutomod(interaction);
+        if (['welcome', 'goodbye', 'boost', 'system'].includes(interaction.options.getSubcommandGroup(false))) return executeLifecycle(interaction);
         return executeAliasCommand(interaction, client, aliasFor(interaction));
     }
 };

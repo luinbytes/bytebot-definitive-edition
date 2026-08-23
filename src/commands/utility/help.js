@@ -186,7 +186,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                 value:
                     '`/community` member progress, achievements, BytePods, and community features\n' +
                     '`/me` personal settings, reminders, bookmarks, birthdays, streaks\n' +
-                    '`/server` setup, stats, suggestions, welcome, starboard, achievements, security\n' +
+                    '`/server` setup, lifecycle messages, suggestions, starboard, achievements, security\n' +
                     '`/pod` BytePod actions and settings\n' +
                     '`/mod` member actions, cases, invoke templates, setup, logs, and channel controls\n' +
                     '`/game` F1 and War Thunder\n' +
@@ -197,7 +197,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                 name: 'Common Paths',
                 value:
                     '`/me reminder add` • `/me bookmark search` • `/pod panel`\n' +
-                    '`/server suggestion submit` • `/server welcome setup`\n' +
+                    '`/server welcome setup` • `/server goodbye setup` • `/server boost setup`\n' +
                     '`/server security antinuke-settings` • `/server security antinuke-module`\n' +
                     '`/server antiraid settings` • `/server antiraid module`\n' +
                     '`/server automod settings` • `/server automod filter`\n' +

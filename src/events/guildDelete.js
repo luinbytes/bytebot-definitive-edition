@@ -1,6 +1,6 @@
 const { Events } = require('discord.js');
 const { db } = require('../database/index');
-const { guilds, reminders } = require('../database/schema');
+const { guilds, lifecycleMessages, reminders } = require('../database/schema');
 const { eq, and } = require('drizzle-orm');
 const logger = require('../utils/logger');
 const { dbLog } = require('../utils/dbLogger');
@@ -12,6 +12,7 @@ module.exports = {
 
         try {
             // Cleanup guild data
+            await db.delete(lifecycleMessages).where(eq(lifecycleMessages.guildId, guild.id));
             await dbLog.delete('guilds',
                 () => db.delete(guilds).where(eq(guilds.id, guild.id)),
                 { guildId: guild.id }

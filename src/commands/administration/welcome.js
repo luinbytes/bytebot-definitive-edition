@@ -5,7 +5,7 @@ const { eq } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { dbLog } = require('../../utils/dbLogger');
-const { fetchChannel, safeChannelSend } = require('../../utils/discordApiUtil');
+const lifecycle = require('../../services/lifecycleMessageService');
 
 /**
  * Get ordinal suffix for a number (1st, 2nd, 3rd, etc.)
@@ -172,6 +172,13 @@ module.exports = {
                     embeds: [embeds.error('Error', 'Configuration not found for this server.')]
                 });
             }
+            const current = lifecycle.getConfig(interaction.guild.id, 'welcome');
+            if (current) Object.assign(config, {
+                welcomeChannel: current.channel_id,
+                welcomeMessage: current.template,
+                welcomeEnabled: Boolean(current.enabled),
+                welcomeUseEmbed: current.format === 'embed'
+            });
 
             switch (subcommand) {
                 case 'channel':
@@ -226,6 +233,7 @@ async function handleSetup(interaction, config) {
         });
     }
 
+    lifecycle.setConfig(interaction.guild.id, 'welcome', { channelId: channel.id });
     await dbLog.update('guilds',
         () => db.update(guilds)
             .set({ welcomeChannel: channel.id })
@@ -243,6 +251,8 @@ async function handleSetup(interaction, config) {
  */
 async function handleMessage(interaction, config) {
     const message = interaction.options.getString('text');
+    lifecycle.validateTemplate(message);
+    lifecycle.setConfig(interaction.guild.id, 'welcome', { template: message });
 
     await dbLog.update('guilds',
         () => db.update(guilds)
@@ -279,6 +289,7 @@ async function handleToggle(interaction, config) {
         });
     }
 
+    lifecycle.setConfig(interaction.guild.id, 'welcome', { enabled });
     await dbLog.update('guilds',
         () => db.update(guilds)
             .set({ welcomeEnabled: enabled })
@@ -299,6 +310,7 @@ async function handleToggle(interaction, config) {
  */
 async function handleEmbed(interaction, config) {
     const useEmbed = interaction.options.getBoolean('use_embed');
+    lifecycle.setConfig(interaction.guild.id, 'welcome', { format: useEmbed ? 'embed' : 'text' });
 
     await dbLog.update('guilds',
         () => db.update(guilds)
@@ -372,48 +384,13 @@ async function handleVariables(interaction) {
 /**
  * Handle test subcommand
  */
-async function handleTest(interaction, config) {
-    // Check if channel is configured
-    if (!config.welcomeChannel) {
-        return interaction.editReply({
-            embeds: [embeds.error('Channel Not Set', 'Please use `/welcome setup` to set a welcome channel first.')]
-        });
-    }
-
-    const channel = await fetchChannel(interaction.guild, config.welcomeChannel, { logContext: 'welcome-test' });
-    if (!channel) {
-        return interaction.editReply({
-            embeds: [embeds.error('Channel Not Found', 'The configured welcome channel no longer exists. Please run `/welcome setup` again.')]
-        });
-    }
-
-    // Use custom message or default
-    const messageTemplate = config.welcomeMessage || 'Welcome to **{server}**, {user}! You are member #{memberCount}.';
-    const parsedMessage = parseWelcomeMessage(messageTemplate, interaction.member, interaction.guild);
-
+async function handleTest(interaction) {
     try {
-        // Send test message based on embed preference
-        let messageOptions;
-        if (config.welcomeUseEmbed) {
-            const welcomeEmbed = embeds.brand('Welcome!', parsedMessage)
-                .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true, size: 256 }))
-                .setFooter({ text: 'This is a test message' });
-            messageOptions = { embeds: [welcomeEmbed] };
-        } else {
-            messageOptions = { content: `${parsedMessage}\n\n*This is a test message*` };
-        }
-
-        const sent = await safeChannelSend(channel, messageOptions, { logContext: 'welcome-test' });
-        if (!sent) {
-            return interaction.editReply({
-                embeds: [embeds.error('Failed to Send', 'Could not send test message. Check bot permissions.')]
-            });
-        }
-
+        const result = await lifecycle.sendLifecycleMessage('welcome', interaction.member, { test: true });
+        if (result.status !== 'sent') throw new Error(`Test could not be sent: ${result.status}.`);
         return interaction.editReply({
-            embeds: [embeds.success('Test Sent', `A test welcome message has been sent to ${channel}.`)]
+            embeds: [embeds.success('Test Sent', 'A test welcome message has been sent.')]
         });
-
     } catch (error) {
         await handleCommandError(error, interaction, 'sending test welcome message');
     }
