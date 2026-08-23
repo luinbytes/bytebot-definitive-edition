@@ -1,5 +1,19 @@
 # ByteBot Notes
 
+## Agent skills
+
+### Issue tracker
+
+Issues and specs are tracked in GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Uses the default five Matt workflow labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout using root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+
 ## BytePod Ownership Reclaim
 
 `reclaimRequestPending` lives on the `bytepods` table. Prevents duplicate reclaim prompts when the original owner tries to request a BytePod back while another request is already pending.

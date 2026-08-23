@@ -245,6 +245,73 @@ describe('RBAC Permission System', () => {
         });
 
         describe('Override Priority', () => {
+            test('should prefer the deepest command-path override over the root override', async () => {
+                const mockOverrides = [
+                    { roleId: 'rootRole', commandName: 'fun', guildId: 'guild123' },
+                    { roleId: 'uwuRole', commandName: 'fun uwulock add', guildId: 'guild123' }
+                ];
+
+                db.select.mockReturnValue({
+                    from: jest.fn().mockReturnValue({
+                        where: jest.fn().mockResolvedValue(mockOverrides)
+                    })
+                });
+
+                const mockInteraction = {
+                    guild: { id: 'guild123' },
+                    options: {
+                        getSubcommandGroup: jest.fn().mockReturnValue('uwulock'),
+                        getSubcommand: jest.fn().mockReturnValue('add')
+                    },
+                    member: {
+                        roles: {
+                            cache: new Map([['rootRole', {}]])
+                        },
+                        permissions: {
+                            has: jest.fn().mockReturnValue(false)
+                        }
+                    }
+                };
+
+                const result = await checkUserPermissions(mockInteraction, {
+                    data: { name: 'fun' },
+                    permissions: []
+                });
+
+                expect(result.allowed).toBe(false);
+                expect(result.error.data.description).toContain('<@&uwuRole>');
+                expect(result.error.data.description).not.toContain('<@&rootRole>');
+            });
+
+            test('should fall back to the root override for a command path', async () => {
+                db.select.mockReturnValue({
+                    from: jest.fn().mockReturnValue({
+                        where: jest.fn().mockResolvedValue([
+                            { roleId: 'rootRole', commandName: 'fun', guildId: 'guild123' }
+                        ])
+                    })
+                });
+
+                const mockInteraction = {
+                    guild: { id: 'guild123' },
+                    options: {
+                        getSubcommandGroup: jest.fn().mockReturnValue('uwulock'),
+                        getSubcommand: jest.fn().mockReturnValue('add')
+                    },
+                    member: {
+                        roles: { cache: new Map([['rootRole', {}]]) },
+                        permissions: { has: jest.fn().mockReturnValue(false) }
+                    }
+                };
+
+                const result = await checkUserPermissions(mockInteraction, {
+                    data: { name: 'fun' },
+                    permissions: []
+                });
+
+                expect(result.allowed).toBe(true);
+            });
+
             test('should ignore code permissions when database overrides exist', async () => {
                 const mockOverrides = [
                     { roleId: 'role123', commandName: 'testcommand', guildId: 'guild123' }

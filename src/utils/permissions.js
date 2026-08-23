@@ -1,7 +1,7 @@
 const { PermissionFlagsBits } = require('discord.js');
 const { db } = require('../database/index');
 const { commandPermissions } = require('../database/schema');
-const { eq, and } = require('drizzle-orm');
+const { eq, and, or } = require('drizzle-orm');
 const embeds = require('./embeds');
 const { dbLog } = require('./dbLogger');
 
@@ -33,14 +33,28 @@ function getPermissionNames(permissions) {
  * @returns {Promise<{ allowed: boolean, error?: any }>}
  */
 async function checkUserPermissions(interaction, command) {
+    const rootCommand = command.data.name;
+    const group = interaction.options?.getSubcommandGroup?.(false);
+    const subcommand = interaction.options?.getSubcommand?.(false);
+    const commandPath = [rootCommand, group, subcommand].filter(Boolean).join(' ');
+
     // 1. Check for custom permission overrides in the database
-    const overrides = await dbLog.select('commandPermissions',
+    const storedOverrides = await dbLog.select('commandPermissions',
         () => db.select().from(commandPermissions).where(and(
             eq(commandPermissions.guildId, interaction.guild.id),
-            eq(commandPermissions.commandName, command.data.name)
+            commandPath === rootCommand
+                ? eq(commandPermissions.commandName, rootCommand)
+                : or(
+                    eq(commandPermissions.commandName, commandPath),
+                    eq(commandPermissions.commandName, rootCommand)
+                )
         )),
-        { guildId: interaction.guild.id, commandName: command.data.name }
+        { guildId: interaction.guild.id, commandName: commandPath }
     );
+    const pathOverrides = storedOverrides.filter(override => override.commandName === commandPath);
+    const overrides = pathOverrides.length > 0
+        ? pathOverrides
+        : storedOverrides.filter(override => override.commandName === rootCommand);
 
     if (overrides.length > 0) {
         // Custom permissions exist: Allow if user has ANY allowed role or is Admin
