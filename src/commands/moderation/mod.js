@@ -16,7 +16,7 @@ const {
     purgeMessages, lockdownChannel, unlockdownChannel, lockdownAll
 } = require('../../services/channelModerationService');
 const {
-    validateRole, changeMemberRole, restoreMemberRoles, bulkRole, setNickname
+    validateRole, changeMemberRole, restoreMemberRoles, bulkRole, setNickname, fetchDiscordRoleIcon
 } = require('../../services/roleModerationService');
 
 const MODERATION_ACTIONS = [
@@ -196,11 +196,11 @@ module.exports = {
                 .addBooleanOption(opt => opt.setName('confirm').setDescription('Confirm bulk mutation').setRequired(true))))
             .addSubcommand(sub => addReasonOption(sub.setName('create').setDescription('Create a role').addStringOption(opt => opt.setName('name').setDescription('Role name').setRequired(true).setMinLength(1).setMaxLength(100))))
             .addSubcommand(sub => addReasonOption(sub.setName('delete').setDescription('Delete a role').addRoleOption(opt => opt.setName('role').setDescription('Role').setRequired(true)).addBooleanOption(opt => opt.setName('confirm').setDescription('Confirm irreversible deletion').setRequired(true))))
-            .addSubcommand(sub => addReasonOption(sub.setName('color').setDescription('Set a role color tier').addRoleOption(opt => opt.setName('role').setDescription('Role').setRequired(true)).addStringOption(opt => opt.setName('color').setDescription('Hex color').setRequired(true).setMaxLength(7)).addIntegerOption(opt => opt.setName('tier').setDescription('Color tier').setRequired(true).setMinValue(1).setMaxValue(3))))
+            .addSubcommand(sub => addReasonOption(sub.setName('color').setDescription('Set a role color tier').addRoleOption(opt => opt.setName('role').setDescription('Role').setRequired(true)).addStringOption(opt => opt.setName('color').setDescription('Hex or decimal color').setRequired(true).setMaxLength(10)).addIntegerOption(opt => opt.setName('tier').setDescription('Color tier').setRequired(true).setMinValue(1).setMaxValue(3))))
             .addSubcommand(sub => addReasonOption(sub.setName('hoist').setDescription('Set role hoisting').addRoleOption(opt => opt.setName('role').setDescription('Role').setRequired(true)).addBooleanOption(opt => opt.setName('enabled').setDescription('Hoist status').setRequired(true))))
             .addSubcommand(sub => addReasonOption(sub.setName('mentionable').setDescription('Set role mentionability').addRoleOption(opt => opt.setName('role').setDescription('Role').setRequired(true)).addBooleanOption(opt => opt.setName('enabled').setDescription('Mentionable status').setRequired(true))))
             .addSubcommand(sub => addReasonOption(sub.setName('rename').setDescription('Rename a role').addRoleOption(opt => opt.setName('role').setDescription('Role').setRequired(true)).addStringOption(opt => opt.setName('name').setDescription('New role name').setRequired(true).setMinLength(1).setMaxLength(100))))
-            .addSubcommand(sub => addReasonOption(sub.setName('icon').setDescription('Set a role icon from Discord CDN').addRoleOption(opt => opt.setName('role').setDescription('Role').setRequired(true)).addAttachmentOption(opt => opt.setName('image').setDescription('Image up to 256 KiB')).addStringOption(opt => opt.setName('emoji').setDescription('Unicode emoji').setMaxLength(16)))))
+            .addSubcommand(sub => addReasonOption(sub.setName('icon').setDescription('Set a role icon').addRoleOption(opt => opt.setName('role').setDescription('Role').setRequired(true)).addAttachmentOption(opt => opt.setName('image').setDescription('Image up to 256 KiB')).addStringOption(opt => opt.setName('url').setDescription('Discord CDN image URL').setMaxLength(500)).addStringOption(opt => opt.setName('emoji').setDescription('Unicode emoji').setMaxLength(16)))))
         .addSubcommandGroup(group => group
             .setName('case')
             .setDescription('Inspect and undo moderation cases')
@@ -263,7 +263,8 @@ module.exports = {
 
         const requiredPermission = group === 'config' && ['setup', 'reset'].includes(subcommand)
             ? PermissionFlagsBits.Administrator
-            : group === 'config' || group === 'template' || (group === 'case' && subcommand === 'reset')
+                : group === 'case' && subcommand === 'undo' ? null
+                    : group === 'config' || group === 'template' || (group === 'case' && subcommand === 'reset')
                 ? PermissionFlagsBits.ManageGuild
                 : group === 'logs' ? PermissionFlagsBits.ViewAuditLog
                     : group === 'channel' ? CHANNEL_PERMISSIONS[subcommand]
@@ -273,7 +274,7 @@ module.exports = {
                                     || PermissionFlagsBits.ModerateMembers;
         const permissionCheck = await checkUserPermissions(interaction, {
             data: { name: 'mod' },
-            permissions: [requiredPermission]
+            permissions: requiredPermission ? [requiredPermission] : []
         });
 
         if (!permissionCheck.allowed) {
@@ -410,11 +411,12 @@ async function handleChannelModeration(interaction, subcommand) {
                 executor: interaction.member,
                 interactionId: interaction.id,
                 amount: interaction.options.getInteger('amount'),
-                filter: subcommand === 'cleanup' ? 'bots' : subcommand === 'selfpurge' ? 'user' : interaction.options.getString('filter'),
+                filter: subcommand === 'cleanup' ? 'cleanup' : subcommand === 'selfpurge' ? 'user' : interaction.options.getString('filter'),
                 text: interaction.options.getString('text'),
                 memberId: subcommand === 'selfpurge' ? interaction.user.id : interaction.options.getUser('member')?.id,
                 startId: interaction.options.getString('start_id'),
-                endId: interaction.options.getString('end_id')
+                endId: interaction.options.getString('end_id'),
+                prefix: sqlite.prepare('SELECT prefix FROM guilds WHERE id = ?').get(interaction.guild.id)?.prefix || '!'
             });
             const title = subcommand === 'cleanup' ? 'Cleanup Complete' : subcommand === 'selfpurge' ? 'Self Purge Complete' : 'Purge Complete';
             return interaction.editReply({ embeds: [embeds.success(title, `Removed **${count}** matching ${subcommand === 'purge' && interaction.options.getString('filter') === 'reactions' ? 'reactions' : 'messages'}.`)] });
@@ -535,14 +537,18 @@ async function handleRoleModeration(interaction, subcommand) {
             perform = () => role.delete(reason);
         } else if (subcommand === 'color') {
             const color = interaction.options.getString('color');
-            if (!/^#[\da-f]{6}$/i.test(color)) throw new Error('Color must be a six-digit hex value such as #FF0000.');
+            const parsedColor = /^#[\da-f]{6}$/i.test(color) ? Number.parseInt(color.slice(1), 16)
+                : /^\d{1,8}$/.test(color) ? Number.parseInt(color, 10) : NaN;
+            if (!Number.isInteger(parsedColor) || parsedColor > 0xFFFFFF) {
+                throw new Error('Color must be #RRGGBB or a decimal value from 0 to 16777215.');
+            }
             const tier = interaction.options.getInteger('tier');
             const colors = {
                 primaryColor: role.colors?.primaryColor || 0,
                 secondaryColor: role.colors?.secondaryColor || null,
                 tertiaryColor: role.colors?.tertiaryColor || null
             };
-            colors[{ 1: 'primaryColor', 2: 'secondaryColor', 3: 'tertiaryColor' }[tier]] = Number.parseInt(color.slice(1), 16);
+            colors[{ 1: 'primaryColor', 2: 'secondaryColor', 3: 'tertiaryColor' }[tier]] = parsedColor;
             perform = () => role.setColors(colors, reason);
         } else if (subcommand === 'hoist') {
             perform = () => role.setHoist(interaction.options.getBoolean('enabled'), reason);
@@ -552,16 +558,18 @@ async function handleRoleModeration(interaction, subcommand) {
             perform = () => role.setName(interaction.options.getString('name'), reason);
         } else if (subcommand === 'icon') {
             const image = interaction.options.getAttachment('image');
+            const url = interaction.options.getString('url');
             const emoji = interaction.options.getString('emoji');
-            if (Boolean(image) === Boolean(emoji)) throw new Error('Provide exactly one image or emoji.');
-            if (image) {
-                const host = new URL(image.url).hostname;
+            if ([image, url, emoji].filter(Boolean).length !== 1) throw new Error('Provide exactly one image, URL, or emoji.');
+            if (image || url) {
+                const iconUrl = image?.url || url;
+                const host = new URL(iconUrl).hostname;
                 if (!['cdn.discordapp.com', 'media.discordapp.net'].includes(host)
-                    || !image.contentType?.startsWith('image/') || image.size > 262144) {
-                    throw new Error('Role icons must be a Discord-hosted image up to 256 KiB.');
+                    || (image && (!image.contentType?.startsWith('image/') || image.size > 262144))) {
+                    throw new Error('Role icon URLs must use Discord CDN; attachments must be images up to 256 KiB.');
                 }
             }
-            perform = () => role.setIcon(image?.url || emoji, reason);
+            perform = async () => role.setIcon(url ? await fetchDiscordRoleIcon(url) : image?.url || emoji, reason);
         }
         await executeRecordedAction({
             guildId: guild.id, targetId: role.id, executorId: interaction.member.id,

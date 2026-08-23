@@ -21,6 +21,8 @@ function matches(message, filter, options) {
     switch (filter) {
         case 'activity': return message.system || (message.type != null && message.type !== 0 && message.type !== 19);
         case 'bots': return message.author?.bot && !message.webhookId;
+        case 'cleanup': return (message.author?.bot && !message.webhookId)
+            || Boolean(options.prefix && content.startsWith(options.prefix));
         case 'contains': return content.toLowerCase().includes(options.text.toLowerCase());
         case 'embeds': return (message.embeds?.length || message.embeds?.size || 0) > 0;
         case 'emojis': return EMOJI_RE.test(content);
@@ -98,8 +100,8 @@ async function collectMessages(channel, options) {
     return selected;
 }
 
-async function purgeMessages({ guild, channel, executor, interactionId, amount, filter = 'all', text, memberId, startId, endId }) {
-    const options = { amount, filter, text, memberId, startId, endId, interactionId };
+async function purgeMessages({ guild, channel, executor, interactionId, amount, filter = 'all', text, memberId, startId, endId, prefix }) {
+    const options = { amount, filter, text, memberId, startId, endId, interactionId, prefix };
     validatePurgeOptions(options);
     await validateBoundaryMessages(channel, options);
     const messages = await collectMessages(channel, options);
@@ -184,7 +186,8 @@ async function lockdownAll({ guild, executor, reason, unlock = false }) {
     const channels = unlock
         ? sqlite.prepare('SELECT channel_id FROM lockdown_states WHERE guild_id = ?').all(guild.id)
             .map(row => guild.channels.cache.get(row.channel_id)).filter(Boolean)
-        : values(guild.channels.cache).filter(channel => channel.isTextBased?.() && !channel.isThread?.()).slice(0, MAX_LOCKDOWN_CHANNELS);
+        : values(guild.channels.cache).filter(channel => channel.isTextBased?.() && !channel.isThread?.());
+    if (channels.length > MAX_LOCKDOWN_CHANNELS) throw new Error(`Server lockdown is capped at ${MAX_LOCKDOWN_CHANNELS} channels.`);
     let changed = 0;
     const failures = [];
     for (const channel of channels) {

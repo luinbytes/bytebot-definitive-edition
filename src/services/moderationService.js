@@ -35,7 +35,9 @@ const ACTION_PERMISSIONS = {
     JAIL: PermissionFlagsBits.ManageRoles,
     UNJAIL: PermissionFlagsBits.ManageRoles,
     STRIP: PermissionFlagsBits.ManageRoles,
-    STAFFSTRIP: PermissionFlagsBits.ManageRoles
+    STAFFSTRIP: PermissionFlagsBits.ManageRoles,
+    ROLE_ADD: PermissionFlagsBits.ManageRoles,
+    ROLE_REMOVE: PermissionFlagsBits.ManageRoles
 };
 
 function validateActionPermissions(guild, executor, action, { actor = true } = {}) {
@@ -96,8 +98,8 @@ function recordCompletedCase({ guildId, targetId, executorId, action, reason }) 
     return getCase(guildId, caseNumber);
 }
 
-async function executeRecordedAction({ guildId, targetId, executorId, action, reason, perform }) {
-    const caseNumber = createPendingCase({ guildId, targetId, executorId, action, reason });
+async function executeRecordedAction({ guildId, targetId, executorId, action, reason, metadata, perform }) {
+    const caseNumber = createPendingCase({ guildId, targetId, executorId, action, reason, metadata });
     try {
         const result = await perform(caseNumber);
         setCaseStatus(guildId, caseNumber, 'completed');
@@ -458,7 +460,7 @@ async function undoCase({ guild, executor, caseNumber, reason }) {
     if (moderationCase.action === 'TIMEOUT' || moderationCase.action === 'WARN'
         || metadata.roleOperation || metadata.strippedRoleIds || metadata.jailRoleId) {
         target = await guild.members.fetch(moderationCase.target_id);
-        const hierarchy = validateHierarchy(executor, target);
+        const hierarchy = validateHierarchy(executor, target, { allowBots: Boolean(metadata.roleOperation) });
         if (!hierarchy.valid) throw new Error(hierarchy.error);
     } else {
         const protection = validateProtectedTarget(guild.id, moderationCase.target_id);

@@ -92,6 +92,7 @@ describe('channel and role moderation parity', () => {
     });
 
     afterEach(() => {
+        jest.restoreAllMocks();
         database.sqlite.close();
         delete process.env.DATABASE_URL;
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -113,6 +114,19 @@ describe('channel and role moderation parity', () => {
         expect(command.reply).not.toHaveBeenCalled();
         expect(channel.bulkDelete).toHaveBeenCalledWith([botMessage], true);
         expect(database.sqlite.prepare("SELECT action FROM moderation_cases").get().action).toBe('PURGE');
+    });
+
+    test('cleanup removes bot messages and configured-prefix invocations', async () => {
+        database.sqlite.prepare("INSERT INTO guilds (id, prefix) VALUES ('guild1', '?')").run();
+        const botMessage = { id: '201', content: 'response', author: { id: 'bot2', bot: true }, createdTimestamp: Date.now() };
+        const invocation = { id: '200', content: '?help', author: { id: 'user1', bot: false }, createdTimestamp: Date.now() };
+        const chat = { id: '199', content: 'hello', author: { id: 'user2', bot: false }, createdTimestamp: Date.now() };
+        channel.messages.fetch.mockResolvedValueOnce(new Map([[botMessage.id, botMessage], [invocation.id, invocation], [chat.id, chat]]));
+        const command = interaction({ guild, member: actor([PermissionFlagsBits.ManageMessages]), group: 'channel', subcommand: 'cleanup', values: { amount: 20 } });
+
+        await mod.execute(command, {});
+
+        expect(channel.bulkDelete).toHaveBeenCalledWith([botMessage, invocation], true);
     });
 
     test('selfpurge requires Manage Messages and only deletes the caller messages', async () => {
@@ -180,6 +194,18 @@ describe('channel and role moderation parity', () => {
         expect(ignored.editReply.mock.calls[0][0].embeds[0].data.description).toContain('ignored');
     });
 
+    test('server lockdown fails explicitly rather than silently truncating an oversized set', async () => {
+        const channels = Array.from({ length: 501 }, (_, index) => [`channel-${index}`, {
+            id: `channel-${index}`, isTextBased: () => true, isThread: () => false
+        }]);
+        guild.channels.cache = new Map(channels);
+        const command = interaction({ guild, member: actor([PermissionFlagsBits.ManageChannels]), group: 'channel', subcommand: 'lockdown-all', values: { confirm: true }, channel: channels[0][1] });
+
+        await mod.execute(command, {});
+
+        expect(command.editReply.mock.calls[0][0].embeds[0].data.description).toContain('capped at 500');
+    });
+
     test('slowmode, topic, and NSFW channel mutations use Discord bounds and audit reasons', async () => {
         const moderator = actor([PermissionFlagsBits.ManageChannels]);
         channel.setTopic.mockImplementation(() => {
@@ -233,6 +259,44 @@ describe('channel and role moderation parity', () => {
         expect(target.roles.add).toHaveBeenCalledWith(botRole, expect.any(String));
     });
 
+    test('single role cases carry enough metadata for action-specific case undo', async () => {
+        const assignedRole = role('assigned-role');
+        guild.roles.cache.set(assignedRole.id, assignedRole);
+        const target = member(guild);
+        target.roles.cache.set(assignedRole.id, assignedRole);
+        guild.members.fetch.mockResolvedValue(target);
+        const moderator = actor([PermissionFlagsBits.ManageRoles]);
+        await mod.execute(interaction({ guild, member: moderator, group: 'role', subcommand: 'remove', values: { target, role: assignedRole, reason: 'temporary' } }), {});
+        const moderationCase = database.sqlite.prepare("SELECT case_number FROM moderation_cases WHERE action = 'ROLE_REMOVE'").get();
+
+        await mod.execute(interaction({ guild, member: moderator, group: 'case', subcommand: 'undo', values: { number: moderationCase.case_number, reason: 'restore' } }), {});
+
+        expect(target.roles.add).toHaveBeenCalledWith(assignedRole, 'restore');
+    });
+
+    test('role color accepts decimal values and role icon accepts Discord CDN URLs', async () => {
+        const managedRole = role('managed-role');
+        guild.roles.cache.set(managedRole.id, managedRole);
+        const moderator = actor([PermissionFlagsBits.ManageRoles]);
+        jest.spyOn(global, 'fetch').mockResolvedValue(new Response(new Uint8Array([1, 2, 3]), {
+            headers: { 'content-type': 'image/png' }
+        }));
+
+        await mod.execute(interaction({ guild, member: moderator, group: 'role', subcommand: 'color', values: { role: managedRole, color: '16711680', tier: 1 } }), {});
+        await mod.execute(interaction({ guild, member: moderator, group: 'role', subcommand: 'icon', values: { role: managedRole, url: 'https://cdn.discordapp.com/icons/guild/icon.png' } }), {});
+
+        expect(managedRole.setColors).toHaveBeenCalledWith(expect.objectContaining({ primaryColor: 16711680 }), expect.any(String));
+        expect(managedRole.setIcon).toHaveBeenCalledWith(Buffer.from([1, 2, 3]), expect.any(String));
+
+        global.fetch.mockResolvedValueOnce(new Response(new Uint8Array(262145), {
+            headers: { 'content-type': 'image/png' }
+        }));
+        const oversized = interaction({ guild, member: moderator, group: 'role', subcommand: 'icon', values: { role: managedRole, url: 'https://cdn.discordapp.com/icons/guild/large.png' } });
+        await mod.execute(oversized, {});
+        expect(oversized.editReply.mock.calls[0][0].embeds[0].data.description).toContain('256 KiB');
+        expect(managedRole.setIcon).toHaveBeenCalledTimes(1);
+    });
+
     test('forced nicknames persist, reapply on member updates, and cancel cleanly', async () => {
         const target = member(guild);
         const moderator = actor([PermissionFlagsBits.ManageNicknames]);
@@ -248,5 +312,16 @@ describe('channel and role moderation parity', () => {
 
         await mod.execute(interaction({ guild, member: moderator, group: 'user', subcommand: 'nickname-unforce', values: { target } }), {});
         expect(database.sqlite.prepare('SELECT COUNT(*) AS count FROM forced_nicknames').get().count).toBe(0);
+    });
+
+    test('failed forced nickname changes roll back enforcement state and retain a failed case', async () => {
+        const target = member(guild);
+        target.setNickname.mockRejectedValueOnce(new Error('Discord rejected nickname'));
+        const command = interaction({ guild, member: actor([PermissionFlagsBits.ManageNicknames]), group: 'user', subcommand: 'nickname-force', values: { target, name: 'Locked' } });
+
+        await mod.execute(command, {});
+
+        expect(database.sqlite.prepare('SELECT COUNT(*) AS count FROM forced_nicknames').get().count).toBe(0);
+        expect(database.sqlite.prepare("SELECT status FROM moderation_cases WHERE action = 'NICKNAME_FORCE'").get().status).toBe('failed');
     });
 });

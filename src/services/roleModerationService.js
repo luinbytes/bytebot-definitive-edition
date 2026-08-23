@@ -5,6 +5,7 @@ const { validateHierarchy, validateProtectedTarget } = require('../utils/moderat
 const { executeRecordedAction } = require('./moderationService');
 
 const MAX_BULK_MEMBERS = 5000;
+const MAX_ROLE_ICON_BYTES = 262144;
 const DANGEROUS = [
     PermissionFlagsBits.Administrator, PermissionFlagsBits.ManageGuild,
     PermissionFlagsBits.ManageRoles, PermissionFlagsBits.ManageChannels,
@@ -12,6 +13,21 @@ const DANGEROUS = [
     PermissionFlagsBits.ModerateMembers, PermissionFlagsBits.ManageWebhooks,
     PermissionFlagsBits.MentionEveryone
 ];
+
+async function fetchDiscordRoleIcon(url) {
+    const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(5000) });
+    if (!response.ok || !response.headers.get('content-type')?.startsWith('image/')) {
+        throw new Error('The role icon URL did not return an image.');
+    }
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of response.body) {
+        size += chunk.length;
+        if (size > MAX_ROLE_ICON_BYTES) throw new Error('Role icons must be no larger than 256 KiB.');
+        chunks.push(Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+}
 
 function validateRole(executor, guild, role, { adding = false } = {}) {
     if (!role || role.id === guild.id || role.managed) throw new Error('That role cannot be managed.');
@@ -43,6 +59,7 @@ async function changeMemberRole({ guild, executor, member, role, add, reason }) 
     await executeRecordedAction({
         guildId: guild.id, targetId: member.id, executorId: executor.id,
         action: add ? 'ROLE_ADD' : 'ROLE_REMOVE', reason: `${reason} (${role.id})`,
+        metadata: { roleId: role.id, roleOperation: add ? 'add' : 'remove' },
         perform: async () => {
             if (!add) snapshotRoles(member);
             const result = await RoleManager[add ? 'addRole' : 'removeRole'](member, role, {
@@ -132,17 +149,28 @@ async function setNickname({ guild, executor, member, nickname, force = false, r
         guildId: guild.id, targetId: member.id, executorId: executor.id,
         action: force ? 'NICKNAME_FORCE' : remove ? 'NICKNAME_REMOVE' : 'NICKNAME', reason,
         perform: async () => {
-            await member.setNickname(remove ? null : nickname, reason);
             if (force) {
                 sqlite.prepare(`
                     INSERT INTO forced_nicknames (guild_id, user_id, nickname, updated_at) VALUES (?, ?, ?, ?)
                     ON CONFLICT (guild_id, user_id) DO UPDATE SET nickname = excluded.nickname, updated_at = excluded.updated_at
                 `).run(guild.id, member.id, nickname, Date.now());
             }
+            try {
+                await member.setNickname(remove ? null : nickname, reason);
+            } catch (error) {
+                if (force && forced) {
+                    sqlite.prepare('UPDATE forced_nicknames SET nickname = ?, updated_at = ? WHERE guild_id = ? AND user_id = ?')
+                        .run(forced.nickname, Date.now(), guild.id, member.id);
+                } else if (force) {
+                    sqlite.prepare('DELETE FROM forced_nicknames WHERE guild_id = ? AND user_id = ?').run(guild.id, member.id);
+                }
+                throw error;
+            }
         }
     });
 }
 
 module.exports = {
-    MAX_BULK_MEMBERS, validateRole, changeMemberRole, restoreMemberRoles, bulkRole, setNickname
+    MAX_BULK_MEMBERS, validateRole, changeMemberRole, restoreMemberRoles, bulkRole, setNickname,
+    fetchDiscordRoleIcon
 };
