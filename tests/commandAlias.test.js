@@ -1,4 +1,3 @@
-const { PermissionFlagsBits } = require('discord.js');
 const { createCommandAliasInteraction, executeAliasCommand } = require('../src/utils/commandAlias');
 const { db } = require('../src/database');
 
@@ -114,7 +113,7 @@ describe('command alias interaction proxy', () => {
 
         const command = {
             data: { name: 'config' },
-            permissions: [PermissionFlagsBits.Administrator],
+            permissions: [],
             execute: jest.fn()
         };
         const interaction = {
