@@ -11,9 +11,13 @@ ByteBot's `/mod` hub provides guild-local cases for member actions, history, inv
 - `/mod case` views, undoes, or explicitly resets guild case history.
 - `/mod template` sets, removes, views, resets, lists, tests, and documents invoke templates.
 - `/mod config` runs setup/reset, selects moderation channels and roles, manages staff roles, and configures warning punishments.
-- `/mod channel` retains the existing clear, lock, and unlock paths.
+- `/mod channel` provides clear, cleanup, selfpurge, all documented purge filters, reversible single/server lockdown, lockdown roles and ignores, slowmode, topic, and NSFW controls alongside the existing lock/unlock paths. Purge and cleanup allow the former paid maximum of 2,000 messages; selfpurge is capped at Greed's documented 50 and needs no moderator permission.
+- `/mod role` adds/removes/restores member roles, performs confirmed all/bot/human/has-role bulk changes, and manages role creation, deletion, colors, hoist, icons, mentionability, and names.
+- `/mod user nickname*` sets, removes, forces, or cancels forced nicknames.
 
 Every member mutation checks the moderator's real action-specific Discord permission, the bot's matching permission, persisted protected targets, the server owner boundary, and actor/bot role hierarchy. ByteBot RBAC may restrict a path further but cannot grant Discord authority. Context-menu warn, kick, ban, and history use the same case service.
+
+Destructive bulk role, lockdown, and role deletion paths require explicit confirmation. Purges, channel mutations, role changes, and nickname changes record moderation cases. Lockdown restores the exact prior Send Messages overwrite, role removal snapshots restorable roles, and forced nicknames survive restarts until cancelled.
 
 ## Cases and recovery
 

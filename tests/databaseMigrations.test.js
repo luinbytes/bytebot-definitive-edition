@@ -64,7 +64,7 @@ describe('database migrations', () => {
             'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)'
         );
         const migrations = readMigrationFiles({ migrationsFolder: './drizzle' });
-        migrations.slice(0, -3).forEach(migration => {
+        migrations.slice(0, -4).forEach(migration => {
             appliedMigration.run(migration.hash, migration.folderMillis);
         });
         seed.close();

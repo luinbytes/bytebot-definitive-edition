@@ -161,14 +161,15 @@ describe('Intent command hubs', () => {
 
         expect(command.name).toBe('mod');
         expect(command.dm_permission).toBe(false);
-        expect(command.default_member_permissions).toBe(PermissionFlagsBits.ModerateMembers.toString());
-        expect(mod.permissions).toEqual([PermissionFlagsBits.ModerateMembers]);
+        expect(command.default_member_permissions).toBeUndefined();
+        expect(mod.permissions).toEqual([]);
         expect(optionNames(command.options)).toEqual([
             'user',
             'status',
             'bulk',
             'logs',
             'channel',
+            'role',
             'case',
             'template',
             'config'
@@ -192,6 +193,10 @@ describe('Intent command hubs', () => {
             'warn-clear',
             'strip',
             'staffstrip',
+            'nickname',
+            'nickname-remove',
+            'nickname-force',
+            'nickname-unforce',
             'history'
         ]);
         expect(optionNames(findOption(command, 'status').options)).toEqual([
@@ -206,9 +211,14 @@ describe('Intent command hubs', () => {
             'audit'
         ]);
         expect(optionNames(findOption(command, 'channel').options)).toEqual([
-            'clear',
-            'lock',
-            'unlock'
+            'clear', 'lock', 'unlock', 'cleanup', 'selfpurge', 'purge', 'lockdown', 'unlockdown',
+            'lockdown-all', 'unlockdown-all', 'lockdown-role', 'lockdown-ignore',
+            'lockdown-unignore', 'lockdown-ignored', 'slowmode', 'slowmode-disable',
+            'topic', 'topic-remove', 'nsfw'
+        ]);
+        expect(optionNames(findOption(command, 'role').options)).toEqual([
+            'add', 'remove', 'restore', 'bulk', 'create', 'delete', 'color',
+            'hoist', 'mentionable', 'rename', 'icon'
         ]);
         expect(optionNames(findOption(command, 'case').options)).toEqual([
             'view', 'undo', 'reset'

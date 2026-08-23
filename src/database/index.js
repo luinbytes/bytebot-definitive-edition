@@ -170,7 +170,8 @@ const expectedSchema = {
         jail_role_id: 'TEXT',
         jail_channel_id: 'TEXT',
         managed_resources: 'TEXT',
-        setup_status: 'TEXT'
+        setup_status: 'TEXT',
+        lock_role_id: 'TEXT'
     },
     moderation_hardbans: {
         guild_id: 'TEXT NOT NULL',
@@ -187,6 +188,29 @@ const expectedSchema = {
         previous_role_ids: 'TEXT NOT NULL',
         state: 'TEXT NOT NULL',
         created_at: 'INTEGER NOT NULL'
+    },
+    lockdown_ignores: {
+        guild_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL'
+    },
+    lockdown_states: {
+        guild_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        role_id: 'TEXT NOT NULL',
+        prior_send_messages: 'INTEGER NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    forced_nicknames: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        nickname: 'TEXT NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    member_role_snapshots: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        role_ids: 'TEXT NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
     },
     moderation_templates: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
