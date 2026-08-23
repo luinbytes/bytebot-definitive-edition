@@ -141,6 +141,13 @@
       "when": 1787505000000,
       "tag": "0019_lifecycle_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1787506000000,
+      "tag": "0020_automation_platform",
+      "breakpoints": true
     }
   ]
 }

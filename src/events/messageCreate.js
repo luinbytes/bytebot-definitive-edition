@@ -8,6 +8,12 @@ const { handleMessage: handleAutomodMessage } = require('../services/automodServ
 module.exports = {
     name: Events.MessageCreate,
     async execute(message, client) {
+        // DISBOARD is a bot, but successful bumps are the event source for the
+        // configured bump-reminder workflow.
+        if (message.author.id === '302050872383242240' && client.automationService) {
+            await client.automationService.handleMessage(message).catch(error => logger.error('Bump reminder error:', error));
+            return;
+        }
         // Ignore bot messages (prevents infinite loops)
         if (message.author.bot) return;
 
@@ -45,6 +51,14 @@ module.exports = {
             } catch (error) {
                 logger.error('Auto-responder error:', error);
                 // Don't crash on auto-responder errors, just log
+            }
+        }
+
+        if (client.automationService) {
+            try {
+                await client.automationService.handleMessage(message);
+            } catch (error) {
+                logger.error('Automation handler error:', error);
             }
         }
 

@@ -545,6 +545,15 @@ const autoResponses = sqliteTable('auto_responses', {
     cooldown: integer('cooldown').default(60), // Seconds between triggers
     matchType: text('match_type').default('contains').notNull(), // exact, contains, wildcard, regex
     requireRoleId: text('require_role_id'), // null = any user
+    reply: integer('reply', { mode: 'boolean' }).default(false).notNull(),
+    deleteTrigger: integer('delete_trigger', { mode: 'boolean' }).default(false).notNull(),
+    selfDestructSeconds: integer('self_destruct_seconds'),
+    mentionPolicy: text('mention_policy').default('none').notNull(),
+    actionRoleId: text('action_role_id'),
+    actionRoleMode: text('action_role_mode'),
+    channelIds: text('channel_ids').default('[]').notNull(),
+    roleIds: text('role_ids').default('[]').notNull(),
+    actionRoles: text('action_roles').default('[]').notNull(),
     useCount: integer('use_count').default(0), // Analytics
     createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date()),
     lastUsed: integer('last_used', { mode: 'timestamp' })
@@ -553,6 +562,30 @@ const autoResponses = sqliteTable('auto_responses', {
     guildEnabledIdx: index('autoresponse_guild_enabled_idx').on(table.guildId, table.enabled),
     // Index for channel-specific responses
     guildChannelIdx: index('autoresponse_guild_channel_idx').on(table.guildId, table.channelId),
+}));
+
+// Shared storage for message/member automations. Kind + key identifies the
+// public command object (for example timer + channel ID).
+const automationRules = sqliteTable('automation_rules', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    kind: text('kind').notNull(),
+    key: text('key').notNull(),
+    config: text('config').default('{}').notNull(),
+    enabled: integer('enabled', { mode: 'boolean' }).default(true).notNull(),
+    nextRunAt: integer('next_run_at'),
+    lastRunAt: integer('last_run_at'),
+    lastMessageId: text('last_message_id'),
+    runCount: integer('run_count').default(0).notNull(),
+    leaseToken: text('lease_token'),
+    leaseExpiresAt: integer('lease_expires_at'),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, (table) => ({
+    guildKindKeyUnique: unique('automation_guild_kind_key_unique').on(table.guildId, table.kind, table.key),
+    dueIdx: index('automation_due_idx').on(table.enabled, table.nextRunAt),
+    guildKindIdx: index('automation_guild_kind_idx').on(table.guildId, table.kind)
 }));
 
 // Starboard configuration (per-guild)
@@ -889,6 +922,7 @@ module.exports = {
     birthdayConfig,
     bookmarks,
     autoResponses,
+    automationRules,
     starboardConfig,
     starboardMessages,
     honeypotConfig,

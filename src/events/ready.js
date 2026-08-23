@@ -302,6 +302,16 @@ module.exports = {
             logger.error(`Failed to initialize auto-responder service: ${e}`);
         }
 
+        // --- Initialize message/member automation ---
+        try {
+            const AutomationService = require('../services/automationService');
+            client.automationService = new AutomationService(client);
+            await client.automationService.start();
+            logger.success('Automation service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize automation service: ${e}`);
+        }
+
         // --- Initialize Starboard Service ---
         try {
             const StarboardService = require('../services/starboardService');

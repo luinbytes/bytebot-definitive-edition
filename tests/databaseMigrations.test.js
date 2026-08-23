@@ -154,6 +154,16 @@ describe('database migrations', () => {
 
         insert.run('first');
         expect(() => insert.run('duplicate')).toThrow();
+
+        const automationInsert = database.sqlite.prepare(`
+            INSERT INTO automation_rules
+                (guild_id, kind, key, config, enabled, run_count, created_by, created_at, updated_at)
+            VALUES ('guild1', 'timer', 'channel1', '{}', 1, 0, 'admin1', 1, 1)
+        `);
+        automationInsert.run();
+        expect(() => automationInsert.run()).toThrow();
+        const automationIndexes = database.sqlite.prepare("PRAGMA index_list('automation_rules')").all().map(index => index.name);
+        expect(automationIndexes).toEqual(expect.arrayContaining(['automation_due_idx', 'automation_guild_kind_idx']));
     });
 
     test('antinuke state is guild-scoped and audit entries are idempotent', async () => {
