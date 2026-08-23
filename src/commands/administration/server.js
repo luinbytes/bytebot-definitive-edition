@@ -1,5 +1,15 @@
-const { SlashCommandBuilder, ChannelType } = require('discord.js');
+const { SlashCommandBuilder, ChannelType, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const { executeAliasCommand } = require('../../utils/commandAlias');
+const { sqlite } = require('../../database');
+const embeds = require('../../utils/embeds');
+const { executeRecordedAction } = require('../../services/moderationService');
+const {
+    MODULES, PUNISHMENTS, ensureConfig, isTrustedManager, upsertModule
+} = require('../../services/antinukeService');
+const config = require('../../../config.json');
+
+const MODULE_CHOICES = MODULES.map(value => ({ name: value, value }));
+const PUNISHMENT_CHOICES = PUNISHMENTS.map(value => ({ name: value, value }));
 
 const TARGETS = {
     info: { commandName: 'serverinfo', requirePath: 'src/commands/utility/serverinfo.js' },
@@ -54,6 +64,158 @@ function addCommandScope(subcommand) {
         .addChannelOption(opt => opt.setName('channel').setDescription('Limit this rule to a channel'))
         .addRoleOption(opt => opt.setName('role').setDescription('Limit this rule to a role'))
         .addUserOption(opt => opt.setName('member').setDescription('Limit this rule to a member'));
+}
+
+function securitySettings(guildId) {
+    const current = ensureConfig(guildId);
+    const modules = sqlite.prepare(`
+        SELECT module, enabled, threshold, punishment FROM antinuke_modules
+        WHERE guild_id = ? ORDER BY module
+    `).all(guildId);
+    return embeds.brand('AntiNuke Settings', [
+        `Status: **${current.enabled ? 'enabled' : 'disabled'}**`,
+        `Default punishment: **${current.punishment}**`,
+        `Window: **${current.window_seconds} seconds**`,
+        `Log channel: ${current.log_channel_id ? `<#${current.log_channel_id}>` : '**not set**'}`,
+        `Enabled modules: **${modules.filter(row => row.enabled).length}/${MODULES.length}**`,
+        modules.length ? modules.map(row =>
+            `\`${row.module}\` ${row.enabled ? 'on' : 'off'} · ${row.threshold} · ${row.punishment || 'default'}`
+        ).join('\n').slice(0, 3500) : 'No module overrides configured.'
+    ].join('\n'));
+}
+
+async function recordSecurityChange(interaction, action, targetId, reason, perform) {
+    return executeRecordedAction({
+        guildId: interaction.guild.id,
+        targetId: targetId || interaction.guild.id,
+        executorId: interaction.user.id,
+        action,
+        reason,
+        perform
+    });
+}
+
+function requireUser(interaction, action) {
+    const user = interaction.options.getUser('user');
+    if (!user && action !== 'list') throw new Error(`A user is required to ${action} an entry.`);
+    return user;
+}
+
+async function executeSecurity(interaction) {
+    if (!isTrustedManager(interaction.guild, interaction.user.id, config.developers || [])) {
+        return interaction.reply({
+            embeds: [embeds.error('Access Denied', 'Only the server owner, a bot developer, or an AntiNuke admin can manage AntiNuke.')],
+            flags: [MessageFlags.Ephemeral]
+        });
+    }
+
+    const subcommand = interaction.options.getSubcommand();
+    const guildId = interaction.guild.id;
+    try {
+        if (subcommand === 'antinuke-settings') {
+            return interaction.reply({ embeds: [securitySettings(guildId)], flags: [MessageFlags.Ephemeral] });
+        }
+        if (subcommand === 'antinuke-toggle') {
+            const enabled = interaction.options.getBoolean('enabled', true);
+            if (enabled && !interaction.guild.members.me.permissions.has(PermissionFlagsBits.ViewAuditLog)) {
+                throw new Error('I need View Audit Log before AntiNuke can be enabled.');
+            }
+            await recordSecurityChange(interaction, 'ANTINUKE_TOGGLE', guildId, `Set AntiNuke enabled=${enabled}`, () => {
+                ensureConfig(guildId);
+                sqlite.prepare('UPDATE antinuke_config SET enabled = ? WHERE guild_id = ?').run(Number(enabled), guildId);
+            });
+        } else if (subcommand === 'antinuke-punishment') {
+            const punishment = interaction.options.getString('punishment', true);
+            await recordSecurityChange(interaction, 'ANTINUKE_PUNISHMENT', guildId, `Set AntiNuke punishment=${punishment}`, () => {
+                ensureConfig(guildId);
+                sqlite.prepare('UPDATE antinuke_config SET punishment = ? WHERE guild_id = ?').run(punishment, guildId);
+            });
+        } else if (subcommand === 'antinuke-window') {
+            const seconds = interaction.options.getInteger('minutes', true) * 60;
+            await recordSecurityChange(interaction, 'ANTINUKE_WINDOW', guildId, `Set AntiNuke window=${seconds}s`, () => {
+                ensureConfig(guildId);
+                sqlite.prepare('UPDATE antinuke_config SET window_seconds = ? WHERE guild_id = ?').run(seconds, guildId);
+            });
+        } else if (subcommand === 'antinuke-module') {
+            const action = interaction.options.getString('action', true);
+            const module = interaction.options.getString('module', true);
+            if (!MODULES.includes(module)) throw new Error('Unknown AntiNuke module.');
+            if (action === 'view') {
+                const row = sqlite.prepare('SELECT * FROM antinuke_modules WHERE guild_id = ? AND module = ?').get(guildId, module)
+                    || { module, enabled: 0, threshold: 3, punishment: null };
+                return interaction.reply({
+                    embeds: [embeds.brand(`AntiNuke: ${module}`, `Status: **${row.enabled ? 'on' : 'off'}**\nThreshold: **${row.threshold}**\nPunishment: **${row.punishment || 'default'}**`)],
+                    flags: [MessageFlags.Ephemeral]
+                });
+            }
+            const changes = {};
+            if (action === 'toggle') {
+                const enabled = interaction.options.getBoolean('enabled');
+                if (enabled == null) throw new Error('enabled is required for the toggle action.');
+                changes.enabled = Number(enabled);
+            } else if (action === 'threshold') {
+                const threshold = interaction.options.getInteger('threshold');
+                if (threshold == null) throw new Error('threshold is required for the threshold action.');
+                changes.threshold = threshold;
+            } else if (action === 'punishment') {
+                const punishment = interaction.options.getString('punishment');
+                if (!punishment) throw new Error('punishment is required for the punishment action.');
+                changes.punishment = punishment === 'default' ? null : punishment;
+            }
+            await recordSecurityChange(interaction, 'ANTINUKE_MODULE', module, `${action} ${module}`, () => upsertModule(guildId, module, changes));
+        } else if (subcommand === 'antinuke-admin' || subcommand === 'antinuke-whitelist') {
+            const action = interaction.options.getString('action', true);
+            const table = subcommand === 'antinuke-admin' ? 'antinuke_admins' : 'antinuke_whitelist';
+            const label = subcommand === 'antinuke-admin' ? 'admin' : 'whitelist';
+            const user = requireUser(interaction, action);
+            if (action === 'list') {
+                const { count } = sqlite.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE guild_id = ?`).get(guildId);
+                const rows = sqlite.prepare(`
+                    SELECT user_id, added_by FROM ${table} WHERE guild_id = ? ORDER BY user_id LIMIT 50
+                `).all(guildId);
+                const body = rows.length
+                    ? `${rows.map(row => `<@${row.user_id}> · added by <@${row.added_by}>`).join('\n')}${count > rows.length ? `\n…and ${count - rows.length} more.` : ''}`
+                    : `No AntiNuke ${label} entries.`;
+                return interaction.reply({ embeds: [embeds.brand(`AntiNuke ${label}`, body)], flags: [MessageFlags.Ephemeral] });
+            }
+            await recordSecurityChange(interaction, `ANTINUKE_${label.toUpperCase()}_${action.toUpperCase()}`, user.id, `${action} ${label} ${user.id}`, () => {
+                if (action === 'add') {
+                    sqlite.prepare(`INSERT INTO ${table} (guild_id, user_id, added_by, created_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING`)
+                        .run(guildId, user.id, interaction.user.id, Date.now());
+                } else {
+                    sqlite.prepare(`DELETE FROM ${table} WHERE guild_id = ? AND user_id = ?`).run(guildId, user.id);
+                }
+            });
+        } else if (subcommand === 'antinuke-incidents') {
+            const limit = interaction.options.getInteger('limit') || 10;
+            const rows = sqlite.prepare(`
+                SELECT * FROM antinuke_incidents WHERE guild_id = ? ORDER BY created_at DESC LIMIT ?
+            `).all(guildId, limit);
+            const body = rows.length
+                ? rows.map(row => `#${row.id} <@${row.actor_id}> · \`${row.module}\` · ${row.punishment} · **${row.status}**`).join('\n')
+                : 'No AntiNuke incidents recorded.';
+            return interaction.reply({ embeds: [embeds.brand('AntiNuke Incidents', body)], flags: [MessageFlags.Ephemeral] });
+        } else if (subcommand === 'antinuke-log') {
+            const action = interaction.options.getString('action', true);
+            if (action === 'view') {
+                return interaction.reply({ embeds: [securitySettings(guildId)], flags: [MessageFlags.Ephemeral] });
+            }
+            const channel = interaction.options.getChannel('channel');
+            if (action === 'set' && !channel) throw new Error('channel is required for the set action.');
+            if (channel && !interaction.guild.members.me.permissionsIn(channel)
+                .has([PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks])) {
+                throw new Error('I need Send Messages and Embed Links in the AntiNuke log channel.');
+            }
+            await recordSecurityChange(interaction, 'ANTINUKE_LOG', channel?.id || guildId, `${action} AntiNuke log channel`, () => {
+                ensureConfig(guildId);
+                sqlite.prepare('UPDATE antinuke_config SET log_channel_id = ? WHERE guild_id = ?')
+                    .run(action === 'clear' ? null : channel.id, guildId);
+            });
+        }
+        return interaction.reply({ embeds: [securitySettings(guildId)], flags: [MessageFlags.Ephemeral] });
+    } catch (error) {
+        return interaction.reply({ embeds: [embeds.error('AntiNuke Error', error.message)], flags: [MessageFlags.Ephemeral] });
+    }
 }
 
 module.exports = {
@@ -245,6 +407,41 @@ module.exports = {
                 .setDescription('View streak leaderboard')
                 .addStringOption(opt => opt.setName('type').setDescription('Leaderboard type'))))
         .addSubcommandGroup(group => group
+            .setName('security')
+            .setDescription('AntiNuke protection and trusted actors')
+            .addSubcommand(sub => sub.setName('antinuke-settings').setDescription('View AntiNuke settings'))
+            .addSubcommand(sub => sub.setName('antinuke-toggle').setDescription('Enable or disable AntiNuke')
+                .addBooleanOption(opt => opt.setName('enabled').setDescription('Whether AntiNuke is enabled').setRequired(true)))
+            .addSubcommand(sub => sub.setName('antinuke-punishment').setDescription('Set the default punishment')
+                .addStringOption(opt => opt.setName('punishment').setDescription('Default punishment').setRequired(true).addChoices(...PUNISHMENT_CHOICES)))
+            .addSubcommand(sub => sub.setName('antinuke-window').setDescription('Set the rolling action window')
+                .addIntegerOption(opt => opt.setName('minutes').setDescription('Window in minutes').setRequired(true).setMinValue(1).setMaxValue(1440)))
+            .addSubcommand(sub => sub.setName('antinuke-module').setDescription('View or configure one protection module')
+                .addStringOption(opt => opt.setName('action').setDescription('Configuration action').setRequired(true).addChoices(
+                    { name: 'View', value: 'view' }, { name: 'Toggle', value: 'toggle' },
+                    { name: 'Threshold', value: 'threshold' }, { name: 'Punishment', value: 'punishment' }
+                ))
+                .addStringOption(opt => opt.setName('module').setDescription('Protected audit action').setRequired(true).setAutocomplete(true))
+                .addBooleanOption(opt => opt.setName('enabled').setDescription('Required for toggle'))
+                .addIntegerOption(opt => opt.setName('threshold').setDescription('Required for threshold').setMinValue(1).setMaxValue(127))
+                .addStringOption(opt => opt.setName('punishment').setDescription('Required for punishment').addChoices(
+                    ...PUNISHMENT_CHOICES, { name: 'Use default', value: 'default' }
+                )))
+            .addSubcommand(sub => sub.setName('antinuke-admin').setDescription('Manage AntiNuke configuration admins')
+                .addStringOption(opt => opt.setName('action').setDescription('Action').setRequired(true).addChoices(
+                    { name: 'Add', value: 'add' }, { name: 'Remove', value: 'remove' }, { name: 'List', value: 'list' }
+                )).addUserOption(opt => opt.setName('user').setDescription('User to add or remove')))
+            .addSubcommand(sub => sub.setName('antinuke-whitelist').setDescription('Manage users exempt from enforcement')
+                .addStringOption(opt => opt.setName('action').setDescription('Action').setRequired(true).addChoices(
+                    { name: 'Add', value: 'add' }, { name: 'Remove', value: 'remove' }, { name: 'List', value: 'list' }
+                )).addUserOption(opt => opt.setName('user').setDescription('User to add or remove')))
+            .addSubcommand(sub => sub.setName('antinuke-incidents').setDescription('View recent AntiNuke incidents')
+                .addIntegerOption(opt => opt.setName('limit').setDescription('Incidents to show').setMinValue(1).setMaxValue(25)))
+            .addSubcommand(sub => sub.setName('antinuke-log').setDescription('Configure AntiNuke incident logs')
+                .addStringOption(opt => opt.setName('action').setDescription('Action').setRequired(true).addChoices(
+                    { name: 'Set', value: 'set' }, { name: 'Clear', value: 'clear' }, { name: 'View', value: 'view' }
+                )).addChannelOption(opt => opt.setName('channel').setDescription('Log channel').addChannelTypes(ChannelType.GuildText))))
+        .addSubcommandGroup(group => group
             .setName('community')
             .setDescription('Community feature setup status')
             .addSubcommand(sub => sub
@@ -255,10 +452,18 @@ module.exports = {
         if (interaction.options.getSubcommandGroup(false) === 'permissions') {
             return require('./perm').autocomplete(interaction, client);
         }
+        if (interaction.options.getSubcommandGroup(false) === 'security'
+            && interaction.options.getFocused(true).name === 'module') {
+            const query = interaction.options.getFocused().toLowerCase();
+            return interaction.respond(MODULE_CHOICES
+                .filter(choice => choice.name.includes(query))
+                .slice(0, 25));
+        }
         return interaction.respond([]);
     },
 
     async execute(interaction, client) {
+        if (interaction.options.getSubcommandGroup(false) === 'security') return executeSecurity(interaction);
         return executeAliasCommand(interaction, client, aliasFor(interaction));
     }
 };

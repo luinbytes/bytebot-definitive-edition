@@ -213,6 +213,55 @@ const expectedSchema = {
         role_ids: 'TEXT NOT NULL',
         updated_at: 'INTEGER NOT NULL'
     },
+    antinuke_config: {
+        guild_id: 'TEXT PRIMARY KEY',
+        enabled: 'INTEGER DEFAULT 0 NOT NULL',
+        punishment: "TEXT DEFAULT 'strip' NOT NULL",
+        window_seconds: 'INTEGER DEFAULT 60 NOT NULL',
+        log_channel_id: 'TEXT'
+    },
+    antinuke_modules: {
+        guild_id: 'TEXT NOT NULL',
+        module: 'TEXT NOT NULL',
+        enabled: 'INTEGER DEFAULT 0 NOT NULL',
+        threshold: 'INTEGER DEFAULT 3 NOT NULL',
+        punishment: 'TEXT'
+    },
+    antinuke_admins: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        added_by: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    antinuke_whitelist: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        added_by: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    antinuke_actions: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        actor_id: 'TEXT NOT NULL',
+        module: 'TEXT NOT NULL',
+        audit_entry_id: 'TEXT NOT NULL',
+        consumed: 'INTEGER DEFAULT 0 NOT NULL',
+        occurred_at: 'INTEGER NOT NULL'
+    },
+    antinuke_incidents: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        actor_id: 'TEXT NOT NULL',
+        module: 'TEXT NOT NULL',
+        action_count: 'INTEGER NOT NULL',
+        punishment: 'TEXT NOT NULL',
+        status: 'TEXT NOT NULL',
+        applying_at: 'INTEGER',
+        applying_token: 'TEXT',
+        error: 'TEXT',
+        audit_entry_id: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
     moderation_templates: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
         guild_id: 'TEXT NOT NULL',
@@ -557,7 +606,12 @@ const compatibilityUniqueKeys = {
     lockdown_ignores: ['guild_id', 'channel_id'],
     lockdown_states: ['guild_id', 'channel_id'],
     forced_nicknames: ['guild_id', 'user_id'],
-    member_role_snapshots: ['guild_id', 'user_id']
+    member_role_snapshots: ['guild_id', 'user_id'],
+    antinuke_modules: ['guild_id', 'module'],
+    antinuke_admins: ['guild_id', 'user_id'],
+    antinuke_whitelist: ['guild_id', 'user_id'],
+    antinuke_actions: ['guild_id', 'audit_entry_id'],
+    antinuke_incidents: ['guild_id', 'audit_entry_id']
 };
 
 function hasUniqueKey(tableName, columns) {
@@ -712,10 +766,14 @@ function validateAndFixSchema() {
             }
 
             if (!existingColumns.includes(columnName)) {
-                // Add missing column (SQLite only supports simple ADD COLUMN)
-                const simpleType = columnType.split(' ')[0]; // Get just TEXT, INTEGER, etc.
+                // SQLite accepts constant defaults when adding columns; retain them so
+                // compatibility-created rows behave like migrated rows.
+                const simpleType = columnType.split(' ')[0];
+                const addType = columnType.includes('DEFAULT') && !columnType.includes('PRIMARY KEY')
+                    ? columnType
+                    : simpleType;
                 try {
-                    sqlite.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${simpleType}`);
+                    sqlite.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${addType}`);
                     fixes.push(`Added column: ${tableName}.${columnName}`);
                 } catch (e) {
                     // Column might already exist or other error - silently ignore duplicates

@@ -186,7 +186,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                 value:
                     '`/community` member progress, achievements, BytePods, and community features\n' +
                     '`/me` personal settings, reminders, bookmarks, birthdays, streaks\n' +
-                    '`/server` setup, stats, suggestions, welcome, starboard, achievements\n' +
+                    '`/server` setup, stats, suggestions, welcome, starboard, achievements, security\n' +
                     '`/pod` BytePod actions and settings\n' +
                     '`/mod` member actions, cases, invoke templates, setup, logs, and channel controls\n' +
                     '`/game` F1 and War Thunder\n' +
@@ -198,6 +198,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                 value:
                     '`/me reminder add` • `/me bookmark search` • `/pod panel`\n' +
                     '`/server suggestion submit` • `/server welcome setup`\n' +
+                    '`/server security antinuke-settings` • `/server security antinuke-module`\n' +
                     '`/server permissions disable` • `/server permissions denyperm` • `/server permissions protect`\n' +
                     '`/mod user warn` • `/mod case view` • `/mod config setup`\n' +
                     '`/mod template set` • `/game warthunder stats`\n' +
@@ -209,7 +210,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                 value:
                     'Greed source categories route through ByteBot\'s existing hubs as features land:\n' +
                     '`/community` Levels, Socials • `/me` Information, Utility\n' +
-                    '`/server` Auto, Logs, Server, Settings • `/mod` Moderation, Security\n' +
+                    '`/server` Auto, Logs, Security, Server, Settings • `/mod` Moderation\n' +
                     '`/fun` Fun, Manipulation, Roleplay, Snipe\n' +
                     '**Not yet available (planned):** Economy, LastFM, Voice\n' +
                     '**Registry-only evidence gaps:** Boosters, Developer, Music',

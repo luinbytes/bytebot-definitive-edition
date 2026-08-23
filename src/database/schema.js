@@ -126,6 +126,74 @@ const memberRoleSnapshots = sqliteTable('member_role_snapshots', {
     pk: primaryKey({ columns: [table.guildId, table.userId] }),
 }));
 
+const antinukeConfig = sqliteTable('antinuke_config', {
+    guildId: text('guild_id').primaryKey(),
+    enabled: integer('enabled', { mode: 'boolean' }).default(false).notNull(),
+    punishment: text('punishment').default('strip').notNull(),
+    windowSeconds: integer('window_seconds').default(60).notNull(),
+    logChannelId: text('log_channel_id'),
+});
+
+const antinukeModules = sqliteTable('antinuke_modules', {
+    guildId: text('guild_id').notNull(),
+    module: text('module').notNull(),
+    enabled: integer('enabled', { mode: 'boolean' }).default(false).notNull(),
+    threshold: integer('threshold').default(3).notNull(),
+    punishment: text('punishment'),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.guildId, table.module] }),
+}));
+
+const antinukeAdmins = sqliteTable('antinuke_admins', {
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    addedBy: text('added_by').notNull(),
+    createdAt: integer('created_at').notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.guildId, table.userId] }),
+}));
+
+const antinukeWhitelist = sqliteTable('antinuke_whitelist', {
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    addedBy: text('added_by').notNull(),
+    createdAt: integer('created_at').notNull(),
+}, (table) => ({
+    pk: primaryKey({ columns: [table.guildId, table.userId] }),
+}));
+
+const antinukeActions = sqliteTable('antinuke_actions', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    actorId: text('actor_id').notNull(),
+    module: text('module').notNull(),
+    auditEntryId: text('audit_entry_id').notNull(),
+    consumed: integer('consumed', { mode: 'boolean' }).default(false).notNull(),
+    occurredAt: integer('occurred_at').notNull(),
+}, (table) => ({
+    auditUnique: unique().on(table.guildId, table.auditEntryId),
+    windowIdx: index('antinuke_actions_window_idx').on(table.guildId, table.actorId, table.module, table.consumed, table.occurredAt),
+}));
+
+const antinukeIncidents = sqliteTable('antinuke_incidents', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    actorId: text('actor_id').notNull(),
+    module: text('module').notNull(),
+    actionCount: integer('action_count').notNull(),
+    punishment: text('punishment').notNull(),
+    status: text('status').notNull(),
+    applyingAt: integer('applying_at'),
+    applyingToken: text('applying_token'),
+    error: text('error'),
+    auditEntryId: text('audit_entry_id').notNull(),
+    createdAt: integer('created_at').notNull(),
+}, (table) => ({
+    auditUnique: unique().on(table.guildId, table.auditEntryId),
+    guildCreatedIdx: index('antinuke_incidents_guild_created_idx').on(table.guildId, table.createdAt),
+    statusIdx: index('antinuke_incidents_status_idx').on(table.status, table.id),
+}));
+
 const moderationTemplates = sqliteTable('moderation_templates', {
     id: integer('id').primaryKey({ autoIncrement: true }),
     guildId: text('guild_id').notNull(),
@@ -655,6 +723,12 @@ module.exports = {
     lockdownStates,
     forcedNicknames,
     memberRoleSnapshots,
+    antinukeConfig,
+    antinukeModules,
+    antinukeAdmins,
+    antinukeWhitelist,
+    antinukeActions,
+    antinukeIncidents,
     moderationTemplates,
     moderationStaffRoles,
     warningPunishments,
