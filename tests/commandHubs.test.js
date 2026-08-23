@@ -72,6 +72,7 @@ describe('Intent command hubs', () => {
             'permissions',
             'achievement',
             'streak',
+            'security',
             'community'
         ]));
 
@@ -122,6 +123,19 @@ describe('Intent command hubs', () => {
         expect(optionNames(findOption(command, 'achievement').options.find(option => option.name === 'enable').options)).toEqual([]);
         expect(optionNames(findOption(command, 'achievement').options.find(option => option.name === 'disable').options)).toEqual([]);
         expect(optionNames(findOption(command, 'community').options)).toEqual(['view']);
+        expect(optionNames(findOption(command, 'security').options)).toEqual([
+            'antinuke-settings',
+            'antinuke-toggle',
+            'antinuke-punishment',
+            'antinuke-window',
+            'antinuke-module',
+            'antinuke-admin',
+            'antinuke-whitelist',
+            'antinuke-incidents',
+            'antinuke-log'
+        ]);
+        const moduleOption = findOption(findOption(command, 'security').options.find(option => option.name === 'antinuke-module'), 'module');
+        expect(moduleOption.autocomplete).toBe(true);
     });
 
     test('pod and game hubs expose the accepted top-level areas', () => {

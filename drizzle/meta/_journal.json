@@ -120,6 +120,13 @@
       "when": 1787502000000,
       "tag": "0016_channel_role_moderation",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1787503000000,
+      "tag": "0017_antinuke",
+      "breakpoints": true
     }
   ]
 }

@@ -64,7 +64,7 @@ describe('database migrations', () => {
             'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)'
         );
         const migrations = readMigrationFiles({ migrationsFolder: './drizzle' });
-        migrations.slice(0, -4).forEach(migration => {
+        migrations.slice(0, -5).forEach(migration => {
             appliedMigration.run(migration.hash, migration.folderMillis);
         });
         seed.close();
@@ -154,6 +154,66 @@ describe('database migrations', () => {
 
         insert.run('first');
         expect(() => insert.run('duplicate')).toThrow();
+    });
+
+    test('antinuke state is guild-scoped and audit entries are idempotent', async () => {
+        database = require('../src/database');
+        await database.runMigrations();
+
+        const moduleInsert = database.sqlite.prepare(`
+            INSERT INTO antinuke_modules (guild_id, module) VALUES (?, 'ban')
+        `);
+        moduleInsert.run('guild1');
+        expect(() => moduleInsert.run('guild1')).toThrow();
+        expect(() => moduleInsert.run('guild2')).not.toThrow();
+
+        const actionInsert = database.sqlite.prepare(`
+            INSERT INTO antinuke_actions (guild_id, actor_id, module, audit_entry_id, occurred_at)
+            VALUES (?, 'actor1', 'ban', 'audit1', 1)
+        `);
+        actionInsert.run('guild1');
+        expect(() => actionInsert.run('guild1')).toThrow();
+        expect(() => actionInsert.run('guild2')).not.toThrow();
+    });
+
+    test('compatibility repair preserves the AntiNuke consumed default', async () => {
+        const seed = new Database(process.env.DATABASE_URL);
+        seed.exec(`
+            CREATE TABLE antinuke_actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id TEXT NOT NULL,
+                actor_id TEXT NOT NULL,
+                module TEXT NOT NULL,
+                audit_entry_id TEXT NOT NULL,
+                occurred_at INTEGER NOT NULL
+            );
+            CREATE TABLE __drizzle_migrations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                hash TEXT NOT NULL,
+                created_at NUMERIC
+            );
+            INSERT INTO antinuke_actions
+                (guild_id, actor_id, module, audit_entry_id, occurred_at)
+            VALUES ('guild1', 'actor1', 'ban', 'audit1', 1);
+        `);
+        const appliedMigration = seed.prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)');
+        readMigrationFiles({ migrationsFolder: './drizzle' }).forEach(migration => {
+            appliedMigration.run(migration.hash, migration.folderMillis);
+        });
+        seed.close();
+
+        database = require('../src/database');
+        await database.runMigrations();
+
+        const consumed = database.sqlite.prepare("PRAGMA table_info('antinuke_actions')").all()
+            .find(column => column.name === 'consumed');
+        expect(consumed).toEqual(expect.objectContaining({ notnull: 1, dflt_value: '0' }));
+        expect(database.sqlite.prepare("SELECT consumed FROM antinuke_actions WHERE audit_entry_id = 'audit1'").get().consumed).toBe(0);
+        database.sqlite.prepare(`
+            INSERT INTO antinuke_actions (guild_id, actor_id, module, audit_entry_id, occurred_at)
+            VALUES ('guild1', 'actor1', 'ban', 'audit2', 2)
+        `).run();
+        expect(database.sqlite.prepare("SELECT consumed FROM antinuke_actions WHERE audit_entry_id = 'audit2'").get().consumed).toBe(0);
     });
 
     test('moderation cases and configuration preserve guild-local numbering', async () => {

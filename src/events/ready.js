@@ -6,6 +6,7 @@ const { eq, and } = require('drizzle-orm');
 const { dbLog } = require('../utils/dbLogger');
 const { scheduleOwnershipTransfer } = require('./voiceStateUpdate');
 const { reconcileForcedNicknamesWithRetry } = require('../services/roleModerationService');
+const { recoverPendingIncidents } = require('../services/antinukeService');
 
 async function fetchDiscordResource(fetch, unknownCode) {
     try {
@@ -15,6 +16,21 @@ async function fetchDiscordResource(fetch, unknownCode) {
             return { resource: null, missing: true };
         }
         throw error;
+    }
+}
+
+async function recoverAntinuke(client) {
+    try {
+        const result = await recoverPendingIncidents(client);
+        if (result.recovered) logger.info(`AntiNuke incidents recovered: ${result.recovered}`);
+        result.failures.forEach(failure => logger.error(`AntiNuke recovery failed for ${failure}`));
+        if (result.remaining) {
+            logger.warn(`AntiNuke incidents still pending: ${result.remaining}`);
+            const timer = setTimeout(() => recoverAntinuke(client), Math.max(30000, result.retryAfterMs || 0));
+            timer.unref?.();
+        }
+    } catch (error) {
+        logger.error(`Failed to recover AntiNuke incidents on startup: ${error.message}`);
     }
 }
 
@@ -87,6 +103,8 @@ module.exports = {
     async execute(client) {
         logger.success(`Ready! Logged in as ${client.user.tag}`);
         logger.info(`Bot is active in ${client.guilds.cache.size} guilds.`);
+
+        await recoverAntinuke(client);
 
         reconcileForcedNicknamesWithRetry(client).then(result => {
             if (result.reconciled) logger.info(`Forced nicknames reconciled: ${result.reconciled}`);

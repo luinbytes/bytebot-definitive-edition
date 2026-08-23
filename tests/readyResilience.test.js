@@ -6,6 +6,7 @@ const mockDbLog = {
 };
 const mockRecordActivity = jest.fn();
 const mockScheduleOwnershipTransfer = jest.fn();
+const mockRecoverPendingIncidents = jest.fn().mockResolvedValue({ recovered: 0, remaining: 0, retryAfterMs: null, failures: [] });
 
 jest.mock('../src/database', () => ({ db: {} }));
 jest.mock('../src/utils/dbLogger', () => ({ dbLog: mockDbLog }));
@@ -29,6 +30,9 @@ jest.mock('../src/services/activityStreakService', () => jest.fn().mockImplement
 jest.mock('../src/events/voiceStateUpdate', () => ({
     scheduleOwnershipTransfer: mockScheduleOwnershipTransfer
 }));
+jest.mock('../src/services/antinukeService', () => ({
+    recoverPendingIncidents: mockRecoverPendingIncidents
+}));
 
 const ready = require('../src/events/ready');
 
@@ -47,6 +51,7 @@ describe('ready event recovery', () => {
         mockDbLog.insert.mockResolvedValue(undefined);
         mockDbLog.update.mockResolvedValue(undefined);
         mockDbLog.delete.mockResolvedValue(undefined);
+        mockRecoverPendingIncidents.mockResolvedValue({ recovered: 0, remaining: 0, retryAfterMs: null, failures: [] });
     });
 
     afterEach(() => jest.useRealTimers());
