@@ -185,6 +185,7 @@ module.exports = {
             .addSubcommand(sub => addCommandScope(sub.setName('enable').setDescription('Enable a command in a scope')))
             .addSubcommand(sub => addCommandScope(sub.setName('allow').setDescription('Allow a command only in a scope')))
             .addSubcommand(sub => addCommandScope(sub.setName('deny').setDescription('Deny a command in a scope')))
+            .addSubcommand(sub => addCommandScope(sub.setName('unrestrict').setDescription('Remove allow and deny rules in a scope')))
             .addSubcommand(sub => sub
                 .setName('fake')
                 .setDescription('Manage virtual permission labels')
@@ -195,6 +196,17 @@ module.exports = {
                     { name: 'Reset', value: 'reset' }
                 ))
                 .addRoleOption(opt => opt.setName('role').setDescription('Role'))
+                .addStringOption(opt => opt.setName('permissions').setDescription('Comma-separated Discord permission names')))
+            .addSubcommand(sub => sub
+                .setName('denyperm')
+                .setDescription('Block dangerous permissions on assigned roles')
+                .addStringOption(opt => opt.setName('action').setDescription('Action').setRequired(true).addChoices(
+                    { name: 'Add', value: 'add' },
+                    { name: 'Remove', value: 'remove' },
+                    { name: 'List blocked', value: 'list' },
+                    { name: 'List available', value: 'available' },
+                    { name: 'Clear', value: 'clear' }
+                ))
                 .addStringOption(opt => opt.setName('permission').setDescription('Discord permission name')))
             .addSubcommand(sub => sub
                 .setName('protect')

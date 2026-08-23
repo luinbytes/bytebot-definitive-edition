@@ -63,6 +63,15 @@ const fakePermissions = sqliteTable('fake_permissions', {
     guildRoleIdx: index('fake_permissions_guild_role_idx').on(table.guildId, table.roleId),
 }));
 
+const deniedRolePermissions = sqliteTable('denied_role_permissions', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    permission: text('permission').notNull(),
+}, (table) => ({
+    permissionUnique: unique().on(table.guildId, table.permission),
+    guildIdx: index('denied_role_permissions_guild_idx').on(table.guildId),
+}));
+
 const protectedTargets = sqliteTable('protected_targets', {
     id: integer('id').primaryKey({ autoIncrement: true }),
     guildId: text('guild_id').notNull(),
@@ -521,6 +530,7 @@ module.exports = {
     commandPermissions,
     commandAccessRules,
     fakePermissions,
+    deniedRolePermissions,
     protectedTargets,
     uwuLockMembers,
     bytepods,

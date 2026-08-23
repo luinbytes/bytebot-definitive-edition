@@ -96,6 +96,10 @@ describe('database migrations', () => {
             INSERT INTO protected_targets (guild_id, target_type, target_id)
             VALUES ('guild1', 'member', 'user1')
         `).run();
+        database.sqlite.prepare(`
+            INSERT INTO denied_role_permissions (guild_id, permission)
+            VALUES ('guild1', 'Administrator')
+        `).run();
 
         expect(() => database.sqlite.prepare(`
             INSERT INTO command_access_rules
@@ -109,6 +113,10 @@ describe('database migrations', () => {
         expect(() => database.sqlite.prepare(`
             INSERT INTO protected_targets (guild_id, target_type, target_id)
             VALUES ('guild1', 'member', 'user1')
+        `).run()).toThrow();
+        expect(() => database.sqlite.prepare(`
+            INSERT INTO denied_role_permissions (guild_id, permission)
+            VALUES ('guild1', 'Administrator')
         `).run()).toThrow();
     });
 });

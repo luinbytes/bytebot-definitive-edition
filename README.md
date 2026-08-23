@@ -75,7 +75,7 @@ await interaction.reply({ content: '...', flags: [MessageFlags.Ephemeral] });
 ```
 
 ### 4. Custom Permissions (RBAC)
-Admins use `/server permissions` to manage granular permissions. The group provides legacy role allowlists (`add`, `remove`), scoped rules (`disable`, `enable`, `allow`, `deny`), virtual permission labels (`fake`), protected moderation targets (`protect`), and inspect/reset paths (`list`, `reset`). See [`docs/features/command-access-controls.md`](docs/features/command-access-controls.md).
+Admins use `/server permissions` to manage granular permissions. The group provides legacy role allowlists (`add`, `remove`), scoped rules (`disable`, `enable`, `allow`, `deny`, `unrestrict`), virtual permission labels (`fake`), dangerous role-permission blocks (`denyperm`), protected moderation targets (`protect`), and inspect/reset paths (`list`, `reset`). See [`docs/features/command-access-controls.md`](docs/features/command-access-controls.md).
 
 ### 4. Visual Consistency & Branding
 Always use the `src/utils/embeds.js` utility for bot responses to maintain the "ByteBot Purple" theme.

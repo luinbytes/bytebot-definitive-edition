@@ -73,9 +73,10 @@ async function checkUserPermissions(interaction, command) {
             || (rule.scopeType === 'member' && rule.scopeId === (interaction.user?.id || interaction.member.id))
         );
 
-        if (rules.some(rule => ['disabled', 'deny'].includes(rule.effect) && matchesScope(rule))
-            || (rules.some(rule => rule.effect === 'allow')
-                && !rules.some(rule => rule.effect === 'allow' && matchesScope(rule)))) {
+        const allowMatch = rules.some(rule => rule.effect === 'allow' && matchesScope(rule));
+        if (rules.some(rule => rule.effect === 'deny' && matchesScope(rule))
+            || (rules.some(rule => rule.effect === 'disabled' && matchesScope(rule)) && !allowMatch)
+            || (rules.some(rule => rule.effect === 'allow') && !allowMatch)) {
             return {
                 allowed: false,
                 error: embeds.error('Access Denied', 'This command is disabled for you here.')

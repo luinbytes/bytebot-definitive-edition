@@ -22,6 +22,16 @@ CREATE UNIQUE INDEX `fake_permissions_guild_id_role_id_permission_unique` ON `fa
 --> statement-breakpoint
 CREATE INDEX `fake_permissions_guild_role_idx` ON `fake_permissions` (`guild_id`,`role_id`);
 --> statement-breakpoint
+CREATE TABLE `denied_role_permissions` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`guild_id` text NOT NULL,
+	`permission` text NOT NULL
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `denied_role_permissions_guild_id_permission_unique` ON `denied_role_permissions` (`guild_id`,`permission`);
+--> statement-breakpoint
+CREATE INDEX `denied_role_permissions_guild_idx` ON `denied_role_permissions` (`guild_id`);
+--> statement-breakpoint
 CREATE TABLE `protected_targets` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`guild_id` text NOT NULL,

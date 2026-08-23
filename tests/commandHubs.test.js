@@ -94,7 +94,9 @@ describe('Intent command hubs', () => {
             'enable',
             'allow',
             'deny',
+            'unrestrict',
             'fake',
+            'denyperm',
             'protect'
         ]);
         expect(findOption(findOption(command, 'permissions').options.find(option => option.name === 'add'), 'command').autocomplete).toBe(true);
@@ -102,7 +104,10 @@ describe('Intent command hubs', () => {
             'command', 'channel', 'role', 'member'
         ]);
         expect(optionNames(findOption(command, 'permissions').options.find(option => option.name === 'fake').options)).toEqual([
-            'action', 'role', 'permission'
+            'action', 'role', 'permissions'
+        ]);
+        expect(optionNames(findOption(command, 'permissions').options.find(option => option.name === 'denyperm').options)).toEqual([
+            'action', 'permission'
         ]);
         expect(optionNames(findOption(command, 'permissions').options.find(option => option.name === 'protect').options)).toEqual([
             'action', 'member', 'role'

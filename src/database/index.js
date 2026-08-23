@@ -165,6 +165,11 @@ const expectedSchema = {
         role_id: 'TEXT NOT NULL',
         permission: 'TEXT NOT NULL'
     },
+    denied_role_permissions: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        permission: 'TEXT NOT NULL'
+    },
     protected_targets: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
         guild_id: 'TEXT NOT NULL',

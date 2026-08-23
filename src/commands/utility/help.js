@@ -198,7 +198,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                 value:
                     '`/me reminder add` • `/me bookmark search` • `/pod panel`\n' +
                     '`/server suggestion submit` • `/server welcome setup`\n' +
-                    '`/server permissions disable` • `/server permissions protect`\n' +
+                    '`/server permissions disable` • `/server permissions denyperm` • `/server permissions protect`\n' +
                     '`/mod user warn` • `/game warthunder stats`\n' +
                     '`/fun uwuify` • `/fun uwulock add`',
                 inline: false

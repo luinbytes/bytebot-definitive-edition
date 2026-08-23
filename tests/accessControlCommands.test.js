@@ -37,6 +37,7 @@ describe('server command access controls', () => {
     let fun;
     let modActions;
     let checkUserPermissions;
+    let RoleManager;
     let client;
 
     beforeEach(async () => {
@@ -49,6 +50,7 @@ describe('server command access controls', () => {
         fun = require('../src/commands/fun/fun');
         modActions = require('../src/commands/context-menus/modactions');
         checkUserPermissions = require('../src/utils/permissions').checkUserPermissions;
+        RoleManager = require('../src/utils/discordApiUtil').RoleManager;
         client = { commands: new Collection([['fun', fun]]) };
     });
 
@@ -128,12 +130,13 @@ describe('server command access controls', () => {
         await server.execute(adminInteraction('fake', {
             action: 'add',
             role,
-            permission: 'banmembers'
+            permissions: 'banmembers, manageMessages'
         }), client);
 
         const list = adminInteraction('fake', { action: 'list' });
         await server.execute(list, client);
         expect(list.editReply.mock.calls[0][0].embeds[0].data.description).toContain('<@&role1>: `BanMembers`');
+        expect(list.editReply.mock.calls[0][0].embeds[0].data.description).toContain('<@&role1>: `ManageMessages`');
 
         const result = await checkUserPermissions({
             commandName: 'mod',
@@ -152,6 +155,95 @@ describe('server command access controls', () => {
 
         expect(result.allowed).toBe(false);
         expect(result.error.data.title).toContain('Insufficient Permissions');
+
+        await server.execute(adminInteraction('fake', { action: 'remove', role }), client);
+        const emptyList = adminInteraction('fake', { action: 'list' });
+        await server.execute(emptyList, client);
+        expect(emptyList.editReply.mock.calls[0][0].embeds[0].data.description).toContain('No virtual permission');
+    });
+
+    test('a matching allow rule punches through a disabled scope and can be removed', async () => {
+        await server.execute(adminInteraction('disable', { command: 'fun uwuify' }), client);
+        await server.execute(adminInteraction('disable', {
+            command: 'fun uwuify',
+            channel: { id: 'channel1', toString: () => '<#channel1>' }
+        }), client);
+        await server.execute(adminInteraction('allow', {
+            command: 'fun uwuify',
+            member: { id: 'user1', toString: () => '<@user1>' }
+        }), client);
+
+        const interaction = userId => ({
+            commandName: 'fun',
+            channelId: 'channel1',
+            guild: { id: 'guild1' },
+            user: { id: userId },
+            member: {
+                id: userId,
+                roles: { cache: new Map() },
+                permissions: { has: jest.fn().mockReturnValue(false) }
+            },
+            options: {
+                getSubcommandGroup: jest.fn().mockReturnValue(null),
+                getSubcommand: jest.fn().mockReturnValue('uwuify')
+            }
+        });
+
+        expect((await checkUserPermissions(interaction('user1'), fun)).allowed).toBe(true);
+        expect((await checkUserPermissions(interaction('user2'), fun)).allowed).toBe(false);
+
+        await server.execute(adminInteraction('unrestrict', {
+            command: 'fun uwuify',
+            member: { id: 'user1', toString: () => '<@user1>' }
+        }), client);
+        expect((await checkUserPermissions(interaction('user1'), fun)).allowed).toBe(false);
+
+        await server.execute(adminInteraction('enable', { command: 'fun uwuify' }), client);
+        expect((await checkUserPermissions(interaction('user2'), fun)).allowed).toBe(true);
+    });
+
+    test('denyperm blocks assignment of roles carrying a configured permission', async () => {
+        await server.execute(adminInteraction('denyperm', {
+            action: 'add',
+            permission: 'administrator'
+        }), client);
+
+        const list = adminInteraction('denyperm', { action: 'list' });
+        await server.execute(list, client);
+        expect(list.editReply.mock.calls[0][0].embeds[0].data.description).toContain('Administrator');
+
+        const add = jest.fn();
+        const member = {
+            user: { tag: 'Target' },
+            guild: {
+                id: 'guild1',
+                members: { me: { roles: { highest: { position: 10 } } } },
+                roles: { cache: new Map() }
+            },
+            roles: { cache: new Map(), add }
+        };
+        const role = {
+            id: 'admin-role',
+            name: 'Admin',
+            position: 1,
+            permissions: { has: permission => permission === PermissionFlagsBits.Administrator }
+        };
+        const result = await RoleManager.addRole(member, role);
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('blocked permission');
+        expect(add).not.toHaveBeenCalled();
+
+        const available = adminInteraction('denyperm', { action: 'available' });
+        await server.execute(available, client);
+        expect(available.editReply.mock.calls[0][0].embeds[0].data.description).toContain('Administrator');
+
+        await server.execute(adminInteraction('denyperm', {
+            action: 'remove',
+            permission: 'Administrator'
+        }), client);
+        expect((await RoleManager.addRole(member, role)).success).toBe(true);
+        expect(add).toHaveBeenCalledTimes(1);
     });
 
     test('protected members and roles are blocked on the public moderation menu', async () => {

@@ -12,6 +12,12 @@ jest.mock('../src/database', () => ({
         insert: jest.fn().mockReturnValue({
             values: jest.fn().mockResolvedValue({})
         })
+    },
+    sqlite: {
+        prepare: jest.fn().mockReturnValue({
+            get: jest.fn().mockReturnValue(undefined),
+            all: jest.fn().mockReturnValue([])
+        })
     }
 }));
 
