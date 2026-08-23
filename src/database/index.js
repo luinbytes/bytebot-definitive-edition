@@ -145,6 +145,68 @@ const expectedSchema = {
         reason: 'TEXT',
         timestamp: 'INTEGER'
     },
+    moderation_cases: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        case_number: 'INTEGER NOT NULL',
+        target_id: 'TEXT NOT NULL',
+        executor_id: 'TEXT NOT NULL',
+        action: 'TEXT NOT NULL',
+        reason: 'TEXT',
+        status: 'TEXT NOT NULL',
+        duration_ms: 'INTEGER',
+        metadata: 'TEXT',
+        created_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL',
+        undone_by: 'TEXT',
+        undo_reason: 'TEXT'
+    },
+    moderation_config: {
+        guild_id: 'TEXT PRIMARY KEY',
+        next_case_number: 'INTEGER DEFAULT 1 NOT NULL',
+        log_channel_id: 'TEXT',
+        image_mute_role_id: 'TEXT',
+        reaction_mute_role_id: 'TEXT',
+        jail_role_id: 'TEXT',
+        jail_channel_id: 'TEXT',
+        managed_resources: 'TEXT',
+        setup_status: 'TEXT'
+    },
+    moderation_hardbans: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        case_number: 'INTEGER NOT NULL',
+        reason: 'TEXT',
+        state: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    moderation_jail_state: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        case_number: 'INTEGER NOT NULL',
+        previous_role_ids: 'TEXT NOT NULL',
+        state: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    moderation_templates: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        action: 'TEXT NOT NULL',
+        message_type: 'TEXT NOT NULL',
+        template: 'TEXT NOT NULL'
+    },
+    moderation_staff_roles: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        role_id: 'TEXT NOT NULL'
+    },
+    warning_punishments: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        threshold: 'INTEGER NOT NULL',
+        action: 'TEXT NOT NULL',
+        duration_ms: 'INTEGER'
+    },
     command_permissions: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
         guild_id: 'TEXT NOT NULL',

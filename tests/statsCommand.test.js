@@ -35,12 +35,16 @@ describe('/stats server', () => {
                 activity_date TEXT NOT NULL,
                 commands_run INTEGER DEFAULT 0 NOT NULL
             );
-            CREATE TABLE moderation_logs (
+            CREATE TABLE moderation_cases (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 guild_id TEXT NOT NULL,
+                case_number INTEGER NOT NULL,
                 target_id TEXT NOT NULL,
                 executor_id TEXT NOT NULL,
-                action TEXT NOT NULL
+                action TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
             );
             CREATE TABLE bytepods (
                 channel_id TEXT PRIMARY KEY,

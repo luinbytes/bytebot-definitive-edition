@@ -11,6 +11,7 @@ A highly modular, scalable, and future-proof Discord bot boilerplate built with 
 -   **Persistence with Drizzle ORM**: Integrated SQLite database for guild settings and persistent data.
 -   **Dynamic Testing**: Automated structural integrity audits and utility verification via Jest.
 -   **Hardened Security**: Built-in cooldowns, permission checks, role-based access control (RBAC), and DM-to-Guild protection.
+-   **Case-backed Moderation**: Action-specific Discord permissions, protected targets, setup-owned mute/jail roles, warning escalation, hardbans, history, recovery, and invoke templates under `/mod`.
 
 ## Project Structure
 
@@ -76,6 +77,8 @@ await interaction.reply({ content: '...', flags: [MessageFlags.Ephemeral] });
 
 ### 4. Custom Permissions (RBAC)
 Admins use `/server permissions` to manage granular permissions. The group provides legacy role allowlists (`add`, `remove`), scoped rules (`disable`, `enable`, `allow`, `deny`, `unrestrict`), virtual permission labels (`fake`), dangerous role-permission blocks (`denyperm`), protected moderation targets (`protect`), and inspect/reset paths (`list`, `reset`). See [`docs/features/command-access-controls.md`](docs/features/command-access-controls.md).
+
+Moderators use `/mod` for member actions, guild-local cases and history, invoke templates, warning punishments, and owned setup/reset. See [`docs/features/moderation-workflow.md`](docs/features/moderation-workflow.md).
 
 ### 4. Visual Consistency & Branding
 Always use the `src/utils/embeds.js` utility for bot responses to maintain the "ByteBot Purple" theme.

@@ -4,8 +4,7 @@
  */
 
 const { PermissionFlagsBits } = require('discord.js');
-const { db, sqlite } = require('../database');
-const { moderationLogs } = require('../database/schema');
+const { sqlite } = require('../database');
 const logger = require('./logger');
 const embeds = require('./embeds');
 const { handleDMError } = require('./errorHandlerUtil');
@@ -20,14 +19,8 @@ const { handleDMError } = require('./errorHandlerUtil');
  * @returns {Promise<void>}
  */
 async function logModerationAction(guildId, targetId, executorId, action, reason) {
-    await db.insert(moderationLogs).values({
-        guildId,
-        targetId,
-        executorId,
-        action,
-        reason,
-        timestamp: new Date()
-    });
+    // Lazy require avoids the service/util cycle while keeping one case allocator.
+    require('../services/moderationService').recordCompletedCase({ guildId, targetId, executorId, action, reason });
 
     logger.info(`Moderation action logged: ${action} on ${targetId} by ${executorId} in ${guildId} - Reason: ${reason}`);
 }
@@ -137,7 +130,7 @@ function validateHierarchy(executor, target) {
     const protection = validateProtectedTarget(target.guild.id, target.id, target.roles.cache?.keys() || []);
     if (!protection.valid) return protection;
 
-    // Role hierarchy check (administrators bypass this)
+    // Administrators bypass actor hierarchy, never the bot's hierarchy.
     if (!executor.permissions.has(PermissionFlagsBits.Administrator)) {
         if (executor.roles.highest.position <= target.roles.highest.position) {
             return {
@@ -146,14 +139,14 @@ function validateHierarchy(executor, target) {
             };
         }
 
-        // Bot must also have higher role
-        const botMember = target.guild.members.me;
-        if (botMember.roles.highest.position <= target.roles.highest.position) {
-            return {
-                valid: false,
-                error: 'I cannot moderate this user. They have a higher or equal role than me.'
-            };
-        }
+    }
+
+    const botMember = target.guild.members.me;
+    if (botMember.roles.highest.position <= target.roles.highest.position) {
+        return {
+            valid: false,
+            error: 'I cannot moderate this user. They have a higher or equal role than me.'
+        };
     }
 
     return { valid: true };

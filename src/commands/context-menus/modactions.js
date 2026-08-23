@@ -1,9 +1,8 @@
 const { ContextMenuCommandBuilder, ApplicationCommandType, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, PermissionFlagsBits } = require('discord.js');
 const embeds = require('../../utils/embeds');
-const { db } = require('../../database');
-const { moderationLogs } = require('../../database/schema');
-const { eq, and, desc } = require('drizzle-orm');
-const { executeModerationAction, validateHierarchy, validateProtectedTarget } = require('../../utils/moderationUtil');
+const { sqlite } = require('../../database');
+const { validateHierarchy, validateProtectedTarget } = require('../../utils/moderationUtil');
+const { executeMemberAction, executeUserAction } = require('../../services/moderationService');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { fetchMember } = require('../../utils/discordApiUtil');
 
@@ -13,7 +12,7 @@ module.exports = {
         .setType(ApplicationCommandType.User)
         .setDMPermission(false), // Guild only
 
-    permissions: [PermissionFlagsBits.ManageMessages], // Require mod permissions
+    permissions: [PermissionFlagsBits.ModerateMembers],
     cooldown: 3,
 
     async execute(interaction, client) {
@@ -51,13 +50,15 @@ module.exports = {
                     .setLabel('Kick')
                     .setStyle(ButtonStyle.Danger)
                     .setEmoji('👢')
-                    .setDisabled(!interaction.guild.members.me.permissions.has(PermissionFlagsBits.KickMembers)),
+                    .setDisabled(!executor.permissions.has(PermissionFlagsBits.KickMembers)
+                        || !interaction.guild.members.me.permissions.has(PermissionFlagsBits.KickMembers)),
                 new ButtonBuilder()
                     .setCustomId(`mod_ban_${target.id}`)
                     .setLabel('Ban')
                     .setStyle(ButtonStyle.Danger)
                     .setEmoji('🔨')
-                    .setDisabled(!interaction.guild.members.me.permissions.has(PermissionFlagsBits.BanMembers)),
+                    .setDisabled(!executor.permissions.has(PermissionFlagsBits.BanMembers)
+                        || !interaction.guild.members.me.permissions.has(PermissionFlagsBits.BanMembers)),
                 new ButtonBuilder()
                     .setCustomId(`mod_history_${target.id}`)
                     .setLabel('History')
@@ -132,7 +133,19 @@ module.exports = {
         const executor = interaction.member;
 
         // Re-validate hierarchy (user might have left or role changed)
-        const targetMember = await fetchMember(guild, userId, { logContext: 'modactions-revalidate' });
+        let targetMember;
+        try {
+            targetMember = await fetchMember(guild, userId, {
+                logContext: 'modactions-revalidate',
+                cache: false,
+                force: true,
+                throwOnError: true
+            });
+        } catch (error) {
+            return interaction.editReply({
+                embeds: [embeds.error('Moderation Check Failed', 'I could not safely re-check this member. Try again.')]
+            });
+        }
 
         if (!targetMember && action !== 'ban') {
             return interaction.editReply({
@@ -152,32 +165,40 @@ module.exports = {
         }
 
         try {
+            const permission = {
+                warn: PermissionFlagsBits.ModerateMembers,
+                kick: PermissionFlagsBits.KickMembers,
+                ban: PermissionFlagsBits.BanMembers
+            }[action];
+            if (!executor.permissions.has(permission)) {
+                return interaction.editReply({ embeds: [embeds.error('Insufficient Permissions', 'Your Discord permissions no longer allow this action.')] });
+            }
+
             switch (action) {
                 case 'warn':
-                    // Execute moderation action (log + notify)
-                    await executeModerationAction({
-                        guildId: guild.id,
-                        guildName: guild.name,
-                        target,
+                {
+                    const moderationCase = await executeMemberAction({
+                        guild,
+                        target: targetMember,
                         executor,
                         action: 'WARN',
                         reason
                     });
 
                     return interaction.editReply({
-                        embeds: [embeds.success('User Warned', `${target.tag} has been warned.\n\n**Reason:** ${reason}`)]
+                        embeds: [moderationCase.punishmentError
+                            ? embeds.warn('User Warned; Punishment Failed', `${target.tag} was warned, but automatic punishment failed: ${moderationCase.punishmentError}`)
+                            : embeds.success('User Warned', `${target.tag} has been warned.\n\n**Reason:** ${reason}`)]
                     });
+                }
 
                 case 'kick':
-                    // Execute moderation action (log + notify)
-                    await executeModerationAction({
-                        guildId: guild.id,
-                        guildName: guild.name,
-                        target,
+                    await executeMemberAction({
+                        guild,
+                        target: targetMember,
                         executor,
                         action: 'KICK',
-                        reason,
-                        perform: () => targetMember.kick(reason)
+                        reason
                     });
 
                     return interaction.editReply({
@@ -185,16 +206,11 @@ module.exports = {
                     });
 
                 case 'ban':
-                    // Execute moderation action (log + notify)
-                    await executeModerationAction({
-                        guildId: guild.id,
-                        guildName: guild.name,
-                        target,
-                        executor,
-                        action: 'BAN',
-                        reason,
-                        perform: () => guild.members.ban(userId, { reason, deleteMessageSeconds: 0 })
-                    });
+                    if (targetMember) {
+                        await executeMemberAction({ guild, target: targetMember, executor, action: 'BAN', reason });
+                    } else {
+                        await executeUserAction({ guild, targetId: userId, targetUser: target, executor, action: 'BAN', reason });
+                    }
 
                     return interaction.editReply({
                         embeds: [embeds.success('User Banned', `${target.tag} has been banned from the server.\n\n**Reason:** ${reason}`)]
@@ -235,15 +251,10 @@ async function showReasonModal(interaction, userId, action, title) {
 async function showHistory(interaction, userId) {
     await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
-    const logs = await db.select()
-        .from(moderationLogs)
-        .where(and(
-            eq(moderationLogs.guildId, interaction.guild.id),
-            eq(moderationLogs.targetId, userId)
-        ))
-        .orderBy(desc(moderationLogs.timestamp))
-        .limit(10)
-        .all();
+    const logs = sqlite.prepare(`
+        SELECT * FROM moderation_cases WHERE guild_id = ? AND target_id = ?
+        ORDER BY case_number DESC LIMIT 10
+    `).all(interaction.guild.id, userId);
 
     if (logs.length === 0) {
         return interaction.editReply({
@@ -257,7 +268,7 @@ async function showHistory(interaction, userId) {
     );
 
     for (const log of logs) {
-        const timestamp = Math.floor(new Date(log.timestamp).getTime() / 1000);
+        const timestamp = Math.floor(log.created_at / 1000);
         const actionEmoji = {
             'WARN': '⚠️',
             'KICK': '👢',
@@ -266,8 +277,8 @@ async function showHistory(interaction, userId) {
         };
 
         historyEmbed.addFields({
-            name: `${actionEmoji[log.action] || '•'} ${log.action} - <t:${timestamp}:R>`,
-            value: `**By:** <@${log.executorId}>\n**Reason:** ${log.reason || '*No reason provided*'}`,
+            name: `${actionEmoji[log.action] || '•'} #${log.case_number} ${log.action} (${log.status}) - <t:${timestamp}:R>`,
+            value: `**By:** <@${log.executor_id}>\n**Reason:** ${log.reason || '*No reason provided*'}`,
             inline: false
         });
     }

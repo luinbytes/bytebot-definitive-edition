@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, ChannelType, MessageFlags } = require('discord.js');
 const { db } = require('../../database');
-const { activityLogs, moderationLogs, bytepods, bytepodVoiceStats } = require('../../database/schema');
+const { activityLogs, moderationCases, bytepods, bytepodVoiceStats } = require('../../database/schema');
 const { eq, sql, desc } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
@@ -76,7 +76,7 @@ module.exports = {
             // Moderation actions count
             const modStats = await db.select({
                 totalActions: sql`COUNT(*)`
-            }).from(moderationLogs).where(eq(moderationLogs.guildId, guild.id)).get();
+            }).from(moderationCases).where(eq(moderationCases.guildId, guild.id)).get();
 
             const totalModActions = modStats?.totalActions || 0;
 

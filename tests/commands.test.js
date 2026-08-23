@@ -86,9 +86,21 @@ describe('Grouped Slash Command Appearance', () => {
 
     test('moderation command uses intent groups instead of a flat action list', () => {
         expectGroups('src/commands/moderation/mod.js', {
-            user: ['ban', 'kick', 'warn', 'unwarn', 'history'],
-            logs: ['recent', 'by-moderator'],
-            channel: ['clear', 'lock', 'unlock']
+            user: [
+                'ban', 'kick', 'timeout', 'untimeout', 'softban', 'hardban', 'unban',
+                'imute', 'iunmute', 'rmute', 'runmute', 'jail', 'unjail', 'warn',
+                'unwarn', 'warn-clear', 'strip', 'staffstrip', 'history'
+            ],
+            status: ['hardbans', 'jailed', 'image-muted', 'reaction-muted', 'timeouts', 'warnings'],
+            bulk: ['unban-all', 'untimeout-all', 'unjail-all'],
+            logs: ['recent', 'by-moderator', 'audit'],
+            channel: ['clear', 'lock', 'unlock'],
+            case: ['view', 'undo', 'reset'],
+            template: ['set', 'remove', 'view', 'reset', 'list', 'test', 'variables'],
+            config: [
+                'view', 'setup', 'reset', 'modlog', 'imuted', 'rmuted', 'jail',
+                'staff-add', 'staff-remove', 'staff-list', 'warn-add', 'warn-remove', 'warn-list'
+            ]
         });
     });
 });

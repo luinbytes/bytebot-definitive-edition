@@ -7,7 +7,6 @@ const {
     honeypotExemptRoles,
     honeypotExemptUsers,
     honeypotIncidents,
-    moderationLogs
 } = require('../database/schema');
 const embeds = require('./embeds');
 const logger = require('./logger');
@@ -155,13 +154,12 @@ async function writeIncident(message, status, snippet, attachmentSummary, failur
 }
 
 async function writeModerationLog(message, reason) {
-    await db.insert(moderationLogs).values({
+    require('../services/moderationService').recordCompletedCase({
         guildId: message.guild.id,
         targetId: message.author.id,
         executorId: message.client.user.id,
         action: 'BAN',
-        reason,
-        timestamp: new Date()
+        reason
     });
 }
 

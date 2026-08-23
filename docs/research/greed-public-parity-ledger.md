@@ -83,6 +83,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | --- | --- | --- | --- |
 | `uwuify`; `uwulock add/remove/list`; `uwulock protect add/remove/list` | #35 | Advances the live Fun/Utility and pinned `fun`/`utility` rows; each remains `partial` because other mapped issues are still open. | `tests/uwuLock.test.js`, `tests/uwuLockCommands.test.js`, `tests/uwuLockReplay.test.js`, and `tests/databaseMigrations.test.js` |
 | Command disable/enable/whitelist, allow/deny/unrestrict, fake permissions, blocked role permissions, and protected moderation targets | #36 | Advances the live Settings/Moderation and pinned `settings`/`moderation` rows; each remains `partial` because other mapped issues are still open. | `tests/accessControlCommands.test.js`, `tests/permissions.test.js`, and `tests/databaseMigrations.test.js` |
+| Core member moderation, setup, cases/history, hardban enforcement, invoke templates, staff roles, and warning punishments | #37 | Advances live Moderation/Logs/Settings and pinned `moderation`/`logs`/`settings`; each remains `partial` because #38 and other mapped issues remain open. | `tests/moderationWorkflow.test.js`, `tests/moderationHistory.test.js`, `tests/moderationUtil.test.js`, and `tests/databaseMigrations.test.js` |
 
 ## Update rule
 
