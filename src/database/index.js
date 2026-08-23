@@ -151,6 +151,26 @@ const expectedSchema = {
         command_name: 'TEXT NOT NULL',
         role_id: 'TEXT NOT NULL'
     },
+    command_access_rules: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        command_path: 'TEXT NOT NULL',
+        effect: 'TEXT NOT NULL',
+        scope_type: 'TEXT NOT NULL',
+        scope_id: 'TEXT NOT NULL'
+    },
+    fake_permissions: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        role_id: 'TEXT NOT NULL',
+        permission: 'TEXT NOT NULL'
+    },
+    protected_targets: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        target_type: 'TEXT NOT NULL',
+        target_id: 'TEXT NOT NULL'
+    },
     uwu_lock_members: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
         guild_id: 'TEXT NOT NULL',

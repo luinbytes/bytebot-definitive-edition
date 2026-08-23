@@ -1,6 +1,6 @@
 const { ApplicationCommandOptionType, SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const { db } = require('../../database/index');
-const { commandPermissions } = require('../../database/schema');
+const { commandPermissions, commandAccessRules, fakePermissions, protectedTargets } = require('../../database/schema');
 const embeds = require('../../utils/embeds');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { eq, and } = require('drizzle-orm');
@@ -85,6 +85,8 @@ module.exports = {
         const subcommand = interaction.options.getSubcommand();
         const commandName = interaction.options.getString('command')?.trim().replace(/\s+/g, ' ');
         const role = interaction.options.getRole('role');
+        const channel = interaction.options.getChannel?.('channel');
+        const member = interaction.options.getUser?.('member');
 
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
@@ -96,6 +98,220 @@ module.exports = {
                         embeds: [embeds.error('Invalid Command', `The command \`${commandName}\` does not exist.`)]
                     });
                 }
+            }
+
+            if (subcommand === 'fake') {
+                const action = interaction.options.getString('action');
+                const permissionInput = interaction.options.getString('permission')?.trim();
+                const permission = permissionInput && Object.keys(PermissionFlagsBits)
+                    .find(name => name.toLowerCase() === permissionInput.toLowerCase());
+
+                if (['add', 'remove'].includes(action) && (!role || !permissionInput)) {
+                    return interaction.editReply({
+                        embeds: [embeds.error('Missing Options', 'Add and remove require both a role and permission.')]
+                    });
+                }
+                if (permissionInput && !permission) {
+                    return interaction.editReply({
+                        embeds: [embeds.error('Invalid Permission', `\`${permissionInput}\` is not a Discord permission name.`)]
+                    });
+                }
+                if (action === 'reset' && !role) {
+                    return interaction.editReply({
+                        embeds: [embeds.error('Missing Role', 'Reset requires a role.')]
+                    });
+                }
+
+                if (action === 'add') {
+                    await dbLog.insert('fakePermissions',
+                        () => db.insert(fakePermissions).values({
+                            guildId: interaction.guild.id,
+                            roleId: role.id,
+                            permission
+                        }).onConflictDoNothing(),
+                        { guildId: interaction.guild.id, roleId: role.id, permission }
+                    );
+                    return interaction.editReply({
+                        embeds: [embeds.success('Fake Permission Added', `${role} now has the virtual label \`${permission}\`.`)]
+                    });
+                }
+
+                if (action === 'remove') {
+                    await dbLog.delete('fakePermissions',
+                        () => db.delete(fakePermissions).where(and(
+                            eq(fakePermissions.guildId, interaction.guild.id),
+                            eq(fakePermissions.roleId, role.id),
+                            eq(fakePermissions.permission, permission)
+                        )),
+                        { guildId: interaction.guild.id, roleId: role.id, permission }
+                    );
+                    return interaction.editReply({
+                        embeds: [embeds.success('Fake Permission Removed', `${role} no longer has the virtual label \`${permission}\`.`)]
+                    });
+                }
+
+                if (action === 'reset') {
+                    await dbLog.delete('fakePermissions',
+                        () => db.delete(fakePermissions).where(and(
+                            eq(fakePermissions.guildId, interaction.guild.id),
+                            eq(fakePermissions.roleId, role.id)
+                        )),
+                        { guildId: interaction.guild.id, roleId: role.id }
+                    );
+                    return interaction.editReply({
+                        embeds: [embeds.success('Fake Permissions Reset', `Virtual permission labels for ${role} were cleared.`)]
+                    });
+                }
+
+                const labels = await dbLog.select('fakePermissions',
+                    () => db.select().from(fakePermissions).where(role
+                        ? and(
+                            eq(fakePermissions.guildId, interaction.guild.id),
+                            eq(fakePermissions.roleId, role.id)
+                        )
+                        : eq(fakePermissions.guildId, interaction.guild.id)),
+                    { guildId: interaction.guild.id, roleId: role?.id }
+                );
+                const description = labels.length
+                    ? labels.map(label => `<@&${label.roleId}>: \`${label.permission}\``).join('\n')
+                    : 'No virtual permission labels are configured.';
+                return interaction.editReply({
+                    embeds: [embeds.info('Fake Permissions', description)]
+                });
+            }
+
+            if (subcommand === 'protect') {
+                const action = interaction.options.getString('action');
+                const targets = [
+                    member && { type: 'member', id: member.id, label: `${member}` },
+                    role && { type: 'role', id: role.id, label: `${role}` }
+                ].filter(Boolean);
+
+                if (targets.length > 1 || (action !== 'list' && targets.length !== 1)) {
+                    return interaction.editReply({
+                        embeds: [embeds.error('Invalid Target', 'Choose exactly one member or role for add and remove.')]
+                    });
+                }
+
+                if (action === 'list') {
+                    const protectedRows = await dbLog.select('protectedTargets',
+                        () => db.select().from(protectedTargets)
+                            .where(eq(protectedTargets.guildId, interaction.guild.id)),
+                        { guildId: interaction.guild.id }
+                    );
+                    const description = protectedRows.length
+                        ? protectedRows.map(target => target.targetType === 'member'
+                            ? `<@${target.targetId}> (member)`
+                            : `<@&${target.targetId}> (role)`).join('\n')
+                        : 'No members or roles are protected from moderation.';
+                    return interaction.editReply({
+                        embeds: [embeds.info('Protected Targets', description)]
+                    });
+                }
+
+                const target = targets[0];
+                if (action === 'add') {
+                    await dbLog.insert('protectedTargets',
+                        () => db.insert(protectedTargets).values({
+                            guildId: interaction.guild.id,
+                            targetType: target.type,
+                            targetId: target.id
+                        }).onConflictDoNothing(),
+                        { guildId: interaction.guild.id, targetId: target.id }
+                    );
+                    return interaction.editReply({
+                        embeds: [embeds.success('Target Protected', `${target.label} is protected from moderation.`)]
+                    });
+                }
+
+                await dbLog.delete('protectedTargets',
+                    () => db.delete(protectedTargets).where(and(
+                        eq(protectedTargets.guildId, interaction.guild.id),
+                        eq(protectedTargets.targetType, target.type),
+                        eq(protectedTargets.targetId, target.id)
+                    )),
+                    { guildId: interaction.guild.id, targetId: target.id }
+                );
+                return interaction.editReply({
+                    embeds: [embeds.success('Protection Removed', `${target.label} is no longer protected from moderation.`)]
+                });
+            }
+
+            if (['disable', 'enable', 'allow', 'deny'].includes(subcommand)) {
+                const targets = [
+                    channel && { type: 'channel', id: channel.id, label: `${channel}` },
+                    role && { type: 'role', id: role.id, label: `${role}` },
+                    member && { type: 'member', id: member.id, label: `${member}` }
+                ].filter(Boolean);
+                if (targets.length > 1) {
+                    return interaction.editReply({
+                        embeds: [embeds.error('Invalid Scope', 'Choose at most one channel, role, or member.')]
+                    });
+                }
+                const scope = targets[0] || {
+                    type: 'guild',
+                    id: interaction.guild.id,
+                    label: 'this server'
+                };
+
+                if (subcommand === 'disable') {
+                    await dbLog.insert('commandAccessRules',
+                        () => db.insert(commandAccessRules).values({
+                            guildId: interaction.guild.id,
+                            commandPath: commandName,
+                            effect: 'disabled',
+                            scopeType: scope.type,
+                            scopeId: scope.id
+                        }).onConflictDoNothing(),
+                        { guildId: interaction.guild.id, commandName }
+                    );
+                    return interaction.editReply({
+                        embeds: [embeds.success('Command Disabled', `\`/${commandName}\` is disabled in ${scope.label}.`)]
+                    });
+                }
+
+                if (subcommand === 'allow' || subcommand === 'deny') {
+                    await dbLog.insert('commandAccessRules',
+                        () => db.insert(commandAccessRules).values({
+                            guildId: interaction.guild.id,
+                            commandPath: commandName,
+                            effect: subcommand,
+                            scopeType: scope.type,
+                            scopeId: scope.id
+                        }).onConflictDoNothing(),
+                        { guildId: interaction.guild.id, commandName }
+                    );
+                    await dbLog.delete('commandAccessRules',
+                        () => db.delete(commandAccessRules).where(and(
+                            eq(commandAccessRules.guildId, interaction.guild.id),
+                            eq(commandAccessRules.commandPath, commandName),
+                            eq(commandAccessRules.effect, subcommand === 'allow' ? 'deny' : 'allow'),
+                            eq(commandAccessRules.scopeType, scope.type),
+                            eq(commandAccessRules.scopeId, scope.id)
+                        )),
+                        { guildId: interaction.guild.id, commandName }
+                    );
+                    return interaction.editReply({
+                        embeds: [embeds.success(
+                            subcommand === 'allow' ? 'Command Allowed' : 'Command Denied',
+                            `\`/${commandName}\` is ${subcommand}ed for ${scope.label}.`
+                        )]
+                    });
+                }
+
+                await dbLog.delete('commandAccessRules',
+                    () => db.delete(commandAccessRules).where(and(
+                        eq(commandAccessRules.guildId, interaction.guild.id),
+                        eq(commandAccessRules.commandPath, commandName),
+                        eq(commandAccessRules.effect, 'disabled'),
+                        eq(commandAccessRules.scopeType, scope.type),
+                        eq(commandAccessRules.scopeId, scope.id)
+                    )),
+                    { guildId: interaction.guild.id, commandName }
+                );
+                return interaction.editReply({
+                    embeds: [embeds.success('Command Enabled', `\`/${commandName}\` is enabled in ${scope.label}.`)]
+                });
             }
 
             if (subcommand === 'add') {
@@ -159,6 +375,13 @@ module.exports = {
                         )),
                     { guildId: interaction.guild.id, commandName }
                 );
+                await dbLog.delete('commandAccessRules',
+                    () => db.delete(commandAccessRules).where(and(
+                        eq(commandAccessRules.guildId, interaction.guild.id),
+                        eq(commandAccessRules.commandPath, commandName)
+                    )),
+                    { guildId: interaction.guild.id, commandName }
+                );
 
                 return interaction.editReply({
                     embeds: [embeds.success('Permissions Reset', `Custom permissions for \`/${commandName}\` have been cleared. Default bot permissions apply.`)]
@@ -170,8 +393,13 @@ module.exports = {
                         .where(eq(commandPermissions.guildId, interaction.guild.id)),
                     { guildId: interaction.guild.id }
                 );
+                const rules = await dbLog.select('commandAccessRules',
+                    () => db.select().from(commandAccessRules)
+                        .where(eq(commandAccessRules.guildId, interaction.guild.id)),
+                    { guildId: interaction.guild.id }
+                );
 
-                if (perms.length === 0) {
+                if (perms.length === 0 && rules.length === 0) {
                     return interaction.editReply({
                         embeds: [embeds.info('No Custom Permissions', 'This server checks default bot permissions for all commands.')]
                     });
@@ -184,9 +412,22 @@ module.exports = {
                     return acc;
                 }, {});
 
-                const description = Object.entries(grouped).map(([cmd, roles]) => {
+                const roleLines = Object.entries(grouped).map(([cmd, roles]) => {
                     return `**/${cmd}**: ${roles.join(', ')}`;
-                }).join('\n');
+                });
+                const scopeLabel = rule => ({
+                    guild: 'this server',
+                    channel: `<#${rule.scopeId}>`,
+                    role: `<@&${rule.scopeId}>`,
+                    member: `<@${rule.scopeId}>`
+                })[rule.scopeType];
+                const ruleLines = rules.map(rule => {
+                    const action = rule.effect === 'disabled'
+                        ? 'disabled in'
+                        : `${rule.effect === 'allow' ? 'allowed' : 'denied'} for`;
+                    return `**/${rule.commandPath}**: ${action} ${scopeLabel(rule)}`;
+                });
+                const description = [...roleLines, ...ruleLines].join('\n');
 
                 return interaction.editReply({
                     embeds: [embeds.info('Command Permissions', description)]

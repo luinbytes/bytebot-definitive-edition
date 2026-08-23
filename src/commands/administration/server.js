@@ -48,6 +48,14 @@ function aliasFor(interaction) {
     };
 }
 
+function addCommandScope(subcommand) {
+    return subcommand
+        .addStringOption(opt => opt.setName('command').setDescription('Command path').setRequired(true).setAutocomplete(true))
+        .addChannelOption(opt => opt.setName('channel').setDescription('Limit this rule to a channel'))
+        .addRoleOption(opt => opt.setName('role').setDescription('Limit this rule to a role'))
+        .addUserOption(opt => opt.setName('member').setDescription('Limit this rule to a member'));
+}
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('server')
@@ -168,11 +176,36 @@ module.exports = {
                 .addRoleOption(opt => opt.setName('role').setDescription('Birthday role'))))
         .addSubcommandGroup(group => group
             .setName('permissions')
-            .setDescription('Command role permissions')
+            .setDescription('Command access and protected targets')
             .addSubcommand(sub => sub.setName('add').setDescription('Allow a role to use a command').addStringOption(opt => opt.setName('command').setDescription('Command path').setRequired(true).setAutocomplete(true)).addRoleOption(opt => opt.setName('role').setDescription('Allowed role').setRequired(true)))
             .addSubcommand(sub => sub.setName('remove').setDescription('Remove a command role').addStringOption(opt => opt.setName('command').setDescription('Command path').setRequired(true).setAutocomplete(true)).addRoleOption(opt => opt.setName('role').setDescription('Allowed role').setRequired(true)))
             .addSubcommand(sub => sub.setName('list').setDescription('List command role permissions'))
-            .addSubcommand(sub => sub.setName('reset').setDescription('Reset command role permissions').addStringOption(opt => opt.setName('command').setDescription('Command path').setRequired(true).setAutocomplete(true))))
+            .addSubcommand(sub => sub.setName('reset').setDescription('Reset command role permissions').addStringOption(opt => opt.setName('command').setDescription('Command path').setRequired(true).setAutocomplete(true)))
+            .addSubcommand(sub => addCommandScope(sub.setName('disable').setDescription('Disable a command in a scope')))
+            .addSubcommand(sub => addCommandScope(sub.setName('enable').setDescription('Enable a command in a scope')))
+            .addSubcommand(sub => addCommandScope(sub.setName('allow').setDescription('Allow a command only in a scope')))
+            .addSubcommand(sub => addCommandScope(sub.setName('deny').setDescription('Deny a command in a scope')))
+            .addSubcommand(sub => sub
+                .setName('fake')
+                .setDescription('Manage virtual permission labels')
+                .addStringOption(opt => opt.setName('action').setDescription('Action').setRequired(true).addChoices(
+                    { name: 'Add', value: 'add' },
+                    { name: 'Remove', value: 'remove' },
+                    { name: 'List', value: 'list' },
+                    { name: 'Reset', value: 'reset' }
+                ))
+                .addRoleOption(opt => opt.setName('role').setDescription('Role'))
+                .addStringOption(opt => opt.setName('permission').setDescription('Discord permission name')))
+            .addSubcommand(sub => sub
+                .setName('protect')
+                .setDescription('Protect members or roles from moderation')
+                .addStringOption(opt => opt.setName('action').setDescription('Action').setRequired(true).addChoices(
+                    { name: 'Add', value: 'add' },
+                    { name: 'Remove', value: 'remove' },
+                    { name: 'List', value: 'list' }
+                ))
+                .addUserOption(opt => opt.setName('member').setDescription('Member'))
+                .addRoleOption(opt => opt.setName('role').setDescription('Role'))))
         .addSubcommandGroup(group => group
             .setName('achievement')
             .setDescription('Server achievement administration')

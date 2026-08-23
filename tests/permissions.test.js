@@ -14,8 +14,7 @@ jest.mock('../src/database', () => ({
 
 describe('RBAC Permission System', () => {
     beforeEach(() => {
-        // Reset all mocks before each test
-        jest.clearAllMocks();
+        jest.resetAllMocks();
     });
 
     describe('checkUserPermissions', () => {
@@ -312,7 +311,7 @@ describe('RBAC Permission System', () => {
                 expect(result.allowed).toBe(true);
             });
 
-            test('should ignore code permissions when database overrides exist', async () => {
+            test('database role access never replaces required Discord permissions', async () => {
                 const mockOverrides = [
                     { roleId: 'role123', commandName: 'testcommand', guildId: 'guild123' }
                 ];
@@ -343,11 +342,100 @@ describe('RBAC Permission System', () => {
 
                 const result = await checkUserPermissions(mockInteraction, mockCommand);
 
-                // Should be allowed even though user doesn't have BanMembers permission
-                expect(result.allowed).toBe(true);
-                // Should not check for BanMembers permission because overrides exist
-                expect(mockInteraction.member.permissions.has).not.toHaveBeenCalledWith([PermissionFlagsBits.BanMembers]);
+                expect(result.allowed).toBe(false);
+                expect(mockInteraction.member.permissions.has).toHaveBeenCalledWith([PermissionFlagsBits.BanMembers]);
             });
+        });
+
+        describe('Scoped access rules', () => {
+            test('a matching channel deny blocks the command', async () => {
+                const accessRules = [{
+                    commandPath: 'mod user ban',
+                    effect: 'deny',
+                    scopeType: 'channel',
+                    scopeId: 'channel1'
+                }];
+                db.select
+                    .mockReturnValueOnce({ from: jest.fn().mockReturnValue({ where: jest.fn().mockResolvedValue(accessRules) }) })
+                    .mockReturnValueOnce({ from: jest.fn().mockReturnValue({ where: jest.fn().mockResolvedValue([]) }) });
+
+                const result = await checkUserPermissions({
+                    commandName: 'mod',
+                    channelId: 'channel1',
+                    guild: { id: 'guild123' },
+                    user: { id: 'user1' },
+                    options: {
+                        getSubcommandGroup: jest.fn().mockReturnValue('user'),
+                        getSubcommand: jest.fn().mockReturnValue('ban')
+                    },
+                    member: {
+                        roles: { cache: new Map() },
+                        permissions: { has: jest.fn().mockReturnValue(false) }
+                    }
+                }, { data: { name: 'mod' }, permissions: [] });
+
+                expect(result.allowed).toBe(false);
+                expect(result.error.data.description).toContain('disabled for you here');
+            });
+
+            test('an allow rule admits only a matching member', async () => {
+                const accessRules = [{
+                    commandPath: 'fun',
+                    effect: 'allow',
+                    scopeType: 'member',
+                    scopeId: 'user1'
+                }];
+                db.select
+                    .mockReturnValueOnce({ from: jest.fn().mockReturnValue({ where: jest.fn().mockResolvedValue(accessRules) }) })
+                    .mockReturnValueOnce({ from: jest.fn().mockReturnValue({ where: jest.fn().mockResolvedValue([]) }) });
+
+                const result = await checkUserPermissions({
+                    commandName: 'fun',
+                    channelId: 'channel1',
+                    guild: { id: 'guild123' },
+                    user: { id: 'user2' },
+                    member: {
+                        id: 'user2',
+                        roles: { cache: new Map() },
+                        permissions: { has: jest.fn().mockReturnValue(false) }
+                    }
+                }, { data: { name: 'fun' }, permissions: [] });
+
+                expect(result.allowed).toBe(false);
+            });
+        });
+
+        test('fake role permissions satisfy only explicitly virtual command checks', async () => {
+            db.select
+                .mockReturnValueOnce({ from: jest.fn().mockReturnValue({ where: jest.fn().mockResolvedValue([]) }) })
+                .mockReturnValueOnce({ from: jest.fn().mockReturnValue({ where: jest.fn().mockResolvedValue([]) }) });
+            const interaction = {
+                commandName: 'community-status',
+                guild: { id: 'guild123' },
+                user: { id: 'user1' },
+                member: {
+                    id: 'user1',
+                    roles: { cache: new Map([['role1', {}]]) },
+                    permissions: { has: jest.fn().mockReturnValue(false) }
+                }
+            };
+
+            const command = {
+                data: { name: 'community-status' },
+                virtualPermissions: [PermissionFlagsBits.Administrator]
+            };
+
+            expect((await checkUserPermissions(interaction, command)).allowed).toBe(false);
+
+            db.select.mockReset();
+            db.select
+                .mockReturnValueOnce({ from: jest.fn().mockReturnValue({ where: jest.fn().mockResolvedValue([]) }) })
+                .mockReturnValueOnce({ from: jest.fn().mockReturnValue({ where: jest.fn().mockResolvedValue([
+                    { roleId: 'role1', permission: 'Administrator' }
+                ]) }) })
+                .mockReturnValueOnce({ from: jest.fn().mockReturnValue({ where: jest.fn().mockResolvedValue([]) }) });
+
+            expect((await checkUserPermissions(interaction, command)).allowed).toBe(true);
         });
 
         describe('Edge Cases', () => {

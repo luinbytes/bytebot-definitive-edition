@@ -99,6 +99,13 @@
       "when": 1787445064215,
       "tag": "0013_uwu_lock",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1787500000000,
+      "tag": "0014_command_access_controls",
+      "breakpoints": true
     }
   ]
 }

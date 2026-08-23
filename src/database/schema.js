@@ -41,6 +41,38 @@ const commandPermissions = sqliteTable('command_permissions', {
     roleId: text('role_id').notNull(),
 });
 
+const commandAccessRules = sqliteTable('command_access_rules', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    commandPath: text('command_path').notNull(),
+    effect: text('effect').notNull(), // disabled | allow | deny
+    scopeType: text('scope_type').notNull(), // guild | channel | role | member
+    scopeId: text('scope_id').notNull(),
+}, (table) => ({
+    ruleUnique: unique().on(table.guildId, table.commandPath, table.effect, table.scopeType, table.scopeId),
+    guildCommandIdx: index('command_access_rules_guild_command_idx').on(table.guildId, table.commandPath),
+}));
+
+const fakePermissions = sqliteTable('fake_permissions', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    roleId: text('role_id').notNull(),
+    permission: text('permission').notNull(),
+}, (table) => ({
+    permissionUnique: unique().on(table.guildId, table.roleId, table.permission),
+    guildRoleIdx: index('fake_permissions_guild_role_idx').on(table.guildId, table.roleId),
+}));
+
+const protectedTargets = sqliteTable('protected_targets', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    targetType: text('target_type').notNull(), // member | role
+    targetId: text('target_id').notNull(),
+}, (table) => ({
+    targetUnique: unique().on(table.guildId, table.targetType, table.targetId),
+    guildTypeIdx: index('protected_targets_guild_type_idx').on(table.guildId, table.targetType),
+}));
+
 const uwuLockMembers = sqliteTable('uwu_lock_members', {
     id: integer('id').primaryKey({ autoIncrement: true }),
     guildId: text('guild_id').notNull(),
@@ -487,6 +519,9 @@ module.exports = {
     users,
     moderationLogs,
     commandPermissions,
+    commandAccessRules,
+    fakePermissions,
+    protectedTargets,
     uwuLockMembers,
     bytepods,
     bytepodAutoWhitelist,

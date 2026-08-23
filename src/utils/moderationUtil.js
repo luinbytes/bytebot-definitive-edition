@@ -4,7 +4,7 @@
  */
 
 const { PermissionFlagsBits } = require('discord.js');
-const { db } = require('../database');
+const { db, sqlite } = require('../database');
 const { moderationLogs } = require('../database/schema');
 const logger = require('./logger');
 const embeds = require('./embeds');
@@ -103,6 +103,24 @@ function validateHierarchy(executor, target) {
             valid: false,
             error: 'You cannot moderate the server owner.'
         };
+    }
+
+    if (sqlite?.prepare) {
+        const memberProtected = sqlite.prepare(`
+            SELECT 1 FROM protected_targets
+            WHERE guild_id = ? AND target_type = 'member' AND target_id = ?
+        `).get(target.guild.id, target.id);
+        const protectedRoles = sqlite.prepare(`
+            SELECT target_id FROM protected_targets
+            WHERE guild_id = ? AND target_type = 'role'
+        `).all(target.guild.id);
+
+        if (memberProtected || protectedRoles.some(role => target.roles.cache.has(role.target_id))) {
+            return {
+                valid: false,
+                error: 'This member is protected from moderation.'
+            };
+        }
     }
 
     // Role hierarchy check (administrators bypass this)

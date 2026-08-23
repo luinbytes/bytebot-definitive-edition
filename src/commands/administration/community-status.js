@@ -116,7 +116,7 @@ module.exports = {
         .setDescription('View read-only community configuration status')
         .setDMPermission(false)
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-    permissions: [PermissionFlagsBits.Administrator],
+    virtualPermissions: [PermissionFlagsBits.Administrator],
 
     async execute(interaction) {
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
