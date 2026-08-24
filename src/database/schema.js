@@ -1151,6 +1151,7 @@ const levelRoleJobs = sqliteTable('level_role_jobs', {
     attempts: integer('attempts').default(0).notNull(),
     generation: integer('generation').default(1).notNull(),
     claimToken: text('claim_token'),
+    claimExpiresAt: integer('claim_expires_at'),
     nextAttemptAt: integer('next_attempt_at').notNull(),
     updatedAt: integer('updated_at').notNull()
 }, table => ({

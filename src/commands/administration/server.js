@@ -269,6 +269,16 @@ const serverBuilder = new SlashCommandBuilder()
                 .addUserOption(opt => opt.setName('member').setDescription('Member to ignore'))
                 .addChannelOption(opt => opt.setName('channel').setDescription('Channel to ignore')))
             .addSubcommand(sub => sub
+                .setName('recover')
+                .setDescription('Resolve an uncertain event-log delivery')
+                .addStringOption(opt => opt.setName('action').setDescription('Recovery action').setRequired(true).addChoices(
+                    { name: 'List uncertain deliveries', value: 'list' },
+                    { name: 'Retry a delivery', value: 'retry' },
+                    { name: 'Abandon a delivery', value: 'abandon' }
+                ))
+                .addIntegerOption(opt => opt.setName('id').setDescription('Delivery ID').setMinValue(1))
+                .addBooleanOption(opt => opt.setName('confirm').setDescription('Confirm retry or abandon')))
+            .addSubcommand(sub => sub
                 .setName('modlog')
                 .setDescription('Set the moderation log channel')
                 .addChannelOption(opt => opt

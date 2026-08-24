@@ -73,7 +73,18 @@ const data = new SlashCommandBuilder()
         .addSubcommand(subcommand => subcommand.setName('text').setDescription('Create a text XP board')
             .addChannelOption(option => option.setName('channel').setDescription('Destination').addChannelTypes(ChannelType.GuildText)))
         .addSubcommand(subcommand => subcommand.setName('voice').setDescription('Create a voice XP board')
-            .addChannelOption(option => option.setName('channel').setDescription('Destination').addChannelTypes(ChannelType.GuildText))))
+            .addChannelOption(option => option.setName('channel').setDescription('Destination').addChannelTypes(ChannelType.GuildText)))
+        .addSubcommand(subcommand => subcommand.setName('recover').setDescription('Resolve an uncertain live board')
+            .addStringOption(option => option.setName('action').setDescription('Recovery action').setRequired(true).addChoices(
+                { name: 'List uncertain boards', value: 'list' },
+                { name: 'Force a replacement', value: 'force' },
+                { name: 'Abandon the board', value: 'abandon' }
+            ))
+            .addChannelOption(option => option.setName('channel').setDescription('Board channel').addChannelTypes(ChannelType.GuildText))
+            .addStringOption(option => option.setName('metric').setDescription('Board metric').addChoices(
+                { name: 'Text XP', value: 'text' }, { name: 'Voice XP', value: 'voice' }
+            ))
+            .addBooleanOption(option => option.setName('confirm').setDescription('Confirm force or abandon'))))
     .addSubcommandGroup(group => group
         .setName('boost')
         .setDescription('Manage role and channel XP multipliers')

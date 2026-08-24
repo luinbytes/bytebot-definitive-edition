@@ -1038,6 +1038,7 @@ const expectedSchema = {
         attempts: 'INTEGER DEFAULT 0 NOT NULL',
         generation: 'INTEGER DEFAULT 1 NOT NULL',
         claim_token: 'TEXT',
+        claim_expires_at: 'INTEGER',
         next_attempt_at: 'INTEGER NOT NULL',
         updated_at: 'INTEGER NOT NULL'
     },

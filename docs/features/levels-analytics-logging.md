@@ -7,13 +7,16 @@ The public-source contract and source discrepancies are recorded in
 
 - Utility: `/levels` provides rank cards, leaderboards, role rewards, setup,
   text/voice configuration, multipliers, exclusions, XP administration,
-  level-up messages, live boards, styling, and resets.
+  level-up messages, live boards, explicit uncertain-board recovery, styling,
+  and resets.
 - Utility: `/analytics` presents persisted message, reaction, voice, and
   membership activity. `/server stats` is the same handler and data source.
 - Administration / Server: `/server logs` configures event destinations for
   messages, members, moderation, server, voice, channels, roles, invites,
   emojis, stickers, integrations, and soundboard events. `/server logs set`
-  and `modlog` retain the dedicated moderation-case log behavior.
+  and `modlog` retain the dedicated moderation-case log behavior. The
+  `/server logs recover` path explicitly lists, retries, or abandons uncertain
+  sends.
 
 Greed's text aliases are displayed in `/help`; Discord slash commands do not
 support aliases. Formerly paid capabilities have no billing, entitlement, or
@@ -24,9 +27,11 @@ available to every member.
 ## Permission and safety model
 
 Member views require only normal response-channel access. Configuration and
-XP administration require Manage Server. Reward mutations additionally
-require Manage Roles and current caller/bot hierarchy access. ByteBot command
-RBAC may narrow those real Discord permissions but cannot grant them.
+XP administration require Manage Server. If reward roles are configured, XP
+administration and resets additionally require caller/bot Manage Roles because
+they can change those roles. Direct reward mutations also recheck current
+caller/bot hierarchy. ByteBot command RBAC may narrow those real Discord
+permissions but cannot grant them.
 
 Reset-all and remove-all-log operations use one-time, actor/guild-bound
 confirmations that expire after ten minutes. Level-up messages reuse the

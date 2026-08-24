@@ -327,6 +327,25 @@ describe('LevelAnalyticsService', () => {
         });
     });
 
+    test('XP administration requires Manage Roles when reward roles can change', async () => {
+        database.sqlite.prepare(`
+            INSERT INTO level_role_rewards (guild_id, level, role_id, created_at)
+            VALUES ('guild1', 1, 'reward1', 1)
+        `).run();
+        const interaction = {
+            guildId: 'guild1',
+            guild: { members: { me: { permissions: { has: () => true } } } },
+            member: { permissions: { has: permission => permission === PermissionFlagsBits.ManageGuild } },
+            options: {
+                getSubcommandGroup: () => 'admin', getSubcommand: () => 'setxp',
+                getUser: () => ({ id: 'user1' }), getInteger: () => 100
+            }
+        };
+
+        await expect(service.execute(interaction)).rejects.toThrow('Manage Roles');
+        expect(database.sqlite.prepare(`SELECT 1 FROM member_levels`).get()).toBeUndefined();
+    });
+
     test('/levels ignore blocks XP but keeps accepted messages in analytics', async () => {
         const interaction = {
             guildId: 'guild1',
@@ -485,6 +504,41 @@ describe('LevelAnalyticsService', () => {
 
         expect(database.sqlite.prepare(`SELECT generation, claim_token FROM level_role_jobs`).get())
             .toEqual({ generation: 2, claim_token: null });
+    });
+
+    test('an expired role-job claim is reclaimed after a worker crash', async () => {
+        database.sqlite.prepare(`
+            INSERT INTO level_role_jobs
+                (guild_id, user_id, claim_token, claim_expires_at, next_attempt_at, updated_at)
+            VALUES ('guild1', 'user1', 'dead-worker', ?, ?, ?)
+        `).run(now + 5 * 60 * 1000, now, now);
+        service.client = { guilds: { cache: new Map() } };
+
+        await service.processRoleJobs();
+        expect(database.sqlite.prepare(`SELECT attempts, claim_token FROM level_role_jobs`).get())
+            .toEqual({ attempts: 0, claim_token: 'dead-worker' });
+        now += 5 * 60 * 1000 + 1;
+        await service.processRoleJobs();
+
+        expect(database.sqlite.prepare(`SELECT attempts, claim_token, claim_expires_at FROM level_role_jobs`).get())
+            .toEqual({ attempts: 1, claim_token: null, claim_expires_at: null });
+    });
+
+    test('a transient member fetch failure keeps the role job retryable', async () => {
+        database.sqlite.prepare(`
+            INSERT INTO level_role_jobs (guild_id, user_id, next_attempt_at, updated_at)
+            VALUES ('guild1', 'user1', ?, ?)
+        `).run(now, now);
+        const fetch = jest.fn().mockRejectedValue(new Error('connection reset'));
+        service.client = { guilds: { cache: new Map([['guild1', {
+            id: 'guild1', members: { cache: new Map(), fetch }
+        }]]) } };
+
+        const result = await service.processRoleJobs();
+
+        expect(result.failures).toHaveLength(1);
+        expect(database.sqlite.prepare(`SELECT attempts, claim_token FROM level_role_jobs`).get())
+            .toEqual({ attempts: 1, claim_token: null });
     });
 
     test('configured level-up scripts are validated and delivered only on a level increase', async () => {
@@ -653,9 +707,12 @@ describe('LevelAnalyticsService', () => {
     });
 
     test('live boards do not resend after the nonce recovery window expires', async () => {
-        const send = jest.fn();
+        const send = jest.fn().mockResolvedValue({ id: 'replacement' });
         const channel = { id: 'channel1', send, messages: { fetch: jest.fn() } };
-        const guild = { id: 'guild1', channels: { cache: new Map([['channel1', channel]]), fetch: jest.fn() } };
+        const guild = {
+            id: 'guild1', channels: { cache: new Map([['channel1', channel]]), fetch: jest.fn() },
+            members: { me: { permissionsIn: () => ({ has: () => true }) } }
+        };
         database.sqlite.prepare(`
             INSERT INTO level_live_boards
                 (guild_id, channel_id, metric, create_token, create_status, create_started_at, revision, updated_at)
@@ -669,6 +726,51 @@ describe('LevelAnalyticsService', () => {
             error: expect.stringContaining('administrator recovery')
         })] }));
         expect(send).not.toHaveBeenCalled();
+
+        const listReply = jest.fn();
+        await service.execute({
+            guildId: 'guild1', guild, member: {
+                permissions: { has: () => true }, permissionsIn: () => ({ has: () => true })
+            },
+            options: {
+                getSubcommandGroup: () => 'live', getSubcommand: () => 'recover',
+                getString: () => 'list'
+            },
+            reply: listReply
+        });
+        expect(listReply.mock.calls[0][0].embeds[0].data.description).toContain('channel1');
+
+        const interaction = {
+            guildId: 'guild1', guild, member: { permissions: { has: () => true } },
+            options: {
+                getSubcommandGroup: () => 'live', getSubcommand: () => 'recover',
+                getString: name => name === 'action' ? 'force' : 'text',
+                getChannel: () => channel, getBoolean: () => true
+            },
+            deferReply: jest.fn(), editReply: jest.fn(), reply: jest.fn()
+        };
+        await service.execute(interaction);
+
+        expect(send).toHaveBeenCalledTimes(1);
+        expect(database.sqlite.prepare(`SELECT message_id, create_status FROM level_live_boards`).get())
+            .toEqual({ message_id: 'replacement', create_status: 'active' });
+    });
+
+    test('a definite live-board send rejection remains retryable', async () => {
+        const error = Object.assign(new Error('forbidden'), { status: 403 });
+        const channel = { id: 'channel1', send: jest.fn().mockRejectedValue(error), messages: { fetch: jest.fn() } };
+        const guild = { id: 'guild1', channels: { cache: new Map([['channel1', channel]]), fetch: jest.fn() } };
+        database.sqlite.prepare(`
+            INSERT INTO level_live_boards
+                (guild_id, channel_id, metric, create_token, revision, updated_at)
+            VALUES ('guild1', 'channel1', 'text', 'token', 0, 1)
+        `).run();
+        service.client = { guilds: { cache: new Map([['guild1', guild]]) } };
+
+        await service.refreshLiveBoards();
+
+        expect(database.sqlite.prepare(`SELECT create_status, create_started_at FROM level_live_boards`).get())
+            .toEqual({ create_status: 'active', create_started_at: null });
     });
 
     test('a transient live-board fetch failure cannot create a duplicate message', async () => {

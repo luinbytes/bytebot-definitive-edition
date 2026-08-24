@@ -81,6 +81,35 @@ class EventLoggingService {
         if (action !== 'view' && !interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
             throw new Error('You need Manage Server to configure event logs.');
         }
+        if (action === 'recover') {
+            const recovery = interaction.options.getString('action', true);
+            if (recovery === 'list') {
+                const rows = this.sqlite.prepare(`
+                    SELECT id, module, channel_id FROM event_log_outbox
+                    WHERE guild_id = ? AND status = 'uncertain' ORDER BY id LIMIT 20
+                `).all(interaction.guildId);
+                return interaction.reply(this.response('Uncertain Event Logs', rows.length
+                    ? rows.map(row => {
+                        const channel = interaction.guild.channels.cache.get(row.channel_id);
+                        const visible = channel && interaction.member.permissionsIn?.(channel).has(PermissionFlagsBits.ViewChannel);
+                        return `**#${row.id}** · ${row.module} · ${visible ? `<#${row.channel_id}>` : '*inaccessible channel*'}`;
+                    }).join('\n')
+                    : 'No event-log deliveries need recovery.', { flags: [MessageFlags.Ephemeral] }));
+            }
+            const id = interaction.options.getInteger('id');
+            if (!id || interaction.options.getBoolean('confirm') !== true) {
+                throw new Error('Choose a delivery ID and confirm this recovery action.');
+            }
+            const status = recovery === 'retry' ? 'pending' : 'failed';
+            const changed = this.sqlite.prepare(`
+                UPDATE event_log_outbox SET status = ?, next_attempt_at = ?
+                WHERE id = ? AND guild_id = ? AND status = 'uncertain'
+            `).run(status, this.now(), id, interaction.guildId).changes;
+            if (!changed) throw new Error('That delivery does not need recovery.');
+            return interaction.reply(this.response('Event Log Recovery', recovery === 'retry'
+                ? `Delivery **#${id}** will be retried.`
+                : `Delivery **#${id}** was abandoned.`, { flags: [MessageFlags.Ephemeral] }));
+        }
         if (action === 'view') {
             const rows = this.sqlite.prepare(`
                 SELECT module, channel_id, color FROM event_log_channels

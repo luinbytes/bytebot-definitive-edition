@@ -26,6 +26,7 @@ describe('levels and analytics command contract', () => {
         expect(option(levels, 'config').options.map(item => item.name)).toEqual([
             'text', 'voice', 'dm', 'antiafk', 'channel', 'rate'
         ]);
+        expect(option(levels, 'live').options.map(item => item.name)).toEqual(['text', 'voice', 'recover']);
         expect(option(option(levels, 'boost'), 'add').options.map(item => item.name)).toEqual([
             'multiplier', 'role', 'channel'
         ]);
@@ -60,7 +61,7 @@ describe('levels and analytics command contract', () => {
 
         expect(stats.options.map(item => item.name)).toEqual(['private', 'days', 'metric']);
         expect(logs.options.map(item => item.name)).toEqual([
-            'add', 'view', 'remove', 'color', 'ignore', 'modlog', 'set'
+            'add', 'view', 'remove', 'color', 'ignore', 'recover', 'modlog', 'set'
         ]);
         expect(option(logs, 'ignore').options.map(item => item.name)).toEqual(['member', 'channel']);
         expect(option(logs, 'set').options).toEqual(option(logs, 'modlog').options);

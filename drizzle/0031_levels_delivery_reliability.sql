@@ -10,6 +10,7 @@ CREATE TABLE `level_role_jobs` (
     `attempts` integer DEFAULT 0 NOT NULL,
     `generation` integer DEFAULT 1 NOT NULL,
     `claim_token` text,
+    `claim_expires_at` integer,
     `next_attempt_at` integer NOT NULL,
     `updated_at` integer NOT NULL,
     PRIMARY KEY (`guild_id`,`user_id`)

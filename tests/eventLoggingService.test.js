@@ -122,6 +122,16 @@ describe('EventLoggingService', () => {
         ]);
     });
 
+    test('state-only events retain distinct occurrence identities', () => {
+        const { eventKey } = require('../src/events/eventLogging');
+        const role = { id: 'role1', guild: { id: 'guild1' }, name: 'Member', permissions: { bitfield: 1n } };
+
+        expect(eventKey(Events.GuildRoleUpdate, [role, role]))
+            .not.toBe(eventKey(Events.GuildRoleUpdate, [role, role]));
+        expect(eventKey(Events.MessageDelete, [{ id: 'message1' }]))
+            .toBe(eventKey(Events.MessageDelete, [{ id: 'message1' }]));
+    });
+
     test('startup blocks ambiguously claimed deliveries instead of risking duplicates', async () => {
         const channel = { id: 'channel1', send: jest.fn().mockResolvedValue({}) };
         const server = guild([channel]);
@@ -184,6 +194,30 @@ describe('EventLoggingService', () => {
         expect(channel.send).toHaveBeenCalledTimes(1);
         expect(database.sqlite.prepare(`SELECT status, attempts FROM event_log_outbox WHERE event_key = 'message:uncertain'`).get())
             .toEqual({ status: 'uncertain', attempts: 1 });
+
+        let recovery = 'list';
+        const options = {
+            getSubcommand: () => 'recover', getString: () => recovery,
+            getInteger: () => database.sqlite.prepare(`SELECT id FROM event_log_outbox WHERE event_key = 'message:uncertain'`).get().id,
+            getBoolean: () => true
+        };
+        const reply = jest.fn();
+        const interaction = {
+            guildId: 'guild1', guild: server, member: { permissions: { has: () => true } },
+            options, reply
+        };
+        await service.execute(interaction);
+        expect(reply.mock.calls[0][0].embeds[0].data.description).toContain('messages');
+        recovery = 'retry';
+        await service.execute({
+            ...interaction, reply: jest.fn()
+        });
+        channel.send.mockResolvedValue({});
+        await service.processOutbox();
+
+        expect(channel.send).toHaveBeenCalledTimes(2);
+        expect(database.sqlite.prepare(`SELECT status, attempts FROM event_log_outbox WHERE event_key = 'message:uncertain'`).get())
+            .toEqual({ status: 'sent', attempts: 2 });
     });
 
     test('failed deliveries stop after three exponential retry attempts', async () => {

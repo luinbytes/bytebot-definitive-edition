@@ -51,6 +51,29 @@ class LevelAnalyticsService {
         return { embeds: [embeds.brand(title, description)], allowedMentions: { parse: [] }, ...extra };
     }
 
+    assertRoleMutationAuthority(interaction) {
+        const rewards = this.sqlite.prepare(`SELECT role_id FROM level_role_rewards WHERE guild_id = ?`)
+            .all(interaction.guildId);
+        if (!rewards.length) return;
+        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageRoles)) {
+            throw new Error('You need Manage Roles because this XP change can update reward roles.');
+        }
+        const bot = interaction.guild.members.me;
+        if (!bot.permissions.has(PermissionFlagsBits.ManageRoles)) {
+            throw new Error('I need Manage Roles because this XP change can update reward roles.');
+        }
+        for (const reward of rewards) {
+            const role = interaction.guild.roles.cache.get(reward.role_id);
+            if (!role || role.managed) continue;
+            if (interaction.member.roles.highest.comparePositionTo(role) <= 0) {
+                throw new Error('Your highest role must be above every reward role this XP change can update.');
+            }
+            if (bot.roles.highest.comparePositionTo(role) <= 0) {
+                throw new Error('My highest role must be above every reward role this XP change can update.');
+            }
+        }
+    }
+
     async acknowledge(interaction, flags = []) {
         if (!interaction.deferReply || interaction.deferred || interaction.replied) return false;
         await interaction.deferReply({ flags });
@@ -598,7 +621,16 @@ class LevelAnalyticsService {
                 UPDATE level_live_boards SET create_status = 'creating', create_started_at = ?, updated_at = ?
                 WHERE guild_id = ? AND channel_id = ? AND metric = ? AND create_status = 'active'
             `).run(now, now, board.guild_id, board.channel_id, board.metric);
-            message = await channel.send({ ...payload, nonce: token, enforceNonce: true });
+            try {
+                message = await channel.send({ ...payload, nonce: token, enforceNonce: true });
+            } catch (error) {
+                const status = Number(error?.status || error?.httpStatus);
+                if (status >= 400 && status < 500) this.sqlite.prepare(`
+                    UPDATE level_live_boards SET create_status = 'active', create_started_at = NULL, updated_at = ?
+                    WHERE guild_id = ? AND channel_id = ? AND metric = ?
+                `).run(this.now(), board.guild_id, board.channel_id, board.metric);
+                throw error;
+            }
         }
         this.sqlite.prepare(`
             UPDATE level_live_boards SET message_id = ?, create_status = 'active', create_started_at = NULL,
@@ -648,7 +680,8 @@ class LevelAnalyticsService {
             INSERT INTO level_role_jobs (guild_id, user_id, attempts, next_attempt_at, updated_at)
             VALUES (?, ?, 0, ?, ?)
             ON CONFLICT(guild_id, user_id) DO UPDATE SET
-                attempts = 0, generation = level_role_jobs.generation + 1, claim_token = NULL,
+                attempts = 0, generation = level_role_jobs.generation + 1,
+                claim_token = NULL, claim_expires_at = NULL,
                 next_attempt_at = excluded.next_attempt_at, updated_at = excluded.updated_at
         `).run(guildId, userId, now, now);
     }
@@ -662,16 +695,24 @@ class LevelAnalyticsService {
         const failures = [];
         for (const row of rows) {
             const token = crypto.randomBytes(12).toString('hex');
+            const claimedAt = this.now();
             const claimed = this.sqlite.prepare(`
-                UPDATE level_role_jobs SET claim_token = ?
-                WHERE guild_id = ? AND user_id = ? AND generation = ? AND claim_token IS NULL
-            `).run(token, row.guild_id, row.user_id, row.generation);
+                UPDATE level_role_jobs SET claim_token = ?, claim_expires_at = ?
+                WHERE guild_id = ? AND user_id = ? AND generation = ?
+                  AND (claim_token IS NULL OR claim_expires_at <= ?)
+            `).run(token, claimedAt + 5 * 60 * 1000, row.guild_id, row.user_id, row.generation, claimedAt);
             if (!claimed.changes) continue;
             try {
                 const guild = this.client.guilds.cache.get(row.guild_id);
                 if (!guild) throw new Error('guild unavailable');
-                const member = guild.members.cache.get(row.user_id)
-                    || await guild.members.fetch(row.user_id).catch(() => null);
+                let member = guild.members.cache.get(row.user_id);
+                if (!member) {
+                    try {
+                        member = await guild.members.fetch(row.user_id);
+                    } catch (error) {
+                        if (error?.code !== 10007) throw error;
+                    }
+                }
                 if (member) await this.reconcileMemberRoles(member);
                 this.sqlite.prepare(`
                     DELETE FROM level_role_jobs
@@ -681,8 +722,8 @@ class LevelAnalyticsService {
                 const attempts = row.attempts + 1;
                 const retryAt = this.now() + Math.min(3_600_000, 1000 * 2 ** Math.min(attempts, 12));
                 this.sqlite.prepare(`
-                    UPDATE level_role_jobs SET attempts = ?, next_attempt_at = ?, updated_at = ?
-                        , claim_token = NULL
+                    UPDATE level_role_jobs SET attempts = ?, next_attempt_at = ?, updated_at = ?,
+                        claim_token = NULL, claim_expires_at = NULL
                     WHERE guild_id = ? AND user_id = ? AND generation = ? AND claim_token = ?
                 `).run(attempts, retryAt, this.now(), row.guild_id, row.user_id, row.generation, token);
                 failures.push({ guildId: row.guild_id, userId: row.user_id, error: error.message });
@@ -824,6 +865,7 @@ class LevelAnalyticsService {
             await this.assertRbac(interaction, 'reset', confirmation.scope === 'all' ? 'all' : 'user');
             if (decision === 'cancel') return this.update(interaction, this.response('Level Reset', 'Reset cancelled.', { components: [] }), acknowledged);
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) throw new Error('You need Manage Server to reset XP.');
+            this.assertRoleMutationAuthority(interaction);
             this.sqlite.transaction(() => {
                 if (confirmation.scope === 'all') {
                     const users = this.sqlite.prepare(`SELECT user_id FROM member_levels WHERE guild_id = ?`)
@@ -1163,6 +1205,55 @@ class LevelAnalyticsService {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
                 throw new Error('You need Manage Server to create a live leaderboard.');
             }
+            if (action === 'recover') {
+                const recovery = interaction.options.getString('action', true);
+                const cutoff = this.now() - 5 * 60 * 1000;
+                if (recovery === 'list') {
+                    const rows = this.sqlite.prepare(`
+                        SELECT channel_id, metric FROM level_live_boards
+                        WHERE guild_id = ? AND create_status = 'creating' AND create_started_at <= ?
+                        ORDER BY channel_id, metric
+                    `).all(interaction.guildId, cutoff);
+                    return interaction.reply(this.response('Uncertain Live Boards', rows.length
+                        ? rows.map(row => {
+                            const channel = interaction.guild.channels.cache.get(row.channel_id);
+                            const visible = channel && interaction.member.permissionsIn?.(channel).has(PermissionFlagsBits.ViewChannel);
+                            return `${visible ? `<#${row.channel_id}>` : '*inaccessible channel*'} · **${row.metric}**`;
+                        }).join('\n')
+                        : 'No live boards need recovery.', { flags: [MessageFlags.Ephemeral] }));
+                }
+                const channel = interaction.options.getChannel('channel');
+                const metric = interaction.options.getString('metric');
+                if (!channel || !metric || interaction.options.getBoolean('confirm') !== true) {
+                    throw new Error('Choose a channel and metric, then confirm this recovery action.');
+                }
+                const board = this.sqlite.prepare(`
+                    SELECT * FROM level_live_boards
+                    WHERE guild_id = ? AND channel_id = ? AND metric = ?
+                      AND create_status = 'creating' AND create_started_at <= ?
+                `).get(interaction.guildId, channel.id, metric, cutoff);
+                if (!board) throw new Error('That live board does not need recovery.');
+                if (recovery === 'abandon') {
+                    this.sqlite.prepare(`
+                        DELETE FROM level_live_boards WHERE guild_id = ? AND channel_id = ? AND metric = ?
+                    `).run(interaction.guildId, channel.id, metric);
+                    return interaction.reply(this.response('Live Board Abandoned', `Removed the **${metric}** board in <#${channel.id}>.`, {
+                        flags: [MessageFlags.Ephemeral]
+                    }));
+                }
+                const permissions = interaction.guild.members.me.permissionsIn(channel);
+                if (!permissions.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks])) {
+                    throw new Error('I need View Channel, Send Messages, and Embed Links there.');
+                }
+                const acknowledged = await this.acknowledge(interaction, [MessageFlags.Ephemeral]);
+                this.sqlite.prepare(`
+                    UPDATE level_live_boards SET message_id = NULL, create_status = 'active',
+                        create_started_at = NULL, updated_at = ?
+                    WHERE guild_id = ? AND channel_id = ? AND metric = ?
+                `).run(this.now(), interaction.guildId, channel.id, metric);
+                await this.deliverLiveBoard({ ...board, message_id: null, create_status: 'active' }, channel);
+                return this.send(interaction, this.response('Live Board Recovered', `Created a replacement **${metric}** board in <#${channel.id}>.`), acknowledged);
+            }
             const channel = interaction.options.getChannel('channel') || interaction.channel;
             const permissions = interaction.guild.members.me.permissionsIn(channel);
             if (!permissions.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks])) {
@@ -1393,6 +1484,7 @@ class LevelAnalyticsService {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
                 throw new Error('You need Manage Server to reset XP.');
             }
+            this.assertRoleMutationAuthority(interaction);
             if (action === 'all') return this.beginReset(interaction, 'all');
             const acknowledged = await this.acknowledge(interaction, [MessageFlags.Ephemeral]);
             const user = interaction.options.getUser('member', true);
@@ -1414,6 +1506,7 @@ class LevelAnalyticsService {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
                 throw new Error('You need Manage Server to manage member XP.');
             }
+            this.assertRoleMutationAuthority(interaction);
             const acknowledged = await this.acknowledge(interaction, [MessageFlags.Ephemeral]);
             const user = interaction.options.getUser('member', true);
             const now = this.now();
