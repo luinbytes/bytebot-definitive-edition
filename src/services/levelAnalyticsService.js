@@ -538,6 +538,22 @@ class LevelAnalyticsService {
         return { updated, failures };
     }
 
+    pruneAnalytics(limit = 1000) {
+        const cutoffAt = this.now() - 1095 * 86400000;
+        const cutoffDate = new Date(cutoffAt).toISOString().slice(0, 10);
+        return this.sqlite.transaction(() => ({
+            daily: this.sqlite.prepare(`DELETE FROM server_daily_metrics WHERE rowid IN (
+                SELECT rowid FROM server_daily_metrics WHERE activity_date < ? LIMIT ?
+            )`).run(cutoffDate, limit).changes,
+            activity: this.sqlite.prepare(`DELETE FROM activity_logs WHERE rowid IN (
+                SELECT rowid FROM activity_logs WHERE activity_date < ? LIMIT ?
+            )`).run(cutoffDate, limit).changes,
+            dedupe: this.sqlite.prepare(`DELETE FROM analytics_events WHERE rowid IN (
+                SELECT rowid FROM analytics_events WHERE occurred_at < ? LIMIT ?
+            )`).run(cutoffAt, limit).changes
+        }))();
+    }
+
     async reconcileMemberRoles(member) {
         if (!member || member.user?.bot) return false;
         const config = this.sqlite.prepare(`SELECT stack_roles FROM level_configs WHERE guild_id = ?`).get(member.guild.id);

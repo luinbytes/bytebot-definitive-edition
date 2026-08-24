@@ -174,6 +174,15 @@ module.exports = {
                 )))
                 .catch(error => logger.error(`Live level board refresh failed: ${error.message}`)), 5 * 60 * 1000);
             liveBoardTimer.unref?.();
+            const prune = () => {
+                const removed = client.levelAnalyticsService.pruneAnalytics();
+                if (removed.daily || removed.activity || removed.dedupe) logger.info(
+                    `Analytics retention pruned ${removed.daily} daily, ${removed.activity} member, and ${removed.dedupe} dedupe rows`
+                );
+            };
+            prune();
+            const analyticsPruneTimer = setInterval(prune, 24 * 60 * 60 * 1000);
+            analyticsPruneTimer.unref?.();
             logger.success('Level analytics service initialized');
         } catch (e) {
             logger.error(`Failed to initialize level analytics service: ${e}`);

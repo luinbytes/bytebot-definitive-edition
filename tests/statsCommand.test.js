@@ -61,6 +61,19 @@ describe('/stats server', () => {
                 total_seconds INTEGER DEFAULT 0,
                 session_count INTEGER DEFAULT 0
             );
+            CREATE TABLE server_daily_metrics (
+                guild_id TEXT NOT NULL,
+                activity_date TEXT NOT NULL,
+                message_count INTEGER DEFAULT 0 NOT NULL,
+                reaction_count INTEGER DEFAULT 0 NOT NULL,
+                voice_seconds INTEGER DEFAULT 0 NOT NULL,
+                joins INTEGER DEFAULT 0 NOT NULL,
+                leaves INTEGER DEFAULT 0 NOT NULL,
+                member_count INTEGER,
+                baseline_at INTEGER,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (guild_id, activity_date)
+            );
 
             INSERT INTO users (id, guild_id, commands_run) VALUES
                 ('user-1', 'guild-a', 9),
@@ -71,6 +84,12 @@ describe('/stats server', () => {
                 ('user-1', 'guild-a', '2026-07-30', 12, 5, 2, 4),
                 ('user-2', 'guild-a', '2026-07-30', 8, 3, 1, 2),
                 ('user-1', 'guild-b', '2026-07-30', 99, 90, 7, 50);
+            INSERT INTO server_daily_metrics
+                (guild_id, activity_date, message_count, reaction_count, voice_seconds,
+                 joins, leaves, member_count, baseline_at, updated_at)
+            VALUES
+                ('guild-a', '2026-07-30', 20, 6, 480, 2, 1, 2, 1, 1),
+                ('guild-b', '2026-07-30', 99, 50, 5400, 0, 0, 1, 1, 1);
         `);
         mockDb = drizzle(sqlite);
     });
@@ -87,7 +106,8 @@ describe('/stats server', () => {
             options: {
                 getSubcommand: () => 'server',
                 getBoolean: () => null,
-                getInteger: () => 60
+                getInteger: () => 60,
+                getString: () => 'all'
             },
             guild: {
                 id: 'guild-a',
@@ -113,7 +133,10 @@ describe('/stats server', () => {
         const embed = editReply.mock.calls[0][0].embeds[0];
         const commandsField = embed.data.fields.find(field => field.name === 'Commands Run');
         expect(commandsField.value).toBe('3 (2 users)');
+        expect(embed.data.fields.find(field => field.name === 'Messages').value).toBe('20');
+        expect(embed.data.fields.find(field => field.name === 'Reactions').value).toBe('6');
+        expect(embed.data.fields.find(field => field.name === 'Voice').value).toBe('8 minutes');
         expect(embed.data.fields.find(field => field.name === 'Last 60 Days · stored since 2026-07-30').value)
-            .toBe('20 messages · 6 reactions · 8 voice minutes · 3 commands');
+            .toBe('3 commands');
     });
 });

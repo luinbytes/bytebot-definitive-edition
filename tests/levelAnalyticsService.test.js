@@ -514,4 +514,18 @@ describe('LevelAnalyticsService', () => {
         expect([0, 99, 100, 399, 100_000, Number.MAX_SAFE_INTEGER].map(levelForXp))
             .toEqual([0, 0, 1, 1, 31, 999]);
     });
+
+    test('analytics retention prunes history without deleting XP balances', () => {
+        service.recordMessage({
+            id: 'old-message', content: 'old', webhookId: null,
+            guild: { id: 'guild1' }, channelId: 'channel1',
+            author: { id: 'user1', bot: false }, member: { roles: { cache: new Map() } }
+        });
+        database.sqlite.prepare(`UPDATE server_daily_metrics SET activity_date = '2020-01-01'`).run();
+        database.sqlite.prepare(`UPDATE activity_logs SET activity_date = '2020-01-01'`).run();
+        database.sqlite.prepare(`UPDATE analytics_events SET occurred_at = 1`).run();
+
+        expect(service.pruneAnalytics()).toEqual({ daily: 1, activity: 1, dedupe: 1 });
+        expect(database.sqlite.prepare(`SELECT xp FROM member_levels WHERE guild_id = 'guild1'`).get().xp).toBe(20);
+    });
 });
