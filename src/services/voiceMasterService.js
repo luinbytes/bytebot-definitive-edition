@@ -23,6 +23,7 @@ class VoiceMasterService {
         this.cleanupRunning = false;
         this.cleanupTimer = null;
         this.accessLocks = new Map();
+        this.roleLocks = new Map();
     }
 
     startCleanup() {
@@ -299,7 +300,8 @@ class VoiceMasterService {
             if (action === 'add') {
                 this.sqlite.transaction(() => {
                     const count = this.sqlite.prepare(`SELECT COUNT(*) count FROM voice_master_sources
-                        WHERE guild_id = ? AND is_primary = 0`).get(interaction.guildId).count;
+                        WHERE guild_id = ? AND is_primary = 0 AND state IN ('pending','active')`)
+                        .get(interaction.guildId).count;
                     if (count >= 25) throw new Error('This server already has 25 secondary join channels.');
                     this.sqlite.prepare(`INSERT INTO voice_master_sources
                         (channel_id, guild_id, category_id, state, is_primary, owned, created_at)
@@ -620,6 +622,12 @@ class VoiceMasterService {
 
         try {
             await this.revokeChannelJoinRoles(guild, channelId);
+            if (channel.members.size > 0) {
+                this.sqlite.prepare(`UPDATE bytepods SET state = 'active', cleanup_after = NULL
+                    WHERE guild_id = ? AND channel_id = ? AND state = 'deleting'`)
+                    .run(guild.id, channelId);
+                return true;
+            }
             await channel.delete('VoiceMaster channel became empty');
             this.clearOwnedChannel(guild.id, channelId);
         } catch (error) {
@@ -635,7 +643,12 @@ class VoiceMasterService {
         return true;
     }
 
-    async removeJoinRoleAfterExit(guild, member, oldChannelId, newChannelId) {
+    removeJoinRoleAfterExit(guild, member, oldChannelId, newChannelId) {
+        return this.withRoleLock(guild.id, member.id,
+            () => this.performRemoveJoinRoleAfterExit(guild, member, oldChannelId, newChannelId));
+    }
+
+    async performRemoveJoinRoleAfterExit(guild, member, oldChannelId, newChannelId) {
         const oldOwned = this.sqlite.prepare(`SELECT 1 FROM bytepods
             WHERE guild_id = ? AND channel_id = ? AND source_channel_id IS NOT NULL AND bot_owned = 1`)
             .get(guild.id, oldChannelId);
@@ -699,7 +712,12 @@ class VoiceMasterService {
         if (config?.join_role_id) await this.grantJoinRole(guild, member, channelId, config.join_role_id);
     }
 
-    async grantJoinRole(guild, member, channelId, roleId) {
+    grantJoinRole(guild, member, channelId, roleId) {
+        return this.withRoleLock(guild.id, member.id,
+            () => this.performGrantJoinRole(guild, member, channelId, roleId));
+    }
+
+    async performGrantJoinRole(guild, member, channelId, roleId) {
         const existing = this.sqlite.prepare(`SELECT * FROM voice_master_join_roles
             WHERE guild_id = ? AND channel_id = ? AND member_id = ?`).get(guild.id, channelId, member.id);
         let roleAdded = false;
@@ -739,12 +757,30 @@ class VoiceMasterService {
         const grants = this.sqlite.prepare(`SELECT * FROM voice_master_join_roles
             WHERE guild_id = ? AND channel_id = ?`).all(guild.id, channelId);
         for (const grant of grants) {
-            const member = await this.fetchMember(guild, grant.member_id);
-            if (member && grant.added_by_bot) await member.roles.remove(grant.role_id, 'VoiceMaster channel removed');
-            this.sqlite.prepare(`DELETE FROM voice_master_join_roles
-                WHERE guild_id = ? AND channel_id = ? AND member_id = ?`)
-                .run(guild.id, channelId, grant.member_id);
+            await this.withRoleLock(guild.id, grant.member_id, async () => {
+                const current = this.sqlite.prepare(`SELECT * FROM voice_master_join_roles
+                    WHERE guild_id = ? AND channel_id = ? AND member_id = ?`)
+                    .get(guild.id, channelId, grant.member_id);
+                if (!current) return;
+                const member = await this.fetchMember(guild, current.member_id);
+                if (member && current.added_by_bot) {
+                    await member.roles.remove(current.role_id, 'VoiceMaster channel removed');
+                }
+                this.sqlite.prepare(`DELETE FROM voice_master_join_roles
+                    WHERE guild_id = ? AND channel_id = ? AND member_id = ?`)
+                    .run(guild.id, channelId, current.member_id);
+            });
         }
+    }
+
+    withRoleLock(guildId, memberId, action) {
+        const key = `${guildId}:${memberId}`;
+        const previous = this.roleLocks.get(key) || Promise.resolve();
+        const operation = previous.catch(() => null).then(action);
+        this.roleLocks.set(key, operation);
+        return operation.finally(() => {
+            if (this.roleLocks.get(key) === operation) this.roleLocks.delete(key);
+        });
     }
 
     ownerContext(interaction, allowClaim = false) {
@@ -787,10 +823,14 @@ class VoiceMasterService {
     }
 
     updateAccess(channel, guildId, userId, effect, permissions) {
-        const key = `${guildId}:${channel.id}:${userId}`;
+        return this.withAccessLock(guildId, channel.id, userId,
+            () => this.performAccessUpdate(channel, guildId, userId, effect, permissions));
+    }
+
+    withAccessLock(guildId, channelId, userId, action) {
+        const key = `${guildId}:${channelId}:${userId}`;
         const previous = this.accessLocks.get(key) || Promise.resolve();
-        const operation = previous.catch(() => null)
-            .then(() => this.performAccessUpdate(channel, guildId, userId, effect, permissions));
+        const operation = previous.catch(() => null).then(action);
         this.accessLocks.set(key, operation);
         return operation.finally(() => {
             if (this.accessLocks.get(key) === operation) this.accessLocks.delete(key);
@@ -1238,6 +1278,12 @@ class VoiceMasterService {
                     if (won.changes) {
                         try {
                             await this.revokeChannelJoinRoles(guild, channel.id);
+                            if (channel.members.size > 0) {
+                                this.sqlite.prepare(`UPDATE bytepods SET state = 'active', cleanup_after = NULL
+                                    WHERE guild_id = ? AND channel_id = ? AND state = 'deleting'`)
+                                    .run(pod.guild_id, pod.channel_id);
+                                continue;
+                            }
                             await channel.delete('VoiceMaster restart cleanup');
                             this.clearOwnedChannel(pod.guild_id, pod.channel_id);
                             result.deleted++;
@@ -1360,61 +1406,70 @@ class VoiceMasterService {
 
     async reconcileJoinRoleGrants(result) {
         const grants = this.sqlite.prepare('SELECT * FROM voice_master_join_roles').all();
-        for (const grant of grants) {
+        for (const snapshot of grants) {
             try {
-                const guild = await this.client.guilds.fetch(grant.guild_id);
-                const member = await this.fetchMember(guild, grant.member_id);
-                if (!member) {
-                    this.sqlite.prepare(`DELETE FROM voice_master_join_roles
-                        WHERE guild_id = ? AND channel_id = ? AND member_id = ?`)
-                        .run(grant.guild_id, grant.channel_id, grant.member_id);
-                    continue;
-                }
-                if (grant.state === 'pending') {
-                    if (!member.roles.cache?.has(grant.role_id)) {
-                        await member.roles.add(grant.role_id, 'VoiceMaster join role recovery');
-                    }
-                    this.sqlite.prepare(`UPDATE voice_master_join_roles SET state = 'active', updated_at = ?
-                        WHERE guild_id = ? AND channel_id = ? AND member_id = ? AND role_id = ? AND state = 'pending'`)
-                        .run(this.now(), grant.guild_id, grant.channel_id, grant.member_id, grant.role_id);
-                    grant.state = 'active';
-                }
-                if (member?.voice?.channelId) {
-                    const currentPod = this.sqlite.prepare(`SELECT 1 FROM bytepods
-                        WHERE guild_id = ? AND channel_id = ? AND source_channel_id IS NOT NULL
-                        AND state = 'active' AND bot_owned = 1`).get(grant.guild_id, member.voice.channelId);
-                    if (currentPod && this.config(grant.guild_id)?.join_role_id === grant.role_id) {
-                        if (member.voice.channelId !== grant.channel_id) {
-                            this.sqlite.transaction(() => {
-                                this.sqlite.prepare(`DELETE FROM voice_master_join_roles
-                                    WHERE guild_id = ? AND channel_id = ? AND member_id = ?`)
-                                    .run(grant.guild_id, grant.channel_id, grant.member_id);
-                                this.sqlite.prepare(`INSERT INTO voice_master_join_roles
-                                    (guild_id, channel_id, member_id, role_id, state, added_by_bot, updated_at)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                                    ON CONFLICT (guild_id, channel_id, member_id) DO UPDATE SET
-                                        role_id = excluded.role_id, state = excluded.state,
-                                        added_by_bot = excluded.added_by_bot, updated_at = excluded.updated_at`)
-                                    .run(grant.guild_id, member.voice.channelId, grant.member_id,
-                                        grant.role_id, grant.state, grant.added_by_bot, this.now());
-                            })();
-                        }
-                        continue;
-                    }
-                }
-                const pod = this.sqlite.prepare(`SELECT 1 FROM bytepods
-                    WHERE guild_id = ? AND channel_id = ? AND source_channel_id IS NOT NULL
-                    AND state = 'active' AND bot_owned = 1`).get(grant.guild_id, grant.channel_id);
-                const channel = pod ? await this.fetchChannel(guild, grant.channel_id) : null;
-                if (channel?.members.has(grant.member_id)) continue;
-                if (grant.added_by_bot) await member.roles.remove(grant.role_id, 'VoiceMaster role reconciliation');
-                this.sqlite.prepare(`DELETE FROM voice_master_join_roles
-                    WHERE guild_id = ? AND channel_id = ? AND member_id = ?`)
-                    .run(grant.guild_id, grant.channel_id, grant.member_id);
+                await this.withRoleLock(snapshot.guild_id, snapshot.member_id,
+                    () => this.reconcileJoinRoleGrant(snapshot));
             } catch (error) {
-                result.failures.push({ guildId: grant.guild_id, channelId: grant.channel_id, error: error.message });
+                result.failures.push({ guildId: snapshot.guild_id, channelId: snapshot.channel_id, error: error.message });
             }
         }
+    }
+
+    async reconcileJoinRoleGrant(snapshot) {
+        const grant = this.sqlite.prepare(`SELECT * FROM voice_master_join_roles
+            WHERE guild_id = ? AND channel_id = ? AND member_id = ?`)
+            .get(snapshot.guild_id, snapshot.channel_id, snapshot.member_id);
+        if (!grant) return;
+        const guild = await this.client.guilds.fetch(grant.guild_id);
+        const member = await this.fetchMember(guild, grant.member_id);
+        if (!member) {
+            this.sqlite.prepare(`DELETE FROM voice_master_join_roles
+                WHERE guild_id = ? AND channel_id = ? AND member_id = ?`)
+                .run(grant.guild_id, grant.channel_id, grant.member_id);
+            return;
+        }
+        if (grant.state === 'pending') {
+            if (!member.roles.cache?.has(grant.role_id)) {
+                await member.roles.add(grant.role_id, 'VoiceMaster join role recovery');
+            }
+            this.sqlite.prepare(`UPDATE voice_master_join_roles SET state = 'active', updated_at = ?
+                WHERE guild_id = ? AND channel_id = ? AND member_id = ? AND role_id = ? AND state = 'pending'`)
+                .run(this.now(), grant.guild_id, grant.channel_id, grant.member_id, grant.role_id);
+            grant.state = 'active';
+        }
+        if (member.voice?.channelId) {
+            const currentPod = this.sqlite.prepare(`SELECT 1 FROM bytepods
+                WHERE guild_id = ? AND channel_id = ? AND source_channel_id IS NOT NULL
+                AND state = 'active' AND bot_owned = 1`).get(grant.guild_id, member.voice.channelId);
+            if (currentPod && this.config(grant.guild_id)?.join_role_id === grant.role_id) {
+                if (member.voice.channelId !== grant.channel_id) {
+                    this.sqlite.transaction(() => {
+                        this.sqlite.prepare(`DELETE FROM voice_master_join_roles
+                            WHERE guild_id = ? AND channel_id = ? AND member_id = ?`)
+                            .run(grant.guild_id, grant.channel_id, grant.member_id);
+                        this.sqlite.prepare(`INSERT INTO voice_master_join_roles
+                            (guild_id, channel_id, member_id, role_id, state, added_by_bot, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            ON CONFLICT (guild_id, channel_id, member_id) DO UPDATE SET
+                                role_id = excluded.role_id, state = excluded.state,
+                                added_by_bot = excluded.added_by_bot, updated_at = excluded.updated_at`)
+                            .run(grant.guild_id, member.voice.channelId, grant.member_id,
+                                grant.role_id, grant.state, grant.added_by_bot, this.now());
+                    })();
+                }
+                return;
+            }
+        }
+        const pod = this.sqlite.prepare(`SELECT 1 FROM bytepods
+            WHERE guild_id = ? AND channel_id = ? AND source_channel_id IS NOT NULL
+            AND state = 'active' AND bot_owned = 1`).get(grant.guild_id, grant.channel_id);
+        const channel = pod ? await this.fetchChannel(guild, grant.channel_id) : null;
+        if (channel?.members.has(grant.member_id)) return;
+        if (grant.added_by_bot) await member.roles.remove(grant.role_id, 'VoiceMaster role reconciliation');
+        this.sqlite.prepare(`DELETE FROM voice_master_join_roles
+            WHERE guild_id = ? AND channel_id = ? AND member_id = ?`)
+            .run(grant.guild_id, grant.channel_id, grant.member_id);
     }
 
     async reconcilePendingOperations(result) {
@@ -1446,34 +1501,41 @@ class VoiceMasterService {
         const accessRows = this.sqlite.prepare("SELECT * FROM voice_master_access WHERE state = 'pending'").all();
         for (const access of accessRows) {
             try {
-                const pod = this.sqlite.prepare(`SELECT 1 FROM bytepods
-                    WHERE guild_id = ? AND channel_id = ? AND source_channel_id IS NOT NULL
-                    AND state = 'active' AND bot_owned = 1`).get(access.guild_id, access.channel_id);
-                if (!pod) {
-                    this.sqlite.prepare(`DELETE FROM voice_master_access
+                await this.withAccessLock(access.guild_id, access.channel_id, access.user_id, async () => {
+                    const current = this.sqlite.prepare(`SELECT * FROM voice_master_access
                         WHERE guild_id = ? AND channel_id = ? AND user_id = ?
                         AND state = 'pending' AND generation = ?`)
-                        .run(access.guild_id, access.channel_id, access.user_id, access.generation);
-                    continue;
-                }
-                const guild = await this.client.guilds.fetch(access.guild_id);
-                const channel = await this.fetchChannel(guild, access.channel_id);
-                if (!channel) {
-                    this.clearOwnedChannel(access.guild_id, access.channel_id);
-                    continue;
-                }
-                if (channel.type !== ChannelType.GuildVoice
-                    || (channel.guildId && channel.guildId !== access.guild_id)) {
-                    throw new Error('Pending VoiceMaster access channel is ambiguous.');
-                }
-                const permissions = access.effect === 'permit'
-                    ? { ViewChannel: true, Connect: true }
-                    : { Connect: false };
-                await channel.permissionOverwrites.edit(access.user_id, permissions);
-                this.sqlite.prepare(`UPDATE voice_master_access SET state = 'active', updated_at = ?
-                    WHERE guild_id = ? AND channel_id = ? AND user_id = ?
-                    AND state = 'pending' AND generation = ?`)
-                    .run(this.now(), access.guild_id, access.channel_id, access.user_id, access.generation);
+                        .get(access.guild_id, access.channel_id, access.user_id, access.generation);
+                    if (!current) return;
+                    const pod = this.sqlite.prepare(`SELECT 1 FROM bytepods
+                        WHERE guild_id = ? AND channel_id = ? AND source_channel_id IS NOT NULL
+                        AND state = 'active' AND bot_owned = 1`).get(current.guild_id, current.channel_id);
+                    if (!pod) {
+                        this.sqlite.prepare(`DELETE FROM voice_master_access
+                            WHERE guild_id = ? AND channel_id = ? AND user_id = ?
+                            AND state = 'pending' AND generation = ?`)
+                            .run(current.guild_id, current.channel_id, current.user_id, current.generation);
+                        return;
+                    }
+                    const guild = await this.client.guilds.fetch(current.guild_id);
+                    const channel = await this.fetchChannel(guild, current.channel_id);
+                    if (!channel) {
+                        this.clearOwnedChannel(current.guild_id, current.channel_id);
+                        return;
+                    }
+                    if (channel.type !== ChannelType.GuildVoice
+                        || (channel.guildId && channel.guildId !== current.guild_id)) {
+                        throw new Error('Pending VoiceMaster access channel is ambiguous.');
+                    }
+                    const permissions = current.effect === 'permit'
+                        ? { ViewChannel: true, Connect: true }
+                        : { Connect: false };
+                    await channel.permissionOverwrites.edit(current.user_id, permissions);
+                    this.sqlite.prepare(`UPDATE voice_master_access SET state = 'active', updated_at = ?
+                        WHERE guild_id = ? AND channel_id = ? AND user_id = ?
+                        AND state = 'pending' AND generation = ?`)
+                        .run(this.now(), current.guild_id, current.channel_id, current.user_id, current.generation);
+                });
             } catch (error) {
                 result.failures.push({ guildId: access.guild_id, channelId: access.channel_id, error: error.message });
             }
@@ -1555,6 +1617,12 @@ class VoiceMasterService {
                     AND source_channel_id IS NOT NULL`).run(pod.guild_id, pod.channel_id, pod.generation);
                 if (!won.changes) continue;
                 await this.revokeChannelJoinRoles(guild, channel.id);
+                if (channel.members.size > 0) {
+                    this.sqlite.prepare(`UPDATE bytepods SET state = 'active', cleanup_after = NULL
+                        WHERE guild_id = ? AND channel_id = ? AND state = 'deleting'`)
+                        .run(pod.guild_id, pod.channel_id);
+                    continue;
+                }
                 await channel.delete('VoiceMaster scheduled cleanup retry');
                 this.clearOwnedChannel(pod.guild_id, pod.channel_id);
             } catch (error) {
