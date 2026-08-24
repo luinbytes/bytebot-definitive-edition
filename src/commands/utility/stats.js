@@ -89,8 +89,7 @@ module.exports = {
                 reactions: sql`COALESCE(SUM(${serverDailyMetrics.reactionCount}), 0)`,
                 voiceSeconds: sql`COALESCE(SUM(${serverDailyMetrics.voiceSeconds}), 0)`,
                 joins: sql`COALESCE(SUM(${serverDailyMetrics.joins}), 0)`,
-                leaves: sql`COALESCE(SUM(${serverDailyMetrics.leaves}), 0)`,
-                baselineAt: sql`MIN(${serverDailyMetrics.baselineAt})`
+                leaves: sql`COALESCE(SUM(${serverDailyMetrics.leaves}), 0)`
             }).from(serverDailyMetrics).where(and(
                 eq(serverDailyMetrics.guildId, guild.id),
                 gte(serverDailyMetrics.activityDate, since)
@@ -102,6 +101,8 @@ module.exports = {
                 commands: sql`COALESCE(SUM(${activityLogs.commandsRun}), 0)`
             }).from(activityLogs).where(and(eq(activityLogs.guildId, guild.id), gte(activityLogs.activityDate, since))).get();
             const activityCoverage = await db.select({ firstDate: sql`MIN(${serverDailyMetrics.activityDate})` })
+                .from(serverDailyMetrics).where(eq(serverDailyMetrics.guildId, guild.id)).get();
+            const baselineCoverage = await db.select({ baselineAt: sql`MIN(${serverDailyMetrics.baselineAt})` })
                 .from(serverDailyMetrics).where(eq(serverDailyMetrics.guildId, guild.id)).get();
             const coverage = !activityCoverage?.firstDate ? ' · no stored activity'
                 : activityCoverage.firstDate > since ? ` · stored since ${activityCoverage.firstDate}` : '';
@@ -177,9 +178,9 @@ module.exports = {
                     ...(metric === 'all' || metric === 'voice' ? [{ name: 'Voice', value: `${Math.floor(Number(rangeStats?.voiceSeconds || 0) / 60).toLocaleString()} minutes`, inline: true }] : []),
                     ...(metric === 'all' || metric === 'membership' ? [{
                         name: 'Membership',
-                        value: rangeStats?.baselineAt == null
+                        value: baselineCoverage?.baselineAt == null
                             ? 'History unavailable before the first reliable baseline.'
-                            : `${Number(rangeStats.joins).toLocaleString()} joins · ${Number(rangeStats.leaves).toLocaleString()} leaves · ${Number(rangeStats.joins - rangeStats.leaves).toLocaleString()} net · ${Number(latestSnapshot ?? totalMembers).toLocaleString()} latest`,
+                            : `${new Date(Number(baselineCoverage.baselineAt)).toISOString().slice(0, 10) > since ? `History unavailable before ${new Date(Number(baselineCoverage.baselineAt)).toISOString().slice(0, 10)} · ` : ''}${Number(rangeStats.joins).toLocaleString()} joins · ${Number(rangeStats.leaves).toLocaleString()} leaves · ${Number(rangeStats.joins - rangeStats.leaves).toLocaleString()} net · ${Number(latestSnapshot ?? totalMembers).toLocaleString()} latest`,
                         inline: false
                     }] : []),
                     { name: `Last ${days} Days${coverage}`, value: `${Number(commandRange?.commands || 0).toLocaleString()} commands`, inline: false },

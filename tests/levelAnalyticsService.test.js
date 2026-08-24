@@ -356,7 +356,10 @@ describe('LevelAnalyticsService', () => {
         const permissions = { has: permission => [PermissionFlagsBits.ManageGuild, PermissionFlagsBits.ManageRoles].includes(permission) };
         const interaction = {
             guildId: 'guild1',
-            guild: { id: 'guild1', members: { me: { permissions, roles: { highest } } } },
+            guild: {
+                id: 'guild1', members: { me: { permissions, roles: { highest } } },
+                roles: { cache: new Map([[reward.id, reward]]) }
+            },
             member: { permissions, roles: { highest } },
             options: {
                 getSubcommandGroup: () => 'reward', getSubcommand: () => 'add',
@@ -376,7 +379,7 @@ describe('LevelAnalyticsService', () => {
         `).run();
         const add = jest.fn();
         const member = {
-            id: 'user1', user: { bot: false }, guild: { id: 'guild1' },
+            id: 'user1', user: { bot: false }, guild: interaction.guild,
             roles: { cache: new Map(), add, remove: jest.fn() }
         };
         await service.reconcileMemberRoles(member);

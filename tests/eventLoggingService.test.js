@@ -104,4 +104,20 @@ describe('EventLoggingService', () => {
         await adapter.execute(Events.MessageDelete, message, client);
         expect(log).toHaveBeenCalledTimes(1);
     });
+
+    test('failed deliveries stop after three exponential retry attempts', async () => {
+        const channel = { id: 'channel1', send: jest.fn().mockRejectedValue(new Error('no access')) };
+        const server = guild([channel]);
+        service.client.guilds.cache.set(server.id, server);
+        service.add(server, channel, 'messages');
+        await service.log(server, 'messages', 'message:retry', {});
+        now += 1000;
+        await service.processOutbox();
+        now += 2000;
+        await service.processOutbox();
+
+        expect(channel.send).toHaveBeenCalledTimes(3);
+        expect(database.sqlite.prepare(`SELECT status, attempts FROM event_log_outbox WHERE event_key = 'message:retry'`).get())
+            .toEqual({ status: 'failed', attempts: 3 });
+    });
 });

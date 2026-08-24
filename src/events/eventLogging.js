@@ -39,11 +39,16 @@ function entity(args) {
 
 function guildOf(name, args, client) {
     if (name === Events.GuildAuditLogEntryCreate) return args[1];
+    if (name === Events.GuildSoundboardSoundsUpdate) return args[1];
     const value = entity(args);
     return value?.guild || client.guilds.cache.get(value?.guildId) || (value?.id && value?.members ? value : null);
 }
 
 function eventKey(name, args) {
+    if (name === Events.GuildSoundboardSoundsUpdate) {
+        const sounds = [...args[0].values()].map(sound => [sound.id, sound.name, sound.volume, sound.emoji?.id || sound.emoji?.name]).sort();
+        return `${name}:${crypto.createHash('sha256').update(JSON.stringify(sounds)).digest('hex').slice(0, 24)}`;
+    }
     const current = args[1]?.id ? args[1] : args[0];
     const stable = name === Events.GuildAuditLogEntryCreate ? args[0]?.id
         : name === Events.AutoModerationActionExecution ? args[0]?.id
@@ -108,7 +113,13 @@ module.exports = {
         const guild = guildOf(name, args, client);
         if (!guild) return;
         try {
-            await client.eventLoggingService.log(guild, GROUPS[name], eventKey(name, args), details(name, args));
+            let key = eventKey(name, args);
+            if (name === Events.GuildIntegrationsUpdate && guild.fetchIntegrations) {
+                const integrations = await guild.fetchIntegrations();
+                const state = [...integrations.values()].map(item => [item.id, item.name, item.type, item.enabled, item.syncing, item.role?.id]).sort();
+                key = `${name}:${crypto.createHash('sha256').update(JSON.stringify(state)).digest('hex').slice(0, 24)}`;
+            }
+            await client.eventLoggingService.log(guild, GROUPS[name], key, details(name, args));
         } catch (error) {
             logger.error(`Event logging failed for ${name} in ${guild.id}: ${error.message}`);
         }

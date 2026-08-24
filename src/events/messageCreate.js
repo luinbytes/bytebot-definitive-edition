@@ -75,13 +75,17 @@ module.exports = {
         if (client.levelAnalyticsService) {
             try {
                 levelActivity = await client.levelAnalyticsService.recordMessage(message);
-                if (levelActivity.roleReconcile) {
-                    await client.levelAnalyticsService.reconcileMemberRoles(message.member);
-                }
-                await client.levelAnalyticsService.announceLevel(message, levelActivity);
             } catch (error) {
                 levelTrackingFailed = true;
                 logger.error('Level analytics tracking error:', error);
+            }
+            if (!levelTrackingFailed && levelActivity?.roleReconcile) {
+                await client.levelAnalyticsService.reconcileMemberRoles(message.member)
+                    .catch(error => logger.error('Level role reconciliation error:', error));
+            }
+            if (!levelTrackingFailed) {
+                await client.levelAnalyticsService.announceLevel(message, levelActivity)
+                    .catch(error => logger.error('Level-up message delivery error:', error));
             }
         }
 

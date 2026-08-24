@@ -17,6 +17,7 @@ class EventLoggingService {
         this.now = now;
         this.pending = new Map();
         this.confirmations = new Map();
+        this.sqlite.prepare(`UPDATE event_log_outbox SET status = 'pending' WHERE status = 'sending'`).run();
     }
 
     module(value) {
@@ -228,6 +229,10 @@ class EventLoggingService {
             ORDER BY id LIMIT ?
         `).all(this.now(), limit);
         for (const row of rows) {
+            const claimed = this.sqlite.prepare(`
+                UPDATE event_log_outbox SET status = 'sending' WHERE id = ? AND status = 'pending'
+            `).run(row.id);
+            if (!claimed.changes) continue;
             try {
                 const guild = this.client.guilds.cache.get(row.guild_id);
                 const channel = guild?.channels.cache.get(row.channel_id)

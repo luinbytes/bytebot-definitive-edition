@@ -466,7 +466,7 @@ class LevelAnalyticsService {
         const previousXp = 100 * row.level ** 2;
         const progress = nextXp === previousXp ? 1 : Math.max(0, Math.min(1, (row.xp - previousXp) / (nextXp - previousXp)));
         let image = prefs.background_data
-            ? sharp(prefs.background_data).resize(width, height, { fit: 'cover' })
+            ? sharp(prefs.background_data, { limitInputPixels: 40_000_000 }).resize(width, height, { fit: 'cover' })
             : sharp({ create: { width, height, channels: 4, background: '#17191f' } });
         const avatarSize = prefs.layout === 'compact' ? 130 : 170;
         const avatarX = 35;
@@ -556,10 +556,15 @@ class LevelAnalyticsService {
 
     async reconcileMemberRoles(member) {
         if (!member || member.user?.bot) return false;
+        const bot = member.guild.members.me;
+        if (!bot?.permissions.has(PermissionFlagsBits.ManageRoles)) return false;
         const config = this.sqlite.prepare(`SELECT stack_roles FROM level_configs WHERE guild_id = ?`).get(member.guild.id);
         const rewards = this.sqlite.prepare(`
             SELECT level, role_id FROM level_role_rewards WHERE guild_id = ? ORDER BY level
-        `).all(member.guild.id);
+        `).all(member.guild.id).filter(reward => {
+            const role = member.guild.roles.cache.get(reward.role_id);
+            return role && !role.managed && bot.roles.highest.comparePositionTo(role) > 0;
+        });
         if (!rewards.length) return false;
         const level = this.memberRow(member.guild.id, member.id).level;
         const earned = rewards.filter(reward => reward.level <= level);
@@ -1122,7 +1127,7 @@ class LevelAnalyticsService {
                 if (attachment?.size > 5 * 1024 * 1024) throw new Error('Rank-card backgrounds cannot exceed 5 MiB.');
                 background = await this.images.image(source);
                 if (background.length > 5 * 1024 * 1024) throw new Error('Rank-card backgrounds cannot exceed 5 MiB.');
-                const metadata = await sharp(background).metadata();
+                const metadata = await sharp(background, { limitInputPixels: 40_000_000 }).metadata();
                 mime = `image/${metadata.format === 'jpeg' ? 'jpeg' : metadata.format}`;
             }
             const current = this.sqlite.prepare(`SELECT * FROM level_rank_cards WHERE user_id = ?`).get(interaction.user.id);
