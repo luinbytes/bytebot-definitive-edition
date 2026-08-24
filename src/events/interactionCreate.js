@@ -673,9 +673,9 @@ module.exports = {
 
             try {
                 if (interaction.replied || interaction.deferred) {
-                    await interaction.followUp({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral] });
+                    await interaction.followUp({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] } });
                 } else {
-                    await interaction.reply({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral] });
+                    await interaction.reply({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] } });
                 }
             } catch (replyError) {
                 // Interaction expired or already handled - log but don't crash
