@@ -300,4 +300,28 @@ describe('LevelAnalyticsService', () => {
             manual_adjustment: 100, level_floor: 0
         });
     });
+
+    test('/levels ignore blocks XP but keeps accepted messages in analytics', async () => {
+        const interaction = {
+            guildId: 'guild1',
+            member: { permissions: { has: permission => permission === PermissionFlagsBits.ManageGuild } },
+            options: {
+                getSubcommandGroup: () => 'ignore',
+                getSubcommand: () => 'channel',
+                getChannel: () => ({ id: 'channel1' })
+            },
+            reply: jest.fn()
+        };
+        await service.execute(interaction);
+        const result = service.recordMessage({
+            id: 'ignored-message', content: 'still activity', webhookId: null,
+            guild: { id: 'guild1' }, channelId: 'channel1',
+            author: { id: 'user1', bot: false }, member: { roles: { cache: new Map() } }
+        });
+
+        expect(result).toEqual(expect.objectContaining({ accepted: true, xpAwarded: 0 }));
+        expect(database.sqlite.prepare(`
+            SELECT message_count FROM server_daily_metrics WHERE guild_id = 'guild1'
+        `).get().message_count).toBe(1);
+    });
 });

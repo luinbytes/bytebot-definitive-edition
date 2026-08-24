@@ -518,6 +518,42 @@ class LevelAnalyticsService {
                 flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
             });
         }
+        if (group === 'ignore') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                throw new Error('You need Manage Server to configure XP exclusions.');
+            }
+            if (action === 'list') {
+                const rows = this.sqlite.prepare(`
+                    SELECT target_type, target_id FROM level_ignores
+                    WHERE guild_id = ? ORDER BY target_type, target_id
+                `).all(interaction.guildId);
+                const content = rows.length
+                    ? rows.map(row => row.target_type === 'role' ? `<@&${row.target_id}>` : `<#${row.target_id}>`).join('\n')
+                    : 'No XP exclusions are configured.';
+                return interaction.reply({ content, flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] } });
+            }
+            const target = action === 'role'
+                ? interaction.options.getRole('role', true)
+                : interaction.options.getChannel('channel', true);
+            const existing = this.sqlite.prepare(`
+                SELECT 1 FROM level_ignores WHERE guild_id = ? AND target_type = ? AND target_id = ?
+            `).get(interaction.guildId, action, target.id);
+            if (existing) {
+                this.sqlite.prepare(`
+                    DELETE FROM level_ignores WHERE guild_id = ? AND target_type = ? AND target_id = ?
+                `).run(interaction.guildId, action, target.id);
+            } else {
+                this.sqlite.prepare(`
+                    INSERT INTO level_ignores (guild_id, target_type, target_id, created_at)
+                    VALUES (?, ?, ?, ?)
+                `).run(interaction.guildId, action, target.id, this.now());
+            }
+            const mention = action === 'role' ? `<@&${target.id}>` : `<#${target.id}>`;
+            return interaction.reply({
+                content: `${mention} is ${existing ? 'no longer' : 'now'} ignored for XP.`,
+                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+            });
+        }
         if (group === 'admin') {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
                 throw new Error('You need Manage Server to manage member XP.');
