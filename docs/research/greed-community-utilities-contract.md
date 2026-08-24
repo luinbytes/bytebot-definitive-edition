@@ -32,7 +32,7 @@ The established hubs remain the discoverable categories. This avoids duplicate c
 | `/confess [category]` | Public Utility command. Opens the anonymous submission modal. A configured panel button opens the same flow. |
 | `/server confessions setup` | Administration; configure the destination channel and publish or refresh the submission panel. Requires Manage Server. |
 | `/server confessions remove` | Disable submissions and remove configuration after explicit confirmation. Existing moderation records remain. Requires Manage Server. |
-| `/server confessions category` | Add, remove, or list a category-to-channel route, capped at 25. Requires Manage Server. |
+| `/server confessions category` | Add, remove, or list a category-to-channel route, capped at 24 plus the default General route to fit Discord's 25-choice limit. Requires Manage Server. |
 | `/server confessions blacklist` | Add, remove, list, or clear case-insensitive blocked phrases. Requires Manage Server. |
 | `/server confessions emojis` | Set, reset, or view up/down reaction emoji. Setting both to `none` disables reactions. Requires Manage Server. |
 | `/server confessions mute`, `unmute`, `report` | Resolve an author by confession number without public disclosure. `unmute all` clears all author mutes. Reports reveal the author only in an ephemeral moderator response and record the supplied reason. Requires Manage Messages. |

@@ -68,6 +68,20 @@ module.exports = {
                 .setDescription('Text to uwuify')
                 .setRequired(true)
                 .setMaxLength(2000)))
+        .addSubcommand(sub => sub.setName('choose').setDescription('Choose one item from a comma-separated list')
+            .addStringOption(opt => opt.setName('options').setDescription('Two or more comma-separated choices').setMinLength(3).setMaxLength(2000).setRequired(true)))
+        .addSubcommand(sub => sub.setName('random-member').setDescription('Choose a random non-bot server member'))
+        .addSubcommand(sub => sub.setName('quote').setDescription('Render a same-server text message as a quote image')
+            .addStringOption(opt => opt.setName('message').setDescription('Message link or ID').setRequired(true)))
+        .addSubcommandGroup(group => group.setName('poll').setDescription('Create and manage community polls')
+            .addSubcommand(sub => sub.setName('create').setDescription('Create a timed multiple-choice poll')
+                .addStringOption(opt => opt.setName('question').setDescription('Poll question').setMinLength(1).setMaxLength(300).setRequired(true))
+                .addStringOption(opt => opt.setName('options').setDescription('2-10 comma-separated options').setMinLength(3).setMaxLength(600).setRequired(true))
+                .addStringOption(opt => opt.setName('duration').setDescription('10s to 7d, such as 1h').setRequired(true)))
+            .addSubcommand(sub => sub.setName('quick').setDescription('Create a yes-or-no poll')
+                .addStringOption(opt => opt.setName('question').setDescription('Poll question').setMinLength(1).setMaxLength(300).setRequired(true)))
+            .addSubcommand(sub => sub.setName('end').setDescription('End a poll you created')
+                .addStringOption(opt => opt.setName('message').setDescription('Poll message link or ID').setRequired(true))))
         .addSubcommandGroup(group => group
             .setName('uwulock')
             .setDescription('Manage Server: control automatic UwU Lock')
@@ -98,12 +112,20 @@ module.exports = {
 
     cooldown: 3,
 
-    async execute(interaction) {
+    async execute(interaction, client) {
         const group = interaction.options.getSubcommandGroup(false);
         const subcommand = interaction.options.getSubcommand();
 
         if (group === 'uwulock') {
             return handleUwuLock(interaction, subcommand);
+        }
+        if (group === 'poll') {
+            if (!client.communityUtilityService) throw new Error('Community utilities are unavailable.');
+            if (subcommand === 'create') return client.communityUtilityService.createPoll(interaction,
+                interaction.options.getString('question', true), interaction.options.getString('options', true), interaction.options.getString('duration', true));
+            if (subcommand === 'quick') return client.communityUtilityService.createPoll(interaction,
+                interaction.options.getString('question', true), ['Yes', 'No'], null);
+            return client.communityUtilityService.endPoll(interaction, interaction.options.getString('message', true));
         }
 
         switch (subcommand) {
@@ -125,6 +147,26 @@ module.exports = {
                     allowedMentions: { parse: [], repliedUser: false }
                 });
                 break;
+            case 'choose': {
+                if (!client.communityUtilityService) throw new Error('Community utilities are unavailable.');
+                const choice = client.communityUtilityService.choose(interaction.options.getString('options', true));
+                await interaction.reply({ content: `I choose: **${choice}**`, allowedMentions: { parse: [], repliedUser: false } });
+                break;
+            }
+            case 'random-member': {
+                if (!client.communityUtilityService) throw new Error('Community utilities are unavailable.');
+                const member = await client.communityUtilityService.randomMember(interaction.guild);
+                await interaction.reply({ content: `Random member: <@${member.id}>`, allowedMentions: { parse: [], users: [member.id], repliedUser: false } });
+                break;
+            }
+            case 'quote': {
+                if (!client.communityUtilityService) throw new Error('Community utilities are unavailable.');
+                await interaction.deferReply();
+                const message = await client.communityUtilityService.resolveMessage(interaction, interaction.options.getString('message', true));
+                const attachment = await client.communityUtilityService.quoteImage(message);
+                await interaction.editReply({ content: `Quoted from ${message.url}`, files: [attachment], allowedMentions: { parse: [], repliedUser: false } });
+                break;
+            }
         }
     }
 };

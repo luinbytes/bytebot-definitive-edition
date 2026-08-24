@@ -38,6 +38,14 @@ module.exports = {
             logger.error('AutoMod message handler error:', error);
         }
 
+        if (client.communityUtilityService) {
+            try {
+                if (await client.communityUtilityService.handleMessage(message)) return;
+            } catch (error) {
+                logger.error('Image-only handler error:', error);
+            }
+        }
+
         try {
             if (await handleUwuLockMessage(message)) return;
         } catch (error) {

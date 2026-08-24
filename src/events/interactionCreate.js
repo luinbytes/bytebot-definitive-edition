@@ -24,6 +24,14 @@ module.exports = {
             return;
         }
         processedInteractions.add(interaction.id);
+        if ((interaction.isButton() || interaction.isStringSelectMenu() || interaction.isModalSubmit())
+            && interaction.customId?.startsWith('community:')) {
+            if (!client.communityUtilityService) {
+                return interaction.reply({ content: 'Community utilities are temporarily unavailable.', flags: [MessageFlags.Ephemeral] }).catch(() => null);
+            }
+            await client.communityUtilityService.handleInteraction(interaction);
+            return;
+        }
         if (interaction.customId?.startsWith('economy:')
             && (interaction.isButton() || interaction.isStringSelectMenu())) {
             if (!client.economyService) {

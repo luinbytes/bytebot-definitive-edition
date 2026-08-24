@@ -1411,6 +1411,103 @@ const economyLabOperations = sqliteTable('economy_lab_operations', {
     amountCheck: check('economy_lab_operations_amount_check', sql`${table.inputAmount} >= 0 AND ${table.resultAmount} >= 0`)
 }));
 
+const confessionConfigs = sqliteTable('confession_configs', {
+    guildId: text('guild_id').primaryKey(),
+    channelId: text('channel_id').notNull(),
+    panelMessageId: text('panel_message_id'),
+    upEmoji: text('up_emoji').default('👍').notNull(),
+    downEmoji: text('down_emoji').default('👎').notNull(),
+    nextNumber: integer('next_number').default(1).notNull(),
+    enabled: integer('enabled', { mode: 'boolean' }).default(true).notNull(),
+    updatedAt: integer('updated_at').notNull()
+});
+
+const confessionCategories = sqliteTable('confession_categories', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    name: text('name').notNull(),
+    nameKey: text('name_key').notNull(),
+    channelId: text('channel_id').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({ guildNameUnique: unique().on(table.guildId, table.nameKey) }));
+
+const confessionBlacklist = sqliteTable('confession_blacklist', {
+    guildId: text('guild_id').notNull(),
+    phrase: text('phrase').notNull(),
+    phraseKey: text('phrase_key').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.phraseKey] }) }));
+
+const confessionMutes = sqliteTable('confession_mutes', {
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    mutedBy: text('muted_by').notNull(),
+    reason: text('reason'),
+    createdAt: integer('created_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.userId] }) }));
+
+const confessions = sqliteTable('confessions', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    number: integer('number').notNull(),
+    categoryId: integer('category_id').references(() => confessionCategories.id, { onDelete: 'set null' }),
+    channelId: text('channel_id').notNull(),
+    messageId: text('message_id'),
+    authorId: text('author_id').notNull(),
+    content: text('content').notNull(),
+    status: text('status').default('pending').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({
+    guildNumberUnique: unique().on(table.guildId, table.number),
+    authorCreatedIdx: index('confessions_author_created_idx').on(table.guildId, table.authorId, table.createdAt),
+    statusCheck: check('confessions_status_check', sql`${table.status} IN ('pending','published','failed')`)
+}));
+
+const confessionReplies = sqliteTable('confession_replies', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    confessionId: integer('confession_id').notNull().references(() => confessions.id, { onDelete: 'cascade' }),
+    replierId: text('replier_id').notNull(),
+    content: text('content').notNull(),
+    delivered: integer('delivered', { mode: 'boolean' }).default(false).notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({ confessionCreatedIdx: index('confession_replies_created_idx').on(table.confessionId, table.createdAt) }));
+
+const communityPolls = sqliteTable('community_polls', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    messageId: text('message_id'),
+    creatorId: text('creator_id').notNull(),
+    question: text('question').notNull(),
+    optionsJson: text('options_json').notNull(),
+    status: text('status').default('pending').notNull(),
+    endsAt: integer('ends_at'),
+    createdAt: integer('created_at').notNull(),
+    endedAt: integer('ended_at')
+}, table => ({
+    messageUnique: unique().on(table.guildId, table.messageId),
+    dueIdx: index('community_polls_due_idx').on(table.status, table.endsAt),
+    statusCheck: check('community_polls_status_check', sql`${table.status} IN ('pending','active','ending','ended','failed')`)
+}));
+
+const communityPollVotes = sqliteTable('community_poll_votes', {
+    pollId: integer('poll_id').notNull().references(() => communityPolls.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull(),
+    optionIndex: integer('option_index').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.pollId, table.userId] }),
+    optionCheck: check('community_poll_votes_option_check', sql`${table.optionIndex} BETWEEN 0 AND 9`)
+}));
+
+const imageOnlyChannels = sqliteTable('image_only_channels', {
+    guildId: text('guild_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.channelId] }) }));
+
 module.exports = {
     guilds,
     lifecycleMessages,
@@ -1522,5 +1619,14 @@ module.exports = {
     economyGangMembers,
     economyGangInvites,
     economyLabs,
-    economyLabOperations
+    economyLabOperations,
+    confessionConfigs,
+    confessionCategories,
+    confessionBlacklist,
+    confessionMutes,
+    confessions,
+    confessionReplies,
+    communityPolls,
+    communityPollVotes,
+    imageOnlyChannels
 };

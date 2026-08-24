@@ -1192,6 +1192,83 @@ const expectedSchema = {
         result_amount: 'INTEGER DEFAULT 0 NOT NULL',
         result_json: 'TEXT NOT NULL',
         created_at: 'INTEGER NOT NULL'
+    },
+    confession_configs: {
+        guild_id: 'TEXT PRIMARY KEY',
+        channel_id: 'TEXT NOT NULL',
+        panel_message_id: 'TEXT',
+        up_emoji: "TEXT DEFAULT '👍' NOT NULL",
+        down_emoji: "TEXT DEFAULT '👎' NOT NULL",
+        next_number: 'INTEGER DEFAULT 1 NOT NULL',
+        enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    confession_categories: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        name: 'TEXT NOT NULL',
+        name_key: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    confession_blacklist: {
+        guild_id: 'TEXT NOT NULL',
+        phrase: 'TEXT NOT NULL',
+        phrase_key: 'TEXT NOT NULL',
+        created_by: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    confession_mutes: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        muted_by: 'TEXT NOT NULL',
+        reason: 'TEXT',
+        created_at: 'INTEGER NOT NULL'
+    },
+    confessions: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        number: 'INTEGER NOT NULL',
+        category_id: 'INTEGER',
+        channel_id: 'TEXT NOT NULL',
+        message_id: 'TEXT',
+        author_id: 'TEXT NOT NULL',
+        content: 'TEXT NOT NULL',
+        status: "TEXT DEFAULT 'pending' NOT NULL",
+        created_at: 'INTEGER NOT NULL'
+    },
+    confession_replies: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        confession_id: 'INTEGER NOT NULL',
+        replier_id: 'TEXT NOT NULL',
+        content: 'TEXT NOT NULL',
+        delivered: 'INTEGER DEFAULT 0 NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    community_polls: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        message_id: 'TEXT',
+        creator_id: 'TEXT NOT NULL',
+        question: 'TEXT NOT NULL',
+        options_json: 'TEXT NOT NULL',
+        status: "TEXT DEFAULT 'pending' NOT NULL",
+        ends_at: 'INTEGER',
+        created_at: 'INTEGER NOT NULL',
+        ended_at: 'INTEGER'
+    },
+    community_poll_votes: {
+        poll_id: 'INTEGER NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        option_index: 'INTEGER NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    image_only_channels: {
+        guild_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        created_by: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
     }
 };
 
@@ -1233,6 +1310,13 @@ const compatibilityUniqueKeys = {
     member_levels: ['guild_id', 'user_id'],
     giveaway_entries: ['giveaway_id', 'user_id'],
     giveaway_rounds: ['giveaway_id', 'round_number'],
+    confession_categories: ['guild_id', 'name_key'],
+    confession_blacklist: ['guild_id', 'phrase_key'],
+    confession_mutes: ['guild_id', 'user_id'],
+    confessions: ['guild_id', 'number'],
+    community_polls: ['guild_id', 'message_id'],
+    community_poll_votes: ['poll_id', 'user_id'],
+    image_only_channels: ['guild_id', 'channel_id'],
     guild_backups: ['guild_id', 'creator_id', 'name'],
     customization_presets: ['guild_id', 'name'],
     economy_scope_totals: ['scope_type', 'scope_id'],

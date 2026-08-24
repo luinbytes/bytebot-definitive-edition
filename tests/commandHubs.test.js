@@ -140,7 +140,13 @@ describe('Intent command hubs', () => {
         ]);
         expect(optionNames(findOption(command, 'achievement').options.find(option => option.name === 'enable').options)).toEqual([]);
         expect(optionNames(findOption(command, 'achievement').options.find(option => option.name === 'disable').options)).toEqual([]);
-        expect(optionNames(findOption(command, 'community').options)).toEqual(['view']);
+        expect(optionNames(findOption(command, 'community').options)).toEqual(['view', 'image-only', 'pin', 'unpin']);
+        expect(optionNames(findOption(command, 'confessions').options)).toEqual([
+            'view', 'setup', 'remove', 'category', 'blacklist', 'emojis', 'mute', 'unmute', 'report'
+        ]);
+        expect(optionNames(findOption(command, 'thread').options)).toEqual([
+            'add', 'remove', 'rename', 'slowmode', 'lock', 'unlock', 'archive', 'unarchive', 'solved', 'delete'
+        ]);
         expect(optionNames(findOption(command, 'security').options)).toEqual([
             'antinuke-settings',
             'antinuke-toggle',
@@ -301,7 +307,7 @@ describe('Intent command hubs', () => {
         const protect = findOption(uwuLock, 'protect');
 
         expect(optionNames(command.options)).toEqual([
-            '8ball', 'coin', 'dice', 'joke', 'uwuify', 'uwulock'
+            '8ball', 'coin', 'dice', 'joke', 'uwuify', 'choose', 'random-member', 'quote', 'poll', 'uwulock'
         ]);
         expect(uwuLock.description).toContain('Manage Server');
         expect(optionNames(uwuLock.options)).toEqual(['add', 'remove', 'list', 'protect']);

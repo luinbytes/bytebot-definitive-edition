@@ -327,6 +327,16 @@ module.exports = {
         }
 
         try {
+            const { CommunityUtilityService } = require('../services/communityUtilityService');
+            client.communityUtilityService = new CommunityUtilityService(client);
+            await client.communityUtilityService.reconcile();
+            client.communityUtilityService.start();
+            logger.success('Community utility service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize community utility service: ${e}`);
+        }
+
+        try {
             const { EconomyService } = require('../services/economyService');
             const { sqlite } = require('../database');
             client.economyService = new EconomyService({ client, sqlite });
