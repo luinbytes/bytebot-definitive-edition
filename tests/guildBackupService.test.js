@@ -264,6 +264,13 @@ describe('guild backups', () => {
     });
 
     test('requires a fresh preview code bound to the exact restore plan', () => {
+        let now = 1000;
+        const timers = [];
+        service.now = () => now;
+        service.setTimeout = jest.fn((callback, delay) => {
+            timers.push(callback);
+            return { unref: jest.fn() };
+        });
         const guild = {
             id: 'guild1', roles: { cache: new Map() }, channels: { cache: new Map() },
             emojis: { cache: new Map() }, stickers: { cache: new Map() }
@@ -277,6 +284,21 @@ describe('guild backups', () => {
             backupId: 'backup-1', sections: ['roles']
         }));
         expect(() => service.consumePreview(values, preview.confirmationCode)).toThrow('valid confirmation code');
+
+        const expiring = service.issuePreview(values);
+        now += 10 * 60 * 1000 + 1;
+        expect(() => service.consumePreview(values, expiring.confirmationCode)).toThrow('valid confirmation code');
+
+        now += 1;
+        const changedValues = { ...values, mode: 'destructive' };
+        const changed = service.issuePreview(changedValues);
+        guild.roles.cache.set('role1', {
+            id: 'role1', name: 'New', managed: false, position: 1, color: 0,
+            permissions: { bitfield: 0n }, hoist: false, mentionable: false
+        });
+        expect(() => service.consumePreview(changedValues, changed.confirmationCode)).toThrow('plan changed');
+        expect(service.setTimeout).toHaveBeenCalledWith(expect.any(Function), 10 * 60 * 1000);
+        timers.at(-1)();
     });
 
     test('rejects corrupted or unknown payloads and enforces five backups per creator', () => {

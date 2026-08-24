@@ -181,6 +181,7 @@ class GuildBackupService {
         this.now = options.now || Date.now;
         this.randomUUID = options.randomUUID || crypto.randomUUID;
         this.sleep = options.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+        this.setTimeout = options.setTimeout || setTimeout;
     }
 
     create({ guild, creatorId, name, description = null }) {
@@ -262,11 +263,16 @@ class GuildBackupService {
         for (const [key, preview] of restorePreviews) {
             if (preview.expiresAt < this.now()) restorePreviews.delete(key);
         }
-        restorePreviews.set(`${values.guild.id}:${values.creatorId}:${values.id}`, {
+        const key = `${values.guild.id}:${values.creatorId}:${values.id}`;
+        restorePreviews.set(key, {
             code,
             expiresAt: this.now() + RESTORE_PREVIEW_TTL,
             fingerprint: digest(JSON.stringify(plan))
         });
+        const timer = this.setTimeout(() => {
+            if (restorePreviews.get(key)?.code === code) restorePreviews.delete(key);
+        }, RESTORE_PREVIEW_TTL);
+        timer.unref?.();
         return { ...plan, confirmationCode: code };
     }
 
