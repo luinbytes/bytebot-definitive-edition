@@ -308,6 +308,8 @@ module.exports = {
             client.automationService = new AutomationService(client);
             const RoleAutomationService = require('../services/roleAutomationService');
             client.roleAutomationService = new RoleAutomationService(client, client.automationService);
+            const RichContentService = require('../services/richContentService');
+            client.richContentService = new RichContentService(client, client.automationService);
             await client.automationService.start();
             logger.success('Automation service initialized');
         } catch (e) {

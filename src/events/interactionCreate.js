@@ -24,6 +24,16 @@ module.exports = {
             return;
         }
         processedInteractions.add(interaction.id);
+        if (interaction.isButton() && interaction.customId.startsWith('rich:custom:')) {
+            if (!client.richContentService) return interaction.reply({ content: 'Custom responses are temporarily unavailable.', flags: [MessageFlags.Ephemeral] });
+            try {
+                await client.richContentService.handleCustomButton(interaction);
+            } catch (error) {
+                logger.errorContext('Custom Response Error', error, { customId: interaction.customId, userId: interaction.user?.id, guildId: interaction.guildId });
+                if (!interaction.replied && !interaction.deferred) await interaction.reply({ content: 'That custom response could not be sent.', flags: [MessageFlags.Ephemeral] }).catch(() => null);
+            }
+            return;
+        }
         if (interaction.isButton() && interaction.customId.startsWith('rolebtn:')) {
             if (!client.roleAutomationService) return interaction.reply({ content: 'Role buttons are temporarily unavailable.', flags: [MessageFlags.Ephemeral] });
             try {
