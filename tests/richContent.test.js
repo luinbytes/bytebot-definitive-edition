@@ -49,6 +49,18 @@ describe('Greed-compatible rich content', () => {
         expect(json.components[3].items[0]).toEqual(expect.objectContaining({ media: { url: 'https://example.com/a.png' }, description: 'A' }));
     });
 
+    test('legacy embeds can invoke the same custom scripts', () => {
+        const { renderScript } = require('../src/services/richContentService');
+        const payload = renderScript(
+            '{embed}$v{title: Rules}$v{button: label: Open && custom: rules && style: success}',
+            { customScripts: new Set(['rules']) }
+        );
+
+        expect(payload.components[0].toJSON().components[0]).toEqual(expect.objectContaining({
+            custom_id: 'rich:custom:rules', disabled: false, style: 3
+        }));
+    });
+
     test('renders explicit action rows and disabled display selects', () => {
         const { renderScript } = require('../src/services/richContentService');
         const payload = renderScript(

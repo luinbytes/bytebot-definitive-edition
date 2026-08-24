@@ -264,12 +264,36 @@ function renderComponents(script, context) {
     return { components, flags: MessageFlags.IsComponentsV2, allowedMentions: SAFE_MENTIONS };
 }
 
+function renderLegacy(script, context) {
+    const directives = nodes(script);
+    const isCustomButton = node => {
+        if (node.name !== 'button') return false;
+        const { parts, options } = optionsFor(node.value);
+        return Boolean(options.custom || options.custom_id || options.id)
+            && !options.url && !parts.some(part => /^https?:\/\//i.test(part));
+    };
+    const customButtons = directives.filter(isCustomButton).map(node => buttonFor(node.value, context));
+    const template = directives.filter(node => !isCustomButton(node))
+        .map(node => `{${node.name}${node.value ? `: ${node.value}` : ''}}`).join('$v');
+    const payload = parseEmbedScript(template);
+    for (const button of customButtons) {
+        let row = payload.components.at(-1);
+        if (!row || row.components.length === 5) {
+            if (payload.components.length === 5) throw new Error('Embed scripts can contain at most 5 button rows.');
+            row = new ActionRowBuilder();
+            payload.components.push(row);
+        }
+        row.addComponents(button);
+    }
+    return payload;
+}
+
 function renderScript(script, context) {
     const rendered = renderVariables(script, context);
     if (/^\s*\{cv2(?::)?\}/i.test(rendered)) return renderComponents(rendered, context);
     if (/\{embed\}/i.test(rendered)) validateLegacy(rendered);
     let payload;
-    if (/\{embed\}/i.test(rendered)) payload = parseEmbedScript(rendered);
+    if (/\{embed\}/i.test(rendered)) payload = renderLegacy(rendered, context);
     else if (/^\s*\{content\s*:/i.test(rendered)) {
         const directives = nodes(rendered);
         if (directives.length !== 1 || directives[0].name !== 'content') throw new Error('Content scripts must contain one content directive.');
