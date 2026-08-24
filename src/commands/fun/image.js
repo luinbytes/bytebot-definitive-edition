@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
 const { resolveImageInput } = require('../../services/mediaService');
 const { EFFECTS, ImageManipulationService, MAX_OUTPUT_BYTES } = require('../../services/imageManipulationService');
 
@@ -46,6 +46,7 @@ module.exports = {
 
     cooldown: 3,
     longRunning: true,
+    botPermissions: [PermissionFlagsBits.AttachFiles],
 
     async execute(interaction, client) {
         const attachment = interaction.options.getAttachment('image');
