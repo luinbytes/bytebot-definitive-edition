@@ -406,7 +406,8 @@ class InformationLookupService {
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
         });
-        const row = payload?.data?.[0];
+        if (!Array.isArray(payload?.data)) throw new UserFacingError('Roblox returned an invalid profile.');
+        const row = payload.data[0];
         if (!row) throw new UserFacingError('No Roblox user found with that name');
         if (!Number.isSafeInteger(row.id) || row.id <= 0 || typeof row.name !== 'string'
             || typeof row.displayName !== 'string') throw new UserFacingError('Roblox returned an invalid profile.');
@@ -416,6 +417,7 @@ class InformationLookupService {
     async robloxProfile(input) {
         const user = await this.robloxUser(input);
         const id = user.id;
+        const historyUnavailable = Symbol('history unavailable');
         const count = kind => this.robloxJson(new URL(`https://friends.roblox.com/v1/users/${id}/${kind}/count`));
         const [profile, followers, following, friends, presenceData, badgesData, historyData, thumbnailData] = await Promise.all([
             this.robloxJson(new URL(`https://users.roblox.com/v1/users/${id}`)),
@@ -428,7 +430,7 @@ class InformationLookupService {
             this.robloxJson(new URL(`https://accountinformation.roblox.com/v1/users/${id}/roblox-badges`)),
             this.robloxJson(new URL(`https://users.roblox.com/v1/users/${id}/username-history?limit=10&sortOrder=Desc`))
                 .catch(error => {
-                    if (['not-found', 'inaccessible'].includes(error.providerKind)) return null;
+                    if (['not-found', 'inaccessible'].includes(error.providerKind)) return historyUnavailable;
                     throw error;
                 }),
             this.robloxJson(new URL(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${id}&size=420x420&format=Png&isCircular=false`))
@@ -443,7 +445,8 @@ class InformationLookupService {
             || typeof profile.hasVerifiedBadge !== 'boolean'
             || counts.some(value => !Number.isSafeInteger(value) || value < 0)
             || !Number.isInteger(presence?.userPresenceType) || presence.userPresenceType < 0 || presence.userPresenceType > 3
-            || presence.userId !== id || !Array.isArray(badges) || (historyData !== null && !Array.isArray(history))
+            || presence.userId !== id || !Array.isArray(badges)
+            || (historyData !== historyUnavailable && !Array.isArray(history))
             || thumbnail?.targetId !== id || thumbnail.state !== 'Completed') {
             throw new UserFacingError('Roblox returned an invalid profile.');
         }
@@ -451,7 +454,7 @@ class InformationLookupService {
             if (typeof row?.name !== 'string') throw new UserFacingError('Roblox returned an invalid profile.');
             return row.name;
         });
-        const names = historyData === null ? null : history.slice(0, 5).map(row => {
+        const names = historyData === historyUnavailable ? null : history.slice(0, 5).map(row => {
             if (typeof row?.name !== 'string') throw new UserFacingError('Roblox returned an invalid profile.');
             return row.name;
         });

@@ -303,8 +303,10 @@ test('Roblox lookups distinguish not found, inaccessible, rate-limited, and malf
         .mockResolvedValueOnce(resolvedUser()).mockResolvedValueOnce(response({}, 500)) });
     const emptyGroups = new InformationLookupService({ fetch: jest.fn()
         .mockResolvedValueOnce(resolvedUser()).mockResolvedValueOnce(response({ data: [] })) });
+    const malformedUser = new InformationLookupService({ fetch: jest.fn().mockResolvedValue(response({ data: null })) });
 
     await expect(missing.robloxUser('Builderman')).rejects.toMatchObject({ message: 'No Roblox user found with that name' });
+    await expect(malformedUser.robloxUser('Builderman')).rejects.toThrow('invalid profile');
     await expect(inaccessible.robloxGames('Builderman')).rejects.toThrow('not publicly accessible');
     await expect(limited.robloxGroups('Builderman')).rejects.toThrow('rate limit');
     await expect(malformed.robloxOutfits('Builderman')).rejects.toThrow('invalid outfits');
@@ -318,10 +320,10 @@ test('Roblox profile reports name-history failure without discarding the profile
     const response = (value, status = 200) => new Response(JSON.stringify(value), {
         status, headers: { 'content-type': 'application/json' }
     });
-    const profileFetch = historyStatus => jest.fn(async input => {
+    const profileFetch = (historyStatus, historyPayload = {}) => jest.fn(async input => {
         const url = new URL(input);
         const route = `${url.hostname}${url.pathname}`;
-        if (route.endsWith('/username-history')) return response({}, historyStatus);
+        if (route.endsWith('/username-history')) return response(historyPayload, historyStatus);
         const payloads = {
             'users.roblox.com/v1/usernames/users': { data: [{ id: 156, name: 'builderman', displayName: 'builderman' }] },
             'users.roblox.com/v1/users/156': { id: 156, description: '', created: '2006-02-27T21:06:40Z', isBanned: false, hasVerifiedBadge: true },
@@ -339,6 +341,8 @@ test('Roblox profile reports name-history failure without discarding the profile
         .resolves.toMatchObject({ nameHistory: null, username: 'builderman' });
     await expect(new InformationLookupService({ fetch: profileFetch(429) }).robloxProfile('Builderman'))
         .rejects.toThrow('Roblox rate limit reached.');
+    await expect(new InformationLookupService({ fetch: profileFetch(200, null) }).robloxProfile('Builderman'))
+        .rejects.toThrow('Roblox returned an invalid profile.');
 });
 
 test('name history records only observed former names in the existing automation store', () => {
