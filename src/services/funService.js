@@ -61,7 +61,9 @@ class FunService {
         randomInt: draw = randomInt,
         randomUUID: uuid = randomUUID,
         setTimeout: schedule = setTimeout,
-        clearTimeout: cancel = clearTimeout
+        clearTimeout: cancel = clearTimeout,
+        setInterval: repeat = setInterval,
+        clearInterval: stopRepeating = clearInterval
     } = {}) {
         if (!sqlite) throw new Error('FunService requires sqlite');
         this.sqlite = sqlite;
@@ -71,8 +73,13 @@ class FunService {
         this.randomUUID = uuid;
         this.setTimeout = schedule;
         this.clearTimeout = cancel;
+        this.clearInterval = stopRepeating;
         this.snipes = new Map();
         this.sessions = new Map();
+        this.snipePruner = repeat(() => {
+            for (const channelId of this.snipes.keys()) this._pruneChannel(channelId);
+        }, 60000);
+        this.snipePruner?.unref?.();
         this.statements = {
             protection: sqlite.prepare('SELECT 1 FROM snipe_protections WHERE user_id = ?'),
             protect: sqlite.prepare(`
@@ -320,12 +327,18 @@ class FunService {
             expiresAt: this.now() + 5 * 60 * 1000
         };
         this.sessions.set(session.channelId, session);
-        const message = await interaction.reply({
-            embeds: [this._ticTacToeEmbed(session)],
-            components: this._ticTacToeComponents(session),
-            allowedMentions: { users: session.players, roles: [], repliedUser: false },
-            fetchReply: true
-        });
+        let message;
+        try {
+            message = await interaction.reply({
+                embeds: [this._ticTacToeEmbed(session)],
+                components: this._ticTacToeComponents(session),
+                allowedMentions: { users: session.players, roles: [], repliedUser: false },
+                fetchReply: true
+            });
+        } catch (error) {
+            this._endSession(session);
+            throw error;
+        }
         session.message = message;
         this._setSessionTimer(session, 5 * 60 * 1000, async () => {
             await session.message?.edit?.({
@@ -356,11 +369,16 @@ class FunService {
         const description = kind === 'blacktea'
             ? 'Join within **30 seconds**. You start with **2 lives** and have **10 seconds** to enter a unique word containing the shown three letters.'
             : 'Join within **30 seconds**. You start with **3 lives** and have **10–7 seconds** to identify each flag.';
-        session.message = await interaction.reply({
-            embeds: [embeds.brand(kind === 'blacktea' ? 'BlackTea' : 'Guess the Flags', description)],
-            components: [join],
-            fetchReply: true
-        });
+        try {
+            session.message = await interaction.reply({
+                embeds: [embeds.brand(kind === 'blacktea' ? 'BlackTea' : 'Guess the Flags', description)],
+                components: [join],
+                fetchReply: true
+            });
+        } catch (error) {
+            this._endSession(session);
+            throw error;
+        }
         this._setSessionTimer(session, 30000, () => this._beginLobby(session));
         return session;
     }
@@ -376,10 +394,15 @@ class FunService {
             difficulty
         };
         this.sessions.set(session.channelId, session);
-        session.message = await interaction.reply({
-            embeds: [embeds.brand('Guess the Flag!', `**Difficulty:** ${difficulty}\n\n# ${flag.emoji}\n\nYou have **30 seconds**. Type the country in chat.`)],
-            fetchReply: true
-        });
+        try {
+            session.message = await interaction.reply({
+                embeds: [embeds.brand('Guess the Flag!', `**Difficulty:** ${difficulty}\n\n# ${flag.emoji}\n\nYou have **30 seconds**. Type the country in chat.`)],
+                fetchReply: true
+            });
+        } catch (error) {
+            this._endSession(session);
+            throw error;
+        }
         this._setSessionTimer(session, 30000, async () => {
             await session.message?.edit?.({ embeds: [embeds.warn('Time’s Up', `The answer was **${flag.country}**.`)] }).catch(() => null);
             this._endSession(session);
@@ -392,8 +415,15 @@ class FunService {
         if (parts[0] !== 'fun') return false;
         const session = Array.from(this.sessions.values()).find(candidate => candidate.id === parts[2]);
         if (!session) return this._componentError(interaction, 'That game has expired.');
+        if ((interaction.guildId && interaction.guildId !== session.guildId)
+            || (interaction.channelId && interaction.channelId !== session.channelId)) {
+            return this._componentError(interaction, 'That game belongs to another channel.');
+        }
         if (parts[1] === 'join') {
             if (session.phase !== 'lobby') return this._componentError(interaction, 'That lobby has closed.');
+            if (session.players.size >= 20 && !session.players.has(interaction.user.id)) {
+                return this._componentError(interaction, 'This lobby is full.');
+            }
             session.players.add(interaction.user.id);
             await interaction.reply({ content: `You joined ${session.kind === 'blacktea' ? 'BlackTea' : 'Guess the Flags'}.`, flags: [MessageFlags.Ephemeral] });
             return true;
@@ -438,6 +468,12 @@ class FunService {
         return interaction.reply({ embeds: [embeds.success('Game Ended', 'The active game was ended.')], components: [] });
     }
 
+    isGameParticipant(channelId, userId) {
+        const session = this.sessions.get(channelId);
+        if (!session) return false;
+        return session.players instanceof Set ? session.players.has(userId) : session.players.includes(userId);
+    }
+
     purgeGuild(guildId) {
         this.sqlite.prepare('DELETE FROM roleplay_disabled WHERE guild_id = ?').run(guildId);
         this.sqlite.prepare('DELETE FROM roleplay_counts WHERE guild_id = ?').run(guildId);
@@ -454,6 +490,7 @@ class FunService {
 
     cleanup() {
         this.snipes.clear();
+        this.clearInterval(this.snipePruner);
         for (const session of this.sessions.values()) this.clearTimeout(session.timer);
         this.sessions.clear();
     }

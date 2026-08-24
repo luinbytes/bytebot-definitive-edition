@@ -39,7 +39,8 @@ Manage Server and exact-path RBAC. Bots and self-targets are rejected.
 
 ## Games and lifecycle
 
-Interactive games allow one active session per channel. Tic-tac-toe expires
+Interactive games allow one active session per channel and multiplayer
+lobbies accept at most 20 members. Tic-tac-toe expires
 after five idle minutes. BlackTea and multiplayer flags have 30-second join
 windows and bounded turn timers; single-player flags expire after 30 seconds.
 Sessions and timers are cleared on shutdown or guild removal. A participant or

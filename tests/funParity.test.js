@@ -8,6 +8,7 @@ describe('snipe, roleplay, and persistent fun state', () => {
     let service;
     let now;
     let http;
+    let prune;
 
     beforeEach(async () => {
         jest.resetModules();
@@ -18,7 +19,16 @@ describe('snipe, roleplay, and persistent fun state', () => {
         now = Date.UTC(2026, 0, 1, 12);
         http = { get: jest.fn() };
         const { FunService } = require('../src/services/funService');
-        service = new FunService({ sqlite: database.sqlite, now: () => now, http });
+        service = new FunService({
+            sqlite: database.sqlite,
+            now: () => now,
+            http,
+            setInterval: callback => {
+                prune = callback;
+                return { unref() {} };
+            },
+            clearInterval: jest.fn()
+        });
     });
 
     afterEach(() => {
@@ -54,6 +64,8 @@ describe('snipe, roleplay, and persistent fun state', () => {
         service.setSnipeProtection('user1', false);
         service.captureDeleted(message(14));
         now += 15 * 60 * 1000 + 1;
+        prune();
+        expect(service.snipes.size).toBe(0);
         expect(service.getSnipe('channel1', 'deleted', 1)).toBeNull();
     });
 

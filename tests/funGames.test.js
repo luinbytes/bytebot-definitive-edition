@@ -92,4 +92,12 @@ describe('bounded fun games', () => {
         expect(response.reply.mock.calls[0][0].embeds[0].data.description).toContain('France');
         expect(service.sessions.size).toBe(0);
     });
+
+    test('releases the channel when Discord rejects a game reply', async () => {
+        await expect(service.startTicTacToe({
+            guildId: 'guild1', channelId: 'channel1', user: { id: 'p1' },
+            reply: jest.fn().mockRejectedValue(new Error('Missing Access'))
+        }, { id: 'p2', bot: false })).rejects.toThrow('Missing Access');
+        expect(service.sessions.size).toBe(0);
+    });
 });

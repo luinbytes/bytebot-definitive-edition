@@ -227,8 +227,10 @@ module.exports = {
         if (focused.name !== 'action') return interaction.respond([]);
         const query = String(focused.value || '').toLowerCase();
         const service = interaction.client.funService;
+        const toggling = interaction.options.getSubcommand(false) === 'toggle';
         const choices = ROLEPLAY_ACTIONS
-            .filter(action => action.includes(query) && (!interaction.guildId || service?.isRoleplayEnabled(interaction.guildId, action)))
+            .filter(action => action.includes(query)
+                && (toggling || !interaction.guildId || service?.isRoleplayEnabled(interaction.guildId, action)))
             .slice(0, 25)
             .map(action => ({ name: action, value: action }));
         return interaction.respond(choices);
@@ -374,7 +376,15 @@ async function handleGame(interaction, subcommand) {
         if (subcommand === 'tictactoe') return await service.startTicTacToe(interaction, interaction.options.getUser('member'));
         if (subcommand === 'blacktea' || subcommand === 'flags') return await service.startLobby(interaction, subcommand);
         if (subcommand === 'flag') return await service.startSingleFlag(interaction, interaction.options.getString('difficulty') || 'easy');
-        if (subcommand === 'end') return await service.endGame(interaction);
+        if (subcommand === 'end') {
+            if (!service.isGameParticipant(interaction.channelId, interaction.user.id)) {
+                const permission = await checkUserPermissions(interaction, {
+                    data: { name: 'fun' }, permissions: [PermissionFlagsBits.ManageMessages]
+                });
+                if (!permission.allowed) return interaction.reply({ embeds: [permission.error], flags: [MessageFlags.Ephemeral] });
+            }
+            return await service.endGame(interaction);
+        }
     } catch (error) {
         return interaction.reply({ embeds: [embeds.error('Game Unavailable', error.message)], flags: [MessageFlags.Ephemeral] });
     }

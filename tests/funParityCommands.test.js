@@ -101,12 +101,24 @@ describe('/fun public parity surface', () => {
             client: { funService: service },
             options: {
                 getSubcommandGroup: () => 'roleplay',
+                getSubcommand: () => 'action',
                 getFocused: () => ({ name: 'action', value: 'hu' })
             },
             respond
         });
         expect(respond.mock.calls[0][0]).toContainEqual({ name: 'hug', value: 'hug' });
         expect(respond.mock.calls[0][0].every(choice => choice.value.includes('hu'))).toBe(true);
+
+        service.toggleRoleplay('guild1', 'hug', 'admin1');
+        await fun.autocomplete({
+            guildId: 'guild1', client: { funService: service },
+            options: {
+                getSubcommandGroup: () => 'roleplay', getSubcommand: () => 'toggle',
+                getFocused: () => ({ name: 'action', value: 'hug' })
+            },
+            respond
+        });
+        expect(respond.mock.calls[1][0]).toContainEqual({ name: 'hug', value: 'hug' });
     });
 
     test('reuses persistent blunt and vape state through slash handlers', async () => {
