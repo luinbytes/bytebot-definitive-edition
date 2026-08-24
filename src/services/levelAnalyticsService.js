@@ -166,6 +166,117 @@ class LevelAnalyticsService {
             return { accepted: true, counted: true };
         })();
     }
+
+    recordMembership(member, present) {
+        const guildId = member?.guild?.id;
+        const userId = member?.id || member?.user?.id;
+        if (!guildId || !userId || member?.user?.bot) {
+            return { accepted: false, joined: 0, left: 0 };
+        }
+
+        const now = this.now();
+        const day = new Date(now).toISOString().slice(0, 10);
+        return this.sqlite.transaction(() => {
+            const current = this.sqlite.prepare(`
+                SELECT present FROM member_presence WHERE guild_id = ? AND user_id = ?
+            `).get(guildId, userId);
+            if (current && Boolean(current.present) === present) {
+                return { accepted: false, joined: 0, left: 0 };
+            }
+
+            this.sqlite.prepare(`
+                INSERT INTO member_presence (guild_id, user_id, present, last_observed_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                    present = excluded.present,
+                    last_observed_at = excluded.last_observed_at
+            `).run(guildId, userId, present ? 1 : 0, now);
+            const joined = present ? 1 : 0;
+            const left = present ? 0 : 1;
+            this.sqlite.prepare(`
+                INSERT INTO server_daily_metrics
+                    (guild_id, activity_date, joins, leaves, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(guild_id, activity_date) DO UPDATE SET
+                    joins = joins + excluded.joins,
+                    leaves = leaves + excluded.leaves,
+                    updated_at = excluded.updated_at
+            `).run(guildId, day, joined, left, now);
+            return { accepted: true, joined, left };
+        })();
+    }
+
+    reconcileGuild(guild) {
+        const now = this.now();
+        const day = new Date(now).toISOString().slice(0, 10);
+        const members = [...(guild?.members?.cache?.values?.() || [])]
+            .filter(member => !member.user?.bot);
+        const voiceStates = [...(guild?.voiceStates?.cache?.values?.() || [])]
+            .filter(state => state.channelId && !state.member?.user?.bot && !state.mute && !state.deaf);
+
+        return this.sqlite.transaction(() => {
+            this.sqlite.prepare(`
+                INSERT OR IGNORE INTO level_configs (guild_id, baseline_at, updated_at)
+                VALUES (?, ?, ?)
+            `).run(guild.id, now, now);
+            this.sqlite.prepare(`
+                UPDATE level_configs SET baseline_at = COALESCE(baseline_at, ?), updated_at = ?
+                WHERE guild_id = ?
+            `).run(now, now, guild.id);
+            const config = this.sqlite.prepare(`SELECT antiafk_enabled FROM level_configs WHERE guild_id = ?`).get(guild.id);
+            this.sqlite.prepare(`
+                INSERT INTO server_daily_metrics
+                    (guild_id, activity_date, member_count, baseline_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(guild_id, activity_date) DO UPDATE SET
+                    member_count = excluded.member_count,
+                    baseline_at = COALESCE(server_daily_metrics.baseline_at, excluded.baseline_at),
+                    updated_at = excluded.updated_at
+            `).run(guild.id, day, members.length, now, now);
+
+            const currentIds = new Set(members.map(member => member.id));
+            for (const row of this.sqlite.prepare(`
+                SELECT user_id FROM member_presence WHERE guild_id = ? AND present = 1
+            `).all(guild.id)) {
+                if (!currentIds.has(row.user_id)) this.sqlite.prepare(`
+                    UPDATE member_presence SET present = 0, last_observed_at = ?
+                    WHERE guild_id = ? AND user_id = ?
+                `).run(now, guild.id, row.user_id);
+            }
+            const upsertPresence = this.sqlite.prepare(`
+                INSERT INTO member_presence (guild_id, user_id, present, last_observed_at)
+                VALUES (?, ?, 1, ?)
+                ON CONFLICT(guild_id, user_id) DO UPDATE SET present = 1, last_observed_at = excluded.last_observed_at
+            `);
+            for (const member of members) upsertPresence.run(guild.id, member.id, now);
+
+            this.sqlite.prepare(`DELETE FROM level_voice_sessions WHERE guild_id = ?`).run(guild.id);
+            const peers = new Map();
+            for (const state of voiceStates) peers.set(state.channelId, (peers.get(state.channelId) || 0) + 1);
+            const eligible = voiceStates.filter(state => !config.antiafk_enabled || peers.get(state.channelId) > 1);
+            const insertVoice = this.sqlite.prepare(`
+                INSERT INTO level_voice_sessions
+                    (guild_id, user_id, channel_id, eligible_since, last_observed_at)
+                VALUES (?, ?, ?, ?, ?)
+            `);
+            for (const state of eligible) insertVoice.run(guild.id, state.member.id, state.channelId, now, now);
+            return { members: members.length, voiceSessions: eligible.length };
+        })();
+    }
+
+    async reconcileStartup(client) {
+        const results = [];
+        const failures = [];
+        for (const guild of client.guilds.cache.values()) {
+            try {
+                await guild.members.fetch();
+                results.push({ guildId: guild.id, ...this.reconcileGuild(guild) });
+            } catch (error) {
+                failures.push({ guildId: guild.id, error: error.message });
+            }
+        }
+        return { results, failures };
+    }
 }
 
 module.exports = LevelAnalyticsService;

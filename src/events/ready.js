@@ -160,6 +160,10 @@ module.exports = {
             const LevelAnalyticsService = require('../services/levelAnalyticsService');
             const { sqlite } = require('../database');
             client.levelAnalyticsService = new LevelAnalyticsService({ sqlite });
+            const recovery = await client.levelAnalyticsService.reconcileStartup(client);
+            recovery.failures.forEach(failure => logger.error(
+                `Level analytics baseline failed for ${failure.guildId}: ${failure.error}`
+            ));
             logger.success('Level analytics service initialized');
         } catch (e) {
             logger.error(`Failed to initialize level analytics service: ${e}`);

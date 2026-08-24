@@ -111,4 +111,61 @@ describe('LevelAnalyticsService', () => {
             SELECT reaction_count FROM server_daily_metrics WHERE guild_id = 'guild1'
         `).get().reaction_count).toBe(2);
     });
+
+    test('membership counters change only when persisted presence changes', () => {
+        const member = { id: 'user1', user: { bot: false }, guild: { id: 'guild1' } };
+
+        expect(service.recordMembership(member, true)).toEqual({ accepted: true, joined: 1, left: 0 });
+        expect(service.recordMembership(member, true)).toEqual({ accepted: false, joined: 0, left: 0 });
+        expect(service.recordMembership(member, false)).toEqual({ accepted: true, joined: 0, left: 1 });
+        expect(service.recordMembership(member, false)).toEqual({ accepted: false, joined: 0, left: 0 });
+        expect(service.recordMembership({ ...member, id: 'bot1', user: { bot: true } }, true))
+            .toEqual({ accepted: false, joined: 0, left: 0 });
+
+        expect(database.sqlite.prepare(`
+            SELECT joins, leaves FROM server_daily_metrics WHERE guild_id = 'guild1'
+        `).get()).toEqual({ joins: 1, leaves: 1 });
+    });
+
+    test('startup baselines humans and current voice without inventing offline activity', () => {
+        database.sqlite.prepare(`
+            INSERT INTO member_presence (guild_id, user_id, present, last_observed_at)
+            VALUES ('guild1', 'departed', 1, 1)
+        `).run();
+        database.sqlite.prepare(`
+            INSERT INTO level_voice_sessions
+                (guild_id, user_id, channel_id, eligible_since, last_observed_at)
+            VALUES ('guild1', 'departed', 'voice1', 1, 1)
+        `).run();
+        const first = { id: 'user1', user: { bot: false } };
+        const second = { id: 'user2', user: { bot: false } };
+        const bot = { id: 'bot1', user: { bot: true } };
+        const guild = {
+            id: 'guild1',
+            members: { cache: new Map([[first.id, first], [second.id, second], [bot.id, bot]]) },
+            voiceStates: { cache: new Map([
+                [first.id, { member: first, channelId: 'voice1', mute: false, deaf: false }],
+                [second.id, { member: second, channelId: 'voice1', mute: false, deaf: false }]
+            ]) }
+        };
+
+        expect(service.reconcileGuild(guild)).toEqual({ members: 2, voiceSessions: 2 });
+        expect(database.sqlite.prepare(`
+            SELECT joins, leaves, member_count FROM server_daily_metrics WHERE guild_id = 'guild1'
+        `).get()).toEqual({ joins: 0, leaves: 0, member_count: 2 });
+        expect(database.sqlite.prepare(`
+            SELECT user_id, present FROM member_presence WHERE guild_id = 'guild1' ORDER BY user_id
+        `).all()).toEqual([
+            { user_id: 'departed', present: 0 },
+            { user_id: 'user1', present: 1 },
+            { user_id: 'user2', present: 1 }
+        ]);
+        expect(database.sqlite.prepare(`
+            SELECT user_id, eligible_since, last_observed_at FROM level_voice_sessions
+            WHERE guild_id = 'guild1' ORDER BY user_id
+        `).all()).toEqual([
+            { user_id: 'user1', eligible_since: now, last_observed_at: now },
+            { user_id: 'user2', eligible_since: now, last_observed_at: now }
+        ]);
+    });
 });

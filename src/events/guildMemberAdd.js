@@ -8,6 +8,11 @@ module.exports = {
     name: Events.GuildMemberAdd,
     async execute(member, client) {
         try {
+            await client?.levelAnalyticsService?.recordMembership(member, true);
+        } catch (error) {
+            logger.error(`Failed to record member join analytics for ${member.id}: ${error.message}`);
+        }
+        try {
             const incident = await handleMemberJoin(member);
             if (incident?.status === 'punished') return;
             try {
