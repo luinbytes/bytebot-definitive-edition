@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn: spawnProcess, spawnSync } = require('node:child_process');
-const { MessageFlags, PermissionFlagsBits } = require('discord.js');
+const { ChannelType, MessageFlags, PermissionFlagsBits } = require('discord.js');
 const embeds = require('../utils/embeds');
 const logger = require('../utils/logger');
 
@@ -112,11 +112,13 @@ class MusicLibrary {
     }
 
     resolve(input) {
-        const query = boundedString(input, 'Music query');
-        if (query.startsWith('http://') || query.startsWith('https://')) {
-            if (query.length > 2048) throw new Error('Music URL cannot exceed 2,048 characters.');
-            return { tracks: this.urls.has(query) ? [this.urls.get(query)] : [], kind: 'track' };
+        if (typeof input !== 'string' || !input.trim()) throw new Error('Music query is required.');
+        const raw = input.trim();
+        if (raw.startsWith('http://') || raw.startsWith('https://')) {
+            const url = boundedString(raw, 'Music URL', 2048);
+            return { tracks: this.urls.has(url) ? [this.urls.get(url)] : [], kind: 'track' };
         }
+        const query = boundedString(raw, 'Music query');
         const normalized = query.toLowerCase();
         const playlist = this.playlists.get(normalized);
         if (playlist) return { tracks: [...playlist], kind: 'playlist' };
@@ -130,6 +132,22 @@ class MusicLibrary {
         const track = this.tracks.get(trackId);
         return track ? track.related.map(id => this.tracks.get(id)) : [];
     }
+
+    validate(track) {
+        if (!track || this.tracks.get(track.id) !== track) throw new Error('Unknown music track.');
+        const file = fs.realpathSync(track.file);
+        if (file !== track.file || (file !== this.root && !file.startsWith(`${this.root}${path.sep}`))) {
+            throw new Error(`Track ${track.id} changed or escaped the music library root.`);
+        }
+        const stat = fs.statSync(file);
+        if (!stat.isFile() || stat.size > MAX_TRACK_BYTES) {
+            throw new Error(`Track ${track.id} changed or exceeds 64 MiB.`);
+        }
+        if (!Number.isFinite(track.durationSeconds) || track.durationSeconds <= 0 || track.durationSeconds > 600) {
+            throw new Error(`Track ${track.id} changed or exceeds 600 seconds.`);
+        }
+        return file;
+    }
 }
 
 class MusicService {
@@ -139,6 +157,8 @@ class MusicService {
         this.voice = voice;
         this.spawn = spawn;
         this.players = new Map();
+        this.operations = new Map();
+        this.closing = false;
     }
 
     static checkRuntime(ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg') {
@@ -157,6 +177,18 @@ class MusicService {
     }
 
     async execute(interaction) {
+        if (this.closing) return this.reply(interaction, embeds.error('Music Unavailable', 'The music service is shutting down.'));
+        const previous = this.operations.get(interaction.guild.id) || Promise.resolve();
+        const operation = previous.catch(() => {}).then(() => this.executeOnce(interaction));
+        this.operations.set(interaction.guild.id, operation);
+        try {
+            return await operation;
+        } finally {
+            if (this.operations.get(interaction.guild.id) === operation) this.operations.delete(interaction.guild.id);
+        }
+    }
+
+    async executeOnce(interaction) {
         const group = interaction.options.getSubcommandGroup(false);
         const subcommand = interaction.options.getSubcommand();
         if (group !== 'settings') {
@@ -291,7 +323,12 @@ class MusicService {
         if (!state) return;
         state.suppressIdle = true;
         state.player.stop(true);
-        await this.advance(state);
+        try {
+            await this.advance(state);
+        } catch (error) {
+            this.destroy(interaction.guild.id);
+            return this.reply(interaction, embeds.error('Skip Failed', error.message));
+        }
         state.suppressIdle = false;
         const description = state.current
             ? `Skipped the current track. Now playing **${state.current.title}** by **${state.current.author}** (${this.duration(state.current.durationSeconds)}).`
@@ -328,7 +365,15 @@ class MusicService {
     async play(interaction) {
         const channel = interaction.member.voice?.channel;
         if (!channel) return this.reply(interaction, embeds.error('Not In Voice', 'You must be in a voice channel to play music.'));
-        const result = this.library.resolve(interaction.options.getString('query'));
+        if (channel.type !== ChannelType.GuildVoice) {
+            return this.reply(interaction, embeds.error('Unsupported Voice Channel', 'Music playback requires a standard server voice channel.'));
+        }
+        let result;
+        try {
+            result = this.library.resolve(interaction.options.getString('query'));
+        } catch (error) {
+            return this.reply(interaction, embeds.error('Invalid Query', error.message));
+        }
         if (result.tracks.length === 0) return this.reply(interaction, embeds.error('No Results', 'No configured library track matches that query or URL.'));
 
         let state = this.players.get(interaction.guild.id);
@@ -398,11 +443,17 @@ class MusicService {
         };
         player.on('error', error => {
             logger.error(`Music playback failed in guild ${guild.id}: ${error.message}`);
-            this.advance(state).catch(nextError => logger.error(`Music queue advance failed in guild ${guild.id}: ${nextError.message}`));
+            this.advance(state).catch(nextError => {
+                logger.error(`Music queue advance failed in guild ${guild.id}: ${nextError.message}`);
+                this.destroy(guild.id);
+            });
         });
         player.on(voice.AudioPlayerStatus.Idle, () => {
             if (!state.suppressIdle && state.current) {
-                this.advance(state).catch(error => logger.error(`Music queue advance failed in guild ${guild.id}: ${error.message}`));
+                this.advance(state).catch(error => {
+                    logger.error(`Music queue advance failed in guild ${guild.id}: ${error.message}`);
+                    this.destroy(guild.id);
+                });
             }
         });
         connection.on(voice.VoiceConnectionStatus.Disconnected, async () => {
@@ -421,7 +472,8 @@ class MusicService {
 
     async startTrack(state, track) {
         const voice = this.voiceAdapter();
-        const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-i', track.file, '-vn'];
+        const file = this.library.validate(track);
+        const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-i', file, '-vn'];
         if (state.preset) args.push('-af', PRESET_FILTERS[state.preset]);
         args.push('-ac', '2', '-ar', '48000', '-f', 's16le', 'pipe:1');
         const child = this.spawn(process.env.FFMPEG_PATH || 'ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -516,7 +568,9 @@ class MusicService {
         this.players.delete(guildId);
     }
 
-    cleanup() {
+    async cleanup() {
+        this.closing = true;
+        await Promise.allSettled([...this.operations.values()]);
         for (const guildId of [...this.players.keys()]) this.destroy(guildId);
     }
 }

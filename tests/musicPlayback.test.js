@@ -1,4 +1,4 @@
-const { ApplicationCommandOptionType } = require('discord.js');
+const { ApplicationCommandOptionType, ChannelType } = require('discord.js');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -71,7 +71,7 @@ describe('music playback', () => {
             'play', 'queue', 'pause', 'resume', 'skip', 'stop', 'volume', 'preset', 'settings'
         ]);
         expect(option(option(command, 'play'), 'query')).toMatchObject({
-            type: ApplicationCommandOptionType.String, required: true, max_length: 200
+            type: ApplicationCommandOptionType.String, required: true, max_length: 2048
         });
         expect(option(option(command, 'volume'), 'volume')).toMatchObject({ min_value: 0, max_value: 200 });
         expect(option(option(command, 'preset'), 'name').choices.map(choice => choice.value)).toEqual([
@@ -90,6 +90,34 @@ describe('music playback', () => {
         expect(library.resolve('favourites').tracks.map(track => track.id)).toEqual(['one', 'two']);
         expect(library.related('one').map(track => track.id)).toEqual(['two']);
         expect(library.resolve('https://unknown.example/song').tracks).toEqual([]);
+        expect(library.resolve(`https://unknown.example/${'x'.repeat(300)}`).tracks).toEqual([]);
+        expect(() => library.resolve('x'.repeat(201))).toThrow('200');
+    });
+
+    test('rejects library files that escape the configured root', () => {
+        const { MusicLibrary } = require('../src/services/musicService');
+        const outside = `${libraryRoot}-outside.mp3`;
+        fs.writeFileSync(outside, 'outside');
+        fs.writeFileSync(path.join(libraryRoot, 'music.json'), JSON.stringify({ tracks: [{
+            id: 'escape', title: 'Escape', author: 'Artist', durationSeconds: 1,
+            file: `../${path.basename(outside)}`
+        }] }));
+
+        expect(() => new MusicLibrary(libraryRoot)).toThrow('escapes');
+        fs.rmSync(outside);
+    });
+
+    test('revalidates a library file immediately before playback', () => {
+        const { MusicLibrary } = require('../src/services/musicService');
+        const library = new MusicLibrary(libraryRoot);
+        const track = library.resolve('one').tracks[0];
+        const outside = `${libraryRoot}-swapped.mp3`;
+        fs.writeFileSync(outside, 'outside');
+        fs.rmSync(track.file);
+        fs.symlinkSync(outside, track.file);
+
+        expect(() => library.validate(track)).toThrow('changed');
+        fs.rmSync(outside);
     });
 
     test('persists DJ and universal autoplay settings only for Manage Server members', async () => {
@@ -131,7 +159,7 @@ describe('music playback', () => {
         const voice = fakeVoice();
         const spawn = jest.fn(fakeSpawn);
         const channel = {
-            id: 'voice1', guild: null, userLimit: 0,
+            id: 'voice1', guild: null, type: ChannelType.GuildVoice, userLimit: 0,
             members: new Map([['user1', { user: { bot: false } }]]),
             permissionsFor: () => ({ has: () => true })
         };
@@ -149,15 +177,26 @@ describe('music playback', () => {
         const service = new MusicService({ library: new MusicLibrary(libraryRoot), sqlite, voice: voice.adapter, spawn });
         const first = interaction('one');
         const second = interaction('two');
+        const oversized = interaction('x'.repeat(201));
 
-        await service.execute(first);
-        await service.execute(second);
+        await Promise.all([service.execute(first), service.execute(second)]);
+        await service.execute(oversized);
+        channel.type = ChannelType.GuildStageVoice;
+        const stage = interaction('one');
+        await service.execute(stage);
+        channel.type = ChannelType.GuildVoice;
+        for (let index = 0; index < 24; index++) await service.execute(interaction('two'));
+        const full = interaction('two');
+        await service.execute(full);
 
         expect(voice.adapter.joinVoiceChannel).toHaveBeenCalledTimes(1);
         expect(spawn).toHaveBeenCalledTimes(1);
         expect(voice.player.play).toHaveBeenCalledTimes(1);
         expect(first.reply.mock.calls[0][0].embeds[0].data.description).toContain('First Song');
         expect(second.reply.mock.calls[0][0].embeds[0].data.description).toContain('position 1');
+        expect(oversized.reply.mock.calls[0][0].embeds[0].data.description).toContain('200');
+        expect(stage.reply.mock.calls[0][0].embeds[0].data.description).toContain('standard server voice');
+        expect(full.reply.mock.calls[0][0].embeds[0].data.description).toContain('25');
         await service.cleanup();
         sqlite.close();
     });
@@ -169,7 +208,7 @@ describe('music playback', () => {
             INSERT INTO music_config VALUES ('guild1', 'dj1', 0)`);
         const voice = fakeVoice();
         const spawn = jest.fn(fakeSpawn);
-        const channel = { id: 'voice1', userLimit: 0, members: new Map(), permissionsFor: () => ({ has: () => true }) };
+        const channel = { id: 'voice1', type: ChannelType.GuildVoice, userLimit: 0, members: new Map(), permissionsFor: () => ({ has: () => true }) };
         const guild = { id: 'guild1', voiceAdapterCreator: {}, ownerId: 'owner', members: { me: { id: 'bot1' } }, channels: { cache: new Map([['voice1', channel]]) } };
         channel.guild = guild;
         const roles = new Map();
@@ -184,6 +223,7 @@ describe('music playback', () => {
         channel.members.set('user1', interaction('play').member);
         const service = new MusicService({ library: new MusicLibrary(libraryRoot), sqlite, voice: voice.adapter, spawn });
         await service.execute(interaction('play', 'one'));
+        await service.execute(interaction('play', 'two'));
 
         const denied = interaction('pause');
         await service.execute(denied);
@@ -194,14 +234,17 @@ describe('music playback', () => {
         await service.execute(interaction('pause'));
         await service.execute(interaction('resume'));
         await service.execute(interaction('volume', 150));
+        const skipped = interaction('skip');
+        await service.execute(skipped);
         await service.execute(interaction('preset', '8d'));
         await service.execute(interaction('stop'));
 
         expect(voice.player.pause).toHaveBeenCalledTimes(1);
         expect(voice.player.unpause).toHaveBeenCalledTimes(1);
         expect(voice.volume.setVolume).toHaveBeenLastCalledWith(1.5);
-        expect(spawn).toHaveBeenCalledTimes(2);
-        expect(spawn.mock.calls[1][1]).toEqual(expect.arrayContaining(['-af', expect.stringContaining('apulsator')]));
+        expect(skipped.reply.mock.calls[0][0].embeds[0].data.description).toContain('Second Song');
+        expect(spawn).toHaveBeenCalledTimes(3);
+        expect(spawn.mock.calls[2][1]).toEqual(expect.arrayContaining(['-af', expect.stringContaining('apulsator')]));
         expect(voice.connection.destroy).toHaveBeenCalledTimes(1);
         sqlite.close();
     });
@@ -212,7 +255,7 @@ describe('music playback', () => {
         sqlite.exec(`CREATE TABLE music_config (guild_id TEXT PRIMARY KEY, dj_role_id TEXT, autoplay INTEGER NOT NULL DEFAULT 0);
             INSERT INTO music_config VALUES ('guild1', NULL, 1)`);
         const voice = fakeVoice();
-        const channel = { id: 'voice1', userLimit: 0, members: new Map(), permissionsFor: () => ({ has: () => true }) };
+        const channel = { id: 'voice1', type: ChannelType.GuildVoice, userLimit: 0, members: new Map(), permissionsFor: () => ({ has: () => true }) };
         const guild = { id: 'guild1', voiceAdapterCreator: {}, ownerId: 'owner', members: { me: { id: 'bot1' } }, channels: { cache: new Map([['voice1', channel]]) } };
         const member = { user: { bot: false }, voice: { channel, channelId: channel.id }, roles: { cache: new Map() }, permissions: { has: () => false } };
         channel.members.set('user1', member);
@@ -241,7 +284,7 @@ describe('music playback', () => {
         const sqlite = new Database(':memory:');
         sqlite.exec('CREATE TABLE music_config (guild_id TEXT PRIMARY KEY, dj_role_id TEXT, autoplay INTEGER NOT NULL DEFAULT 0)');
         const voice = fakeVoice();
-        const channel = { id: 'voice1', userLimit: 0, members: new Map(), permissionsFor: () => ({ has: () => true }) };
+        const channel = { id: 'voice1', type: ChannelType.GuildVoice, userLimit: 0, members: new Map(), permissionsFor: () => ({ has: () => true }) };
         const guild = { id: 'guild1', voiceAdapterCreator: {}, ownerId: 'owner', members: { me: { id: 'bot1' } }, channels: { cache: new Map([['voice1', channel]]) } };
         const member = { user: { bot: false }, voice: { channel, channelId: channel.id }, roles: { cache: new Map() }, permissions: { has: () => false } };
         channel.members.set('user1', member);
@@ -262,6 +305,45 @@ describe('music playback', () => {
         jest.advanceTimersByTime(1);
         expect(voice.connection.destroy).toHaveBeenCalledTimes(1);
         jest.useRealTimers();
+        sqlite.close();
+    });
+
+    test('keeps players and queues isolated between guilds', async () => {
+        const { MusicLibrary, MusicService } = require('../src/services/musicService');
+        const sqlite = new Database(':memory:');
+        sqlite.exec('CREATE TABLE music_config (guild_id TEXT PRIMARY KEY, dj_role_id TEXT, autoplay INTEGER NOT NULL DEFAULT 0)');
+        const firstVoice = fakeVoice();
+        const secondVoice = fakeVoice();
+        const voiceByGuild = new Map([['guild1', firstVoice], ['guild2', secondVoice]]);
+        let creatingFor;
+        const adapter = {
+            ...firstVoice.adapter,
+            joinVoiceChannel: jest.fn(options => { creatingFor = options.guildId; return voiceByGuild.get(options.guildId).connection; }),
+            createAudioPlayer: jest.fn(() => voiceByGuild.get(creatingFor).player),
+            createAudioResource: jest.fn((stream, options) => ({
+                playStream: stream, metadata: options.metadata, volume: { setVolume: jest.fn() }
+            })),
+            entersState: jest.fn(async connection => connection)
+        };
+        const makeInteraction = guildId => {
+            const channel = { id: `voice-${guildId}`, type: ChannelType.GuildVoice, userLimit: 0, members: new Map(), permissionsFor: () => ({ has: () => true }) };
+            const guild = { id: guildId, voiceAdapterCreator: {}, ownerId: 'owner', members: { me: { id: 'bot1' } }, channels: { cache: new Map([[channel.id, channel]]) } };
+            const member = { user: { bot: false }, voice: { channel, channelId: channel.id }, roles: { cache: new Map() }, permissions: { has: () => false } };
+            channel.guild = guild;
+            channel.members.set('user1', member);
+            return { guild, user: { id: 'user1' }, member, channelId: 'text1', options: {
+                getSubcommandGroup: () => null, getSubcommand: () => 'play', getString: () => 'one'
+            }, reply: jest.fn() };
+        };
+        const service = new MusicService({ library: new MusicLibrary(libraryRoot), sqlite, voice: adapter, spawn: fakeSpawn });
+
+        await service.execute(makeInteraction('guild1'));
+        await service.execute(makeInteraction('guild2'));
+
+        expect(adapter.joinVoiceChannel).toHaveBeenCalledTimes(2);
+        expect(firstVoice.player.play).toHaveBeenCalledTimes(1);
+        expect(secondVoice.player.play).toHaveBeenCalledTimes(1);
+        await service.cleanup();
         sqlite.close();
     });
 });
