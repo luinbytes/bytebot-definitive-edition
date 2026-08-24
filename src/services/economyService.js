@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { MessageFlags, PermissionFlagsBits } = require('discord.js');
+const { MessageFlags, PermissionFlagsBits, RESTJSONErrorCodes } = require('discord.js');
 const embeds = require('../utils/embeds');
 
 const GLOBAL_SCOPE = 'global';
@@ -12,6 +12,13 @@ const MAX_EARNING_GUILDS = 30;
 const DEFAULT_JOB = { id: 'worker', name: 'worker', minimum: 100, maximum: 250, cooldownSeconds: 3600, builtIn: true };
 const GLOBAL_CONFIG = Object.freeze({ currency_name: 'coins', currency_emoji: '🪙', starting_balance: 0, daily_cap: 50000 });
 const CONFIRMATION_TTL = 10 * 60 * 1000;
+const DEFINITIVE_ROLE_ERRORS = new Set([
+    RESTJSONErrorCodes.UnknownMember,
+    RESTJSONErrorCodes.UnknownRole,
+    RESTJSONErrorCodes.MissingAccess,
+    RESTJSONErrorCodes.MissingPermissions,
+    RESTJSONErrorCodes.InvalidRole
+]);
 
 function digest(value) {
     return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -591,7 +598,8 @@ class EconomyService {
                 throw new Error('Purchase is pending because Discord delivery could not be confirmed.');
             }
             if (confirmed.roles.cache.has(role.id)) return this.markPurchase(purchase.id, 'delivered');
-            return this.reversePurchase(purchase.id, error.message);
+            if (DEFINITIVE_ROLE_ERRORS.has(Number(error.code))) return this.reversePurchase(purchase.id, error.message);
+            throw new Error('Purchase is pending because Discord delivery could not be confirmed.');
         }
     }
 
@@ -702,36 +710,40 @@ class EconomyService {
         return this.sqlite.transaction(() => {
             const scope = { scopeType: 'guild', scopeId: values.guildId };
             const account = this.account(scope, values.targetId);
-            if (plan.total > 0) {
+            const removed = account.wallet + account.bank;
+            if (removed !== plan.total) throw new Error('The economy action plan changed. Preview it again.');
+            if (removed > 0) {
                 this.apply(account, {
                     transactionId: this.randomUUID(), walletDelta: -account.wallet, bankDelta: -account.bank,
-                    supplyDelta: -plan.total, kind: 'reset', actorId: values.actorId, counterpartyId: values.targetId,
+                    supplyDelta: -removed, kind: 'reset', actorId: values.actorId, counterpartyId: values.targetId,
                     reason: this.validateReason(values.reason)
                 });
-                this.updateTotals(scope, 0n, BigInt(plan.total));
+                this.updateTotals(scope, 0n, BigInt(removed));
             }
             this.sqlite.prepare(`DELETE FROM economy_action_cooldowns
                 WHERE user_id = ? AND scope_type = 'guild' AND scope_id = ?`).run(values.targetId, values.guildId);
             this.sqlite.prepare(`DELETE FROM economy_accounts
                 WHERE scope_type = 'guild' AND scope_id = ? AND user_id = ?`).run(values.guildId, values.targetId);
-            return { targetId: values.targetId, removed: plan.total };
+            return { targetId: values.targetId, removed };
         }).immediate();
     }
 
     reconcileTotals({ scopeType, scopeId }) {
-        let minted = 0n;
-        let destroyed = 0n;
-        for (const { supply_delta: delta } of this.sqlite.prepare(`SELECT supply_delta FROM economy_ledger
-            WHERE scope_type = ? AND scope_id = ? ORDER BY id`).iterate(scopeType, scopeId)) {
-            if (delta > 0) minted += BigInt(delta);
-            if (delta < 0) destroyed += BigInt(-delta);
-        }
-        this.sqlite.prepare(`INSERT INTO economy_scope_totals
-            (scope_type, scope_id, minted_text, destroyed_text, updated_at) VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT (scope_type, scope_id) DO UPDATE SET minted_text = excluded.minted_text,
-            destroyed_text = excluded.destroyed_text, updated_at = excluded.updated_at`)
-            .run(scopeType, scopeId, String(minted), String(destroyed), this.now());
-        return { minted, destroyed };
+        return this.sqlite.transaction(() => {
+            let minted = 0n;
+            let destroyed = 0n;
+            for (const { supply_delta: delta } of this.sqlite.prepare(`SELECT supply_delta FROM economy_ledger
+                WHERE scope_type = ? AND scope_id = ? ORDER BY id`).iterate(scopeType, scopeId)) {
+                if (delta > 0) minted += BigInt(delta);
+                if (delta < 0) destroyed += BigInt(-delta);
+            }
+            this.sqlite.prepare(`INSERT INTO economy_scope_totals
+                (scope_type, scope_id, minted_text, destroyed_text, updated_at) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (scope_type, scope_id) DO UPDATE SET minted_text = excluded.minted_text,
+                destroyed_text = excluded.destroyed_text, updated_at = excluded.updated_at`)
+                .run(scopeType, scopeId, String(minted), String(destroyed), this.now());
+            return { minted, destroyed };
+        }).immediate();
     }
 
     disable(values) {

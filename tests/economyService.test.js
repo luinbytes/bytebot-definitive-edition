@@ -168,7 +168,7 @@ describe('economy service', () => {
         expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(60);
         await expect(service.buyShopItem({ guild, userId: 'user1', itemId: item.id, member })).rejects.toThrow('already have');
 
-        member.roles.add.mockRejectedValueOnce(new Error('Discord unavailable')).mockRejectedValueOnce(new Error('Still unavailable'));
+        member.roles.add.mockRejectedValueOnce(Object.assign(new Error('Missing Permissions'), { code: 50013 }));
         await expect(service.buyShopItem({ guild, userId: 'user1', itemId: failed.id, member })).rejects.toThrow('reversed');
         expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(60);
         expect(service.listShopItems('guild1')).toEqual([
@@ -239,6 +239,29 @@ describe('economy service', () => {
         expect(member.roles.add).toHaveBeenCalledTimes(1);
     });
 
+    test('keeps a timed-out role assignment pending until delayed Discord state is visible', async () => {
+        service.enable('guild1', 'admin1');
+        service.configure('guild1', 'admin1', { startingBalance: 100 });
+        service.open({ guildId: 'guild1', userId: 'user1' });
+        const item = service.addShopItem({ guildId: 'guild1', actorId: 'admin1', roleId: 'role1', roleName: 'VIP', price: 40 });
+        const role = { id: 'role1', editable: true, managed: false, permissions: { has: () => false } };
+        const roles = new Map();
+        const member = { roles: { cache: roles, add: jest.fn().mockRejectedValue(new Error('Request timed out')) } };
+        const guild = {
+            id: 'guild1', roles: { everyone: { id: 'guild1' }, cache: new Map([[role.id, role]]) },
+            members: { me: { permissions: { has: () => true } }, fetch: jest.fn().mockResolvedValue(member) }
+        };
+
+        await expect(service.buyShopItem({ guild, userId: 'user1', itemId: item.id, member }))
+            .rejects.toThrow('pending');
+        expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(60);
+
+        roles.set(role.id, role);
+        await expect(service.buyShopItem({ guild, userId: 'user1', itemId: item.id, member }))
+            .resolves.toMatchObject({ status: 'delivered', price: 40 });
+        expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(60);
+    });
+
     test('rejects a 31st earning guild without paying it', () => {
         const ages = { guildCreatedAt: now - 21600000, memberJoinedAt: now - 21600000 };
 
@@ -291,5 +314,23 @@ describe('economy service', () => {
             guildId: 'guild1', actorId: 'admin1', reason: 'Season ended', confirmationCode: disable.confirmationCode
         }).enabled).toBe(0);
         expect(() => service.balance({ guildId: 'guild1', userId: 'user1' })).toThrow('not enabled');
+    });
+
+    test('rejects reset when the confirmed balance changes before its transaction', () => {
+        service.enable('guild1', 'admin1');
+        service.configure('guild1', 'admin1', { startingBalance: 100 });
+        service.open({ guildId: 'guild1', userId: 'user1' });
+        const values = { action: 'reset', guildId: 'guild1', actorId: 'admin1', targetId: 'user1', reason: 'Fresh start' };
+        const preview = service.issueConfirmation(values);
+        const consume = service.consumeConfirmation.bind(service);
+        service.consumeConfirmation = (...args) => {
+            const plan = consume(...args);
+            database.sqlite.prepare(`UPDATE economy_accounts SET wallet = wallet + 1
+                WHERE scope_type = 'guild' AND scope_id = 'guild1' AND user_id = 'user1'`).run();
+            return plan;
+        };
+
+        expect(() => service.reset({ ...values, confirmationCode: preview.confirmationCode })).toThrow('plan changed');
+        expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(101);
     });
 });
