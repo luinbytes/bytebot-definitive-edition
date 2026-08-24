@@ -1,4 +1,4 @@
-const { ChannelType, MessageFlags, PermissionFlagsBits } = require('discord.js');
+const { ChannelType, MessageFlags, PermissionFlagsBits, Routes } = require('discord.js');
 const embeds = require('../utils/embeds');
 const logger = require('../utils/logger');
 const { voiceMasterInterface, voiceMasterRenameModal } = require('../components/voiceMasterControls');
@@ -520,7 +520,7 @@ class VoiceMasterService {
                 const status = !value || value === 'clear' ? null : value;
                 if (status && status.length > 500) throw new Error('Voice status must be at most 500 characters.');
                 this.requireChannelPermissions(interaction.guild, channel, [PermissionFlagsBits.ManageChannels]);
-                await channel.setStatus(status);
+                await channel.client.rest.put(Routes.channelVoiceStatus(channel.id), { body: { status } });
                 break;
             }
             case 'permit': {

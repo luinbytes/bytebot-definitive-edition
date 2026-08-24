@@ -216,18 +216,19 @@ describe('VoiceMaster lifecycle', () => {
 
     test('only the persisted owner can mutate current-channel settings', async () => {
         const channels = new Map();
+        const restPut = jest.fn(async () => {});
         const category = { id: 'category-1', type: ChannelType.GuildCategory, delete: jest.fn() };
         const join = { id: 'join-1', type: ChannelType.GuildVoice, send: jest.fn(async () => ({ id: 'interface-1' })), delete: jest.fn() };
         const overwrites = { edit: jest.fn(async () => {}) };
         const temporary = {
             id: 'temporary-1', type: ChannelType.GuildVoice, name: "Member's channel", members: new Map(),
+            client: { rest: { put: restPut } },
             bitrate: 64000, rtcRegion: null, userLimit: 0, permissionOverwrites: overwrites,
             send: jest.fn(async () => ({ id: 'controls-1' })), delete: jest.fn(),
             setUserLimit: jest.fn(async value => { temporary.userLimit = value; }),
             setName: jest.fn(async value => { temporary.name = value; }),
             setBitrate: jest.fn(async value => { temporary.bitrate = value; }),
-            setRTCRegion: jest.fn(async value => { temporary.rtcRegion = value; }),
-            setStatus: jest.fn(async value => { temporary.status = value; })
+            setRTCRegion: jest.fn(async value => { temporary.rtcRegion = value; })
         };
         const create = jest.fn(async values => {
             const channel = values.type === ChannelType.GuildCategory
@@ -286,6 +287,7 @@ describe('VoiceMaster lifecycle', () => {
         await service.execute(memberInteraction(guild, owner, 'rename', { name: 'Focus Room' }));
         await service.execute(memberInteraction(guild, owner, 'bitrate', { bitrate: 80000 }));
         await service.execute(memberInteraction(guild, owner, 'region', { region: 'eu-west' }));
+        await service.execute(memberInteraction(guild, owner, 'status', { status: 'Working' }));
         await service.execute(memberInteraction(guild, owner, 'permit', { user: target }));
         await service.execute(memberInteraction(guild, owner, 'drag', { user: target }));
         await service.execute(memberInteraction(guild, owner, 'reject', { user: target }));
@@ -306,6 +308,7 @@ describe('VoiceMaster lifecycle', () => {
         expect(target.voice.setChannel).toHaveBeenCalledWith(temporary);
         expect(overwrites.edit).toHaveBeenCalledWith('target-1', { Connect: false });
         expect(target.voice.disconnect).toHaveBeenCalledTimes(1);
+        expect(restPut).toHaveBeenCalledWith('/channels/temporary-1/voice-status', { body: { status: 'Working' } });
         expect(rename.showModal).toHaveBeenCalledTimes(1);
         expect(temporary.delete).not.toHaveBeenCalled();
     });
