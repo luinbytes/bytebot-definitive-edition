@@ -82,9 +82,37 @@ template. It documents rich embed/script syntax, reusable
 
 Reusable script names are limited to 32 lowercase letters, digits, hyphens,
 or underscores, with at most 100 saved scripts per server. ByteBot already has
-a rich-content renderer and saved custom-script surface from the preceding
-parity slice; level-up delivery reuses that implementation and its existing
-mention/URL safety rather than adding a second template language.
+a rich-content renderer and saved custom-script storage from the preceding
+parity slice, but it does not yet expand `{cscript:name}` or expose every Level
+variable. This slice extends that one renderer as specified below and retains
+its mention/URL safety rather than adding a second template language.
+
+The extension is one preprocessing step on `RichContentService`, shared by
+level configuration previews and actual level-up delivery:
+
+- expand `{cscript:name}` from the current guild's existing `custom-script`
+  rows before ordinary variable substitution; a missing/invalid name, a cycle,
+  more than five nested expansion levels, more than 20 references, or more
+  than 32,000 expanded source characters is a validation error and sends
+  nothing;
+- supply the documented Level context deterministically: `{level}` and
+  `{level.current}` are the reached level, `{level.next}` is the next capped
+  level, `{level.rank}` is the member's current deterministic leaderboard
+  rank, `{level.xp}` is total XP, and `{level.next_xp}` is the next threshold;
+- map `{user}` to the member mention, the other documented user keys to the
+  Discord member/user fields named by the guide, `{guild}` to the guild name,
+  and the other documented guild keys to current guild state. A documented
+  optional Discord value that is unavailable becomes an empty string; unknown
+  tokens remain literal so configuration mistakes are visible in previews;
+- escape substituted braces and directive markers exactly as the existing
+  renderer does, then pass the expanded source through its normal Discord
+  content/embed size validation and always return its `allowedMentions` policy
+  (`parse: []`, no replied-user ping).
+
+The 32,000-character expansion ceiling and recursion/reference bounds are
+ByteBot-owned denial-of-service limits, not Greed facts. They permit composition
+of existing 6,000-character saved scripts while Discord's final payload limits
+remain authoritative.
 
 ### Pinned English localization
 
@@ -254,20 +282,22 @@ metadata cannot replace those path-specific checks.
 | `/levels roles` | optional `page`; optional `private` | Any guild member; read-only. |
 | `/levels config text|voice|dm|antiafk` | each subcommand takes required boolean `enabled` | Manage Server. Explicit booleans make slash state deterministic while help records Greed's prefix toggles. Text/voice default enabled; DM default disabled; anti-AFK default enabled. |
 | `/levels config channel` | required `channel` | Manage Server plus bot delivery preflight in the selected channel. |
+| `/levels config rate` | required number `multiplier` from 0 through 10 | Manage Server. This maps pinned `level setrate` and updates the server base XP multiplier. |
 | `/levels live text|voice` | Subcommands `text` and `voice`; optional `channel` (defaults current) | Manage Server plus bot Send Messages, Embed Links, and message edit/delete in the target channel. |
-| `/levels boost add|remove|list` | `add` takes optional `role`, optional `channel`, and required `multiplier`; `remove` takes optional `role` and optional `channel`; exactly one typed target is required; `list` has no required option | Manage Server. Discord has no role-or-channel union option, so separate typed options preserve autocomplete and runtime validation rejects zero or two targets. Merely referencing a role as an XP condition does not mutate it, so no caller/bot Manage Roles check is invented. `add` multiplier is 0–10 from pinned validation; remove/list are ByteBot-owned completion paths because only `add` is publicly documented. |
+| `/levels boost add|remove|list` | `add` registers required `multiplier` first, followed by optional `role` and optional `channel`; `remove` takes optional `role` and optional `channel`; exactly one typed target is required; `list` has no required option | Manage Server. Discord requires required options before optional options and has no role-or-channel union option, so this order is registration-safe while separate typed options preserve autocomplete. Runtime validation rejects zero or two targets. Merely referencing a role as an XP condition does not mutate it, so no caller/bot Manage Roles check is invented. `add` multiplier is 0–10 from pinned validation; remove/list are ByteBot-owned completion paths because only `add` is publicly documented. |
 | `/levels admin award|removexp|setxp|setlevel` | `award`/`removexp` take `member` and amount; `setxp` takes `member` and total XP; `setlevel` takes `member` and level | Manage Server; amount is non-negative for set, positive for removal; level is 1–999 from pinned validation. |
 | `/levels reward add|remove|sync|stack` | `add`/`remove` take role + level; `sync` has no required option; `stack` takes `on`/`off` | Manage Server; all role actions additionally require Manage Roles/hierarchy. `stack` exact values are pinned; reward grouping is a Discord-compatible mapping. |
 | `/levels ignore channel|role|list` | `channel` or `role` target; `list` no option | Manage Server. Role-ignore/list are pinned handler surfaces; group shape is ByteBot-owned. |
 | `/levels message set|view|disable` | `set` takes a rich-content script (max 2,000); `view` and `disable` take no option | Manage Server. Rendering reuses ByteBot's existing script/custom-script service and supports the hosted variable set above. Announcements are sent only when a channel and enabled message exist; DM mode selects DM instead of channel and a failed DM is reported but not reposted elsewhere. |
-| `/levels rankcard view|color|style` | `view` takes optional `member`; `color` takes required `color` (`#RRGGBB` or `reset`); `style` takes optional `background` attachment, optional `layout` (`classic`/`compact`), and optional `avatar_border` (0–20) | Any member may view and customize their own card; viewing another member is read-only. Accent/reset are current hosted command behavior. Background, type, and border-width controls match the hosted dashboard capabilities; the exact choices/bounds are not public, so the stated values are versioned ByteBot-owned UI rules. No Premium/vote gate is applied. |
+| `/levels rankcard view|color|style` | `view` takes optional `member`; `color` takes required `color` (`#RRGGBB` or `reset`); `style` takes optional `background` attachment, optional `background_url`, optional `layout` (`classic`/`compact`), and optional `avatar_border` (0–20) | Any member may view and customize their own card; viewing another member is read-only. At most one background input is accepted. Accent/reset are current hosted command behavior. Background, type, and border-width controls match the hosted dashboard capabilities; the exact choices/bounds are not public, so the stated values are versioned ByteBot-owned UI rules. No Premium/vote gate is applied. |
 | `/levels reset user|all` | `user` takes `member`; `all` takes a one-time confirmation | Manage Server; reset-all requires explicit confirmation and deletes all text/voice XP, matching the pinned warning. |
 | `/levels setup` | Interactive setup action; all settings are component/modal-driven | Manage Server; role reward changes additionally require Manage Roles and hierarchy preflight. |
 
 This grouping keeps all pinned subjects within Discord's one-root/one-group/
 one-subcommand nesting limit and stays below 25 root options. Help displays
-Greed aliases `level`, `rank`, `xp`, `lvl`, `levels lb`, and `levels top` as
-text compatibility names; it does not register duplicate slash commands.
+Greed aliases `level`, `rank`, `xp`, `lvl`, `levels lb`, `levels top`,
+`rankcard`, `rc`, `rankcard colour`, and `rankcard accent` as text
+compatibility names; it does not register duplicate slash commands.
 
 ### Analytics (`/analytics`, Utility presentation category; `/server stats` compatibility path)
 
@@ -440,7 +470,7 @@ can change them through a migration rather than silently changing balances.
 | Manual XP | `text_xp` and `voice_xp` remain activity tracks. A signed `manual_adjustment` records admin changes; cached canonical `xp` is `max(0, text_xp + voice_xp + manual_adjustment)`. `award` adds a positive adjustment, `removexp` subtracts without taking total below zero, and `setxp`/`setlevel` replace the adjustment so the requested total/threshold is exact. Track leaderboards therefore remain truthful after admin changes. |
 | Level roles | At most 50 reward rows per guild; one role per level. Stacking defaults off: reconciliation keeps only the highest configured reward at or below the member's level. With stacking on it keeps every configured reward at or below the level. XP commits enqueue reconciliation; reads never mutate roles. Resets commit level state first, then the retryable reconciler removes obsolete configured rewards. |
 | Level-up message | No announcement is sent until both an award channel and enabled message are configured, matching the hosted guide. Custom serialized script max 2,000 Unicode characters. Rendering and `{cscript:name}` reuse the existing rich-content service with the complete documented level/user/guild variable set above. DM mode sends there instead; failed DMs are not silently rerouted. |
-| Rank card | Every member receives the same ungated card renderer. Accent defaults to ByteBot purple; `reset` restores it. ByteBot-owned style values are `classic`/`compact`, background images up to 5 MiB from an attachment or HTTPS URL, and avatar-border width 0–20 pixels. Image fetches use existing URL-safety rules, byte/type limits, and no arbitrary local paths. |
+| Rank card | Every member receives the same ungated card renderer. Accent defaults to ByteBot purple; `reset` restores it. ByteBot-owned style values are `classic`/`compact`, background images up to 5 MiB from exactly one attachment or HTTPS URL, and avatar-border width 0–20 pixels. Image fetches use existing URL-safety rules, byte/type limits, and no arbitrary local paths. |
 | Live board | One board per `(guild, channel, metric)`, 10 entries per page, page 1 default, max 100 pages/1,000 rows, update every 5 minutes. Ties sort by total XP descending then user ID ascending. A missing/deleted message is recreated while the configuration remains active and the bot still has target-channel permissions; the original administrator need not remain in the guild. |
 | Analytics | Daily UTC buckets. `messages` counts accepted non-bot guild message-create events; `reactions` counts add events; `voice` counts observed eligible voice seconds converted to minutes for display; `membership` counts join/leave events plus the latest daily member snapshot. Missing history is rendered as unavailable, never zero-filled as historical fact. |
 | Analytics ranges | Default 60 days; minimum 1; maximum and retention 1,095 days. A request outside the bound returns a validation error before querying. |
@@ -489,8 +519,8 @@ Implementation is not complete until focused tests and review cover:
 
 | Area | Acceptance evidence |
 | --- | --- |
-| Command contract | Generated slash JSON includes visible `/levels`, `/analytics`, `/server stats`, and `/server logs` paths; `/server logs set` remains the modlog alias; the internal `stats` handler remains unregistered; typed role/channel and member/channel options reject zero or two targets; help lists prefix aliases without duplicate state/handlers. |
-| Levels math and presentation | Table-driven XP/level boundaries at 0, 99, 100, 399, 100,000, and level 999 cap; multiplier order, stack toggle, role thresholds, complete hosted message variables/custom-script reuse, 2,000-character validation, DM/channel delivery, and rank-card color/reset/style bounds without a Premium gate. |
+| Command contract | Generated slash JSON includes visible `/levels`, `/analytics`, `/server stats`, and `/server logs` paths; `/levels config rate` accepts 0–10; boost registration places required multiplier before optional typed targets; `/server logs set` remains the modlog alias; the internal `stats` handler remains unregistered; typed role/channel and member/channel options reject zero or two targets; help includes rank-card aliases without duplicate state/handlers. |
+| Levels math and presentation | Table-driven XP/level boundaries at 0, 99, 100, 399, 100,000, and level 999 cap; server/target multiplier order, stack toggle, role thresholds, complete hosted message variables, custom-script missing/cycle/depth/reference/expanded-size validation, 2,000-character configuration validation, mention-safe DM/channel delivery, and rank-card color/reset/style/background bounds without a Premium gate. |
 | Event ingestion | Bot/DM/ignored filtering; one XP cooldown; voice mute/alone/minimum/session split; reaction add/remove/re-add placement transitions; stable message IDs and state-driven reaction/voice/member dedupe; duplicate/retry delivery produces one counter. Startup/enable baselines exclude bots, do not manufacture offline joins/leaves/voice time, and seed current eligible voice sessions at `now`. |
 | Persistence | Fresh and upgrade migrations preserve `member_levels`, existing `activity_logs`, existing `/stats` output, and giveaway eligibility. Upgrade tests prove existing XP/level are unchanged, automatic XP cannot lower the legacy level floor, and only explicit admin set/reset can replace it. Unique guild/user/date and guild/event keys reject cross-guild collisions; transactions do not partially award XP. |
 | Analytics | Exact daily sums for messages, reactions, voice minutes, joins, leaves, and snapshots; unavailable-history labels; 1/60/1,095 range boundaries; prune deletes only old daily rows and is resumable. |
