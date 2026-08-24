@@ -504,5 +504,10 @@ module.exports = {
         if (interaction.options.getSubcommandGroup(false) === 'automod') return executeAutomod(interaction);
         if (['welcome', 'goodbye', 'boost', 'system'].includes(interaction.options.getSubcommandGroup(false))) return executeLifecycle(interaction);
         return executeAliasCommand(interaction, client, aliasFor(interaction));
+    },
+
+    async handleInteraction(interaction, client) {
+        if (!client.eventLoggingService) throw new Error('Event logging service is unavailable');
+        return client.eventLoggingService.handleInteraction(interaction);
     }
 };

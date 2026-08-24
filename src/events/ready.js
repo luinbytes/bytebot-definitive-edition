@@ -188,6 +188,19 @@ module.exports = {
             logger.error(`Failed to initialize level analytics service: ${e}`);
         }
 
+        try {
+            const EventLoggingService = require('../services/eventLoggingService');
+            const { sqlite } = require('../database');
+            client.eventLoggingService = new EventLoggingService({ sqlite, client });
+            await client.eventLoggingService.processOutbox();
+            const eventLogTimer = setInterval(() => client.eventLoggingService.processOutbox()
+                .catch(error => logger.error(`Event log delivery retry failed: ${error.message}`)), 1000);
+            eventLogTimer.unref?.();
+            logger.success('Event logging service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize event logging service: ${e}`);
+        }
+
         // --- Validate Active BytePod Sessions (Restart Resilience) ---
         try {
             const activeSessions = await dbLog.select('bytepodActiveSessions',

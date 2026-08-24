@@ -1,0 +1,89 @@
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { PermissionFlagsBits } = require('discord.js');
+
+describe('EventLoggingService', () => {
+    let database;
+    let service;
+    let tempDir;
+    let now;
+
+    beforeEach(async () => {
+        jest.resetModules();
+        tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bytebot-event-logs-'));
+        process.env.DATABASE_URL = path.join(tempDir, 'sqlite.db');
+        database = require('../src/database');
+        await database.runMigrations();
+        now = Date.UTC(2026, 7, 24, 12);
+        const EventLoggingService = require('../src/services/eventLoggingService');
+        service = new EventLoggingService({
+            sqlite: database.sqlite,
+            client: { guilds: { cache: new Map() } },
+            now: () => now
+        });
+    });
+
+    afterEach(() => {
+        database.sqlite.close();
+        delete process.env.DATABASE_URL;
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    function guild(channels) {
+        return {
+            id: 'guild1',
+            members: { me: { permissionsIn: () => ({ has: () => true }) } },
+            channels: { cache: new Map(channels.map(channel => [channel.id, channel])), fetch: jest.fn() }
+        };
+    }
+
+    test('same-module fan-out delivers each event once per configured channel', async () => {
+        const first = { id: 'channel1', send: jest.fn().mockResolvedValue({}) };
+        const second = { id: 'channel2', send: jest.fn().mockResolvedValue({}) };
+        const server = guild([first, second]);
+        service.client.guilds.cache.set(server.id, server);
+        service.add(server, first, 'message');
+        service.add(server, second, 'messages');
+
+        await service.log(server, 'messages', 'messageDelete:1', { title: 'Deleted', description: 'content' });
+        await service.log(server, 'messages', 'messageDelete:1', { title: 'Deleted', description: 'content' });
+
+        expect(first.send).toHaveBeenCalledTimes(1);
+        expect(second.send).toHaveBeenCalledTimes(1);
+        expect(database.sqlite.prepare(`SELECT status, COUNT(*) AS count FROM event_log_outbox GROUP BY status`).get())
+            .toEqual({ status: 'sent', count: 2 });
+    });
+
+    test('typed ignores suppress matching events and the channel cap counts distinct channels', async () => {
+        const channels = Array.from({ length: 16 }, (_, index) => ({ id: `channel${index}`, send: jest.fn() }));
+        const server = guild(channels);
+        for (const channel of channels.slice(0, 15)) service.add(server, channel, 'messages');
+        service.add(server, channels[0], 'members');
+        expect(() => service.add(server, channels[15], 'messages')).toThrow('15');
+
+        database.sqlite.prepare(`
+            INSERT INTO event_log_ignores (guild_id, target_type, target_id, created_at)
+            VALUES ('guild1', 'member', 'user1', 1)
+        `).run();
+        expect(await service.log(server, 'messages', 'message:ignored', { actorId: 'user1' })).toBe(0);
+        expect(database.sqlite.prepare(`SELECT 1 FROM event_log_outbox WHERE event_key = 'message:ignored'`).get()).toBeUndefined();
+    });
+
+    test('remove-all confirmation is actor-bound and one-use', async () => {
+        const channel = { id: 'channel1', send: jest.fn() };
+        const server = guild([channel]);
+        service.add(server, channel, 'messages');
+        const permissions = { has: permission => permission === PermissionFlagsBits.ManageGuild };
+        const reply = jest.fn();
+        await service.execute({
+            guildId: 'guild1', guild: server, user: { id: 'admin1' }, member: { permissions }, reply,
+            options: { getSubcommand: () => 'remove', getChannel: () => null, getString: () => null }
+        });
+        const customId = reply.mock.calls[0][0].components[0].components[0].data.custom_id;
+        const component = { customId, guildId: 'guild1', user: { id: 'admin1' }, member: { permissions }, update: jest.fn() };
+        await service.handleInteraction(component);
+        expect(database.sqlite.prepare(`SELECT 1 FROM event_log_channels`).get()).toBeUndefined();
+        await expect(service.handleInteraction(component)).rejects.toThrow('expired');
+    });
+});
