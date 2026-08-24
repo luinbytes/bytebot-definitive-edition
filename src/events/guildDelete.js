@@ -13,6 +13,7 @@ async function handleGuildDelete(guild) {
             // Cleanup guild data
             guild.client.giveawayService?.purgeGuild(guild.id);
             guild.client.ticketService?.purgeGuild(guild.id);
+            guild.client.voiceMasterService?.purgeGuild(guild.id);
             await guild.client.musicService?.purgeGuild(guild.id);
             await db.delete(musicConfig).where(eq(musicConfig.guildId, guild.id));
             await db.delete(lifecycleMessages).where(eq(lifecycleMessages.guildId, guild.id));

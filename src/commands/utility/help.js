@@ -8,6 +8,7 @@ const categoryMetadata = {
     'Fun': { icon: '🎉', description: 'Games and entertainment for everyone.' },
     'Games': { icon: '🎮', description: 'Game-specific statistics and tools.' },
     'Music': { icon: '🎵', description: 'Self-hosted voice playback and DJ controls.' },
+    'Voice': { icon: '🔊', description: 'Temporary voice channels and owner controls.' },
     'Economy': { icon: '🪙', description: 'Earn, bank, spend, and manage virtual currency.' },
     'Developer': { icon: '💻', description: 'Specialized tools for bot developers.' },
 };
@@ -118,7 +119,7 @@ async function showHelpPage(interaction, client, pageNumber) {
     });
 
     // Sort categories in a specific order
-    const categoryOrder = ['Administration', 'Moderation', 'Utility', 'Fun', 'Games', 'Music', 'Economy', 'Developer'];
+    const categoryOrder = ['Administration', 'Moderation', 'Utility', 'Fun', 'Games', 'Music', 'Voice', 'Economy', 'Developer'];
     const sortedCategories = Object.keys(categories).sort((a, b) => {
         return categoryOrder.indexOf(a) - categoryOrder.indexOf(b);
     });

@@ -826,6 +826,18 @@ class VoiceMasterService {
         }
     }
 
+    handleChannelEvent(channel) {
+        if (!channel?.guildId || channel.type === ChannelType.GuildVoice) return;
+        const source = this.sqlite.prepare("SELECT * FROM voice_master_sources WHERE guild_id = ? AND channel_id = ? AND state = 'active'")
+            .get(channel.guildId, channel.id);
+        if (source) logger.warn(`VoiceMaster source ${channel.id} changed to an unsupported channel type; leaving it for operator review.`);
+        const pod = this.sqlite.prepare("SELECT 1 FROM bytepods WHERE guild_id = ? AND channel_id = ? AND state = 'active' AND bot_owned = 1")
+            .get(channel.guildId, channel.id);
+        if (pod) logger.warn(`VoiceMaster owned channel ${channel.id} changed type; refusing automatic cleanup.`);
+    }
+
+    cleanup() {}
+
     purgeGuild(guildId) {
         this.sqlite.transaction(() => {
             this.sqlite.prepare('DELETE FROM voice_master_access WHERE guild_id = ?').run(guildId);

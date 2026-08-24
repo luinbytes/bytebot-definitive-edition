@@ -307,6 +307,12 @@ module.exports = {
         const guild = newState.guild;
 
         newState.client.musicService?.handleVoiceStateUpdate(oldState, newState);
+        await newState.client.voiceMasterService?.handleVoiceState(oldState, newState).catch(error => {
+            logger.errorContext('VoiceMaster voice-state failure', error, {
+                guildId: guild?.id, userId: member?.id,
+                oldChannelId: oldState.channelId, newChannelId: newState.channelId
+            });
+        });
 
         if (member.user.bot) return;
 

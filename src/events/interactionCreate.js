@@ -83,6 +83,27 @@ module.exports = {
             return;
         }
 
+        if ((interaction.isButton() || interaction.isModalSubmit())
+            && interaction.customId.startsWith('voicemaster:')) {
+            if (!client.voiceMasterService) {
+                return interaction.reply({
+                    content: 'VoiceMaster is temporarily unavailable.',
+                    flags: [MessageFlags.Ephemeral]
+                }).catch(() => null);
+            }
+            try {
+                await client.voiceMasterService.handleInteraction(interaction);
+            } catch (error) {
+                logger.errorContext('VoiceMaster Interaction Error', error, {
+                    customId: interaction.customId, userId: interaction.user?.id, guildId: interaction.guildId
+                });
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({ content: 'That VoiceMaster action failed.', flags: [MessageFlags.Ephemeral] }).catch(() => null);
+                }
+            }
+            return;
+        }
+
         // Handle BytePod Interactions
         if ((interaction.isButton() || interaction.isAnySelectMenu() || interaction.isModalSubmit()) && interaction.customId.startsWith('bytepod_')) {
             const command = client.commands.get('bytepod');

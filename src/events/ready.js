@@ -121,6 +121,20 @@ module.exports = {
         logger.success(`Ready! Logged in as ${client.user.tag}`);
         logger.info(`Bot is active in ${client.guilds.cache.size} guilds.`);
 
+        try {
+            const { VoiceMasterService } = require('../services/voiceMasterService');
+            const { sqlite } = require('../database');
+            client.voiceMasterService = new VoiceMasterService({ client, sqlite });
+            const recovery = await client.voiceMasterService.reconcile();
+            if (recovery.active || recovery.deleted || recovery.lost || recovery.ambiguous) {
+                logger.info(`VoiceMaster recovery: ${recovery.active} active, ${recovery.deleted} deleted, ${recovery.lost} lost, ${recovery.ambiguous} ambiguous`);
+            }
+            recovery.failures.forEach(failure => logger.warn(`VoiceMaster recovery failed for ${failure.channelId}: ${failure.error}`));
+            logger.success('VoiceMaster service initialized');
+        } catch (error) {
+            logger.error(`Failed to initialize VoiceMaster service: ${error.message}`);
+        }
+
         await recoverAntinuke(client);
 
         const interruptedSecurityIncidents = recoverPendingAntiraidIncidents() + recoverPendingAutomodIncidents();
