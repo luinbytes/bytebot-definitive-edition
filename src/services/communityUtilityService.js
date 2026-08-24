@@ -82,6 +82,7 @@ class CommunityUtilityService {
         this.randomInt = options.randomInt || crypto.randomInt;
         this.interval = null;
         this.running = false;
+        this.memberRefreshes = new Map();
     }
 
     start() {
@@ -93,6 +94,7 @@ class CommunityUtilityService {
     cleanup() {
         if (this.interval) clearInterval(this.interval);
         this.interval = null;
+        this.memberRefreshes.clear();
     }
 
     async reconcile() {
@@ -354,7 +356,7 @@ class CommunityUtilityService {
             JSON.stringify(values), durationMs == null ? null : this.now() + durationMs, this.now());
         const poll = pollFromRow(row);
         try {
-            const message = await interaction.channel.send(this.pollPayload(poll));
+            const message = await interaction.channel.send(this.pollPayload({ ...poll, status: 'active' }));
             this.sqlite.prepare("UPDATE community_polls SET message_id = ?, status = 'active' WHERE id = ?").run(message.id, poll.id);
             await interaction.editReply({ content: `Poll created: ${message.url}`, allowedMentions: SAFE_MENTIONS });
             return pollFromRow(this.sqlite.prepare('SELECT * FROM community_polls WHERE id = ?').get(poll.id));
@@ -432,8 +434,12 @@ class CommunityUtilityService {
         if (parsed.guildId && parsed.guildId !== interaction.guildId) throw new Error('The poll must be in this server.');
         const poll = this.getPollByMessage(interaction.guildId, parsed.messageId);
         if (!poll) throw new Error('That active ByteBot poll was not found.');
-        if (poll.creator_id !== interaction.user.id && !interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages)) {
-            throw new Error('Only the poll creator or a moderator can end this poll.');
+        if (parsed.channelId && parsed.channelId !== poll.channel_id) throw new Error('That message link does not match the poll channel.');
+        if (poll.creator_id !== interaction.user.id) {
+            const channel = await interaction.guild.channels.fetch(poll.channel_id).catch(() => null);
+            if (!channel || !interaction.member?.permissionsIn(channel)?.has(PermissionFlagsBits.ManageMessages)) {
+                throw new Error('Only the poll creator or a moderator in the poll channel can end this poll.');
+            }
         }
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
         const ended = await this.finishPoll(poll.id);
@@ -469,6 +475,9 @@ class CommunityUtilityService {
         if (!permissions?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory])) {
             throw new Error(`You need View Channel and Read Message History in ${channel}.`);
         }
+        if (!interaction.guild.members.me.permissionsIn(channel).has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory])) {
+            throw new Error(`I need View Channel and Read Message History in ${channel}.`);
+        }
         const message = await channel.messages.fetch(parsed.messageId).catch(() => null);
         if (!message) throw new Error('The message was not found.');
         return message;
@@ -481,6 +490,15 @@ class CommunityUtilityService {
     }
 
     async randomMember(guild) {
+        if (guild.members.cache.size < guild.memberCount) {
+            let refresh = this.memberRefreshes.get(guild.id);
+            if (!refresh || refresh.expiresAt <= this.now()) {
+                // ponytail: one full refresh per guild per five minutes; revisit only if Discord stops returning a complete member fetch.
+                refresh = { expiresAt: this.now() + 300000, promise: guild.members.fetch() };
+                this.memberRefreshes.set(guild.id, refresh);
+            }
+            await refresh.promise;
+        }
         const members = [...guild.members.cache.values()].filter(member => !member.user.bot);
         if (!members.length) throw new Error('This server has no eligible non-bot members.');
         return members[this.randomInt(members.length)];
@@ -537,6 +555,7 @@ class CommunityUtilityService {
     }
 
     purgeGuild(guildId) {
+        this.memberRefreshes.delete(guildId);
         this.sqlite.transaction(() => {
             const pollIds = this.sqlite.prepare('SELECT id FROM community_polls WHERE guild_id = ?').all(guildId).map(row => row.id);
             if (pollIds.length) this.sqlite.prepare(`DELETE FROM community_poll_votes WHERE poll_id IN (${pollIds.map(() => '?').join(',')})`).run(...pollIds);

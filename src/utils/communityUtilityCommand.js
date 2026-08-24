@@ -19,6 +19,15 @@ function requireBot(interaction, channel, permissions, labels) {
     if (!interaction.guild.members.me.permissionsIn(channel).has(permissions)) throw new Error(`I need ${labels.join(', ')} in ${channel}.`);
 }
 
+async function confessionForModerator(interaction, service, number) {
+    const confession = service.confessionByNumber(interaction.guildId, number);
+    if (!confession) throw new Error('That confession was not found.');
+    const channel = await interaction.guild.channels.fetch(confession.channel_id).catch(() => null);
+    if (!channel) throw new Error('That confession channel is unavailable.');
+    requireMemberIn(interaction, channel, PermissionFlagsBits.ManageMessages, 'Manage Messages');
+    return confession;
+}
+
 async function confessionAdmin(interaction, service, subcommand) {
     const guildId = interaction.guildId;
     if (subcommand === 'view') {
@@ -76,9 +85,9 @@ async function confessionAdmin(interaction, service, subcommand) {
         const config = service.setConfessionEmojis(guildId, action, up, down);
         return interaction.reply({ ...EPHEMERAL, content: `Confession reactions: ${config.up_emoji} / ${config.down_emoji}` });
     }
-    requireMember(interaction, PermissionFlagsBits.ManageMessages, 'Manage Messages');
     if (subcommand === 'mute') {
         const number = interaction.options.getInteger('number', true);
+        await confessionForModerator(interaction, service, number);
         service.muteConfessionAuthor(guildId, number, interaction.user.id, interaction.options.getString('reason'));
         return interaction.reply({ ...EPHEMERAL, content: `The author of confession #${number} is muted from confessions and replies.` });
     }
@@ -86,13 +95,14 @@ async function confessionAdmin(interaction, service, subcommand) {
         const all = interaction.options.getBoolean('all') || false;
         const number = interaction.options.getInteger('number');
         if (!all && !number) throw new Error('Provide a confession number or set all to true.');
+        if (all) requireMember(interaction, PermissionFlagsBits.ManageGuild, 'Manage Server');
+        else await confessionForModerator(interaction, service, number);
         const count = service.unmuteConfessionAuthor(guildId, number, all);
         return interaction.reply({ ...EPHEMERAL, content: `Removed ${count} confession mute${count === 1 ? '' : 's'}.` });
     }
     if (subcommand === 'report') {
         const number = interaction.options.getInteger('number', true);
-        const confession = service.confessionByNumber(guildId, number);
-        if (!confession) throw new Error('That confession was not found.');
+        const confession = await confessionForModerator(interaction, service, number);
         const reason = interaction.options.getString('reason', true);
         sqlite.prepare(`INSERT INTO moderation_logs (guild_id, target_id, executor_id, action, reason, timestamp)
             VALUES (?, ?, ?, 'CONFESSION_AUTHOR_VIEWED', ?, ?)`).run(guildId, confession.author_id, interaction.user.id, `Confession #${number}: ${reason}`, service.now());
@@ -137,7 +147,7 @@ async function threadAdmin(interaction, subcommand) {
     else if (subcommand === 'unlock') await thread.setLocked(false, reason);
     else if (subcommand === 'archive') await thread.setArchived(true, reason);
     else if (subcommand === 'unarchive') await thread.setArchived(false, reason);
-    else if (subcommand === 'solved') await thread.edit({ locked: true, archived: true }, reason);
+    else if (subcommand === 'solved') await thread.edit({ locked: true, archived: true, reason });
     else if (subcommand === 'delete') {
         if (!interaction.options.getBoolean('confirm', true)) throw new Error('Set confirm to true to permanently delete the thread.');
         await interaction.reply({ ...EPHEMERAL, content: `Deleting **${thread.name}** permanently.` });
@@ -156,7 +166,9 @@ async function executeCommunityUtilityAdmin(interaction, client) {
         if (group === 'thread') return await threadAdmin(interaction, subcommand);
         return await communityAdmin(interaction, client.communityUtilityService, subcommand);
     } catch (error) {
-        return interaction.reply({ ...EPHEMERAL, content: error.message || 'That community administration action failed.' });
+        const response = { ...EPHEMERAL, content: error.message || 'That community administration action failed.' };
+        if (interaction.deferred || interaction.replied) return interaction.editReply(response);
+        return interaction.reply(response);
     }
 }
 

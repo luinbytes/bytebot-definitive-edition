@@ -116,6 +116,21 @@ describe('community utilities', () => {
         await expect(service.vote({ ...interaction, user: { id: 'user2' }, message: { id: 'forged' } }, row.id, 0)).rejects.toThrow('stale');
     });
 
+    test('publishes new polls with enabled controls', async () => {
+        const message = { id: 'message1', url: 'https://discord.com/channels/guild1/channel1/message1' };
+        const interaction = {
+            guildId: 'guild1', channelId: 'channel1', user: { id: 'creator' },
+            channel: { send: jest.fn().mockResolvedValue(message) },
+            deferReply: jest.fn().mockResolvedValue({}), editReply: jest.fn().mockResolvedValue({})
+        };
+
+        const poll = await service.createPoll(interaction, 'Question?', ['Yes', 'No'], null);
+
+        expect(poll.status).toBe('active');
+        expect(interaction.channel.send.mock.calls[0][0].components.flatMap(component => component.components)
+            .every(button => button.data.disabled === false)).toBe(true);
+    });
+
     test('does not accept votes or render controls after a poll starts ending', async () => {
         const row = database.sqlite.prepare(`INSERT INTO community_polls
             (guild_id, channel_id, message_id, creator_id, question, options_json, status, created_at)
@@ -176,15 +191,46 @@ describe('community utilities', () => {
         expect(channel.messages.fetch).not.toHaveBeenCalled();
     });
 
-    test('selects random members from the maintained cache without a full fetch', async () => {
-        const guild = { members: { cache: new Map([
-            ['bot', { user: { bot: true } }],
-            ['one', { user: { bot: false }, id: 'one' }],
-            ['two', { user: { bot: false }, id: 'two' }]
-        ]), fetch: jest.fn() } };
+    test('requires bot visibility before resolving a message', async () => {
+        const channel = { isTextBased: () => true, messages: { fetch: jest.fn() }, toString: () => '#private' };
+        const interaction = {
+            guildId: '1234567890123456', channel,
+            guild: {
+                channels: { fetch: jest.fn().mockResolvedValue(channel) },
+                members: { me: { permissionsIn: () => ({ has: () => false }) } }
+            },
+            member: { permissionsIn: () => ({ has: () => true }) }
+        };
+
+        await expect(service.resolveMessage(interaction, '3234567890123456')).rejects.toThrow('I need View Channel');
+        expect(channel.messages.fetch).not.toHaveBeenCalled();
+    });
+
+    test('refreshes an incomplete member cache once before random selection', async () => {
+        const cache = new Map([['bot', { user: { bot: true } }]]);
+        const guild = { id: 'guild1', memberCount: 3, members: { cache, fetch: jest.fn(async () => {
+            cache.set('one', { user: { bot: false }, id: 'one' });
+            cache.set('two', { user: { bot: false }, id: 'two' });
+            return cache;
+        }) } };
 
         await expect(service.randomMember(guild)).resolves.toMatchObject({ id: 'two' });
-        expect(guild.members.fetch).not.toHaveBeenCalled();
+        await service.randomMember(guild);
+        expect(guild.members.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    test('requires target-channel moderation permission to end another creator poll', async () => {
+        database.sqlite.prepare(`INSERT INTO community_polls
+            (guild_id, channel_id, message_id, creator_id, question, options_json, status, created_at)
+            VALUES ('guild1','target','1234567890123456','creator','Question?','["Yes","No"]','active',1)`).run();
+        const channel = {};
+        const interaction = {
+            guildId: 'guild1', user: { id: 'moderator' },
+            guild: { channels: { fetch: jest.fn().mockResolvedValue(channel) } },
+            member: { permissionsIn: () => ({ has: () => false }) }
+        };
+
+        await expect(service.endPoll(interaction, '1234567890123456')).rejects.toThrow('moderator in the poll channel');
     });
 
     test('accepts only one durable report per reporter and confession', async () => {
@@ -255,5 +301,63 @@ describe('community administration native permissions', () => {
         };
         await executeCommunityUtilityAdmin(interaction, { communityUtilityService: {} });
         expect(thread.setLocked).toHaveBeenCalledWith(true, 'Thread lock by Mod');
+    });
+
+    test('uses target-channel permissions for confession attribution', async () => {
+        jest.resetModules();
+        const { executeCommunityUtilityAdmin } = require('../src/utils/communityUtilityCommand');
+        const service = {
+            confessionByNumber: jest.fn(() => ({ number: 1, channel_id: 'private', author_id: 'author' })),
+            muteConfessionAuthor: jest.fn()
+        };
+        const interaction = {
+            guildId: 'guild1', guild: { channels: { fetch: jest.fn().mockResolvedValue({ toString: () => '#private' }) } },
+            user: { id: 'mod1' }, member: { permissionsIn: () => ({ has: () => false }) }, reply: jest.fn().mockResolvedValue({}),
+            options: {
+                getSubcommandGroup: () => 'confessions', getSubcommand: () => 'mute', getInteger: () => 1, getString: () => null
+            }
+        };
+
+        await executeCommunityUtilityAdmin(interaction, { communityUtilityService: service });
+
+        expect(service.muteConfessionAuthor).not.toHaveBeenCalled();
+        expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('in #private') }));
+    });
+
+    test('passes the audit reason inside solved thread edits', async () => {
+        jest.resetModules();
+        const { executeCommunityUtilityAdmin } = require('../src/utils/communityUtilityCommand');
+        const thread = { name: 'help', isThread: () => true, edit: jest.fn().mockResolvedValue({}), toString: () => '#help' };
+        const interaction = {
+            guildId: 'guild1', guild: { members: { me: { permissionsIn: () => ({ has: () => true }) } } },
+            channel: thread, user: { id: 'mod1', tag: 'Mod' }, member: { permissionsIn: () => ({ has: () => true }) },
+            reply: jest.fn().mockResolvedValue({}),
+            options: { getSubcommandGroup: () => 'thread', getSubcommand: () => 'solved', getChannel: () => null, getString: () => 'Resolved duplicate' }
+        };
+
+        await executeCommunityUtilityAdmin(interaction, { communityUtilityService: {} });
+
+        expect(thread.edit).toHaveBeenCalledWith({ locked: true, archived: true, reason: 'Resolved duplicate' });
+    });
+
+    test('edits an acknowledged response when thread deletion fails', async () => {
+        jest.resetModules();
+        const { executeCommunityUtilityAdmin } = require('../src/utils/communityUtilityCommand');
+        const thread = { name: 'help', isThread: () => true, delete: jest.fn().mockRejectedValue(new Error('Discord denied deletion')), toString: () => '#help' };
+        const interaction = {
+            guildId: 'guild1', guild: { members: { me: { permissionsIn: () => ({ has: () => true }) } } },
+            channel: thread, user: { id: 'mod1', tag: 'Mod' }, member: { permissionsIn: () => ({ has: () => true }) },
+            replied: false, editReply: jest.fn().mockResolvedValue({}),
+            options: {
+                getSubcommandGroup: () => 'thread', getSubcommand: () => 'delete', getChannel: () => null,
+                getString: () => null, getBoolean: () => true
+            }
+        };
+        interaction.reply = jest.fn(async () => { interaction.replied = true; });
+
+        await executeCommunityUtilityAdmin(interaction, { communityUtilityService: {} });
+
+        expect(interaction.reply).toHaveBeenCalledTimes(1);
+        expect(interaction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Discord denied deletion' }));
     });
 });
