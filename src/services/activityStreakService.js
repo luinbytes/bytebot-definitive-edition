@@ -765,6 +765,14 @@ class ActivityStreakService {
         }
     }
 
+    async recordCommittedActivity(userId, guildId) {
+        try {
+            await this.updateStreak(userId, guildId, this.getTodayDateString());
+        } catch (error) {
+            logger.error(`Error recording committed activity for user ${userId}:`, error);
+        }
+    }
+
     /**
      * Record a reaction given by user
      * @param {string} userId - User ID

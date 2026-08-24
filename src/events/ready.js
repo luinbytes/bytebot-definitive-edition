@@ -156,6 +156,15 @@ module.exports = {
             logger.error(`Failed to initialize activity streak service: ${e}`);
         }
 
+        try {
+            const LevelAnalyticsService = require('../services/levelAnalyticsService');
+            const { sqlite } = require('../database');
+            client.levelAnalyticsService = new LevelAnalyticsService({ sqlite });
+            logger.success('Level analytics service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize level analytics service: ${e}`);
+        }
+
         // --- Validate Active BytePod Sessions (Restart Resilience) ---
         try {
             const activeSessions = await dbLog.select('bytepodActiveSessions',
