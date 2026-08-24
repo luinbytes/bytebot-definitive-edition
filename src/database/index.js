@@ -960,6 +960,43 @@ const expectedSchema = {
         action: 'TEXT NOT NULL',
         detail: 'TEXT',
         created_at: 'INTEGER NOT NULL'
+    },
+    guild_backups: {
+        id: 'TEXT PRIMARY KEY',
+        guild_id: 'TEXT NOT NULL',
+        creator_id: 'TEXT NOT NULL',
+        name: 'TEXT NOT NULL',
+        description: 'TEXT',
+        schema_version: 'INTEGER NOT NULL',
+        payload: 'TEXT NOT NULL',
+        digest: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    customization_presets: {
+        id: 'TEXT PRIMARY KEY',
+        guild_id: 'TEXT NOT NULL',
+        name: 'TEXT NOT NULL',
+        nickname: 'TEXT',
+        avatar_url: 'TEXT',
+        banner_url: 'TEXT',
+        bio: 'TEXT',
+        created_by: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    server_listings: {
+        guild_id: 'TEXT PRIMARY KEY',
+        name: 'TEXT NOT NULL',
+        icon_url: 'TEXT',
+        description: 'TEXT',
+        member_count: 'INTEGER NOT NULL',
+        invite_url: 'TEXT NOT NULL',
+        tags: "TEXT DEFAULT '[]' NOT NULL",
+        banner_url: 'TEXT',
+        bumped_at: 'INTEGER NOT NULL',
+        updated_by: 'TEXT NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
     }
 };
 
@@ -1000,7 +1037,9 @@ const compatibilityUniqueKeys = {
     giveaway_role_limits: ['guild_id', 'role_id'],
     member_levels: ['guild_id', 'user_id'],
     giveaway_entries: ['giveaway_id', 'user_id'],
-    giveaway_rounds: ['giveaway_id', 'round_number']
+    giveaway_rounds: ['giveaway_id', 'round_number'],
+    guild_backups: ['guild_id', 'creator_id', 'name'],
+    customization_presets: ['guild_id', 'name']
 };
 
 function hasUniqueKey(tableName, columns) {
