@@ -960,6 +960,18 @@ const expectedSchema = {
         action: 'TEXT NOT NULL',
         detail: 'TEXT',
         created_at: 'INTEGER NOT NULL'
+    },
+    guild_backups: {
+        id: 'TEXT PRIMARY KEY',
+        guild_id: 'TEXT NOT NULL',
+        creator_id: 'TEXT NOT NULL',
+        name: 'TEXT NOT NULL',
+        description: 'TEXT',
+        schema_version: 'INTEGER NOT NULL',
+        payload: 'TEXT NOT NULL',
+        digest: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
     }
 };
 
@@ -1000,7 +1012,8 @@ const compatibilityUniqueKeys = {
     giveaway_role_limits: ['guild_id', 'role_id'],
     member_levels: ['guild_id', 'user_id'],
     giveaway_entries: ['giveaway_id', 'user_id'],
-    giveaway_rounds: ['giveaway_id', 'round_number']
+    giveaway_rounds: ['giveaway_id', 'round_number'],
+    guild_backups: ['guild_id', 'creator_id', 'name']
 };
 
 function hasUniqueKey(tableName, columns) {

@@ -1130,6 +1130,22 @@ const giveawayActions = sqliteTable('giveaway_actions', {
     createdAt: integer('created_at').notNull()
 }, table => ({ giveawayIdx: index('giveaway_actions_giveaway_idx').on(table.giveawayId, table.id) }));
 
+const guildBackups = sqliteTable('guild_backups', {
+    id: text('id').primaryKey(),
+    guildId: text('guild_id').notNull(),
+    creatorId: text('creator_id').notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    schemaVersion: integer('schema_version').notNull(),
+    payload: text('payload').notNull(),
+    digest: text('digest').notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    nameUnique: unique('guild_backups_name_unique').on(table.guildId, table.creatorId, table.name),
+    ownerIdx: index('guild_backups_owner_idx').on(table.guildId, table.creatorId, table.createdAt)
+}));
+
 module.exports = {
     guilds,
     lifecycleMessages,
@@ -1221,5 +1237,6 @@ module.exports = {
     giveaways,
     giveawayEntries,
     giveawayRounds,
-    giveawayActions
+    giveawayActions,
+    guildBackups
 };
