@@ -65,8 +65,9 @@ playback. FFmpeg hard-stops each stream at its declared duration.
 ## Runtime
 
 Music requires Node 22.12 or newer, `@discordjs/voice`, `opusscript`, Discord
-UDP reachability, FFmpeg, and FFprobe. The Docker image pins Debian's `ffmpeg`
-package at `7:5.1.9-0+deb12u1`, which supplies both executables. A native host
+UDP reachability, FFmpeg, and FFprobe. The Docker image pins
+[Debian's `ffmpeg` package](https://packages.debian.org/bookworm/ffmpeg) at
+`7:5.1.9-0+deb12u1`, which supplies both executables. A native host
 may set `FFMPEG_PATH` or `FFPROBE_PATH` when either executable uses a
 nonstandard name. Startup checks the dependencies and executables within five
 seconds; a failure leaves music
