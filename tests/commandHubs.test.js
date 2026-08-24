@@ -187,6 +187,7 @@ describe('Intent command hubs', () => {
         ]);
 
         expect(game.name).toBe('game');
+        expect(commandModule('src/commands/games/game.js').sourceCategories).toEqual(['Games']);
         expect(optionNames(game.options)).toEqual(['f1', 'warthunder', 'roblox']);
         expect(optionNames(findOption(game, 'f1').options)).toEqual([
             'schedule',
@@ -214,7 +215,7 @@ describe('Intent command hubs', () => {
             createdAt: '2006-02-27T21:06:40Z', banned: false, verified: true,
             followers: 1000, following: 10, friends: 200,
             presence: { status: 'In Game', location: 'Example game', lastOnline: '2026-08-25T00:00:00Z' },
-            badges: ['Administrator'], nameHistory: ['Builderman'], avatar: 'https://tr.rbxcdn.com/avatar.png'
+            badgeCount: 1, badges: ['Administrator'], nameHistory: ['Builderman'], avatar: 'https://tr.rbxcdn.com/avatar.png'
         }) } };
 
         await game.execute(interaction, client);
@@ -223,7 +224,8 @@ describe('Intent command hubs', () => {
         const embed = interaction.editReply.mock.calls[0][0].embeds[0].data;
         expect(embed.url).toBe('https://www.roblox.com/users/156/profile');
         expect(embed.fields).toEqual(expect.arrayContaining([
-            expect.objectContaining({ name: 'Presence', value: expect.stringContaining('In Game') }),
+            expect.objectContaining({ name: 'Presence (In Game)' }),
+            expect.objectContaining({ name: 'Location', value: 'Example game' }),
             expect.objectContaining({ name: 'Badges (1)', value: 'Administrator' })
         ]));
     });

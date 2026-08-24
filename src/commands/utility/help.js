@@ -233,11 +233,12 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                 value:
                     'Greed source categories route through ByteBot\'s existing hubs as features land:\n' +
                     '`/community` Levels, Socials • `/me` Information • `/lookup` Information, Utility\n' +
-                    '`/game` Games, Socials\n' +
+                    '`/game` Games\n' +
                     '`/server` Auto, Logs, Security, Server, Settings • `/ticket` Tickets • `/mod` Moderation\n' +
                     '`/fun` Fun, Manipulation, Roleplay, Snipe • `/boosterrole` Boosters • `/economy` Economy\n' +
                     '`/music` Music\n' +
                     '**Not yet available (planned):** LastFM, Voice\n' +
+                    '**Provider-blocked:** Rolimons, Valorant, Minecraft, Spotify search, Reddit, YouTube downloads, X, TikTok, Instagram, Telegram, bio providers\n' +
                     '**Registry-only evidence gaps:** Developer',
                 inline: false
             }

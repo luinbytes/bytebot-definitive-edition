@@ -69,7 +69,7 @@ module.exports = {
             .addSubcommand(sub => robloxSubcommand(sub, 'outfits', 'Show a Roblox user’s public outfits'))),
 
     longRunning: true,
-    sourceCategories: ['Games', 'Socials'],
+    sourceCategories: ['Games'],
 
     async execute(interaction, client) {
         const group = interaction.options.getSubcommandGroup(false);
@@ -80,23 +80,23 @@ module.exports = {
             if (!service) throw new UserFacingError('Lookup service is temporarily unavailable.');
             if (action === 'profile') {
                 const user = await service.robloxProfile(username);
-                const presence = `${user.presence.status}${user.presence.location ? ` · ${user.presence.location}` : ''}`;
-                const embed = embeds.brand(`${user.displayName} (@${user.username})`, user.description || 'No public description.')
+                const embed = embeds.brand(`${user.displayName} (@${user.username})`,
+                    (user.description || 'No public description.').slice(0, 4000))
                     .setURL(`https://www.roblox.com/users/${user.id}/profile`)
                     .setThumbnail(user.avatar)
                     .addFields(
                         { name: 'Followers', value: String(user.followers), inline: true },
                         { name: 'Following', value: String(user.following), inline: true },
                         { name: 'Friends', value: String(user.friends), inline: true },
-                        { name: 'Presence', value: presence.slice(0, 1024), inline: true },
+                        { name: `Presence (${user.presence.status})`, value: user.presence.status, inline: true },
+                        { name: 'Location', value: (user.presence.location || 'Unavailable').slice(0, 1024), inline: true },
+                        { name: 'Last Online', value: user.presence.lastOnline
+                            ? `<t:${Math.floor(Date.parse(user.presence.lastOnline) / 1000)}:R>` : 'Unavailable', inline: true },
                         { name: 'Account Created', value: `<t:${Math.floor(Date.parse(user.createdAt) / 1000)}:D>`, inline: true },
                         { name: 'Account', value: [user.verified && 'Verified', user.banned && 'Banned'].filter(Boolean).join(' · ') || 'Active', inline: true },
-                        { name: `Badges (${user.badges.length})`, value: user.badges.join(', ').slice(0, 1024) || 'None' },
+                        { name: `Badges (${user.badgeCount})`, value: user.badges.join(', ').slice(0, 1024) || 'None' },
                         { name: 'Name History', value: user.nameHistory.join(', ').slice(0, 1024) || 'None' }
                     );
-                if (user.presence.lastOnline) {
-                    embed.addFields({ name: 'Last Online', value: `<t:${Math.floor(Date.parse(user.presence.lastOnline) / 1000)}:R>` });
-                }
                 return interaction.editReply({ embeds: [embed], allowedMentions: { parse: [] } });
             }
             if (action === 'games') {
@@ -113,7 +113,7 @@ module.exports = {
                 const body = result.groups.map(row => `**[${row.name}](${row.url})** · ${row.role}\n${row.members} members${row.locked ? ' · Locked' : ''}`)
                     .join('\n\n').slice(0, 4000);
                 return interaction.editReply({
-                    embeds: [embeds.brand(`${result.user.displayName}’s Groups`, body)],
+                    embeds: [embeds.brand(`${result.user.username}'s Groups`, body)],
                     allowedMentions: { parse: [] }
                 });
             }

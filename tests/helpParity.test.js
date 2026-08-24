@@ -40,6 +40,9 @@ test('/bot help discovers every public Greed category without advertising unfini
     expect(parityField.value).toContain('/lookup` Information, Utility');
     expect(parityField.value).toContain('/economy` Economy');
     expect(parityField.value).toContain('/ticket` Tickets');
+    expect(parityField.value).toContain('Provider-blocked');
+    expect(parityField.value).toContain('Rolimons');
+    expect(parityField.value).toContain('Valorant');
 });
 
 test('/bot help records the Greed bal compatibility mapping', async () => {

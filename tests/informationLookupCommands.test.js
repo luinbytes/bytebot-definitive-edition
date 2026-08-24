@@ -41,9 +41,36 @@ test('/lookup github user renders validated provider data and the contributions 
 
     const embed = interaction.editReply.mock.calls[0][0].embeds[0].data;
     expect(embed.url).toBe('https://github.com/octocat');
+    expect(embed.fields.map(field => field.name)).toEqual(expect.arrayContaining([
+        'Bio', 'Stats', 'Account Created', 'Website', 'Contributions'
+    ]));
     expect(embed.fields).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: 'Stats', value: expect.stringContaining('Public Repos: 8') }),
         expect.objectContaining({ name: 'Contributions', value: expect.stringContaining('Not available') })
     ]));
+});
+
+test('/lookup github email keeps a maximum-length address out of the embed title', async () => {
+    const lookup = require('../src/commands/utility/lookup');
+    const email = `${'a'.repeat(242)}@example.com`;
+    const interaction = {
+        options: {
+            getSubcommandGroup: jest.fn().mockReturnValue('github'),
+            getSubcommand: jest.fn().mockReturnValue('email'),
+            getString: jest.fn().mockReturnValue(email)
+        },
+        editReply: jest.fn().mockResolvedValue()
+    };
+    const client = { informationLookupService: { githubEmail: jest.fn().mockResolvedValue([{
+        sha: 'abc123', url: 'https://github.com/octocat/repo/commit/abc123',
+        repository: 'octocat/repo', repositoryUrl: 'https://github.com/octocat/repo', message: 'Commit'
+    }]) } };
+
+    await lookup.execute(interaction, client);
+
+    const embed = interaction.editReply.mock.calls[0][0].embeds[0].data;
+    expect(embed.title.length).toBeLessThanOrEqual(256);
+    expect(embed.description).toContain(email);
 });
 
 test('/me and /server place identity lookups in the existing intent hubs', () => {

@@ -123,6 +123,18 @@ class InformationLookupService {
         return value;
     }
 
+    retryHint(response) {
+        const retryAfter = response.headers.get('retry-after');
+        let seconds = /^\d+$/.test(retryAfter || '') ? Number(retryAfter) : NaN;
+        if (!Number.isFinite(seconds) && retryAfter) seconds = Math.ceil((Date.parse(retryAfter) - this.now()) / 1000);
+        const reset = response.headers.get('x-ratelimit-reset');
+        if (!Number.isFinite(seconds) && /^\d+$/.test(reset || '')) {
+            seconds = Math.ceil(Number(reset) - this.now() / 1000);
+        }
+        return Number.isFinite(seconds) && seconds > 0
+            ? ` Try again in ${Math.min(Math.ceil(seconds), 86_400)} seconds.` : ' Try again later.';
+    }
+
     async json(url, options = {}) {
         const { errors = {}, ...request } = options;
         let response;
@@ -134,9 +146,13 @@ class InformationLookupService {
             });
         } catch { throw new UserFacingError(errors.failed || 'Lookup provider request failed.'); }
         if (!response.ok) {
+            const remaining = response.headers.get('x-ratelimit-remaining');
             const exhausted = response.status === 429
-                || (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0');
-            if (exhausted) throw new UserFacingError(errors.rateLimited || 'Lookup provider rate limit reached. Try again later.');
+                || (response.status === 403 && (remaining === '0' || response.headers.has('retry-after')
+                    || (errors.rateLimitedOnForbidden && /^\d+$/.test(remaining || ''))));
+            if (exhausted) {
+                throw new UserFacingError(`${errors.rateLimited || 'Lookup provider rate limit reached.'}${this.retryHint(response)}`);
+            }
             if (response.status === 404 && errors.notFound) throw new UserFacingError(errors.notFound);
             if (response.status === 400 && errors.badRequest) throw new UserFacingError(errors.badRequest);
             if ([401, 403].includes(response.status) && errors.inaccessible) throw new UserFacingError(errors.inaccessible);
@@ -252,12 +268,14 @@ class InformationLookupService {
     async githubUser(input) {
         const username = String(input || '').trim();
         if (!/^(?!-)(?!.*--)[a-z\d-]{1,39}(?<!-)$/i.test(username)) {
-            throw new UserFacingError('Use a valid GitHub username.');
+            throw new UserFacingError('Please provide a valid GitHub username.');
         }
         const row = await this.githubJson(`/users/${encodeURIComponent(username)}`, {
-            notFound: `GitHub user ${username} was not found.`,
+            notFound: `GitHub user **${username}** not found.`,
             inaccessible: 'That GitHub profile is not publicly accessible.',
-            rateLimited: 'GitHub rate limit reached. Try again later.'
+            rateLimited: 'GitHub rate limit reached.',
+            rateLimitedOnForbidden: true,
+            failed: 'Failed to fetch GitHub data. Please try again later.'
         });
         const numbers = ['id', 'public_repos', 'public_gists', 'followers', 'following'];
         if (typeof row?.login !== 'string' || !numbers.every(key => Number.isSafeInteger(row[key]) && row[key] >= 0)
@@ -290,7 +308,11 @@ class InformationLookupService {
         url.searchParams.set('q', `${query} in:name`);
         url.searchParams.set('per_page', '5');
         const rows = (await this.githubJson(url, {
-            rateLimited: 'GitHub search rate limit reached. Try again later.'
+            notFound: 'GitHub repository search was not found.',
+            inaccessible: 'GitHub repository search is not publicly accessible.',
+            rateLimited: 'GitHub search rate limit reached.',
+            rateLimitedOnForbidden: true,
+            failed: 'Failed to fetch GitHub data. Please try again later.'
         }))?.items;
         if (!Array.isArray(rows)) throw new UserFacingError('GitHub returned an invalid repository search.');
         const repositories = rows.slice(0, 5).filter(row => row?.private === false).map(row => {
@@ -325,7 +347,11 @@ class InformationLookupService {
         url.searchParams.set('q', `author-email:${email}`);
         url.searchParams.set('per_page', '5');
         const rows = (await this.githubJson(url, {
-            rateLimited: 'GitHub search rate limit reached. Try again later.'
+            notFound: 'GitHub commit search was not found.',
+            inaccessible: 'GitHub commit search is not publicly accessible.',
+            rateLimited: 'GitHub search rate limit reached.',
+            rateLimitedOnForbidden: true,
+            failed: 'Failed to fetch GitHub data. Please try again later.'
         }))?.items;
         if (!Array.isArray(rows)) throw new UserFacingError('GitHub returned an invalid commit search.');
         const commits = rows.slice(0, 5).map(row => {
@@ -357,8 +383,8 @@ class InformationLookupService {
                 notFound: 'That Roblox account or resource was not found.',
                 badRequest: 'That Roblox account or resource is not publicly accessible.',
                 inaccessible: 'That Roblox account or resource is not publicly accessible.',
-                rateLimited: 'Roblox rate limit reached. Try again later.',
-                failed: 'Failed to fetch Roblox user information. Please try again later.'
+                rateLimited: 'Roblox rate limit reached.',
+                failed: 'Failed to fetch Roblox user information\n-# Please try again later'
             }
         }));
     }
@@ -366,7 +392,7 @@ class InformationLookupService {
     async robloxUser(input) {
         const username = String(input || '').trim();
         if (!/^(?=.{3,20}$)(?!_)(?!.*_$)(?!.*_.*_)(?!\d+$)[a-z\d_]+$/i.test(username)) {
-            throw new UserFacingError('Please provide a valid Roblox username.');
+            throw new UserFacingError('Please provide a Roblox username\n-# Use: roblox (username)');
         }
         const payload = await this.robloxJson(new URL('https://users.roblox.com/v1/usernames/users'), {
             method: 'POST',
@@ -433,6 +459,7 @@ class InformationLookupService {
                 lastOnline: typeof presence.lastOnline === 'string' && Number.isFinite(Date.parse(presence.lastOnline))
                     ? presence.lastOnline : null
             },
+            badgeCount: badges.length,
             badges: badgeNames,
             nameHistory: names,
             avatar: robloxImageUrl(thumbnail.imageUrl)

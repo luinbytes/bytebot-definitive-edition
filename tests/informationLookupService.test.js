@@ -175,9 +175,30 @@ test('GitHub lookups distinguish missing, rate-limited, and invalid responses', 
         login: 'octocat'
     }), { headers: { 'content-type': 'application/json' } })) });
 
-    await expect(missing.githubUser('octocat')).rejects.toThrow('was not found');
+    await expect(missing.githubUser('octocat')).rejects.toThrow('GitHub user **octocat** not found.');
     await expect(limited.githubUser('octocat')).rejects.toThrow('rate limit');
     await expect(malformed.githubUser('octocat')).rejects.toThrow('invalid profile');
+    await expect(malformed.githubUser('bad--name')).rejects.toThrow('Please provide a valid GitHub username.');
+});
+
+test('GitHub secondary limits include a bounded provider retry hint', async () => {
+    const service = new InformationLookupService({ fetch: jest.fn().mockResolvedValue(new Response('{}', {
+        status: 403,
+        headers: { 'content-type': 'application/json', 'retry-after': '120' }
+    })) });
+
+    await expect(service.githubRepositories('example')).rejects.toThrow('Try again in 120 seconds');
+});
+
+test('GitHub searches distinguish missing and inaccessible provider responses', async () => {
+    const response = status => new Response('{}', { status, headers: { 'content-type': 'application/json' } });
+    const missing = new InformationLookupService({ fetch: jest.fn().mockResolvedValue(response(404)) });
+    const inaccessible = new InformationLookupService({ fetch: jest.fn().mockResolvedValue(response(401)) });
+    const forbidden = new InformationLookupService({ fetch: jest.fn().mockResolvedValue(response(403)) });
+
+    await expect(missing.githubEmail('octocat@example.com')).rejects.toThrow('not found');
+    await expect(inaccessible.githubRepositories('example')).rejects.toThrow('not publicly accessible');
+    await expect(forbidden.githubEmail('octocat@example.com')).rejects.toThrow('not publicly accessible');
 });
 
 test('successful provider responses are cached briefly with a bounded lifetime', async () => {
@@ -223,7 +244,7 @@ test('Roblox profile lookup resolves a username and returns bounded public profi
         createdAt: '2006-02-27T21:06:40Z', banned: false, verified: true,
         followers: 1000, following: 10, friends: 200,
         presence: { status: 'In Game', location: 'Example game', lastOnline: '2026-08-25T00:00:00Z' },
-        badges: ['Administrator'], nameHistory: ['Builderman'], avatar: 'https://tr.rbxcdn.com/avatar.png'
+        badgeCount: 1, badges: ['Administrator'], nameHistory: ['Builderman'], avatar: 'https://tr.rbxcdn.com/avatar.png'
     });
     expect(fetch).toHaveBeenCalledTimes(9);
 });
@@ -274,11 +295,14 @@ test('Roblox lookups distinguish not found, inaccessible, rate-limited, and malf
         .mockResolvedValueOnce(resolvedUser()).mockResolvedValueOnce(response({}, 429)) });
     const malformed = new InformationLookupService({ fetch: jest.fn()
         .mockResolvedValueOnce(resolvedUser()).mockResolvedValueOnce(response({ data: [{ id: 'bad' }] })) });
+    const failed = new InformationLookupService({ fetch: jest.fn()
+        .mockResolvedValueOnce(resolvedUser()).mockResolvedValueOnce(response({}, 500)) });
 
     await expect(missing.robloxUser('Builderman')).rejects.toThrow('No Roblox user');
     await expect(inaccessible.robloxGames('Builderman')).rejects.toThrow('not publicly accessible');
     await expect(limited.robloxGroups('Builderman')).rejects.toThrow('rate limit');
     await expect(malformed.robloxOutfits('Builderman')).rejects.toThrow('invalid outfits');
+    await expect(failed.robloxGames('Builderman')).rejects.toThrow('Failed to fetch Roblox user information\n-# Please try again later');
 });
 
 test('name history records only observed former names in the existing automation store', () => {

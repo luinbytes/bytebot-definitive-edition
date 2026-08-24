@@ -41,21 +41,21 @@ module.exports = {
         if (group === 'github') {
             if (action === 'user') {
                 const user = await service.githubUser(interaction.options.getString('username', true));
-                const embed = embeds.brand(user.name || user.username, user.bio || 'No public bio.')
+                const embed = embeds.brand(user.name || user.username)
                     .setURL(user.url)
                     .setThumbnail(user.avatar)
                     .addFields(
-                        { name: 'Username', value: user.username, inline: true },
-                        { name: 'GitHub ID', value: String(user.id), inline: true },
-                        { name: 'Repositories', value: String(user.repositories), inline: true },
-                        { name: 'Followers', value: String(user.followers), inline: true },
-                        { name: 'Following', value: String(user.following), inline: true },
-                        { name: 'Gists', value: String(user.gists), inline: true },
-                        { name: 'Created', value: `<t:${Math.floor(Date.parse(user.createdAt) / 1000)}:D>`, inline: true },
+                        { name: 'Bio', value: (user.bio || 'No public bio.').slice(0, 1024) },
+                        { name: 'Stats', value: [
+                            `Followers: ${user.followers}`,
+                            `Following: ${user.following}`,
+                            `Public Repos: ${user.repositories}`,
+                            `Public Gists: ${user.gists}`
+                        ].join('\n') },
+                        { name: 'Account Created', value: `<t:${Math.floor(Date.parse(user.createdAt) / 1000)}:D>`, inline: true },
+                        { name: 'Website', value: (user.website || 'Not provided.').slice(0, 1024), inline: true },
                         { name: 'Contributions', value: 'Not available through GitHub’s keyless REST API.' }
                     );
-                const details = [user.company, user.location, user.website].filter(Boolean).join(' · ');
-                if (details) embed.addFields({ name: 'Profile', value: details.slice(0, 1024) });
                 return interaction.editReply({ embeds: [embed], allowedMentions: { parse: [] } });
             }
             if (action === 'repository') {
@@ -72,12 +72,13 @@ module.exports = {
             }
             const email = interaction.options.getString('email', true);
             const rows = await service.githubEmail(email);
+            const header = `Author email: ${email}\n\n`;
             const description = rows.map(row => {
                 const message = row.message.split('\n')[0].slice(0, 200);
                 return `**[${row.repository}](${row.repositoryUrl})** · [${row.sha.slice(0, 7)}](${row.url})\n${message}`;
-            }).join('\n\n').slice(0, 4000);
+            }).join('\n\n').slice(0, 4000 - header.length);
             return interaction.editReply({
-                embeds: [embeds.brand(`Public GitHub commits: ${email}`, description)],
+                embeds: [embeds.brand('Public GitHub commits', `${header}${description}`)],
                 allowedMentions: { parse: [] }
             });
         }

@@ -21,4 +21,6 @@ Roblox lookups use only the provider's documented cookie-free legacy endpoints. 
 
 These read-only paths require no Discord member permission by default. Existing `/server permissions` rules may disable or allow their root or exact slash paths. Provider-account actions and feed/reposter mutations are not granted by these commands.
 
+ByteBot categorizes GitHub under `Information`/`Utility` and Roblox under `Games`. The Greed `Socials` ledger row still advances because its public Roblox localization lives there; that source mapping does not create a ByteBot Socials command category. Persistent social feeds and reposters remain issue #61.
+
 The public-source behavior and evidence gaps are frozen in [`docs/research/greed-information-lookups-contract.md`](../research/greed-information-lookups-contract.md) and [`docs/research/greed-social-game-lookups-contract.md`](../research/greed-social-game-lookups-contract.md). Rolimons, Valorant, Minecraft, Spotify search/audio previews, Reddit, YouTube downloads, X, TikTok, Instagram, Telegram, and bio-provider scraping remain blocked by provider terms, credentials, approval, or absent first-party contracts. Live Discord validation remains a separate, explicitly approved step.
