@@ -11,6 +11,10 @@ function requireMember(interaction, permission, label) {
     if (!memberHas(interaction, permission)) throw new Error(`You need the real Discord ${label} permission for this action.`);
 }
 
+function requireMemberIn(interaction, channel, permission, label) {
+    if (!interaction.member?.permissionsIn(channel)?.has(permission)) throw new Error(`You need the real Discord ${label} permission in ${channel}.`);
+}
+
 function requireBot(interaction, channel, permissions, labels) {
     if (!interaction.guild.members.me.permissionsIn(channel).has(permissions)) throw new Error(`I need ${labels.join(', ')} in ${channel}.`);
 }
@@ -98,16 +102,16 @@ async function confessionAdmin(interaction, service, subcommand) {
 
 async function communityAdmin(interaction, service, subcommand) {
     if (subcommand === 'image-only') {
-        requireMember(interaction, PermissionFlagsBits.ManageChannels, 'Manage Channels');
         const action = interaction.options.getString('action', true);
         const channel = interaction.options.getChannel('channel') || interaction.channel;
+        requireMemberIn(interaction, channel, PermissionFlagsBits.ManageChannels, 'Manage Channels');
         if (action === 'view') return interaction.reply({ ...EPHEMERAL, content: `${channel} is **${service.isImageOnly(interaction.guildId, channel.id) ? '' : 'not '}image-only**.` });
         requireBot(interaction, channel, PermissionFlagsBits.ManageMessages, ['Manage Messages']);
         service.setImageOnly(interaction.guildId, channel.id, action === 'enable', interaction.user.id);
         return interaction.reply({ ...EPHEMERAL, content: `${channel} is now **${action === 'enable' ? '' : 'not '}image-only**.` });
     }
     const message = await service.resolveMessage(interaction, interaction.options.getString('message', true));
-    requireMember(interaction, PermissionFlagsBits.PinMessages, 'Pin Messages');
+    requireMemberIn(interaction, message.channel, PermissionFlagsBits.PinMessages, 'Pin Messages');
     requireBot(interaction, message.channel, PermissionFlagsBits.PinMessages, ['Pin Messages']);
     if (subcommand === 'pin') {
         if (message.pinned) throw new Error('That message is already pinned.');
@@ -122,7 +126,7 @@ async function communityAdmin(interaction, service, subcommand) {
 async function threadAdmin(interaction, subcommand) {
     const thread = interaction.options.getChannel('thread') || interaction.channel;
     if (!thread?.isThread()) throw new Error('Choose a thread or run this command inside one.');
-    requireMember(interaction, PermissionFlagsBits.ManageThreads, 'Manage Threads');
+    requireMemberIn(interaction, thread, PermissionFlagsBits.ManageThreads, 'Manage Threads');
     requireBot(interaction, thread, PermissionFlagsBits.ManageThreads, ['Manage Threads']);
     const reason = interaction.options.getString('reason') || `Thread ${subcommand} by ${interaction.user.tag}`;
     if (subcommand === 'add') await thread.members.add(interaction.options.getUser('member', true).id, reason);

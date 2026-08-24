@@ -116,6 +116,21 @@ describe('community utilities', () => {
         await expect(service.vote({ ...interaction, user: { id: 'user2' }, message: { id: 'forged' } }, row.id, 0)).rejects.toThrow('stale');
     });
 
+    test('does not accept votes or render controls after a poll starts ending', async () => {
+        const row = database.sqlite.prepare(`INSERT INTO community_polls
+            (guild_id, channel_id, message_id, creator_id, question, options_json, status, created_at)
+            VALUES ('guild1','channel1','message1','creator','Question?','["Yes","No"]','ending',1) RETURNING *`).get();
+        const interaction = {
+            guildId: 'guild1', channelId: 'channel1', user: { id: 'user1', bot: false }, member: {},
+            message: { id: 'message1', edit: jest.fn() }
+        };
+
+        await expect(service.vote(interaction, row.id, 0)).rejects.toThrow('stale');
+        expect(database.sqlite.prepare('SELECT COUNT(*) count FROM community_poll_votes').get().count).toBe(0);
+        expect(service.pollPayload({ ...row, options: ['Yes', 'No'] }).components.flatMap(component => component.components)
+            .every(button => button.data.disabled)).toBe(true);
+    });
+
     test('claims and ends a timed poll once with durable results', async () => {
         const row = database.sqlite.prepare(`INSERT INTO community_polls
             (guild_id, channel_id, message_id, creator_id, question, options_json, status, ends_at, created_at)
@@ -145,6 +160,47 @@ describe('community utilities', () => {
         expect(base.delete).toHaveBeenCalledTimes(1);
         await expect(service.handleMessage({ ...base, delete: jest.fn(), attachments: new Map([['file', {}]]) })).resolves.toBe(false);
         await expect(service.handleMessage({ ...base, delete: jest.fn(), member: { permissionsIn: () => ({ has: () => true }) } })).resolves.toBe(false);
+        await expect(service.handleMessage({ ...base, delete: jest.fn(), system: true })).resolves.toBe(false);
+    });
+
+    test('requires source-channel visibility before resolving a message', async () => {
+        const channel = { isTextBased: () => true, messages: { fetch: jest.fn() }, toString: () => '#private' };
+        const interaction = {
+            guildId: '1234567890123456', channel,
+            guild: { channels: { fetch: jest.fn().mockResolvedValue(channel) } },
+            member: { permissionsIn: () => ({ has: () => false }) }
+        };
+
+        await expect(service.resolveMessage(interaction, 'https://discord.com/channels/1234567890123456/2234567890123456/3234567890123456'))
+            .rejects.toThrow('View Channel and Read Message History');
+        expect(channel.messages.fetch).not.toHaveBeenCalled();
+    });
+
+    test('selects random members from the maintained cache without a full fetch', async () => {
+        const guild = { members: { cache: new Map([
+            ['bot', { user: { bot: true } }],
+            ['one', { user: { bot: false }, id: 'one' }],
+            ['two', { user: { bot: false }, id: 'two' }]
+        ]), fetch: jest.fn() } };
+
+        await expect(service.randomMember(guild)).resolves.toMatchObject({ id: 'two' });
+        expect(guild.members.fetch).not.toHaveBeenCalled();
+    });
+
+    test('accepts only one durable report per reporter and confession', async () => {
+        database.sqlite.prepare(`INSERT INTO confessions
+            (guild_id, number, channel_id, author_id, content, message_id, status, created_at)
+            VALUES ('guild1',1,'channel1','author1','content','message1','published',1)`).run();
+        const interaction = {
+            guildId: 'guild1', user: { id: 'reporter1' },
+            fields: { getTextInputValue: () => 'unsafe' },
+            guild: { channels: { fetch: jest.fn() } },
+            reply: jest.fn().mockResolvedValue({})
+        };
+
+        await service.submitConfessionReport(interaction, 1);
+        expect(() => service.submitConfessionReport(interaction, 1)).toThrow('already reported');
+        expect(database.sqlite.prepare("SELECT COUNT(*) count FROM moderation_logs WHERE action = 'CONFESSION_REPORT'").get().count).toBe(1);
     });
 
     test('renders bounded quote PNGs and suppresses remote non-Discord avatars', async () => {
@@ -193,7 +249,7 @@ describe('community administration native permissions', () => {
         const thread = { name: 'help', isThread: () => true, setLocked: jest.fn().mockResolvedValue({}), toString: () => '#help' };
         const interaction = {
             guildId: 'guild1', guild: { members: { me: { permissionsIn: () => ({ has: permission => permission === PermissionFlagsBits.ManageThreads }) } } },
-            channel: thread, user: { id: 'mod1', tag: 'Mod' }, memberPermissions: { has: permission => permission === PermissionFlagsBits.ManageThreads },
+            channel: thread, user: { id: 'mod1', tag: 'Mod' }, member: { permissionsIn: () => ({ has: permission => permission === PermissionFlagsBits.ManageThreads }) },
             reply: jest.fn().mockResolvedValue({}),
             options: { getSubcommandGroup: () => 'thread', getSubcommand: () => 'lock', getChannel: () => null, getString: () => null }
         };

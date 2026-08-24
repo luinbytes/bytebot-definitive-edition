@@ -200,7 +200,9 @@ class CommunityUtilityService {
         if (blocked) throw new Error('That text contains a blocked phrase.');
         const cutoff = this.now() - 60000;
         const recent = reply
-            ? this.sqlite.prepare('SELECT 1 FROM confession_replies WHERE replier_id = ? AND created_at > ? LIMIT 1').get(userId, cutoff)
+            ? this.sqlite.prepare(`SELECT 1 FROM confession_replies replies
+                JOIN confessions ON confessions.id = replies.confession_id
+                WHERE confessions.guild_id = ? AND replies.replier_id = ? AND replies.created_at > ? LIMIT 1`).get(guildId, userId, cutoff)
             : this.sqlite.prepare('SELECT 1 FROM confessions WHERE guild_id = ? AND author_id = ? AND created_at > ? LIMIT 1').get(guildId, userId, cutoff);
         if (recent) throw new Error('Please wait 60 seconds before submitting again.');
         return text;
@@ -292,8 +294,14 @@ class CommunityUtilityService {
         const confession = this.sqlite.prepare("SELECT * FROM confessions WHERE id = ? AND guild_id = ? AND status = 'published'").get(confessionId, interaction.guildId);
         if (!confession) throw new Error('That confession is no longer available.');
         const reason = normalizePhrase(interaction.fields.getTextInputValue('reason'), 500).phrase;
-        this.sqlite.prepare(`INSERT INTO moderation_logs (guild_id, target_id, executor_id, action, reason, timestamp)
-            VALUES (?, ?, ?, 'CONFESSION_REPORT', ?, ?)`).run(interaction.guildId, confession.author_id, interaction.user.id, `Confession #${confession.number}: ${reason}`, this.now());
+        this.sqlite.transaction(() => {
+            const duplicate = this.sqlite.prepare(`SELECT 1 FROM moderation_logs
+                WHERE guild_id = ? AND executor_id = ? AND action = 'CONFESSION_REPORT' AND reason LIKE ? LIMIT 1`)
+                .get(interaction.guildId, interaction.user.id, `Confession #${confession.number}: %`);
+            if (duplicate) throw new Error('You have already reported this confession.');
+            this.sqlite.prepare(`INSERT INTO moderation_logs (guild_id, target_id, executor_id, action, reason, timestamp)
+                VALUES (?, ?, ?, 'CONFESSION_REPORT', ?, ?)`).run(interaction.guildId, confession.author_id, interaction.user.id, `Confession #${confession.number}: ${reason}`, this.now());
+        }).immediate();
         const logId = this.sqlite.prepare('SELECT log_channel_id FROM moderation_config WHERE guild_id = ?').get(interaction.guildId)?.log_channel_id;
         if (logId) interaction.guild.channels.fetch(logId).then(channel => channel?.send({
             embeds: [new EmbedBuilder().setColor(0xef4444).setTitle(`Confession #${confession.number} reported`)
@@ -321,7 +329,7 @@ class CommunityUtilityService {
         return counts;
     }
 
-    pollPayload(poll, ended = poll.status === 'ended') {
+    pollPayload(poll, ended = poll.status !== 'active') {
         const counts = this.pollCounts(poll);
         const total = counts.reduce((sum, value) => sum + value, 0);
         const description = poll.options.map((option, index) => `**${index + 1}. ${option}** — ${counts[index]} vote${counts[index] === 1 ? '' : 's'}`).join('\n');
@@ -361,18 +369,19 @@ class CommunityUtilityService {
     }
 
     async vote(interaction, pollId, optionIndex) {
-        const poll = pollFromRow(this.sqlite.prepare('SELECT * FROM community_polls WHERE id = ?').get(pollId));
-        if (!poll || poll.status !== 'active' || poll.guild_id !== interaction.guildId || poll.channel_id !== interaction.channelId
-            || poll.message_id !== interaction.message?.id) throw new Error('This poll control is stale or does not belong to this message.');
-        if (poll.ends_at && poll.ends_at <= this.now()) {
-            await this.finishPoll(poll.id);
-            throw new Error('This poll has ended.');
-        }
-        if (!Number.isInteger(optionIndex) || optionIndex < 0 || optionIndex >= poll.options.length) throw new Error('That poll option does not exist.');
         if (!interaction.member || interaction.user.bot) throw new Error('Only current server members can vote.');
+        let poll;
         try {
-            this.sqlite.prepare('INSERT INTO community_poll_votes (poll_id, user_id, option_index, created_at) VALUES (?, ?, ?, ?)')
-                .run(poll.id, interaction.user.id, optionIndex, this.now());
+            poll = this.sqlite.transaction(() => {
+                const current = pollFromRow(this.sqlite.prepare('SELECT * FROM community_polls WHERE id = ?').get(pollId));
+                if (!current || current.status !== 'active' || current.guild_id !== interaction.guildId || current.channel_id !== interaction.channelId
+                    || current.message_id !== interaction.message?.id) throw new Error('This poll control is stale or does not belong to this message.');
+                if (current.ends_at && current.ends_at <= this.now()) throw new Error('This poll has ended.');
+                if (!Number.isInteger(optionIndex) || optionIndex < 0 || optionIndex >= current.options.length) throw new Error('That poll option does not exist.');
+                this.sqlite.prepare('INSERT INTO community_poll_votes (poll_id, user_id, option_index, created_at) VALUES (?, ?, ?, ?)')
+                    .run(current.id, interaction.user.id, optionIndex, this.now());
+                return current;
+            }).immediate();
         } catch (error) {
             if (String(error.code).startsWith('SQLITE_CONSTRAINT')) throw new Error('You have already voted in this poll.');
             throw error;
@@ -444,7 +453,7 @@ class CommunityUtilityService {
     }
 
     async handleMessage(message) {
-        if (!message.guild || message.author?.bot || message.webhookId || !this.isImageOnly(message.guild.id, message.channel.id)) return false;
+        if (!message.guild || message.system || message.author?.bot || message.webhookId || !this.isImageOnly(message.guild.id, message.channel.id)) return false;
         if (message.member?.permissionsIn(message.channel)?.has(PermissionFlagsBits.ManageMessages)) return false;
         if (message.attachments?.size) return false;
         await message.delete();
@@ -456,6 +465,10 @@ class CommunityUtilityService {
         if (parsed.guildId && parsed.guildId !== interaction.guildId) throw new Error('The message must be in this server.');
         const channel = parsed.channelId ? await interaction.guild.channels.fetch(parsed.channelId).catch(() => null) : interaction.channel;
         if (!channel?.isTextBased()) throw new Error('The message channel is unavailable.');
+        const permissions = interaction.member?.permissionsIn(channel);
+        if (!permissions?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory])) {
+            throw new Error(`You need View Channel and Read Message History in ${channel}.`);
+        }
         const message = await channel.messages.fetch(parsed.messageId).catch(() => null);
         if (!message) throw new Error('The message was not found.');
         return message;
@@ -468,7 +481,7 @@ class CommunityUtilityService {
     }
 
     async randomMember(guild) {
-        const members = [...(await guild.members.fetch()).values()].filter(member => !member.user.bot);
+        const members = [...guild.members.cache.values()].filter(member => !member.user.bot);
         if (!members.length) throw new Error('This server has no eligible non-bot members.');
         return members[this.randomInt(members.length)];
     }
