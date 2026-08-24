@@ -704,7 +704,8 @@ class VoiceMasterService {
             WHERE guild_id = ? AND channel_id = ? AND member_id = ?`).get(guild.id, channelId, member.id);
         let roleAdded = false;
         try {
-            if (existing?.role_id === roleId && existing.state === 'active') return;
+            if (existing?.role_id === roleId && existing.state === 'active'
+                && member.roles.cache?.has(roleId)) return;
             if (existing && existing.role_id !== roleId) {
                 if (existing.added_by_bot) await member.roles.remove(existing.role_id, 'VoiceMaster join role changed');
                 this.sqlite.prepare(`DELETE FROM voice_master_join_roles
@@ -1304,16 +1305,30 @@ class VoiceMasterService {
         const pending = this.sqlite.prepare("SELECT * FROM voice_master_creations WHERE state = 'pending'").all();
         for (const creation of pending) {
             try {
-                if (creation.channel_id) {
-                    const guild = await this.client.guilds.fetch(creation.guild_id);
-                    const channel = await this.fetchChannel(guild, creation.channel_id);
-                    if (channel) await channel.delete('VoiceMaster interrupted creation recovery');
-                }
-                this.failCreation(creation, 'Creation interrupted by restart.');
+                await this.cleanupPendingCreation(creation, 'VoiceMaster interrupted creation recovery');
             } catch (error) {
                 result.failures.push({ guildId: creation.guild_id, channelId: creation.channel_id, error: error.message });
             }
         }
+    }
+
+    async cleanupPendingCreation(creation, reason) {
+        if (creation.channel_id) {
+            const guild = await this.client.guilds.fetch(creation.guild_id);
+            const channel = await this.fetchChannel(guild, creation.channel_id);
+            if (channel) {
+                if (channel.type !== ChannelType.GuildVoice
+                    || (channel.guildId && channel.guildId !== creation.guild_id)) {
+                    throw new Error('Pending VoiceMaster channel is ambiguous.');
+                }
+                try {
+                    await channel.delete(reason);
+                } catch (error) {
+                    if (error.code !== 10003) throw error;
+                }
+            }
+        }
+        this.failCreation(creation, 'Creation cleanup completed.');
     }
 
     async reconcilePendingSources(result) {
@@ -1408,7 +1423,15 @@ class VoiceMasterService {
         for (const pod of claims) {
             try {
                 const guild = await this.client.guilds.fetch(pod.guild_id);
-                const channel = guild.channels.cache.get(pod.channel_id) || await guild.channels.fetch(pod.channel_id);
+                const channel = await this.fetchChannel(guild, pod.channel_id);
+                if (!channel) {
+                    this.clearOwnedChannel(pod.guild_id, pod.channel_id);
+                    continue;
+                }
+                if (channel.type !== ChannelType.GuildVoice
+                    || (channel.guildId && channel.guildId !== pod.guild_id)) {
+                    throw new Error('Pending VoiceMaster claim channel is ambiguous.');
+                }
                 const snapshot = JSON.parse(pod.claim_snapshot);
                 await this.restorePermission(channel, pod.owner_id, snapshot.previous);
                 await this.restorePermission(channel, pod.pending_owner_id, snapshot.next);
@@ -1423,8 +1446,26 @@ class VoiceMasterService {
         const accessRows = this.sqlite.prepare("SELECT * FROM voice_master_access WHERE state = 'pending'").all();
         for (const access of accessRows) {
             try {
+                const pod = this.sqlite.prepare(`SELECT 1 FROM bytepods
+                    WHERE guild_id = ? AND channel_id = ? AND source_channel_id IS NOT NULL
+                    AND state = 'active' AND bot_owned = 1`).get(access.guild_id, access.channel_id);
+                if (!pod) {
+                    this.sqlite.prepare(`DELETE FROM voice_master_access
+                        WHERE guild_id = ? AND channel_id = ? AND user_id = ?
+                        AND state = 'pending' AND generation = ?`)
+                        .run(access.guild_id, access.channel_id, access.user_id, access.generation);
+                    continue;
+                }
                 const guild = await this.client.guilds.fetch(access.guild_id);
-                const channel = guild.channels.cache.get(access.channel_id) || await guild.channels.fetch(access.channel_id);
+                const channel = await this.fetchChannel(guild, access.channel_id);
+                if (!channel) {
+                    this.clearOwnedChannel(access.guild_id, access.channel_id);
+                    continue;
+                }
+                if (channel.type !== ChannelType.GuildVoice
+                    || (channel.guildId && channel.guildId !== access.guild_id)) {
+                    throw new Error('Pending VoiceMaster access channel is ambiguous.');
+                }
                 const permissions = access.effect === 'permit'
                     ? { ViewChannel: true, Connect: true }
                     : { Connect: false };
@@ -1483,6 +1524,15 @@ class VoiceMasterService {
     }
 
     async retryScheduledCleanup() {
+        const creations = this.sqlite.prepare(`SELECT * FROM voice_master_creations
+            WHERE state = 'pending' AND channel_id IS NOT NULL ORDER BY updated_at LIMIT 25`).all();
+        for (const creation of creations) {
+            try {
+                await this.cleanupPendingCreation(creation, 'VoiceMaster scheduled creation cleanup');
+            } catch (error) {
+                logger.warn(`VoiceMaster creation cleanup failed for ${creation.channel_id}: ${error.message}`);
+            }
+        }
         const due = this.sqlite.prepare(`SELECT * FROM bytepods WHERE source_channel_id IS NOT NULL
             AND bot_owned = 1 AND state = 'active' AND cleanup_after IS NOT NULL AND cleanup_after <= ?
             ORDER BY cleanup_after LIMIT 25`).all(this.now());
