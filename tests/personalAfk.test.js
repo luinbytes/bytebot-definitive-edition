@@ -53,4 +53,47 @@ describe('AFK message behavior', () => {
             expect(payload.allowedMentions).toEqual({ parse: [], repliedUser: false });
         }
     });
+
+    test('clears the author but does not emit AFK replies before a blocking safety gate', async () => {
+        require('../src/services/antiraidService').handleMassMention.mockResolvedValueOnce(true);
+        await service.setAfk('author', 'Away', 1000);
+        await service.setAfk('target', 'Away', 1000);
+        const target = { id: 'target', username: 'Target' };
+        const message = {
+            content: '<@target>',
+            author: { id: 'author', bot: false, username: 'Author' },
+            guild: { id: 'guild1' },
+            mentions: { users: new Collection([['target', target]]), repliedUser: null },
+            reply: jest.fn()
+        };
+
+        await messageCreate.execute(message, {});
+
+        expect(await service.getAfk('author')).toBeNull();
+        expect(message.reply).not.toHaveBeenCalled();
+    });
+
+    test('batches multiple AFK targets into one mention-safe response', async () => {
+        const users = new Collection();
+        for (let index = 0; index < 12; index += 1) {
+            const id = `target${index}`;
+            users.set(id, { id, username: id });
+            await service.setAfk(id, 'Away', 1000);
+        }
+        const message = {
+            content: 'many mentions',
+            author: { id: 'author', bot: false, username: 'Author' },
+            guild: { id: 'guild1' },
+            mentions: { users, repliedUser: null },
+            reply: jest.fn().mockResolvedValue({})
+        };
+
+        await messageCreate.execute(message, {});
+
+        expect(message.reply).toHaveBeenCalledTimes(1);
+        expect(message.reply).toHaveBeenCalledWith(expect.objectContaining({
+            content: expect.stringContaining('…and 2 more AFK members.'),
+            allowedMentions: { parse: [], repliedUser: false }
+        }));
+    });
 });

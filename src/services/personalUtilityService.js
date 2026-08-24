@@ -1,4 +1,4 @@
-const { and, desc, eq } = require('drizzle-orm');
+const { and, desc, eq, inArray } = require('drizzle-orm');
 const { db } = require('../database');
 const { afkStatuses, diaryEntries, personalSettings } = require('../database/schema');
 const { renderScript, SAFE_MENTIONS } = require('./richContentService');
@@ -109,8 +109,8 @@ async function deleteDiaryEntry(userId, id) {
         .returning().get() !== undefined;
 }
 
-async function handleAfkMessage(message) {
-    const cleared = await clearAfk(message.author.id);
+async function handleAfkMessage(message, clearedStatus) {
+    const cleared = clearedStatus === undefined ? await clearAfk(message.author.id) : clearedStatus;
     if (cleared) {
         await message.reply({
             content: `Welcome back, **${message.author.username}** — I cleared your AFK status.`,
@@ -122,9 +122,17 @@ async function handleAfkMessage(message) {
     if (message.mentions?.repliedUser) mentioned.set(message.mentions.repliedUser.id, message.mentions.repliedUser);
     mentioned.delete(message.author.id);
 
-    for (const user of mentioned.values()) {
-        const afk = await getAfk(user.id);
-        if (!afk) continue;
+    const users = [...mentioned.values()];
+    if (!users.length) return;
+    const active = await db.select().from(afkStatuses)
+        .where(inArray(afkStatuses.userId, users.map(user => user.id))).all();
+    if (!active.length) return;
+    const byUser = new Map(users.map(user => [user.id, user]));
+    const visible = active.slice(0, 10);
+
+    if (active.length === 1) {
+        const afk = active[0];
+        const user = byUser.get(afk.userId);
         const settings = await getSettings(user.id);
         const fallback = `<@${user.id}> is AFK: **${afk.status}** — since <t:${Math.floor(afk.setAt / 1000)}:R>.`;
         let payload = { content: fallback, allowedMentions: SAFE_MENTIONS };
@@ -141,7 +149,12 @@ async function handleAfkMessage(message) {
             }
         }
         await message.reply(payload);
+        return;
     }
+
+    const lines = visible.map(afk => `<@${afk.userId}> — **${afk.status}** since <t:${Math.floor(afk.setAt / 1000)}:R>`);
+    if (active.length > visible.length) lines.push(`…and ${active.length - visible.length} more AFK members.`);
+    await message.reply({ content: lines.join('\n'), allowedMentions: SAFE_MENTIONS });
 }
 
 module.exports = {

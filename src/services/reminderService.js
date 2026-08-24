@@ -118,7 +118,8 @@ class ReminderService {
                     .set({ active: false })
                     .where(and(
                         eq(reminders.id, reminderId),
-                        eq(reminders.active, true)
+                        eq(reminders.active, true),
+                        lte(reminders.triggerAt, new Date())
                     ))
                     .returning()
                     .all(),

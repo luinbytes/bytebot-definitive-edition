@@ -74,8 +74,9 @@ status and elapsed time.
 
 - AFK status is trimmed, defaults to `AFK`, and is limited to 25 characters.
   A user's next normal guild message clears the row before mention reporting
-  and gets one welcome-back response. Mentions and replied-user mentions report
-  every distinct active AFK target once.
+  and gets one welcome-back response. Mentions and replied-user mentions are
+  batched after message-safety gates; show at most ten distinct active targets
+  plus an omitted count so a mass mention cannot turn into bot reply spam.
 - The custom AFK response uses ByteBot's existing rich-content script parser
   and safe variable renderer. It supports the pinned `{message}`, `{time}`,
   `{user}`, `{user.name}`, `{user.avatar}`, `{mentioner}`,

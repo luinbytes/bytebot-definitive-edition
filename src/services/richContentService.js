@@ -39,11 +39,13 @@ function renderVariables(script, context = {}) {
         'channel.name': channel?.name || '',
         'channel.mention': channel?.id ? `<#${channel.id}>` : '',
         'channel.topic': channel?.topic || '',
-        message: message || '',
-        time: time || '',
-        mentioner: mentioner?.username || '',
-        'mentioner.name': mentioner?.username || '',
-        'mentioner.avatar': mentionerAvatar
+        ...(message === undefined ? {} : { message }),
+        ...(time === undefined ? {} : { time }),
+        ...(mentioner ? {
+            mentioner: mentioner.username || '',
+            'mentioner.name': mentioner.username || '',
+            'mentioner.avatar': mentionerAvatar
+        } : {})
     };
     return String(script).replace(/\{([a-z]+(?:\.[a-z_]+)?)\}/g,
         (token, name) => Object.hasOwn(values, name)

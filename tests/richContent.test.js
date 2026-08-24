@@ -24,6 +24,13 @@ describe('Greed-compatible rich content', () => {
         expect(payload.allowedMentions).toEqual({ parse: [], repliedUser: false });
     });
 
+    test('leaves AFK-only variables untouched outside an AFK context', () => {
+        const { renderScript } = require('../src/services/richContentService');
+
+        expect(renderScript('{content: {message} {mentioner.name} {time}}').content)
+            .toBe('{message} {mentioner.name} {time}');
+    });
+
     test('renders content-only scripts as message content rather than directive text', () => {
         const { renderScript } = require('../src/services/richContentService');
 

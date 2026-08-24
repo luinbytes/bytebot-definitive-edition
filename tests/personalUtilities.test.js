@@ -104,6 +104,19 @@ describe('personal utilities', () => {
         reminderService.cleanup();
     });
 
+    test('does not fire a reminder before a snoozed deadline', async () => {
+        database.sqlite.prepare(`INSERT INTO reminders
+            (user_id, message, trigger_at, created_at, active)
+            VALUES ('user1', 'test', ?, 1, 1)`).run(Date.now() + 60_000);
+        const ReminderService = require('../src/services/reminderService');
+        const reminderService = new ReminderService({});
+
+        await reminderService.fireReminder(1);
+
+        expect(database.sqlite.prepare('SELECT active FROM reminders WHERE id = 1').get().active).toBe(1);
+        reminderService.cleanup();
+    });
+
     test('accepts documented birthday input forms and rejects ambiguous names', () => {
         const birthday = require('../src/commands/utility/birthday');
 
