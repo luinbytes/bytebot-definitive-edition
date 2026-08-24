@@ -8,6 +8,7 @@ const categoryMetadata = {
     'Fun': { icon: '🎉', description: 'Games and entertainment for everyone.' },
     'Games': { icon: '🎮', description: 'Game-specific statistics and tools.' },
     'Economy': { icon: '🪙', description: 'Earn, bank, spend, and manage virtual currency.' },
+    'LastFM': { icon: '🎵', description: 'Last.fm listening, charts, collages, and community.' },
     'Developer': { icon: '💻', description: 'Specialized tools for bot developers.' },
 };
 
@@ -117,7 +118,7 @@ async function showHelpPage(interaction, client, pageNumber) {
     });
 
     // Sort categories in a specific order
-    const categoryOrder = ['Administration', 'Moderation', 'Utility', 'Fun', 'Games', 'Economy', 'Developer'];
+    const categoryOrder = ['Administration', 'Moderation', 'Utility', 'Fun', 'Games', 'Economy', 'LastFM', 'Developer'];
     const sortedCategories = Object.keys(categories).sort((a, b) => {
         return categoryOrder.indexOf(a) - categoryOrder.indexOf(b);
     });
@@ -201,6 +202,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/pod` BytePod actions and settings\n' +
                     '`/mod` member actions, cases, invoke templates, setup, logs, and channel controls\n' +
                     '`/economy` balances, games, crime, gangs, labs, role shops, and administration\n' +
+                    '`/lastfm` listening, charts, collages, library tools, and community rankings\n' +
                     '`/game` F1 and War Thunder\n' +
                     '`/image` transforms, local effects, memes, and color inspection\n' +
                     '`/bot` help, health, deployment, and developer tools',
@@ -215,13 +217,13 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/server antiraid settings` • `/server antiraid module`\n' +
                     '`/server automod settings` • `/server automod filter`\n' +
                     '`/server permissions disable` • `/server permissions denyperm` • `/server permissions protect`\n' +
-                    '`/reactionrole add` • `/buttonrole add` • `/temprole add` • `/boosterrole create`\n' +
-                    '`/ticket setup` • `/ticket panel manage` • `/ticket settings view`\n' +
+                    '`/reactionrole add` • `/buttonrole add` • `/boosterrole create`\n' +
+                    '`/ticket setup` • `/ticket panel manage`\n' +
                     '`/giveaway start` • `/giveaway edit prize` • `/counter add`\n' +
                     '`/economy balance` • `/economy game coinflip` • `/economy gang info` • `/economy lab status`\n' +
+                    '`/lastfm now` • `/lastfm charts collage` • `/lastfm community taste`\n' +
                     '`/server backup create` • `/server customize preset` • `/server discovery publish`\n' +
-                    '`/mod user warn` • `/mod case view` • `/mod config setup`\n' +
-                    '`/mod template set` • `/game warthunder stats`\n' +
+                    '`/mod user warn` • `/mod case view` • `/game warthunder stats`\n' +
                     '`/fun uwuify` • `/fun uwulock add` • `/image effect apply`',
                 inline: false
             },
@@ -231,8 +233,8 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     'Greed source categories route through ByteBot\'s existing hubs as features land:\n' +
                     '`/community` Levels, Socials • `/me` Information, Utility\n' +
                     '`/server` Auto, Logs, Security, Server, Settings • `/ticket` Tickets • `/mod` Moderation\n' +
-                    '`/fun` Fun, Roleplay, Snipe • `/image` Manipulation • `/boosterrole` Boosters • `/economy` Economy\n' +
-                    '**Not yet available (planned):** LastFM, Voice\n' +
+                    '`/fun` Fun, Roleplay, Snipe • `/image` Manipulation • `/boosterrole` Boosters • `/economy` Economy • `/lastfm` LastFM\n' +
+                    '**Not yet available (planned):** Voice\n' +
                     '**Registry-only evidence gaps:** Developer, Music',
                 inline: false
             }

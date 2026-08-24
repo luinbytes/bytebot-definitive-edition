@@ -519,7 +519,10 @@ module.exports = {
                 [PermissionFlagsBits.EmbedLinks, 'Embed Links'],
                 [PermissionFlagsBits.AttachFiles, 'Attach Files']
             ]);
-            const required = [PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, ...(command.botPermissions || [])];
+            const commandPermissions = typeof command.botPermissions === 'function'
+                ? command.botPermissions(interaction)
+                : (command.botPermissions || []);
+            const required = [PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, ...commandPermissions];
             const permissions = botMember.permissionsIn(interaction.channel);
             const missing = required.filter(permission => !permissions.has(permission));
             if (missing.length) {
