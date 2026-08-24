@@ -195,10 +195,14 @@ test('GitHub searches distinguish missing and inaccessible provider responses', 
     const missing = new InformationLookupService({ fetch: jest.fn().mockResolvedValue(response(404)) });
     const inaccessible = new InformationLookupService({ fetch: jest.fn().mockResolvedValue(response(401)) });
     const forbidden = new InformationLookupService({ fetch: jest.fn().mockResolvedValue(response(403)) });
+    const remaining = new InformationLookupService({ fetch: jest.fn().mockResolvedValue(new Response('{}', {
+        status: 403, headers: { 'content-type': 'application/json', 'x-ratelimit-remaining': '42' }
+    })) });
 
     await expect(missing.githubEmail('octocat@example.com')).rejects.toThrow('not found');
     await expect(inaccessible.githubRepositories('example')).rejects.toThrow('not publicly accessible');
     await expect(forbidden.githubEmail('octocat@example.com')).rejects.toThrow('not publicly accessible');
+    await expect(remaining.githubRepositories('example')).rejects.toThrow('not publicly accessible');
 });
 
 test('successful provider responses are cached briefly with a bounded lifetime', async () => {
@@ -297,12 +301,40 @@ test('Roblox lookups distinguish not found, inaccessible, rate-limited, and malf
         .mockResolvedValueOnce(resolvedUser()).mockResolvedValueOnce(response({ data: [{ id: 'bad' }] })) });
     const failed = new InformationLookupService({ fetch: jest.fn()
         .mockResolvedValueOnce(resolvedUser()).mockResolvedValueOnce(response({}, 500)) });
+    const emptyGroups = new InformationLookupService({ fetch: jest.fn()
+        .mockResolvedValueOnce(resolvedUser()).mockResolvedValueOnce(response({ data: [] })) });
 
-    await expect(missing.robloxUser('Builderman')).rejects.toThrow('No Roblox user');
+    await expect(missing.robloxUser('Builderman')).rejects.toMatchObject({ message: 'No Roblox user found with that name' });
     await expect(inaccessible.robloxGames('Builderman')).rejects.toThrow('not publicly accessible');
     await expect(limited.robloxGroups('Builderman')).rejects.toThrow('rate limit');
     await expect(malformed.robloxOutfits('Builderman')).rejects.toThrow('invalid outfits');
     await expect(failed.robloxGames('Builderman')).rejects.toThrow('Failed to fetch Roblox user information\n-# Please try again later');
+    await expect(emptyGroups.robloxGroups('Builderman')).rejects.toMatchObject({
+        message: 'This Roblox user is not in any groups'
+    });
+});
+
+test('Roblox profile reports name-history failure without discarding the profile', async () => {
+    const response = value => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
+    const fetch = jest.fn(async input => {
+        const url = new URL(input);
+        const route = `${url.hostname}${url.pathname}`;
+        if (route.endsWith('/username-history')) throw new Error('history unavailable');
+        const payloads = {
+            'users.roblox.com/v1/usernames/users': { data: [{ id: 156, name: 'builderman', displayName: 'builderman' }] },
+            'users.roblox.com/v1/users/156': { id: 156, description: '', created: '2006-02-27T21:06:40Z', isBanned: false, hasVerifiedBadge: true },
+            'friends.roblox.com/v1/users/156/followers/count': { count: 1 },
+            'friends.roblox.com/v1/users/156/followings/count': { count: 2 },
+            'friends.roblox.com/v1/users/156/friends/count': { count: 3 },
+            'presence.roblox.com/v1/presence/users': { userPresences: [{ userId: 156, userPresenceType: 0 }] },
+            'accountinformation.roblox.com/v1/users/156/roblox-badges': [],
+            'thumbnails.roblox.com/v1/users/avatar-headshot': { data: [{ targetId: 156, state: 'Completed', imageUrl: 'https://tr.rbxcdn.com/avatar.png' }] }
+        };
+        return response(payloads[route]);
+    });
+
+    await expect(new InformationLookupService({ fetch }).robloxProfile('Builderman'))
+        .resolves.toMatchObject({ nameHistory: null, username: 'builderman' });
 });
 
 test('name history records only observed former names in the existing automation store', () => {

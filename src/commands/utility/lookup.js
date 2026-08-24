@@ -54,7 +54,7 @@ module.exports = {
                         ].join('\n') },
                         { name: 'Account Created', value: `<t:${Math.floor(Date.parse(user.createdAt) / 1000)}:D>`, inline: true },
                         { name: 'Website', value: (user.website || 'Not provided.').slice(0, 1024), inline: true },
-                        { name: 'Contributions', value: 'Not available through GitHub’s keyless REST API.' }
+                        { name: `Contributions (${new Date().getUTCFullYear()})`, value: 'Not available through GitHub’s keyless REST API.' }
                     );
                 return interaction.editReply({ embeds: [embed], allowedMentions: { parse: [] } });
             }

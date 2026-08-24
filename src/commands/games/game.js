@@ -81,7 +81,7 @@ module.exports = {
             if (action === 'profile') {
                 const user = await service.robloxProfile(username);
                 const embed = embeds.brand(`${user.displayName} (@${user.username})`,
-                    (user.description || 'No public description.').slice(0, 4000))
+                    (user.description || 'No public description.').slice(0, 1800))
                     .setURL(`https://www.roblox.com/users/${user.id}/profile`)
                     .setThumbnail(user.avatar)
                     .addFields(
@@ -95,7 +95,8 @@ module.exports = {
                         { name: 'Account Created', value: `<t:${Math.floor(Date.parse(user.createdAt) / 1000)}:D>`, inline: true },
                         { name: 'Account', value: [user.verified && 'Verified', user.banned && 'Banned'].filter(Boolean).join(' · ') || 'Active', inline: true },
                         { name: `Badges (${user.badgeCount})`, value: user.badges.join(', ').slice(0, 1024) || 'None' },
-                        { name: 'Name History', value: user.nameHistory.join(', ').slice(0, 1024) || 'None' }
+                        { name: 'Name History', value: user.nameHistory === null
+                            ? 'Unable to fetch name history' : user.nameHistory.join(', ').slice(0, 1024) || 'None' }
                     );
                 return interaction.editReply({ embeds: [embed], allowedMentions: { parse: [] } });
             }

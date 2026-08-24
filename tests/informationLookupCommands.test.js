@@ -42,11 +42,11 @@ test('/lookup github user renders validated provider data and the contributions 
     const embed = interaction.editReply.mock.calls[0][0].embeds[0].data;
     expect(embed.url).toBe('https://github.com/octocat');
     expect(embed.fields.map(field => field.name)).toEqual(expect.arrayContaining([
-        'Bio', 'Stats', 'Account Created', 'Website', 'Contributions'
+        'Bio', 'Stats', 'Account Created', 'Website', `Contributions (${new Date().getUTCFullYear()})`
     ]));
     expect(embed.fields).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: 'Stats', value: expect.stringContaining('Public Repos: 8') }),
-        expect.objectContaining({ name: 'Contributions', value: expect.stringContaining('Not available') })
+        expect.objectContaining({ name: `Contributions (${new Date().getUTCFullYear()})`, value: expect.stringContaining('Not available') })
     ]));
 });
 

@@ -258,6 +258,34 @@ describe('Intent command hubs', () => {
         expect(interaction.editReply.mock.calls[0][0].embeds[0].data.description).toBeTruthy();
     });
 
+    test('Roblox profile rendering stays within Discord aggregate embed limits', async () => {
+        const game = commandModule('src/commands/games/game.js');
+        const interaction = {
+            options: {
+                getSubcommandGroup: jest.fn().mockReturnValue('roblox'),
+                getSubcommand: jest.fn().mockReturnValue('profile'),
+                getString: jest.fn().mockReturnValue('Builderman')
+            },
+            editReply: jest.fn().mockResolvedValue()
+        };
+        const client = { informationLookupService: { robloxProfile: jest.fn().mockResolvedValue({
+            id: 156, username: 'builderman', displayName: 'builderman', description: 'd'.repeat(10_000),
+            createdAt: '2006-02-27T21:06:40Z', banned: false, verified: true,
+            followers: 1, following: 2, friends: 3,
+            presence: { status: 'Online', location: 'l'.repeat(10_000), lastOnline: null },
+            badgeCount: 5, badges: ['b'.repeat(2_000)], nameHistory: ['n'.repeat(2_000)],
+            avatar: 'https://tr.rbxcdn.com/avatar.png'
+        }) } };
+
+        await game.execute(interaction, client);
+
+        const embed = interaction.editReply.mock.calls[0][0].embeds[0].data;
+        const characters = (embed.title?.length || 0) + (embed.description?.length || 0)
+            + (embed.footer?.text?.length || 0)
+            + embed.fields.reduce((total, field) => total + field.name.length + field.value.length, 0);
+        expect(characters).toBeLessThanOrEqual(6000);
+    });
+
     test('moderation hub uses user, logs, and channel intent groups', () => {
         const command = commandJson('src/commands/moderation/mod.js');
         const mod = commandModule('src/commands/moderation/mod.js');

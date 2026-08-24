@@ -148,8 +148,7 @@ class InformationLookupService {
         if (!response.ok) {
             const remaining = response.headers.get('x-ratelimit-remaining');
             const exhausted = response.status === 429
-                || (response.status === 403 && (remaining === '0' || response.headers.has('retry-after')
-                    || (errors.rateLimitedOnForbidden && /^\d+$/.test(remaining || ''))));
+                || (response.status === 403 && (remaining === '0' || response.headers.has('retry-after')));
             if (exhausted) {
                 throw new UserFacingError(`${errors.rateLimited || 'Lookup provider rate limit reached.'}${this.retryHint(response)}`);
             }
@@ -274,7 +273,6 @@ class InformationLookupService {
             notFound: `GitHub user **${username}** not found.`,
             inaccessible: 'That GitHub profile is not publicly accessible.',
             rateLimited: 'GitHub rate limit reached.',
-            rateLimitedOnForbidden: true,
             failed: 'Failed to fetch GitHub data. Please try again later.'
         });
         const numbers = ['id', 'public_repos', 'public_gists', 'followers', 'following'];
@@ -311,7 +309,6 @@ class InformationLookupService {
             notFound: 'GitHub repository search was not found.',
             inaccessible: 'GitHub repository search is not publicly accessible.',
             rateLimited: 'GitHub search rate limit reached.',
-            rateLimitedOnForbidden: true,
             failed: 'Failed to fetch GitHub data. Please try again later.'
         }))?.items;
         if (!Array.isArray(rows)) throw new UserFacingError('GitHub returned an invalid repository search.');
@@ -350,7 +347,6 @@ class InformationLookupService {
             notFound: 'GitHub commit search was not found.',
             inaccessible: 'GitHub commit search is not publicly accessible.',
             rateLimited: 'GitHub search rate limit reached.',
-            rateLimitedOnForbidden: true,
             failed: 'Failed to fetch GitHub data. Please try again later.'
         }))?.items;
         if (!Array.isArray(rows)) throw new UserFacingError('GitHub returned an invalid commit search.');
@@ -400,7 +396,7 @@ class InformationLookupService {
             body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
         });
         const row = payload?.data?.[0];
-        if (!row) throw new UserFacingError('No Roblox user found with that name.');
+        if (!row) throw new UserFacingError('No Roblox user found with that name');
         if (!Number.isSafeInteger(row.id) || row.id <= 0 || typeof row.name !== 'string'
             || typeof row.displayName !== 'string') throw new UserFacingError('Roblox returned an invalid profile.');
         return { id: row.id, username: row.name, displayName: row.displayName };
@@ -419,7 +415,8 @@ class InformationLookupService {
                 method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ userIds: [id] })
             }),
             this.robloxJson(new URL(`https://accountinformation.roblox.com/v1/users/${id}/roblox-badges`)),
-            this.robloxJson(new URL(`https://users.roblox.com/v1/users/${id}/username-history?limit=10&sortOrder=Desc`)),
+            this.robloxJson(new URL(`https://users.roblox.com/v1/users/${id}/username-history?limit=10&sortOrder=Desc`))
+                .catch(() => null),
             this.robloxJson(new URL(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${id}&size=420x420&format=Png&isCircular=false`))
         ]);
         const counts = [followers?.count, following?.count, friends?.count];
@@ -432,7 +429,7 @@ class InformationLookupService {
             || typeof profile.hasVerifiedBadge !== 'boolean'
             || counts.some(value => !Number.isSafeInteger(value) || value < 0)
             || !Number.isInteger(presence?.userPresenceType) || presence.userPresenceType < 0 || presence.userPresenceType > 3
-            || presence.userId !== id || !Array.isArray(badges) || !Array.isArray(history)
+            || presence.userId !== id || !Array.isArray(badges) || (historyData !== null && !Array.isArray(history))
             || thumbnail?.targetId !== id || thumbnail.state !== 'Completed') {
             throw new UserFacingError('Roblox returned an invalid profile.');
         }
@@ -440,7 +437,7 @@ class InformationLookupService {
             if (typeof row?.name !== 'string') throw new UserFacingError('Roblox returned an invalid profile.');
             return row.name;
         });
-        const names = history.slice(0, 5).map(row => {
+        const names = historyData === null ? null : history.slice(0, 5).map(row => {
             if (typeof row?.name !== 'string') throw new UserFacingError('Roblox returned an invalid profile.');
             return row.name;
         });
@@ -517,7 +514,7 @@ class InformationLookupService {
                 url: `https://www.roblox.com/communities/${group.id}`
             };
         });
-        if (!groups.length) throw new UserFacingError('This Roblox user is not in any groups.');
+        if (!groups.length) throw new UserFacingError('This Roblox user is not in any groups');
         return { user, groups };
     }
 
