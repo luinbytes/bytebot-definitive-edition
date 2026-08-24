@@ -35,4 +35,17 @@ describe('levels and analytics command contract', () => {
             'background', 'background_url', 'layout', 'avatar_border'
         ]);
     });
+
+    test('/analytics is public and keeps the existing bounded server-stats options', () => {
+        const analytics = command('analytics');
+
+        expect(analytics.name).toBe('analytics');
+        expect(analytics.default_member_permissions).toBeUndefined();
+        expect(analytics.dm_permission).toBe(false);
+        expect(analytics.options.map(item => item.name)).toEqual(['days', 'private', 'metric']);
+        expect(option(analytics, 'days')).toEqual(expect.objectContaining({ min_value: 1, max_value: 1095 }));
+        expect(option(analytics, 'metric').choices.map(choice => choice.value)).toEqual([
+            'all', 'messages', 'reactions', 'voice', 'membership'
+        ]);
+    });
 });

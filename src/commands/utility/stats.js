@@ -39,7 +39,9 @@ module.exports = {
                     .setMaxValue(1095))),
 
     async execute(interaction) {
-        const subcommand = interaction.options.getSubcommand();
+        const subcommand = interaction.commandName === 'analytics'
+            ? 'server'
+            : interaction.options.getSubcommand();
 
         if (subcommand === 'server') {
             // Manual defer with ephemeral control
