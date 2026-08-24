@@ -1306,23 +1306,23 @@ class VoiceMasterService {
             AND bot_owned = 1 AND state = 'active' AND cleanup_after IS NOT NULL AND cleanup_after <= ?
             ORDER BY cleanup_after LIMIT 25`).all(this.now());
         for (const pod of due) {
-            const guild = await this.client.guilds.fetch(pod.guild_id);
-            const channel = await this.fetchChannel(guild, pod.channel_id);
-            if (!channel) {
-                this.clearOwnedChannel(pod.guild_id, pod.channel_id);
-                continue;
-            }
-            if (channel.type !== ChannelType.GuildVoice || channel.members.size > 0) {
-                this.sqlite.prepare(`UPDATE bytepods SET cleanup_after = NULL
-                    WHERE guild_id = ? AND channel_id = ? AND source_channel_id IS NOT NULL`)
-                    .run(pod.guild_id, pod.channel_id);
-                continue;
-            }
-            const won = this.sqlite.prepare(`UPDATE bytepods SET state = 'deleting', generation = generation + 1
-                WHERE guild_id = ? AND channel_id = ? AND state = 'active' AND generation = ?
-                AND source_channel_id IS NOT NULL`).run(pod.guild_id, pod.channel_id, pod.generation);
-            if (!won.changes) continue;
             try {
+                const guild = await this.client.guilds.fetch(pod.guild_id);
+                const channel = await this.fetchChannel(guild, pod.channel_id);
+                if (!channel) {
+                    this.clearOwnedChannel(pod.guild_id, pod.channel_id);
+                    continue;
+                }
+                if (channel.type !== ChannelType.GuildVoice || channel.members.size > 0) {
+                    this.sqlite.prepare(`UPDATE bytepods SET cleanup_after = NULL
+                        WHERE guild_id = ? AND channel_id = ? AND source_channel_id IS NOT NULL`)
+                        .run(pod.guild_id, pod.channel_id);
+                    continue;
+                }
+                const won = this.sqlite.prepare(`UPDATE bytepods SET state = 'deleting', generation = generation + 1
+                    WHERE guild_id = ? AND channel_id = ? AND state = 'active' AND generation = ?
+                    AND source_channel_id IS NOT NULL`).run(pod.guild_id, pod.channel_id, pod.generation);
+                if (!won.changes) continue;
                 await this.revokeChannelJoinRoles(guild, channel.id);
                 await channel.delete('VoiceMaster scheduled cleanup retry');
                 this.clearOwnedChannel(pod.guild_id, pod.channel_id);
@@ -1330,7 +1330,8 @@ class VoiceMasterService {
                 this.sqlite.prepare(`UPDATE bytepods SET state = 'active', cleanup_after = ?
                     WHERE guild_id = ? AND channel_id = ? AND state = 'deleting' AND source_channel_id IS NOT NULL`)
                     .run(this.now() + 5000, pod.guild_id, pod.channel_id);
-                throw error;
+                if (error.code === 10003) this.clearOwnedChannel(pod.guild_id, pod.channel_id);
+                else logger.warn(`VoiceMaster scheduled cleanup failed for ${pod.channel_id}: ${error.message}`);
             }
         }
     }
