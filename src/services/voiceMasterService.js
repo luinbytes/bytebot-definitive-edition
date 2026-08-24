@@ -247,6 +247,7 @@ class VoiceMasterService {
         if (!member || member.user?.bot || !guild) return false;
         let handled = false;
         if (oldState.channelId && oldState.channelId !== newState.channelId) {
+            await this.removeJoinRoleAfterExit(guild, member, oldState.channelId, newState.channelId);
             handled = await this.handleOwnedLeave(guild, oldState.channelId, member.id);
         }
         const source = this.source(guild.id, newState.channelId);
@@ -383,6 +384,22 @@ class VoiceMasterService {
             }
         }
         return true;
+    }
+
+    async removeJoinRoleAfterExit(guild, member, oldChannelId, newChannelId) {
+        const oldOwned = this.sqlite.prepare(`SELECT 1 FROM bytepods
+            WHERE guild_id = ? AND channel_id = ? AND state = 'active' AND bot_owned = 1`)
+            .get(guild.id, oldChannelId);
+        if (!oldOwned) return;
+        const stillInside = newChannelId && this.sqlite.prepare(`SELECT 1 FROM bytepods
+            WHERE guild_id = ? AND channel_id = ? AND state = 'active' AND bot_owned = 1`)
+            .get(guild.id, newChannelId);
+        if (stillInside) return;
+        const config = this.config(guild.id);
+        if (!config?.join_role_id) return;
+        await member.roles.remove(config.join_role_id, 'VoiceMaster channel left').catch(error => {
+            logger.warn(`VoiceMaster join role removal failed for ${member.id}: ${error.message}`);
+        });
     }
 
     ownerContext(interaction, allowClaim = false) {

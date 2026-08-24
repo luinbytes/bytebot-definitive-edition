@@ -418,7 +418,7 @@ describe('VoiceMaster lifecycle', () => {
         const owner = {
             id: 'member-1', user: { id: 'member-1', bot: false, username: 'Member' }, displayName: 'Member',
             permissions: { has: () => false },
-            roles: { cache: new Map(), add: jest.fn(async () => {}) },
+            roles: { cache: new Map(), add: jest.fn(async () => {}), remove: jest.fn(async () => {}) },
             voice: { channelId: 'join-1', channel: join, setChannel: jest.fn(async channel => {
                 owner.voice.channelId = channel.id; owner.voice.channel = channel;
                 voiceStates.set(owner.id, { channelId: channel.id }); channel.members.set(owner.id, owner);
@@ -433,7 +433,7 @@ describe('VoiceMaster lifecycle', () => {
             fetchVoiceRegions: jest.fn(async () => new Map([['eu-west', { id: 'eu-west', deprecated: false }]]))
         };
         const { VoiceMasterService } = require('../src/services/voiceMasterService');
-        const service = new VoiceMasterService({ sqlite: database.sqlite });
+        const service = new VoiceMasterService({ sqlite: database.sqlite, delay: async () => {} });
         await service.execute(adminInteraction(guild, 'setup'));
         await service.execute(adminInteraction(guild, 'template', { template: '{owner} lounge' }));
         await service.execute(adminInteraction(guild, 'temporary', { enabled: false }));
@@ -445,6 +445,13 @@ describe('VoiceMaster lifecycle', () => {
         await service.execute(adminInteraction(guild, 'interface', { enabled: false }, 'default'));
         await service.execute(adminInteraction(guild, 'temporary', { enabled: true }));
         await service.handleVoiceState({ channelId: null }, { member: owner, guild, channelId: 'join-1', channel: join, client: {} });
+        temporary.members.delete(owner.id);
+        owner.voice.channelId = null;
+        owner.voice.channel = null;
+        await service.handleVoiceState(
+            { channelId: 'temporary-1', channel: temporary },
+            { member: owner, guild, channelId: null, channel: null, client: {} }
+        );
 
         expect(create).toHaveBeenCalledTimes(3);
         expect(temporaryOptions).toEqual(expect.objectContaining({
@@ -455,5 +462,6 @@ describe('VoiceMaster lifecycle', () => {
         ]));
         expect(temporary.send).not.toHaveBeenCalled();
         expect(owner.roles.add).toHaveBeenCalledWith('join-role', 'VoiceMaster channel joined');
+        expect(owner.roles.remove).toHaveBeenCalledWith('join-role', 'VoiceMaster channel left');
     });
 });
