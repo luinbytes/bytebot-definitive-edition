@@ -15,6 +15,20 @@ beforeAll(async () => {
     PNG = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#ff0000' } }).png().toBuffer();
 });
 
+async function expectEncoded(output) {
+    const metadata = await sharp(output.buffer).metadata();
+    expect(metadata).toMatchObject({ format: output.format, width: output.width, height: output.height });
+    expect(output.width).toBeGreaterThan(0);
+    expect(output.height).toBeGreaterThan(0);
+    if (output.format === 'png') expect(output.buffer.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+    if (output.format === 'jpeg') expect(output.buffer.subarray(0, 2).toString('hex')).toBe('ffd8');
+    if (output.format === 'gif') expect(output.buffer.subarray(0, 6).toString('ascii')).toMatch(/^GIF8[79]a$/);
+    if (output.format === 'webp') {
+        expect(output.buffer.subarray(0, 4).toString('ascii')).toBe('RIFF');
+        expect(output.buffer.subarray(8, 12).toString('ascii')).toBe('WEBP');
+    }
+}
+
 function media() {
     return {
         processImage: jest.fn((input, processor) => processor({
@@ -43,19 +57,7 @@ describe('image manipulation service', () => {
         expect(resized.buffer.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
         expect(outputs.every(output => output.buffer.length <= 1024 * 1024)).toBe(true);
         expect(outputs.map(output => output.format)).toEqual(expect.arrayContaining(['png', 'jpeg', 'webp', 'gif']));
-        for (const output of outputs) {
-            const metadata = await sharp(output.buffer).metadata();
-            expect(metadata).toMatchObject({ format: output.format, width: output.width, height: output.height });
-            expect(output.width).toBeGreaterThan(0);
-            expect(output.height).toBeGreaterThan(0);
-            if (output.format === 'png') expect(output.buffer.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
-            if (output.format === 'jpeg') expect(output.buffer.subarray(0, 2).toString('hex')).toBe('ffd8');
-            if (output.format === 'gif') expect(output.buffer.subarray(0, 6).toString('ascii')).toMatch(/^GIF8[79]a$/);
-            if (output.format === 'webp') {
-                expect(output.buffer.subarray(0, 4).toString('ascii')).toBe('RIFF');
-                expect(output.buffer.subarray(8, 12).toString('ascii')).toBe('WEBP');
-            }
-        }
+        for (const output of outputs) await expectEncoded(output);
         expect(resized.buffer.length).toBeLessThanOrEqual(1024 * 1024);
     });
 
@@ -75,6 +77,9 @@ describe('image manipulation service', () => {
         expect(compare).toMatchObject({ format: 'png', contentType: 'image/png' });
         expect(dominant.hex).toMatch(/^#[0-9A-F]{6}$/);
         expect(dominant.buffer.length).toBeLessThanOrEqual(1024 * 1024);
+        await expectEncoded(caption);
+        await expectEncoded(compare);
+        await expectEncoded(dominant);
     });
 
     test('rejects unknown work and invalid output bounds before processing', async () => {
