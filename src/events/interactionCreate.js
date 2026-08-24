@@ -24,6 +24,16 @@ module.exports = {
             return;
         }
         processedInteractions.add(interaction.id);
+        if (interaction.isButton() && interaction.customId?.startsWith('fun:')) {
+            if (!client.funService) {
+                return interaction.reply({
+                    embeds: [embeds.error('Game Unavailable', 'Fun games are temporarily unavailable.')],
+                    flags: [MessageFlags.Ephemeral]
+                }).catch(() => null);
+            }
+            await client.funService.handleInteraction(interaction);
+            return;
+        }
         if (interaction.customId?.startsWith('economy:')
             && (interaction.isButton() || interaction.isStringSelectMenu())) {
             if (!client.economyService) {
