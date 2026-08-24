@@ -3,11 +3,12 @@ const { and, count, eq, isNull, lte, or, sql } = require('drizzle-orm');
 const { db } = require('../database');
 const { automationRules } = require('../database/schema');
 const logger = require('../utils/logger');
+const { RoleManager } = require('../utils/discordApiUtil');
 const { parseEmbedScript } = require('./lifecycleMessageService');
 
 const DISBOARD_ID = '302050872383242240';
 const SAFE_MENTIONS = { parse: [], repliedUser: false };
-const SCHEDULED_KINDS = new Set(['timer', 'bumpreminder', 'sticky', 'revive', 'counter', 'delete-message', 'tracking']);
+const SCHEDULED_KINDS = new Set(['timer', 'bumpreminder', 'sticky', 'revive', 'counter', 'delete-message', 'tracking', 'temp-role', 'booster-role']);
 const MAX_PENDING_DELETES = 250;
 
 function parseInterval(value) {
@@ -314,6 +315,51 @@ class AutomationService {
                     allowedMentions: SAFE_MENTIONS, nonce: `${rule.id}${String(rule.nextRunAt).slice(-15)}`, enforceNonce: true
                 });
                 await db.delete(automationRules).where(and(eq(automationRules.id, rule.id), eq(automationRules.leaseToken, leaseToken)));
+            } catch (error) {
+                await db.update(automationRules).set({ leaseToken: null, leaseExpiresAt: now + 60000 })
+                    .where(and(eq(automationRules.id, rule.id), eq(automationRules.leaseToken, leaseToken)));
+                throw error;
+            }
+            return;
+        }
+        if (rule.kind === 'temp-role') {
+            try {
+                const guild = this.client.guilds.cache.get(rule.guildId);
+                if (!guild) throw new Error('Guild is temporarily unavailable');
+                let member;
+                try {
+                    member = await guild.members.fetch(config.userId);
+                } catch (error) {
+                    if (error.code !== 10007) throw error;
+                }
+                let role = guild.roles.cache.get(config.roleId);
+                if (!role) {
+                    try {
+                        role = await guild.roles.fetch(config.roleId);
+                    } catch (error) {
+                        if (error.code !== 10011) throw error;
+                    }
+                }
+                if (member && role) {
+                    const result = await RoleManager.removeRole(member, role, { reason: 'Temporary role expired', logContext: 'temp-role' });
+                    if (!result.success) throw new Error(result.error);
+                }
+                await db.delete(automationRules).where(and(eq(automationRules.id, rule.id), eq(automationRules.leaseToken, leaseToken)));
+            } catch (error) {
+                await db.update(automationRules).set({ leaseToken: null, leaseExpiresAt: now + 60000 })
+                    .where(and(eq(automationRules.id, rule.id), eq(automationRules.leaseToken, leaseToken)));
+                throw error;
+            }
+            return;
+        }
+        if (rule.kind === 'booster-role') {
+            try {
+                if (!this.client.roleAutomationService) throw new Error('Role automation is temporarily unavailable');
+                const active = await this.client.roleAutomationService.reconcileBooster(rule);
+                if (active) await db.update(automationRules).set({
+                    nextRunAt: now + 3600000, lastRunAt: now, runCount: sql`${automationRules.runCount} + 1`,
+                    leaseToken: null, leaseExpiresAt: null, updatedAt: now
+                }).where(and(eq(automationRules.id, rule.id), eq(automationRules.leaseToken, leaseToken)));
             } catch (error) {
                 await db.update(automationRules).set({ leaseToken: null, leaseExpiresAt: now + 60000 })
                     .where(and(eq(automationRules.id, rule.id), eq(automationRules.leaseToken, leaseToken)));

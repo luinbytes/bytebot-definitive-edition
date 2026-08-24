@@ -202,6 +202,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/server antiraid settings` • `/server antiraid module`\n' +
                     '`/server automod settings` • `/server automod filter`\n' +
                     '`/server permissions disable` • `/server permissions denyperm` • `/server permissions protect`\n' +
+                    '`/reactionrole add` • `/buttonrole add` • `/temprole add` • `/boosterrole create`\n' +
                     '`/mod user warn` • `/mod case view` • `/mod config setup`\n' +
                     '`/mod template set` • `/game warthunder stats`\n' +
                     '`/fun uwuify` • `/fun uwulock add`',
@@ -213,9 +214,9 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     'Greed source categories route through ByteBot\'s existing hubs as features land:\n' +
                     '`/community` Levels, Socials • `/me` Information, Utility\n' +
                     '`/server` Auto, Logs, Security, Server, Settings • `/mod` Moderation\n' +
-                    '`/fun` Fun, Manipulation, Roleplay, Snipe\n' +
+                    '`/fun` Fun, Manipulation, Roleplay, Snipe • `/boosterrole` Boosters\n' +
                     '**Not yet available (planned):** Economy, LastFM, Voice\n' +
-                    '**Registry-only evidence gaps:** Boosters, Developer, Music',
+                    '**Registry-only evidence gaps:** Developer, Music',
                 inline: false
             }
         );
