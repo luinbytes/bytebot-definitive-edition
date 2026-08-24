@@ -18,11 +18,16 @@ function schema(sqlite) {
 
 function response(body, headers = {}) {
     const raw = JSON.stringify(body);
+    let sent = false;
     headers['content-type'] ??= 'application/json';
     headers['content-length'] ??= String(Buffer.byteLength(raw));
     return {
         ok: true,
         headers: { get: name => headers[name.toLowerCase()] || null },
+        body: { getReader: () => ({
+            read: async () => sent ? { done: true } : (sent = true, { done: false, value: Buffer.from(raw) }),
+            cancel: jest.fn()
+        }) },
         text: async () => raw
     };
 }

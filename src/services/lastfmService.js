@@ -80,10 +80,7 @@ async function boundedText(response) {
     const length = Number(response.headers?.get?.('content-length') || 0);
     if (!Number.isFinite(length) || length < 0 || length > MAX_RESPONSE_BYTES) throw new Error('Last.fm response is too large.');
     if (!response.body?.getReader && !response.body?.[Symbol.asyncIterator]) {
-        if (!length) throw new Error('Last.fm response cannot be read safely.');
-        const raw = await response.text();
-        if (Buffer.byteLength(raw) > MAX_RESPONSE_BYTES) throw new Error('Last.fm response is too large.');
-        return raw;
+        throw new Error('Last.fm response cannot be read safely.');
     }
     const chunks = [];
     let total = 0;
