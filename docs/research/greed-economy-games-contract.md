@@ -342,9 +342,9 @@ membership and terminal invite state.
 `economy_labs` stores one row per `(guild_id, user_id)` with level, ampoules,
 stored amount, storage cap, last accrual timestamp, optional paused timestamp,
 and update timestamp.
-`economy_lab_operations` stores an operation UUID, lab/user/guild IDs, kind,
-input amount, result amount, exact result JSON, and created time with a unique
-operation ID.
+`economy_lab_operations` stores an operation UUID, nullable lab ID, durable
+user/guild IDs, kind, input amount, result amount, exact result JSON, and
+created time with a unique operation ID.
 The operation UUID is the Discord interaction ID, not a newly generated ID.
 Discord redelivery of the same interaction therefore returns its committed
 row; a later invocation has a new ID and is an intentional new operation.
@@ -636,9 +636,11 @@ earnings are not circulation and never appear in the ledger.
 - A reset preview fingerprints the target account, any active game session,
   and the laboratory row. In the confirmed reset transaction, an active game
   becomes terminal `forfeited` with no refund or additional supply delta, the
-  lab and its operation rows are removed, cooldowns are cleared, and the
-  account is burned/deleted under #48's existing reset ledger rule. Historical
-  game/lab ledger rows and completed sessions remain immutable. Gang
+  lab is removed, cooldowns are cleared, and the account is burned/deleted
+  under #48's existing reset ledger rule. Historical game/lab ledger rows,
+  completed sessions, and lab operation result rows remain immutable so a
+  redelivered pre-reset Discord interaction returns its prior result without
+  recreating state. Gang
   membership is social state and is preserved by an account reset.
 - A disable preview fingerprints every active game session and laboratory row.
   The confirmed disable transaction refunds each active wager exactly once,
@@ -675,10 +677,12 @@ earnings are not circulation and never appear in the ledger.
   `buy|upgrade|ampoules|collect`, monetary input/result fields are
   non-negative, exact result JSON is required, and the Discord interaction ID
   is the primary key.
-- Foreign keys cascade gang members/invites with a disbanded gang and lab
-  operations with a removed lab. Service transactions still re-check all
-  ownership, capacity, balance, expiry, and status conditions; constraints are
-  the final guard, not the only guard.
+- Foreign keys cascade gang members/invites with a disbanded gang. A lab
+  operation's nullable lab reference becomes null when its lab is removed;
+  its guild/user/interaction key and result snapshot remain durable for replay.
+  Service transactions still re-check all ownership, capacity, balance,
+  expiry, and status conditions; constraints are the final guard, not the only
+  guard.
 
 ### Leaderboard page behavior
 
