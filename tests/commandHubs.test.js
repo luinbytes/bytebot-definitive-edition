@@ -195,7 +195,10 @@ describe('Intent command hubs', () => {
             'circuit',
             'drivers'
         ]);
-        expect(optionNames(findOption(game, 'roblox').options)).toEqual([
+        const roblox = findOption(game, 'roblox');
+        expect(roblox.description).toBe('Look up a user on Roblox');
+        expect(roblox.options[0].description).toBe('Look up a user on Roblox');
+        expect(optionNames(roblox.options)).toEqual([
             'profile', 'games', 'groups', 'outfits'
         ]);
     });

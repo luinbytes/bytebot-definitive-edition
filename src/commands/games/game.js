@@ -62,8 +62,8 @@ module.exports = {
                 .addStringOption(opt => opt.setName('nickname').setDescription('Your War Thunder nickname').setRequired(true))))
         .addSubcommandGroup(group => group
             .setName('roblox')
-            .setDescription('Look up public Roblox profiles and creations')
-            .addSubcommand(sub => robloxSubcommand(sub, 'profile', 'Look up a public Roblox profile'))
+            .setDescription('Look up a user on Roblox')
+            .addSubcommand(sub => robloxSubcommand(sub, 'profile', 'Look up a user on Roblox'))
             .addSubcommand(sub => robloxSubcommand(sub, 'games', 'Show public games created by a Roblox user'))
             .addSubcommand(sub => robloxSubcommand(sub, 'groups', 'Show a Roblox user’s public groups'))
             .addSubcommand(sub => robloxSubcommand(sub, 'outfits', 'Show a Roblox user’s public outfits'))),

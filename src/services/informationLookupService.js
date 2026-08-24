@@ -407,9 +407,10 @@ class InformationLookupService {
             body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
         });
         if (!Array.isArray(payload?.data)) throw new UserFacingError('Roblox returned an invalid profile.');
+        if (!payload.data.length) throw new UserFacingError('No Roblox user found with that name');
         const row = payload.data[0];
-        if (!row) throw new UserFacingError('No Roblox user found with that name');
-        if (!Number.isSafeInteger(row.id) || row.id <= 0 || typeof row.name !== 'string'
+        if (!row || typeof row !== 'object' || Array.isArray(row)
+            || !Number.isSafeInteger(row.id) || row.id <= 0 || typeof row.name !== 'string'
             || typeof row.displayName !== 'string') throw new UserFacingError('Roblox returned an invalid profile.');
         return { id: row.id, username: row.name, displayName: row.displayName };
     }

@@ -304,9 +304,11 @@ test('Roblox lookups distinguish not found, inaccessible, rate-limited, and malf
     const emptyGroups = new InformationLookupService({ fetch: jest.fn()
         .mockResolvedValueOnce(resolvedUser()).mockResolvedValueOnce(response({ data: [] })) });
     const malformedUser = new InformationLookupService({ fetch: jest.fn().mockResolvedValue(response({ data: null })) });
+    const malformedUserRow = new InformationLookupService({ fetch: jest.fn().mockResolvedValue(response({ data: [null] })) });
 
     await expect(missing.robloxUser('Builderman')).rejects.toMatchObject({ message: 'No Roblox user found with that name' });
     await expect(malformedUser.robloxUser('Builderman')).rejects.toThrow('invalid profile');
+    await expect(malformedUserRow.robloxUser('Builderman')).rejects.toThrow('invalid profile');
     await expect(inaccessible.robloxGames('Builderman')).rejects.toThrow('not publicly accessible');
     await expect(limited.robloxGroups('Builderman')).rejects.toThrow('rate limit');
     await expect(malformed.robloxOutfits('Builderman')).rejects.toThrow('invalid outfits');

@@ -19,6 +19,8 @@ test('/lookup exposes every provider-backed public parity path with bounded opti
         expect.objectContaining({ name: 'text', required: true, max_length: 2000 })
     ]));
     expect(options.github.options.map(option => option.name)).toEqual(['user', 'repository', 'email']);
+    expect(options.github.description).toBe('View information about a GitHub user.');
+    expect(options.github.options[0].description).toBe('View information about a GitHub user.');
 });
 
 test('/lookup github user renders validated provider data and the contributions limitation', async () => {
