@@ -339,6 +339,22 @@ module.exports = {
             logger.error(`Failed to initialize economy service: ${e}`);
         }
 
+        if (process.env.MUSIC_LIBRARY_PATH) {
+            try {
+                const { MusicLibrary, MusicService } = require('../services/musicService');
+                const { sqlite } = require('../database');
+                MusicService.checkRuntime();
+                client.musicService = new MusicService({
+                    library: new MusicLibrary(process.env.MUSIC_LIBRARY_PATH), sqlite
+                });
+                logger.success('Music service initialized');
+            } catch (e) {
+                logger.error(`Failed to initialize music service: ${e.message}`);
+            }
+        } else {
+            logger.info('Music service disabled: MUSIC_LIBRARY_PATH is not configured');
+        }
+
         try {
             const { TicketService } = require('../services/ticketService');
             client.ticketService = new TicketService(client);

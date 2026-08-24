@@ -51,6 +51,12 @@ describe('database migrations', () => {
             .toContainEqual(expect.objectContaining({ table: 'economy_labs', on_delete: 'SET NULL' }));
         expect(database.sqlite.prepare("PRAGMA foreign_key_list('economy_gang_invites')").all())
             .toContainEqual(expect.objectContaining({ table: 'economy_gangs', on_delete: 'SET NULL' }));
+        expect(database.sqlite.prepare("PRAGMA table_info('music_config')").all())
+            .toEqual(expect.arrayContaining([
+                expect.objectContaining({ name: 'guild_id', pk: 1, notnull: 1 }),
+                expect.objectContaining({ name: 'dj_role_id' }),
+                expect.objectContaining({ name: 'autoplay', notnull: 1, dflt_value: '0' })
+            ]));
         expect(() => database.sqlite.prepare(`INSERT INTO economy_accounts
             (scope_type, scope_id, user_id, wallet, bank, created_at, updated_at)
             VALUES ('guild', 'guild1', 'user1', -1, 0, 1, 1)`).run()).toThrow();

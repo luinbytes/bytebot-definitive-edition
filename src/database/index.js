@@ -145,6 +145,11 @@ const expectedSchema = {
         voice_hub_category_id: 'TEXT',
         achievements_enabled: 'INTEGER DEFAULT 1'
     },
+    music_config: {
+        guild_id: 'TEXT PRIMARY KEY',
+        dj_role_id: 'TEXT',
+        autoplay: 'INTEGER DEFAULT 0 NOT NULL'
+    },
     lifecycle_messages: {
         guild_id: 'TEXT NOT NULL',
         type: 'TEXT NOT NULL',

@@ -14,6 +14,7 @@ module.exports = {
             // Cleanup guild data
             guild.client.giveawayService?.purgeGuild(guild.id);
             guild.client.ticketService?.purgeGuild(guild.id);
+            guild.client.musicService?.destroy(guild.id);
             await db.delete(lifecycleMessages).where(eq(lifecycleMessages.guildId, guild.id));
             await db.delete(automationRules).where(eq(automationRules.guildId, guild.id));
             await db.delete(autoResponses).where(eq(autoResponses.guildId, guild.id));

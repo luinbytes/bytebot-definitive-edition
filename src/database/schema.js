@@ -15,6 +15,12 @@ const guilds = sqliteTable('guilds', {
     achievementsEnabled: integer('achievements_enabled', { mode: 'boolean' }).default(true), // Guild-level achievement toggle
 });
 
+const musicConfig = sqliteTable('music_config', {
+    guildId: text('guild_id').primaryKey(),
+    djRoleId: text('dj_role_id'),
+    autoplay: integer('autoplay', { mode: 'boolean' }).default(false).notNull(),
+});
+
 const lifecycleMessages = sqliteTable('lifecycle_messages', {
     guildId: text('guild_id').notNull(),
     type: text('type').notNull(),
@@ -1413,6 +1419,7 @@ const economyLabOperations = sqliteTable('economy_lab_operations', {
 
 module.exports = {
     guilds,
+    musicConfig,
     lifecycleMessages,
     users,
     moderationLogs,

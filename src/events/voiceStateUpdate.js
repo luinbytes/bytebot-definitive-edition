@@ -306,6 +306,8 @@ module.exports = {
         const member = newState.member;
         const guild = newState.guild;
 
+        newState.client.musicService?.handleVoiceStateUpdate(oldState, newState);
+
         if (member.user.bot) return;
 
         // DB Fetch
