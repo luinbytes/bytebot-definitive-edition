@@ -200,4 +200,32 @@ describe('guild backups', () => {
         expect(oldEmoji.delete).toHaveBeenCalled();
         expect(oldSticker.delete).toHaveBeenCalled();
     });
+
+    test('restores allowlisted ByteBot configuration without touching moderation evidence', async () => {
+        database.sqlite.prepare(`INSERT INTO lifecycle_messages
+            (guild_id, type, channel_id, template, enabled, format, updated_at)
+            VALUES ('guild1', 'welcome', 'channel1', 'Original', 1, 'text', 1)`).run();
+        database.sqlite.prepare(`INSERT INTO moderation_logs
+            (guild_id, target_id, executor_id, action, reason, timestamp)
+            VALUES ('guild1', 'member1', 'admin1', 'WARN', 'Keep this', 1)`).run();
+        const guild = {
+            id: 'guild1', members: { me: { permissions: { has: jest.fn(() => true) } } },
+            roles: { everyone: { id: 'guild1' }, cache: new Map(), create: jest.fn() },
+            channels: { cache: new Map(), create: jest.fn() },
+            emojis: { cache: new Map(), create: jest.fn() }, stickers: { cache: new Map(), create: jest.fn() }
+        };
+        service.create({ guild, creatorId: 'admin1', name: 'ByteBot config' });
+        database.sqlite.prepare("UPDATE lifecycle_messages SET template = 'Changed' WHERE guild_id = 'guild1'").run();
+
+        const result = await service.restore({
+            guild, creatorId: 'admin1', id: 'backup-1', sections: ['bytebot'], confirmed: true
+        });
+
+        expect(result.created.bytebot).toBe(1);
+        expect(database.sqlite.prepare("SELECT template FROM lifecycle_messages WHERE guild_id = 'guild1'").get().template)
+            .toBe('Original');
+        expect(database.sqlite.prepare("SELECT reason FROM moderation_logs WHERE guild_id = 'guild1'").get().reason)
+            .toBe('Keep this');
+        expect(service.view('guild1', 'admin1', 'backup-1').payload.bytebot.moderation_logs).toBeUndefined();
+    });
 });

@@ -11,6 +11,7 @@ const {
     addAntiraidGroup, addAutomodGroup, executeAntiraid, executeAutomod
 } = require('../../utils/securityAutomationCommand');
 const { addLifecycleGroups, executeLifecycle } = require('../../utils/lifecycleMessageCommand');
+const { addBackupGroup, executeBackup } = require('../../utils/serverBackupCommand');
 
 const MODULE_CHOICES = MODULES.map(value => ({ name: value, value }));
 const PUNISHMENT_CHOICES = PUNISHMENTS.map(value => ({ name: value, value }));
@@ -425,6 +426,7 @@ const serverBuilder = new SlashCommandBuilder()
 addAntiraidGroup(serverBuilder);
 addAutomodGroup(serverBuilder);
 addLifecycleGroups(serverBuilder);
+addBackupGroup(serverBuilder);
 
 module.exports = {
     data: serverBuilder,
@@ -444,6 +446,7 @@ module.exports = {
     },
 
     async execute(interaction, client) {
+        if (interaction.options.getSubcommandGroup(false) === 'backup') return executeBackup(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'security') return executeSecurity(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'antiraid') return executeAntiraid(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'automod') return executeAutomod(interaction);

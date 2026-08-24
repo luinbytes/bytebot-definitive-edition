@@ -69,6 +69,7 @@ describe('Intent command hubs', () => {
             'starboard',
             'suggestion',
             'birthday',
+            'backup',
             'permissions',
             'achievement',
             'streak',
@@ -86,6 +87,12 @@ describe('Intent command hubs', () => {
             'deny',
             'implement'
         ]));
+        expect(optionNames(findOption(command, 'backup').options)).toEqual([
+            'create', 'list', 'view', 'rename', 'delete', 'restore'
+        ]);
+        expect(optionNames(findOption(command, 'backup').options.find(option => option.name === 'restore').options)).toEqual([
+            'backup_id', 'mode', 'roles', 'channels', 'emojis', 'stickers', 'bytebot', 'confirm'
+        ]);
         expect(optionNames(findOption(command, 'permissions').options)).toEqual([
             'add',
             'remove',
