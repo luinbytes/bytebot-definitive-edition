@@ -1,4 +1,5 @@
-const { EmbedBuilder, MessageFlags, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
+const { MessageFlags, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
+const embeds = require('../../utils/embeds');
 
 const periods = option => option.addChoices(
     { name: '7 days', value: '7d' }, { name: '1 month', value: '1m' },
@@ -75,7 +76,7 @@ function linkedIds(interaction, service, global = false) {
 }
 
 function embed(title, description) {
-    return new EmbedBuilder().setColor(0xD51007).setTitle(title).setDescription(description || 'No results.')
+    return embeds.brand(String(title).slice(0, 256), String(description || 'No results.').slice(0, 4096)).setColor(0xD51007)
         .setFooter({ text: 'Listening data from Last.fm' }).setURL('https://www.last.fm/');
 }
 
@@ -86,6 +87,14 @@ function rows(items, empty = 'No Last.fm results found.') {
         const count = item.playcount ? ` — ${item.playcount.toLocaleString()} plays` : '';
         return `**${index + 1}.** ${label}${count}`;
     }).join('\n').slice(0, 4000);
+}
+
+function coverage(service, ids) {
+    const value = service.indexCoverage(ids);
+    const missing = value.total - value.indexed;
+    return missing || value.stale
+        ? `\n\n-# Coverage: ${value.indexed}/${value.total} linked accounts indexed${value.stale ? `; ${value.stale} stale` : ''}. Members can run \`/lastfm library update\`.`
+        : '';
 }
 
 async function latestArtist(service, userId) {
@@ -178,7 +187,7 @@ module.exports = {
             if (action === 'recent') {
                 const selected = target(interaction, service);
                 const tracks = await service.recentTracks(selected.account.username, 10);
-                return interaction.editReply({ embeds: [embed(`${selected.account.username}'s recent tracks`, rows(tracks))] });
+                return interaction.editReply({ embeds: [embed(`${selected.account.username}'s recent tracks`, rows(tracks))], allowedMentions: { parse: [] } });
             }
             const members = linkedIds(interaction, service).slice(0, 25);
             const results = (await Promise.all(members.map(async userId => {
@@ -198,7 +207,7 @@ module.exports = {
                 return interaction.editReply({ content: `${selected.account.username}'s ${requestedPeriod} ${interaction.options.getString('type')} collage — data from https://www.last.fm/`, files: [{ attachment: result.buffer, name: result.filename }] });
             }
             const items = await service.top(action, selected.account.username, requestedPeriod, 10);
-            return interaction.editReply({ embeds: [embed(`${selected.account.username}'s top ${action}`, rows(items))] });
+            return interaction.editReply({ embeds: [embed(`${selected.account.username}'s top ${action}`, rows(items))], allowedMentions: { parse: [] } });
         }
 
         if (group === 'library') {
@@ -208,30 +217,33 @@ module.exports = {
             }
             if (action === 'milestone') {
                 const result = await service.milestone(interaction.user.id, interaction.options.getInteger('number'));
-                return interaction.editReply({ embeds: [embed(`Milestone #${result.number}`, `**${result.name}** by ${result.artist}\n<t:${result.timestamp}:F>\n${result.username} • ${result.total.toLocaleString()} scrobbles`)] });
+                return interaction.editReply({ embeds: [embed(`Milestone #${result.number}`, `**${result.name}** by ${result.artist}\n<t:${result.timestamp}:F>\n${result.username} • ${result.total.toLocaleString()} scrobbles`)], allowedMentions: { parse: [] } });
             }
             const account = service.requireAccount(interaction.user.id);
             const artist = interaction.options.getString('name') || await latestArtist(service, interaction.user.id);
             const info = await service.artistInfo(artist, account.username);
             const card = embed(info.name, `${info.summary || 'No biography available.'}\n\n${info.listeners.toLocaleString()} listeners • ${info.plays.toLocaleString()} plays • ${info.userPlays.toLocaleString()} by ${account.username}`);
             if (info.image) card.setThumbnail(info.image);
-            return interaction.editReply({ embeds: [card] });
+            return interaction.editReply({ embeds: [card], allowedMentions: { parse: [] } });
         }
 
         if (group === 'community') {
             const ids = linkedIds(interaction, service, action === 'whoknows' && interaction.options.getString('scope') === 'global');
             if (action === 'crowns') {
                 const result = service.crowns(ids);
-                return interaction.editReply({ embeds: [embed('Most Last.fm crowns', result.map((item, index) => `**${index + 1}.** <@${item.userId}> — ${item.crowns}`).join('\n'))], allowedMentions: { parse: [] } });
+                const description = result.map((item, index) => `**${index + 1}.** <@${item.userId}> — ${item.crowns}`).join('\n') + coverage(service, ids);
+                return interaction.editReply({ embeds: [embed('Most Last.fm crowns', description)], allowedMentions: { parse: [] } });
             }
             if (action === 'taste') {
                 const other = interaction.options.getUser('member');
                 const result = await service.taste(interaction.user.id, other.id, interaction.options.getString('period') || 'overall');
-                return interaction.editReply({ embeds: [embed(`${result.first} v ${result.second}`, `**${result.score}% overlap**\n${result.common.join(', ') || 'No common top artists.'}`)] });
+                const common = (result.common.join(', ') || 'No common top artists.').slice(0, 3800);
+                return interaction.editReply({ embeds: [embed(`${result.first} v ${result.second}`, `**${result.score}% overlap**\n${common}`)], allowedMentions: { parse: [] } });
             }
             const artist = interaction.options.getString('artist') || await latestArtist(service, interaction.user.id);
             const result = service.rankings(artist, ids);
-            return interaction.editReply({ embeds: [embed(`${artist} most plays`, result.map((item, index) => `**${index + 1}.** <@${item.userId}> — ${item.playcount.toLocaleString()}`).join('\n'))], allowedMentions: { parse: [] } });
+            const description = result.map((item, index) => `**${index + 1}.** <@${item.userId}> — ${item.playcount.toLocaleString()}`).join('\n') + coverage(service, ids);
+            return interaction.editReply({ embeds: [embed(`${artist} most plays`, description)], allowedMentions: { parse: [] } });
         }
 
         const account = service.requireAccount(interaction.user.id);

@@ -55,6 +55,24 @@ describe('LastfmService', () => {
         await expect(service.request('user.getInfo', { user: 'a' })).rejects.toThrow('large');
         service.fetch = jest.fn(async () => response([]));
         await expect(service.request('user.getInfo', { user: 'a' })).rejects.toThrow('payload');
+        service.fetch = jest.fn(async () => response({ nope: true }));
+        await expect(service.recentTracks('a')).rejects.toThrow('malformed recent');
+    });
+
+    test('honors no-store and stops a chunked body above two MiB', async () => {
+        const { LastfmService } = require('../src/services/lastfmService');
+        const fetch = jest.fn(async () => response({ user: { name: 'Alice' } }, { 'cache-control': 'no-store' }));
+        const service = new LastfmService({ sqlite, apiKey: 'key', fetch });
+        await service.userInfo('Alice');
+        await service.userInfo('Alice');
+        expect(fetch).toHaveBeenCalledTimes(2);
+
+        const chunks = [new Uint8Array(1024 * 1024 + 1), new Uint8Array(1024 * 1024)];
+        service.fetch = jest.fn(async () => ({
+            ok: true, headers: { get: name => name === 'content-type' ? 'application/json' : null },
+            body: { getReader: () => ({ read: async () => chunks.length ? { done: false, value: chunks.shift() } : { done: true }, cancel: jest.fn() }) }
+        }));
+        await expect(service.request('user.getInfo', { user: 'Bob' })).rejects.toThrow('large');
     });
 
     test('replaces a bounded artist index and computes deterministic rankings and taste', async () => {
@@ -81,6 +99,9 @@ describe('LastfmService', () => {
             ? [{ name: 'A', playcount: 10 }, { name: 'B', playcount: 5 }]
             : [{ name: 'A', playcount: 8 }, { name: 'C', playcount: 4 }]);
         await expect(service.taste('u1', 'u2', 'overall')).resolves.toMatchObject({ common: ['A'], score: 33 });
+        sqlite.prepare(`INSERT INTO lastfm_accounts
+            (user_id, username, linked_at, refreshed_at) VALUES (?, ?, 1, 1)`).run('u3', 'carol');
+        expect(service.indexCoverage(['u1', 'u2', 'u3'])).toEqual({ total: 3, indexed: 2, stale: 0 });
     });
 
     test('uses single-use expiring OAuth state and signed session exchange', async () => {
@@ -91,11 +112,24 @@ describe('LastfmService', () => {
             randomBytes: size => Buffer.alloc(size, 7),
             fetch: jest.fn(async (_url, options) => response({ session: { name: 'Alice', key: 'session-secret' } }))
         });
+        sqlite.prepare(`INSERT INTO lastfm_accounts (user_id, username, linked_at, refreshed_at)
+            VALUES ('discord-1', 'old-user', 1, 1)`).run();
+        sqlite.prepare(`INSERT INTO lastfm_artists (user_id, artist, playcount, updated_at)
+            VALUES ('discord-1', 'Old Artist', 10, 1)`).run();
         const login = service.beginOAuth('discord-1');
         expect(login.url).toContain('cb=https%3A%2F%2Fbot.example%2Flastfm%2Fcallback');
         await expect(service.completeOAuth(login.state, 'token')).resolves.toMatchObject({ username: 'Alice' });
         expect(sqlite.prepare('SELECT session_key FROM lastfm_accounts').get().session_key).not.toContain('session-secret');
+        expect(sqlite.prepare('SELECT COUNT(*) count FROM lastfm_artists').get().count).toBe(0);
         await expect(service.completeOAuth(login.state, 'token')).rejects.toThrow('state');
         expect(service.fetch.mock.calls[0][1].method).toBe('POST');
+        expect(service.fetch.mock.calls[0][1].redirect).toBe('error');
+    });
+
+    test('requires HTTPS callback and a 32-character encryption secret for OAuth', () => {
+        const { LastfmService, trustedUrl } = require('../src/services/lastfmService');
+        expect(new LastfmService({ sqlite, apiKey: 'key', sharedSecret: 'secret', callbackUrl: 'http://localhost/callback', sessionEncryptionKey: 'short' }).oauthReady()).toBe(false);
+        expect(trustedUrl('https://lastfm.freetls.fastly.net/i/u/300x300/a.jpg', true)).toContain('fastly');
+        expect(trustedUrl('https://attacker.example/a.jpg', true)).toBeNull();
     });
 });

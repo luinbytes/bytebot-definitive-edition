@@ -4,6 +4,7 @@ const { MediaService } = require('./mediaService');
 
 const API_URL = 'https://ws.audioscrobbler.com/2.0/';
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+const MAX_CACHE_BYTES = 100 * 1024 * 1024;
 const METHODS = new Set([
     'album.getInfo', 'artist.getInfo', 'library.getArtists',
     'user.getInfo', 'user.getRecentTracks', 'user.getTopAlbums',
@@ -33,16 +34,25 @@ function text(value) {
     return typeof value === 'string' ? value : value?.['#text'] || value?.name || '';
 }
 
+function trustedUrl(value, artwork = false) {
+    if (!value) return null;
+    try {
+        const url = new URL(value);
+        const host = url.hostname.toLowerCase();
+        const lastfm = host === 'last.fm' || host.endsWith('.last.fm');
+        const cdn = artwork && (host === 'lastfm.freetls.fastly.net'
+            || (host.startsWith('lastfm-') && host.endsWith('.akamaized.net')));
+        return url.protocol === 'https:' && (lastfm || cdn) ? url.toString() : null;
+    } catch {
+        return null;
+    }
+}
+
 function imageUrl(images) {
     const values = list(images).map(image => image?.['#text']).filter(Boolean);
     const value = values.at(-1);
     if (!value) return null;
-    try {
-        const url = new URL(value);
-        return url.protocol === 'https:' ? url.toString() : null;
-    } catch {
-        return null;
-    }
+    return trustedUrl(value, true);
 }
 
 function period(value) {
@@ -58,7 +68,7 @@ function normalizeItem(item, kind) {
         artist: artist ? String(artist).slice(0, 300) : undefined,
         album: text(item.album) ? String(text(item.album)).slice(0, 300) : undefined,
         playcount: positive(item.playcount),
-        url: /^https:\/\//.test(item.url || '') ? item.url : undefined,
+        url: trustedUrl(item.url) || undefined,
         image: imageUrl(item.image),
         nowPlaying: item['@attr']?.nowplaying === 'true',
         timestamp: positive(item.date?.uts),
@@ -102,6 +112,7 @@ class LastfmService {
         this.randomBytes = options.randomBytes || crypto.randomBytes;
         this.media = options.media || new MediaService();
         this.cache = new Map();
+        this.cacheBytes = 0;
         this.indexing = new Set();
     }
 
@@ -112,8 +123,16 @@ class LastfmService {
         for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== null) query.set(key, String(value));
         const key = `${method}?${[...query].filter(([name]) => name !== 'api_key').sort().map(pair => pair.join('=')).join('&')}`;
         const cached = this.cache.get(key);
-        if (!options.fresh && cached?.expiresAt > this.now()) return cached.value;
-        const response = await this.fetch(`${API_URL}?${query}`, { signal: AbortSignal.timeout(10000) });
+        if (!options.fresh && cached?.expiresAt > this.now()) {
+            this.cache.delete(key);
+            this.cache.set(key, cached);
+            return cached.value;
+        }
+        if (cached) {
+            this.cache.delete(key);
+            this.cacheBytes -= cached.bytes;
+        }
+        const response = await this.fetch(`${API_URL}?${query}`, { signal: AbortSignal.timeout(10000), redirect: 'error' });
         if (!response?.ok) throw new Error('Last.fm request failed.');
         const contentType = response.headers?.get?.('content-type');
         if (contentType && !/^application\/json\b/i.test(contentType)) throw new Error('Last.fm returned a non-JSON response.');
@@ -125,9 +144,15 @@ class LastfmService {
         const cacheControl = response.headers?.get?.('cache-control') || '';
         const maxAge = /(?:^|,)\s*max-age=(\d+)/i.exec(cacheControl);
         const ttl = Math.min(60000, Math.max(1000, Number(maxAge?.[1] || 60) * 1000));
-        if (!/\b(?:no-store|private)\b/i.test(cacheControl) && maxAge?.[1] !== '0') {
-            this.cache.set(key, { value: payload, expiresAt: this.now() + ttl });
-            while (this.cache.size > 256) this.cache.delete(this.cache.keys().next().value);
+        if (!/\b(?:no-store|no-cache|must-revalidate|private)\b/i.test(cacheControl) && maxAge?.[1] !== '0') {
+            const bytes = Buffer.byteLength(raw);
+            this.cache.set(key, { value: payload, expiresAt: this.now() + ttl, bytes });
+            this.cacheBytes += bytes;
+            while (this.cache.size > 256 || this.cacheBytes > MAX_CACHE_BYTES) {
+                const oldest = this.cache.keys().next().value;
+                this.cacheBytes -= this.cache.get(oldest).bytes;
+                this.cache.delete(oldest);
+            }
         }
         return payload;
     }
@@ -148,7 +173,7 @@ class LastfmService {
         if (!user?.name) throw new Error('Last.fm returned an invalid user.');
         return {
             username: clean(user.name, 64), playcount: positive(user.playcount),
-            url: /^https:\/\//.test(user.url || '') ? user.url : `https://www.last.fm/user/${encodeURIComponent(user.name)}`,
+            url: trustedUrl(user.url) || `https://www.last.fm/user/${encodeURIComponent(user.name)}`,
             image: imageUrl(user.image)
         };
     }
@@ -173,7 +198,12 @@ class LastfmService {
     }
 
     invalidate(username) {
-        for (const key of this.cache.keys()) if (!username || key.toLowerCase().includes(String(username).toLowerCase())) this.cache.delete(key);
+        for (const [key, value] of this.cache) {
+            if (!username || key.toLowerCase().includes(String(username).toLowerCase())) {
+                this.cache.delete(key);
+                this.cacheBytes -= value.bytes;
+            }
+        }
     }
 
     async refresh(userId) {
@@ -190,6 +220,7 @@ class LastfmService {
         const payload = await this.request('user.getRecentTracks', {
             user: clean(username, 64), limit: bounded, page: Math.max(1, positive(page) || 1), extended: 1
         }, options);
+        if (!payload.recenttracks || !Object.hasOwn(payload.recenttracks, 'track')) throw new Error('Last.fm returned malformed recent tracks.');
         return list(payload.recenttracks?.track).map(item => normalizeItem(item, 'track'));
     }
 
@@ -198,6 +229,7 @@ class LastfmService {
         const config = map[kind];
         if (!config) throw new Error('Invalid Last.fm chart type.');
         const payload = await this.request(config[0], { user: clean(username, 64), period: period(requestedPeriod), limit: Math.max(1, Math.min(25, positive(limit) || 10)) });
+        if (!payload[config[1]] || !Object.hasOwn(payload[config[1]], config[2])) throw new Error('Last.fm returned a malformed chart.');
         return list(payload[config[1]]?.[config[2]]).map(item => normalizeItem(item, kind.slice(0, -1)));
     }
 
@@ -206,7 +238,7 @@ class LastfmService {
         const value = payload.artist;
         if (!value?.name) throw new Error('Last.fm returned an invalid artist.');
         return {
-            name: clean(value.name, 300), url: /^https:\/\//.test(value.url || '') ? value.url : undefined,
+            name: clean(value.name, 300), url: trustedUrl(value.url) || undefined,
             image: imageUrl(value.image), listeners: positive(value.stats?.listeners), plays: positive(value.stats?.playcount),
             userPlays: positive(value.stats?.userplaycount), summary: String(value.bio?.summary || '').replace(/<[^>]+>/g, '').slice(0, 1000)
         };
@@ -215,6 +247,7 @@ class LastfmService {
     async library(username, page = 1) {
         const payload = await this.request('library.getArtists', { user: clean(username, 64), limit: INDEX_PAGE_SIZE, page });
         const root = payload.artists;
+        if (!root || !Object.hasOwn(root, 'artist')) throw new Error('Last.fm returned a malformed library.');
         return {
             artists: list(root?.artist).map(item => normalizeItem(item, 'artist')),
             totalPages: Math.max(1, positive(root?.['@attr']?.totalPages) || 1)
@@ -267,6 +300,19 @@ class LastfmService {
             GROUP BY r.user_id ORDER BY crowns DESC, a.username COLLATE NOCASE, r.user_id LIMIT 25`).all(...ids);
     }
 
+    indexCoverage(userIds) {
+        const ids = [...new Set(userIds)].slice(0, 1000);
+        if (!ids.length) return { total: 0, indexed: 0, stale: 0 };
+        const rows = this.sqlite.prepare(`SELECT a.user_id userId, MAX(i.updated_at) updatedAt
+            FROM lastfm_accounts a LEFT JOIN lastfm_artists i ON i.user_id = a.user_id
+            WHERE a.user_id IN (${ids.map(() => '?').join(',')}) GROUP BY a.user_id`).all(...ids);
+        return {
+            total: ids.length,
+            indexed: rows.filter(row => row.updatedAt != null).length,
+            stale: rows.filter(row => row.updatedAt != null && row.updatedAt < this.now() - 24 * 60 * 60 * 1000).length
+        };
+    }
+
     async taste(firstUserId, secondUserId, requestedPeriod) {
         if (firstUserId === secondUserId) throw new Error('You cannot compare music taste with yourself.');
         const first = this.requireAccount(firstUserId);
@@ -299,7 +345,7 @@ class LastfmService {
         const column = columns[field];
         if (!column) throw new Error('Invalid Last.fm customization.');
         this.requireAccount(userId);
-        const result = value == null || value === '' ? null : clean(value, field === 'presentation' ? 1000 : 100);
+        const result = value == null || value === '' ? null : clean(value, field === 'presentation' ? 1000 : field === 'reactions' ? 256 : 100);
         this.sqlite.prepare(`UPDATE lastfm_accounts SET ${column} = ? WHERE user_id = ?`).run(result, userId);
         return result;
     }
@@ -312,7 +358,13 @@ class LastfmService {
     }
 
     oauthReady() {
-        return Boolean(this.apiKey && this.sharedSecret && this.callbackUrl && this.sessionEncryptionKey);
+        if (!this.apiKey || !this.sharedSecret || !this.callbackUrl || String(this.sessionEncryptionKey || '').length < 32) return false;
+        try {
+            const callback = new URL(this.callbackUrl);
+            return callback.protocol === 'https:' && !callback.username && !callback.password;
+        } catch {
+            return false;
+        }
     }
 
     beginOAuth(userId) {
@@ -351,7 +403,7 @@ class LastfmService {
         const signed = { api_key: this.apiKey, method: 'auth.getSession', token };
         const apiSig = crypto.createHash('md5').update(Object.keys(signed).sort().map(key => `${key}${signed[key]}`).join('') + this.sharedSecret).digest('hex');
         const body = new URLSearchParams({ ...signed, api_sig: apiSig, format: 'json' });
-        const response = await this.fetch(API_URL, { method: 'POST', body, signal: AbortSignal.timeout(10000) });
+        const response = await this.fetch(API_URL, { method: 'POST', body, signal: AbortSignal.timeout(10000), redirect: 'error' });
         if (!response.ok) throw new Error('Last.fm OAuth exchange failed.');
         const contentType = response.headers?.get?.('content-type');
         if (contentType && !/^application\/json\b/i.test(contentType)) throw new Error('Last.fm OAuth returned a non-JSON response.');
@@ -360,10 +412,13 @@ class LastfmService {
         try { payload = JSON.parse(raw); } catch { throw new Error('Last.fm OAuth returned invalid JSON.'); }
         if (payload.error || !payload.session?.name || !payload.session?.key) throw new Error(`Last.fm: ${payload.message || 'OAuth exchange failed'}`);
         const now = this.now();
-        this.sqlite.prepare(`INSERT INTO lastfm_accounts (user_id, username, session_key, linked_at, refreshed_at)
-            VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET username = excluded.username,
-            session_key = excluded.session_key, linked_at = excluded.linked_at, refreshed_at = excluded.refreshed_at`)
-            .run(owner.user_id, clean(payload.session.name, 64), this.encryptSession(payload.session.key), now, now);
+        this.sqlite.transaction(() => {
+            this.sqlite.prepare(`INSERT INTO lastfm_accounts (user_id, username, session_key, linked_at, refreshed_at)
+                VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET username = excluded.username,
+                session_key = excluded.session_key, linked_at = excluded.linked_at, refreshed_at = excluded.refreshed_at`)
+                .run(owner.user_id, clean(payload.session.name, 64), this.encryptSession(payload.session.key), now, now);
+            this.sqlite.prepare('DELETE FROM lastfm_artists WHERE user_id = ?').run(owner.user_id);
+        }).immediate();
         return { userId: owner.user_id, username: payload.session.name };
     }
 
@@ -393,4 +448,4 @@ class LastfmService {
     }
 }
 
-module.exports = { API_URL, INDEX_MAX_PAGES, INDEX_PAGE_SIZE, LastfmService, METHODS, PERIOD_ALIASES, period };
+module.exports = { API_URL, INDEX_MAX_PAGES, INDEX_PAGE_SIZE, LastfmService, METHODS, PERIOD_ALIASES, period, trustedUrl };

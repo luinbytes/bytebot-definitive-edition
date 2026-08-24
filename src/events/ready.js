@@ -345,7 +345,7 @@ module.exports = {
             const { LastfmOAuthServer } = require('../services/lastfmOAuthServer');
             client.lastfmService = new LastfmService({ sqlite });
             client.lastfmOAuthServer = new LastfmOAuthServer(client.lastfmService);
-            const oauth = client.lastfmOAuthServer.start();
+            const oauth = await client.lastfmOAuthServer.start();
             logger.success(`Last.fm service initialized${oauth ? ' with OAuth callback' : ' in read-only mode'}`);
         } catch (e) {
             logger.error(`Failed to initialize Last.fm service: ${e}`);
