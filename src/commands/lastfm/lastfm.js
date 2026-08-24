@@ -204,7 +204,11 @@ module.exports = {
             if (action === 'collage') {
                 const result = await service.collage(selected.account.username, interaction.options.getString('type'), requestedPeriod,
                     interaction.options.getInteger('size'), interaction.attachmentSizeLimit || 10 * 1024 * 1024);
-                return interaction.editReply({ content: `${selected.account.username}'s ${requestedPeriod} ${interaction.options.getString('type')} collage — data from https://www.last.fm/`, files: [{ attachment: result.buffer, name: result.filename }] });
+                return interaction.editReply({
+                    content: `${selected.account.username}'s ${requestedPeriod} ${interaction.options.getString('type')} collage — data from https://www.last.fm/`,
+                    files: [{ attachment: result.buffer, name: result.filename }],
+                    allowedMentions: { parse: [] }
+                });
             }
             const items = await service.top(action, selected.account.username, requestedPeriod, 10);
             return interaction.editReply({ embeds: [embed(`${selected.account.username}'s top ${action}`, rows(items))], allowedMentions: { parse: [] } });
