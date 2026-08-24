@@ -21,6 +21,64 @@ const musicConfig = sqliteTable('music_config', {
     autoplay: integer('autoplay', { mode: 'boolean' }).default(false).notNull(),
 });
 
+const voiceMasterConfigs = sqliteTable('voice_master_configs', {
+    guildId: text('guild_id').primaryKey(),
+    state: text('state').default('active').notNull(),
+    categoryId: text('category_id'),
+    primaryChannelId: text('primary_channel_id'),
+    interfaceMessageId: text('interface_message_id'),
+    nameTemplate: text('name_template').default("{owner}'s channel").notNull(),
+    defaultRoleId: text('default_role_id'),
+    defaultBitrate: integer('default_bitrate'),
+    defaultRegion: text('default_region'),
+    sendInterface: integer('send_interface', { mode: 'boolean' }).default(true).notNull(),
+    temporaryEnabled: integer('temporary_enabled', { mode: 'boolean' }).default(true).notNull(),
+    joinRoleId: text('join_role_id'),
+    updatedAt: integer('updated_at').notNull(),
+}, table => ({
+    stateCheck: check('voice_master_configs_state_check', sql`${table.state} IN ('creating','active','resetting','failed')`),
+    templateCheck: check('voice_master_configs_template_check', sql`length(${table.nameTemplate}) BETWEEN 1 AND 32`),
+    bitrateCheck: check('voice_master_configs_bitrate_check', sql`${table.defaultBitrate} IS NULL OR ${table.defaultBitrate} >= 8000`),
+}));
+
+const voiceMasterSources = sqliteTable('voice_master_sources', {
+    channelId: text('channel_id').primaryKey(),
+    guildId: text('guild_id').notNull(),
+    categoryId: text('category_id'),
+    interfaceMessageId: text('interface_message_id'),
+    isPrimary: integer('is_primary', { mode: 'boolean' }).default(false).notNull(),
+    owned: integer('owned', { mode: 'boolean' }).default(false).notNull(),
+    createdAt: integer('created_at').notNull(),
+}, table => ({
+    primaryUnique: uniqueIndex('voice_master_sources_primary_unique').on(table.guildId).where(sql`${table.isPrimary} = 1`),
+    guildIdx: index('voice_master_sources_guild_idx').on(table.guildId, table.channelId),
+}));
+
+const voiceMasterCreations = sqliteTable('voice_master_creations', {
+    guildId: text('guild_id').notNull(),
+    sourceChannelId: text('source_channel_id').notNull(),
+    memberId: text('member_id').notNull(),
+    channelId: text('channel_id'),
+    state: text('state').notNull(),
+    generation: integer('generation').default(0).notNull(),
+    error: text('error'),
+    updatedAt: integer('updated_at').notNull(),
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.sourceChannelId, table.memberId] }),
+    stateCheck: check('voice_master_creations_state_check', sql`${table.state} IN ('pending','active','failed')`),
+}));
+
+const voiceMasterAccess = sqliteTable('voice_master_access', {
+    guildId: text('guild_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    userId: text('user_id').notNull(),
+    effect: text('effect').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.channelId, table.userId] }),
+    effectCheck: check('voice_master_access_effect_check', sql`${table.effect} IN ('permit','reject')`),
+}));
+
 const lifecycleMessages = sqliteTable('lifecycle_messages', {
     guildId: text('guild_id').notNull(),
     type: text('type').notNull(),
@@ -422,8 +480,15 @@ const bytepods = sqliteTable('bytepods', {
     ownerLeftAt: integer('owner_left_at'),      // Timestamp (ms) when owner left - null if owner present
     reclaimRequestPending: integer('reclaim_request_pending', { mode: 'boolean' }).default(false), // Prevents duplicate reclaim prompts
     panelMessageId: text('panel_message_id'), // Message ID of the active control panel (for cleanup)
+    sourceChannelId: text('source_channel_id'),
+    state: text('state').default('active').notNull(),
+    generation: integer('generation').default(0).notNull(),
+    cleanupAfter: integer('cleanup_after'),
+    botOwned: integer('bot_owned', { mode: 'boolean' }).default(true).notNull(),
     createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date()),
-});
+}, table => ({
+    guildStateIdx: index('bytepods_guild_state_idx').on(table.guildId, table.state),
+}));
 
 const bytepodAutoWhitelist = sqliteTable('bytepod_autowhitelist', {
     id: integer('id').primaryKey({ autoIncrement: true }),
@@ -1420,6 +1485,10 @@ const economyLabOperations = sqliteTable('economy_lab_operations', {
 module.exports = {
     guilds,
     musicConfig,
+    voiceMasterConfigs,
+    voiceMasterSources,
+    voiceMasterCreations,
+    voiceMasterAccess,
     lifecycleMessages,
     users,
     moderationLogs,

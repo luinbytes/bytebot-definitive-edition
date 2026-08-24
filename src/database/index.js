@@ -458,7 +458,53 @@ const expectedSchema = {
         owner_left_at: 'INTEGER',
         reclaim_request_pending: 'INTEGER DEFAULT 0',
         panel_message_id: 'TEXT',
+        source_channel_id: 'TEXT',
+        state: "TEXT DEFAULT 'active' NOT NULL",
+        generation: 'INTEGER DEFAULT 0 NOT NULL',
+        cleanup_after: 'INTEGER',
+        bot_owned: 'INTEGER DEFAULT 1 NOT NULL',
         created_at: 'INTEGER'
+    },
+    voice_master_configs: {
+        guild_id: 'TEXT PRIMARY KEY',
+        state: "TEXT DEFAULT 'active' NOT NULL",
+        category_id: 'TEXT',
+        primary_channel_id: 'TEXT',
+        interface_message_id: 'TEXT',
+        name_template: "TEXT DEFAULT '{owner}''s channel' NOT NULL",
+        default_role_id: 'TEXT',
+        default_bitrate: 'INTEGER',
+        default_region: 'TEXT',
+        send_interface: 'INTEGER DEFAULT 1 NOT NULL',
+        temporary_enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        join_role_id: 'TEXT',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    voice_master_sources: {
+        channel_id: 'TEXT PRIMARY KEY',
+        guild_id: 'TEXT NOT NULL',
+        category_id: 'TEXT',
+        interface_message_id: 'TEXT',
+        is_primary: 'INTEGER DEFAULT 0 NOT NULL',
+        owned: 'INTEGER DEFAULT 0 NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    voice_master_creations: {
+        guild_id: 'TEXT NOT NULL',
+        source_channel_id: 'TEXT NOT NULL',
+        member_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT',
+        state: 'TEXT NOT NULL',
+        generation: 'INTEGER DEFAULT 0 NOT NULL',
+        error: 'TEXT',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    voice_master_access: {
+        guild_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        effect: 'TEXT NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
     },
     bytepod_autowhitelist: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
