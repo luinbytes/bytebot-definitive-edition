@@ -61,9 +61,11 @@ the media layer does not acquire channel permissions or fetch arbitrary IDs.
   seconds, return a 2xx response, and must not redirect.
 - Both declared `Content-Length` and streamed bytes are bounded. Partial and
   oversized bodies are cancelled or destroyed.
-- Processing runs through one in-process FIFO slot by default. A configured
-  value may lower the slot count to disable processing but cannot exceed one in
-  the 1 vCPU/1 GB deployment profile.
+- Processing runs through `processImage` and one in-process FIFO slot by default.
+  At most four active/queued jobs are retained; excess work fails immediately.
+  A configured value may lower the slot count to disable processing but cannot
+  exceed one in the 1 vCPU/1 GB deployment profile. Each processor receives a
+  cancellation signal and has a 30-second default deadline.
 - Temporary processing uses a fresh operating-system temp directory and removes
   it in `finally`. Callers receive the validated buffer and metadata; commands
   never pass an untrusted path or filename to a processor.

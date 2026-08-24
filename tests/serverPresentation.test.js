@@ -3,7 +3,7 @@ const os = require('os');
 const path = require('path');
 const http = require('http');
 
-const IMAGE_BUFFER = Buffer.from('89504e470d0a1a0a0000000d494844520000000100000001', 'hex');
+const IMAGE_BUFFER = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlS4AAAAASUVORK5CYII=', 'base64');
 
 describe('server presentation', () => {
     let tempDir;
@@ -24,7 +24,7 @@ describe('server presentation', () => {
             fetch: jest.fn(async () => ({
                 ok: true,
                 headers: { get: name => name === 'content-type' ? 'image/png' : String(IMAGE_BUFFER.length) },
-                arrayBuffer: async () => IMAGE_BUFFER
+                async *[Symbol.asyncIterator]() { yield IMAGE_BUFFER; }
             })),
             lookup: jest.fn(async () => [{ address: '93.184.216.34' }])
         });

@@ -1,12 +1,6 @@
 const fs = require('fs');
 
-const png = (width = 2, height = 3) => {
-    const buffer = Buffer.alloc(24);
-    Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').copy(buffer);
-    buffer.writeUInt32BE(width, 16);
-    buffer.writeUInt32BE(height, 20);
-    return buffer;
-};
+const VALID_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlS4AAAAASUVORK5CYII=', 'base64');
 
 describe('media service', () => {
     test('resolves the documented image-source order', () => {
@@ -29,11 +23,11 @@ describe('media service', () => {
 
     test('pins public downloads and verifies bytes, dimensions, and declared metadata', async () => {
         const { MediaService } = require('../src/services/mediaService');
-        const body = png();
+        const body = VALID_PNG;
         const fetch = jest.fn(async () => ({
             statusCode: 200,
             headers: { 'content-type': 'image/png', 'content-length': String(body.length) },
-            arrayBuffer: async () => body
+            async *[Symbol.asyncIterator]() { yield body; }
         }));
         const service = new MediaService({
             fetch,
@@ -42,8 +36,8 @@ describe('media service', () => {
 
         await expect(service.image({
             url: 'https://example.com/image.png', contentType: 'image/png', size: body.length,
-            width: 2, height: 3
-        })).resolves.toEqual({ buffer: body, format: 'png', contentType: 'image/png', width: 2, height: 3 });
+            width: 1, height: 1
+        })).resolves.toEqual({ buffer: body, format: 'png', contentType: 'image/png', width: 1, height: 1 });
         expect(fetch).toHaveBeenCalledWith(expect.any(URL), expect.objectContaining({ address: '93.184.216.34', family: 4 }));
 
         await expect(service.image({ url: 'https://example.com/image.png', width: 5000, height: 3 })).rejects.toThrow('dimensions');
@@ -54,7 +48,7 @@ describe('media service', () => {
         fetch.mockResolvedValueOnce({
             statusCode: 200,
             headers: { 'content-type': 'image/jpeg', 'content-length': String(body.length) },
-            arrayBuffer: async () => body
+            async *[Symbol.asyncIterator]() { yield body; }
         });
         await expect(service.image('https://example.com/wrong.jpg')).rejects.toThrow('match');
     });
@@ -63,6 +57,48 @@ describe('media service', () => {
         const { validateMediaMetadata } = require('../src/services/mediaService');
         expect(() => validateMediaMetadata({ size: 10, duration: 601 }, { maxDurationSeconds: 600 })).toThrow('duration');
         expect(() => validateMediaMetadata({ size: 10 }, { maxDurationSeconds: 600, requireDuration: true })).toThrow('duration');
+        expect(() => validateMediaMetadata({ size: 10 }, { maxBytes: 0 })).toThrow('positive');
+    });
+
+    test('rejects redirects, private DNS answers, and streamed overflow', async () => {
+        const { MAX_IMAGE_BYTES, MediaService } = require('../src/services/mediaService');
+        const destroy = jest.fn();
+        const fetch = jest.fn(async () => ({ statusCode: 302, headers: {}, destroy }));
+        const lookup = jest.fn(async () => [{ address: '93.184.216.34', family: 4 }]);
+        const service = new MediaService({ fetch, lookup });
+        await expect(service.image('https://example.com/image.png')).rejects.toThrow('download failed');
+        expect(destroy).toHaveBeenCalled();
+
+        lookup.mockResolvedValueOnce([
+            { address: '93.184.216.34', family: 4 }, { address: '127.0.0.1', family: 4 }
+        ]);
+        await expect(service.image('https://example.com/image.png')).rejects.toThrow('public address');
+
+        fetch.mockResolvedValueOnce({
+            statusCode: 200, headers: { 'content-type': 'image/png' }, destroy,
+            async *[Symbol.asyncIterator]() { yield Buffer.alloc(MAX_IMAGE_BYTES + 1); }
+        });
+        await expect(service.image('https://example.com/image.png')).rejects.toThrow('8 MB');
+        expect(destroy).toHaveBeenCalledTimes(2);
+    });
+
+    test('applies the download deadline to DNS resolution', async () => {
+        const { MediaService } = require('../src/services/mediaService');
+        const service = new MediaService({ lookup: () => new Promise(() => {}), timeoutMs: 20 });
+        await expect(service.image('https://example.com/image.png')).rejects.toThrow('timed out');
+    });
+
+    test('rejects non-streaming responses before buffering them', async () => {
+        const { MediaService } = require('../src/services/mediaService');
+        const arrayBuffer = jest.fn();
+        const service = new MediaService({
+            lookup: async () => [{ address: '93.184.216.34', family: 4 }],
+            fetch: async () => ({
+                statusCode: 200, headers: { 'content-type': 'image/png' }, arrayBuffer
+            })
+        });
+        await expect(service.image('https://example.com/image.png')).rejects.toThrow('bounded response stream');
+        expect(arrayBuffer).not.toHaveBeenCalled();
     });
 
     test('serializes processing and removes each temporary workspace', async () => {
@@ -94,5 +130,18 @@ describe('media service', () => {
         expect(order).toEqual(['first-start', 'first-end', 'second']);
         expect(fs.existsSync(firstDirectory)).toBe(false);
         expect(fs.existsSync(secondDirectory)).toBe(false);
+    });
+
+    test('rejects excess queued work and aborts a timed-out processor', async () => {
+        const { ProcessingQueue } = require('../src/services/mediaService');
+        const queue = new ProcessingQueue(1, { maxPending: 1, timeoutMs: 1000 });
+        let observedSignal;
+        const blocked = queue.run((_directory, signal) => {
+            observedSignal = signal;
+            return new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+        });
+        await expect(queue.run(() => {})).rejects.toThrow('full');
+        await expect(blocked).rejects.toThrow('timed out');
+        expect(observedSignal.aborted).toBe(true);
     });
 });

@@ -12,6 +12,11 @@ const MAX_IMAGE_PIXELS = 16 * 1024 * 1024;
 const MAX_MEDIA_DURATION_SECONDS = 600;
 const IMAGE_FORMATS = new Set(['png', 'jpeg', 'gif', 'webp']);
 
+function boundedLimit(value, ceiling, label) {
+    if (!Number.isFinite(value) || value <= 0) throw new Error(`${label} must be a positive number.`);
+    return Math.min(value, ceiling);
+}
+
 function privateAddress(address) {
     address = String(address).replace(/^\[|\]$/g, '');
     if (net.isIP(address) === 4) {
@@ -106,11 +111,11 @@ function imageMetadata(buffer) {
 }
 
 function validateMediaMetadata(input = {}, options = {}) {
-    const limit = (value, ceiling) => Number.isFinite(value) && value > 0 ? Math.min(value, ceiling) : ceiling;
-    const maxBytes = limit(options.maxBytes ?? MAX_IMAGE_BYTES, MAX_IMAGE_BYTES);
-    const maxEdge = limit(options.maxEdge ?? MAX_IMAGE_EDGE, MAX_IMAGE_EDGE);
-    const maxPixels = limit(options.maxPixels ?? MAX_IMAGE_PIXELS, MAX_IMAGE_PIXELS);
-    const maxDuration = limit(options.maxDurationSeconds ?? MAX_MEDIA_DURATION_SECONDS, MAX_MEDIA_DURATION_SECONDS);
+    const maxBytes = boundedLimit(options.maxBytes ?? MAX_IMAGE_BYTES, MAX_IMAGE_BYTES, 'Media byte limit');
+    const maxEdge = boundedLimit(options.maxEdge ?? MAX_IMAGE_EDGE, MAX_IMAGE_EDGE, 'Media edge limit');
+    const maxPixels = boundedLimit(options.maxPixels ?? MAX_IMAGE_PIXELS, MAX_IMAGE_PIXELS, 'Media pixel limit');
+    const maxDuration = boundedLimit(options.maxDurationSeconds ?? MAX_MEDIA_DURATION_SECONDS,
+        MAX_MEDIA_DURATION_SECONDS, 'Media duration limit');
     const size = input.size;
     const width = input.width;
     const height = input.height;
@@ -154,6 +159,20 @@ function resolveImageInput({ attachment, member, message, url, user } = {}) {
     throw new Error('Provide an image attachment, member, reply, URL, or avatar.');
 }
 
+function discard(response) {
+    response.destroy?.();
+    const cancellation = response.body?.cancel?.();
+    cancellation?.catch?.(() => {});
+}
+
+function untilAbort(signal) {
+    return new Promise((_, reject) => {
+        const fail = () => reject(new Error('Media download timed out.'));
+        if (signal.aborted) fail();
+        else signal.addEventListener('abort', fail, { once: true });
+    });
+}
+
 async function responseBuffer(response, maxBytes) {
     if (response.body?.getReader) {
         const reader = response.body.getReader();
@@ -184,15 +203,16 @@ async function responseBuffer(response, maxBytes) {
         }
         return Buffer.concat(chunks, total);
     }
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.length > maxBytes) throw new Error('Media cannot exceed 8 MB.');
-    return buffer;
+    discard(response);
+    throw new Error('Media downloads require a bounded response stream.');
 }
 
 class MediaService {
     constructor(options = {}) {
         this.fetch = options.fetch || pinnedFetch;
         this.lookup = options.lookup || (hostname => dns.lookup(hostname, { all: true, verbatim: true }));
+        this.timeoutMs = options.timeoutMs || 10000;
+        this.queue = options.queue || new ProcessingQueue(options.concurrency);
     }
 
     async image(input, options = {}) {
@@ -210,7 +230,8 @@ class MediaService {
         if ((input?.contentType || input?.content_type) && (!declaredFormat || !allowedFormats.has(declaredFormat))) {
             throw new Error('Images must use an allowed PNG, JPG, GIF, or WebP format.');
         }
-        const addresses = await this.lookup(url.hostname);
+        const signal = AbortSignal.timeout(this.timeoutMs);
+        const addresses = await Promise.race([this.lookup(url.hostname), untilAbort(signal)]);
         const resolved = Array.isArray(addresses) ? addresses : [addresses];
         if (!resolved.length || resolved.some(entry => privateAddress(entry.address || entry))) {
             throw new Error('Images must be hosted at a public address.');
@@ -220,24 +241,23 @@ class MediaService {
         const response = await this.fetch(url, {
             address,
             family: destination.family || net.isIP(address),
-            signal: AbortSignal.timeout(10000)
+            signal
         });
         const status = response.status ?? response.statusCode;
         if (response.ok === false || (status != null && (status < 200 || status >= 300))) {
-            response.destroy?.();
+            discard(response);
             throw new Error('Image download failed.');
         }
         const header = name => response.headers.get?.(name) ?? response.headers[name];
         const responseFormat = normalizeType(header('content-type'));
         if (!responseFormat || !allowedFormats.has(responseFormat)) {
-            response.destroy?.();
+            discard(response);
             throw new Error('Images must use an allowed PNG, JPG, GIF, or WebP format.');
         }
-        const maxBytes = Number.isFinite(options.maxBytes) && options.maxBytes > 0
-            ? Math.min(options.maxBytes, MAX_IMAGE_BYTES) : MAX_IMAGE_BYTES;
+        const maxBytes = boundedLimit(options.maxBytes ?? MAX_IMAGE_BYTES, MAX_IMAGE_BYTES, 'Media byte limit');
         const length = Number(header('content-length') || 0);
         if (!Number.isFinite(length) || length < 0 || length > maxBytes) {
-            response.destroy?.();
+            discard(response);
             throw new Error('Media cannot exceed 8 MB.');
         }
         const buffer = await responseBuffer(response, maxBytes);
@@ -252,26 +272,68 @@ class MediaService {
         }
         return { buffer, ...metadata, contentType: `image/${metadata.format}` };
     }
+
+    processImage(input, processor, options = {}) {
+        return this.queue.run(async (directory, signal) => {
+            const image = await this.image(input, options);
+            return processor(image, directory, signal);
+        });
+    }
 }
 
 class ProcessingQueue {
-    constructor(concurrency = Number(process.env.MEDIA_PROCESSING_CONCURRENCY ?? 1)) {
+    constructor(concurrency = Number(process.env.MEDIA_PROCESSING_CONCURRENCY ?? 1), options = {}) {
         if (![0, 1].includes(concurrency)) throw new Error('Media processing concurrency must be 0 or 1.');
+        const maxPending = options.maxPending ?? 4;
+        const timeoutMs = options.timeoutMs ?? 30000;
+        if (!Number.isInteger(maxPending) || maxPending < 1 || maxPending > 4) throw new Error('Media queue limit must be 1-4.');
+        if (!Number.isFinite(timeoutMs) || timeoutMs < 1000 || timeoutMs > 60000) throw new Error('Media task timeout must be 1-60 seconds.');
         this.enabled = concurrency === 1;
+        this.maxPending = maxPending;
+        this.timeoutMs = timeoutMs;
+        this.pending = 0;
         this.tail = Promise.resolve();
     }
 
     run(task) {
         if (!this.enabled) return Promise.reject(new Error('Media processing is disabled.'));
-        const result = this.tail.then(async () => {
+        if (this.pending >= this.maxPending) return Promise.reject(new Error('Media processing queue is full.'));
+        this.pending++;
+        let resolveResult;
+        let rejectResult;
+        let settled = false;
+        const result = new Promise((resolve, reject) => {
+            resolveResult = resolve;
+            rejectResult = reject;
+        });
+        const completion = this.tail.then(async () => {
             const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'bytebot-media-'));
+            const controller = new AbortController();
+            const timeout = setTimeout(() => {
+                controller.abort();
+                if (!settled) {
+                    settled = true;
+                    rejectResult(new Error('Media processing timed out.'));
+                }
+            }, this.timeoutMs);
+            timeout.unref?.();
+            let value;
+            let error;
             try {
-                return await task(directory);
+                value = await task(directory, controller.signal);
+            } catch (taskError) {
+                error = taskError;
             } finally {
+                clearTimeout(timeout);
                 await fs.rm(directory, { recursive: true, force: true });
             }
-        });
-        this.tail = result.catch(() => {});
+            if (!settled) {
+                settled = true;
+                if (error) rejectResult(error);
+                else resolveResult(value);
+            }
+        }).finally(() => { this.pending--; });
+        this.tail = completion.catch(() => {});
         return result;
     }
 }
