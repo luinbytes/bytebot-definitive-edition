@@ -234,9 +234,11 @@ from #48 still applies to the resulting ledger mutation.
   negative balance; a success mints a positive payout through the common 1.5x
   earning path.
 - `/economy rob` is guild-only and requires a current non-bot target distinct
-  from the actor. Enforce the evidenced minimums (robber total at least 100,
-  target total at least 500), one persisted cooldown, and wallet-only
-  settlement because the public guide says deposit protects coins from
+  from the actor. Enforce the evidenced minimum amounts as wallet minimums
+  (robber wallet at least 100, target wallet at least 500); this wallet-only
+  interpretation is ByteBot-owned because the source does not distinguish
+  wallet from bank in the error text. Use one persisted cooldown and wallet-
+  only settlement because the public guide says deposit protects coins from
   robbery. The amount/odds/cooldown are ByteBot-owned until sourced. Robbery
   transfers target currency and never receives the 1.5x system payout
   multiplier; failed robbery loses only available actor wallet currency.
@@ -414,3 +416,203 @@ When a new first-party Greed source resolves one of these gaps, update this
 file, pin the source/ref, and re-run the contract/review gate before changing
 runtime behavior. Until then, ByteBot-owned values must be labelled as such
 and never described as Greed's paywalled defaults.
+
+## ByteBot-owned deterministic rules appendix
+
+This appendix closes the implementation choices needed to ship #49. Every
+number and mechanic in this section is ByteBot-owned. None is evidence about
+Greed and none may be presented as a Greed default. The shared engine is
+deliberately small: one wallet-only game debit, one outcome/settlement helper,
+one persisted interactive-session state machine, and fixed tables below.
+
+### Shared game accounting
+
+All twelve games use the same accounting contract:
+
+1. Validate a guild account, enabled economy, wallet balance, integer bet
+   between 10 and 1,000,000 inclusive, and the actor-bound rate limit.
+2. In one immediate transaction, debit the bet and append an immutable
+   `game_bet` ledger row. One-shot games immediately append their settlement
+   in the same transaction; interactive games commit the debit before sending
+   buttons.
+3. Tables below give a `base return`, including the returned stake. For a
+   base return of `R` coins, `base_profit = max(0, R - bet)`. The inherited
+   multiplier is applied only to that positive system-funded profit:
+   `funded_profit = floor(base_profit * 3 / 2)` and
+   `credit = (R > 0 ? bet + funded_profit : 0)`. Thus a push returns exactly
+   the stake and is never multiplied; a loss returns zero; a winning game
+   receives the 1.5x allowance once. All arithmetic floors toward zero.
+4. Append one `game_settlement` ledger row for a positive credit or a
+   `game_loss` terminal row with no credit. `net = credit - bet` is shown to
+   the player. No result can make wallet or bank negative.
+
+Production outcomes use `crypto.randomInt` (or the existing injected random
+source in tests). The command root keeps its existing two-second cooldown.
+Interactive sessions have one active session per user/guild, a ten-minute
+expiry, and a server-generated nonce. A component must match the session ID,
+nonce, guild, and initiating user. The first conditional terminal update wins;
+later clicks return that terminal result without another ledger row. On expiry
+the engine credits exactly the original bet, marks the session `refunded`, and
+does not apply 1.5x. A restart reconciles active sessions whose expiry has
+passed before serving a new game command.
+
+### One-shot game table
+
+`return` is the base return multiple before the inherited multiplier. `0x`
+means no credit; `1x` is a push. Percentages are exact selection weights.
+
+| Game | Deterministic ByteBot rule | Outcome and base return |
+| --- | --- | --- |
+| `coinflip` | Draw one equally likely value from `heads`/`tails`; compare with the required `side`. | Match: 50%, `2x`; mismatch: 50%, `0x`. |
+| `dice` | Draw player and dealer values independently and uniformly from d6. | Player higher: 15/36, `2x`; tie: 6/36, `1x`; player lower: 15/36, `0x`. |
+| `gamble` | Draw an integer 1–100 and use the first inclusive weight bucket. | 1–45: 45%, `0x`; 46–70: 25%, `1x`; 71–90: 20%, `2x`; 91–98: 8%, `3x`; 99–100: 2%, `5x`. |
+| `roulette` | Draw one integer 0–36 uniformly. Use the conventional 18 red values, 18 black values, and green 0. | `red`, `black`, `odd`, or `even` win on their matching non-zero set: 18/37, `2x`; `green` wins only on 0: 1/37, `36x`; all other results: `0x`. |
+| `highlow` | Draw a first and next rank independently and uniformly from 1–13; compare them with required `higher`/`lower`. | Correct: 78/169, `2x`; equal: 13/169, `1x`; incorrect: 78/169, `0x`. |
+| `slots` | Draw three independent symbols uniformly from `cherry`, `lemon`, `bell`, `star`, `seven`. | `seven-seven-seven`: 1/125, `20x`; any other triple: 4/125, `8x`; exactly one matching pair: 60/125, `2x`; otherwise: 60/125, `0x`. |
+| `plinko` | Make eight independent fair left/right hops. The number of right hops selects bin 0–8. | Bin probabilities are `1,8,28,56,70,56,28,8,1 / 256`; base-return table by bin is `[0x, 0x, 1x, 2x, 3x, 2x, 1x, 0x, 0x]`. |
+| `scratch` | Draw an integer 1–100 and render nine scratch cells whose symbols communicate the selected tier. | 1–60: 60%, `0x`; 61–85: 25%, `1x`; 86–95: 10%, `2x`; 96–99: 4%, `5x`; 100: 1%, `10x`. Reveal is one atomic command result; there is no second charge. |
+
+The game table is the only source of odds or payouts for this implementation.
+No configurable per-guild house edge, user luck, premium multiplier, or
+client-supplied result is permitted.
+
+### Interactive game state transitions
+
+The four games whose public descriptions imply multiple actions use the same
+session row and conditional settlement helper. Every transition below is
+atomic and idempotent. An expired session refunds the stake exactly once as
+described by the shared contract.
+
+#### `bombs`
+
+- On start, generate a uniform 5x5 board with exactly three bomb cells, debit
+  the bet, and reveal no cells. The session stores the board, revealed safe
+  cells, and nonce; the player sees buttons for unrevealed cells only.
+- A safe-cell click adds that cell to `revealed` and leaves the session active.
+  After `n` safe cells, the cash-out base return is
+  `1 + floor(n / 2)` times the bet, capped at `12x`; cash-out is offered after
+  the first safe cell. A bomb click settles `lost` at `0x`. Revealing all 22
+  safe cells auto-settles at `12x`.
+- A cash-out click settles at the current table return and disables all cell
+  and cash-out buttons. Invalid, repeated, expired, or non-owner clicks do not
+  alter the session.
+
+#### `ladder`
+
+- On start, set rung 0 of 6 and debit the bet. The player receives `climb`;
+  after the first successful rung it also receives `cash out`.
+- Each climb uses one uniform draw 1–100 and the following inclusive success
+  thresholds: rung 1 `<=80`, rung 2 `<=70`, rung 3 `<=60`, rung 4 `<=50`,
+  rung 5 `<=40`, rung 6 `<=30`. A failed climb settles `lost` at `0x`.
+- Successful rung cash-out returns `[1x, 2x, 3x, 5x, 8x, 12x]` for rungs
+  1–6. Reaching rung 6 auto-settles at `12x`; cash-out disables `climb`.
+  Expiry before settlement refunds the stake.
+
+#### `crash`
+
+- On start, draw one crash point from the following weighted table and store
+  it as hundredths: `1.10` (20%), `1.25` (20%), `1.50` (20%), `2.00` (15%),
+  `3.00` (12%), `5.00` (8%), `10.00` (5%). Current multiplier starts at
+  `1.00x`; `cash out` and `advance` are the only actions.
+- `advance` moves through `[1.10, 1.25, 1.50, 2.00, 3.00, 5.00, 10.00]`.
+  If the next value is at or above the stored crash point, the multiplier
+  crashes and the session settles `lost` at `0x`; otherwise current multiplier
+  becomes that next value. A `cash out` click settles at current multiplier,
+  calculated as `floor(bet * multiplierHundredths / 100)` before the 1.5x
+  profit allowance.
+- A crash point of 1.10 therefore gives the player no profitable advance but
+  still permits the initial 1.00x push if they cash out immediately. Expiry
+  refunds the stake, not the current displayed multiplier.
+
+#### `blackjack`
+
+- On start, shuffle a standard 52-card deck with the server RNG, deal two
+  cards to the player and two to the dealer, and keep one dealer card hidden.
+  Aces count as 1 or 11 to maximize the hand without busting. Only `hit` and
+  `stand` are supported; double and split are intentionally absent. An initial
+  two-card 21 auto-settles as a win at `2x` and exposes no action buttons.
+- `hit` deals one card. A player total over 21 settles `lost` at `0x`; a total
+  of exactly 21 keeps `stand` available. `stand` reveals the dealer and draws
+  while dealer total is below 17 (dealer stands on soft 17).
+- Player total above dealer, or a dealer bust, settles at `2x`; equal totals
+  push at `1x`; all other results settle at `0x`. A natural 21 uses the same
+  `2x` table as every other win; no undocumented 3:2 bonus is added. Expiry
+  refunds the stake and clears the hidden dealer state.
+
+### Crime and robbery table
+
+These are fixed ByteBot-owned values; the existing six-hour age gate and
+guild-only scope remain in force.
+
+| Action | Cooldown | Outcome draw | Amount and accounting |
+| --- | ---: | --- | --- |
+| `crime` | 3,600 seconds from every completed attempt | 1–100: 1–60 succeeds; 61–100 fails. | Success draws base amount uniformly from 100–500 inclusive, then credits `floor(base * 3 / 2)` as a positive system payout. Failure burns `min(wallet, max(1, floor(wallet / 10)))`; a zero wallet loses zero. Failure is not multiplied. |
+| `rob` | 7,200 seconds from every completed attempt | 1–100: 1–40 succeeds; 41–100 fails. | Require actor wallet ≥100 and target wallet ≥500. Success transfers `max(100, floor(target.wallet / 4))` from target wallet to actor wallet, never bank, and never multiplies. Failure burns `min(actor.wallet, max(10, floor(actor.wallet / 10)))`; no negative wallet is possible. |
+
+Crime success is a system-funded payout and therefore receives 1.5x exactly
+once. Robbery success is a wallet-to-wallet transfer and therefore receives no
+multiplier. A failed attempt claims its cooldown even if its available loss is
+zero. Robbery never reads or changes bank balances; the public guide's bank
+safety behavior is therefore preserved by this explicit ByteBot rule.
+
+### Gang capacity and invites
+
+- A gang has a maximum of 25 members, including its owner. A member cannot
+  belong to two gangs in one guild. There is no gang currency, fee, or passive
+  payout.
+- An invite is valid for 600 seconds. At most one pending invite exists for a
+  `(gang, invitee)` pair and a gang may have at most 25 pending invites. The
+  invitee alone can accept or decline; an expired, already-acted, non-member,
+  bot, or wrong-guild click is rejected without changing membership.
+- Acceptance checks capacity and one-gang membership again inside the same
+  immediate transaction that marks the invite accepted and inserts the
+  member. Decline and expiry only mark the invite terminal. Disband marks all
+  pending invites revoked and removes memberships in one transaction.
+
+### Laboratory rule table
+
+Laboratories use wallet-only purchases and a single fixed progression table.
+The table is intentionally small and visible in `/economy lab status`:
+
+| Setting | ByteBot-owned value |
+| --- | ---: |
+| Purchase price | 10,000 coins |
+| Starting level | 1 |
+| Maximum level | 10 |
+| Starting ampoules | 1 |
+| Maximum ampoules | 5 |
+| Level-1 storage | 1,000 coins |
+| Storage at level `L` | `1,000 * L` coins |
+| Base hourly earnings at level `L`, ampoules `A` | `100 * L + 50 * (A - 1)` coins/hour |
+| Ampoule price | 2,000 coins each |
+| Upgrade from level `L` to `L+1` | `5,000 * (L + 1)` coins |
+
+`lab buy` creates level 1 with one ampoule and 1,000 storage. `lab upgrade`
+settles elapsed accrual first, then charges the formula cost and increases
+level/storage. `lab ampoules amount` accepts exactly 1–5, rejects a purchase
+that would exceed five total, charges `2,000 * amount`, and increases the
+hourly formula immediately. Level 10 has no next upgrade; an ampoule purchase
+at five is rejected.
+
+On every lab write, projected accrued coins are computed as
+`min(storage, storedAmount + floor(hourlyRate * elapsedSeconds / 3,600))`,
+where elapsed time is clamped to non-negative and `last_accrual_at` advances to
+the current time. Status computes the same projection without mutating it.
+Collection sets the projected stored amount to zero and credits
+`floor(baseAccrued * 3 / 2)`; this positive collection payout receives the
+inherited multiplier once. A collection with zero base accrued coins returns
+the evidenced no-earnings state. Lab earnings do not consume the #48
+daily/work cap, but account, operation, scope-supply, and wallet bounds still
+apply. Buy, upgrade, ampoules, and collect each use a unique operation ID so a
+retry cannot charge or credit twice.
+
+### Leaderboard page behavior
+
+`/economy leaderboard` returns the first 25 guild accounts ordered by total
+`wallet + bank` descending, then Discord user ID ascending. It excludes bots,
+does not create accounts, and never reads a global scope. If more than 25 rows
+exist, show a `next` button; subsequent pages use a server-generated page
+token containing guild, requester, offset, and a ten-minute expiry. Only the
+requester may use those buttons. `previous` and `next` use offsets of 25,
+disable at the ends, and are terminal after expiry. A missing member at render
+time remains a row with its stored Discord ID rather than changing rank order.
