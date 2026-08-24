@@ -206,6 +206,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/server permissions disable` • `/server permissions denyperm` • `/server permissions protect`\n' +
                     '`/reactionrole add` • `/buttonrole add` • `/temprole add` • `/boosterrole create`\n' +
                     '`/ticket setup` • `/ticket panel manage` • `/ticket settings view`\n' +
+                    '`/giveaway start` • `/giveaway edit prize` • `/counter add`\n' +
                     '`/mod user warn` • `/mod case view` • `/mod config setup`\n' +
                     '`/mod template set` • `/game warthunder stats`\n' +
                     '`/fun uwuify` • `/fun uwulock add`',

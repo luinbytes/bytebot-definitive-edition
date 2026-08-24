@@ -62,6 +62,7 @@ describe('giveaway platform', () => {
         expect(() => parseDuration('9s')).toThrow('at least 10 seconds');
         expect(() => parseDuration('31d')).toThrow('30 days');
         expect(() => parseDuration('later')).toThrow('formats like');
+        expect(() => service.validateUrl('ftp://example.com/image.png')).toThrow('HTTP or HTTPS');
     });
 
     test('rechecks role blacklist, required role, level, and maximum entries on every click', () => {
@@ -107,10 +108,13 @@ describe('giveaway platform', () => {
             id: 'guild1', name: 'Guild', channels: { cache: new Map([['channel1', channel]]), fetch: jest.fn() },
             members: { cache: members, fetch: jest.fn(id => members.get(id)), me: { permissionsIn: () => ({ has: () => true }) } }
         };
-        service.client = {
+        const hostSend = jest.fn().mockResolvedValue({});
+        const winnerSend = jest.fn().mockRejectedValue(new Error('DMs closed'));
+        const client = {
             user: { id: 'bot' }, guilds: { cache: new Map([['guild1', guild]]), fetch: jest.fn() },
-            users: { fetch: jest.fn().mockResolvedValue({ send: jest.fn().mockResolvedValue({}) }) }
+            users: { fetch: jest.fn(id => Promise.resolve({ send: id === 'admin' ? hostSend : winnerSend })) }
         };
+        service.client = client;
         const giveaway = await service.startDiscordGiveaway({ guild, channel, user: { id: 'admin' }, member: member('admin') }, {
             duration: '10s', winnerCount: 1, prize: 'Nitro'
         });
@@ -118,13 +122,31 @@ describe('giveaway platform', () => {
         service.enter(giveaway.id, members.get('user2'));
         service.updateConfig('guild1', { dmCreator: true, dmWinners: true });
 
-        const first = await service.endDiscordGiveaway(giveaway.id, 'admin');
+        const claimed = service.claimEnd(giveaway.id, 'bot', [...members.values()]);
+        const { GiveawayService } = require('../src/services/giveawayService');
+        service = new GiveawayService(client, { sqlite: database.sqlite, now: () => 1000, randomInt: () => 0 });
+        await service.reconcile();
         const retry = await service.endDiscordGiveaway(giveaway.id, 'admin');
 
-        expect(retry.round.winnerIds).toEqual(first.round.winnerIds);
+        expect(retry.round.winnerIds).toEqual(claimed.round.winnerIds);
         expect(message.edit).toHaveBeenCalledTimes(1);
-        expect(service.client.users.fetch).toHaveBeenCalledTimes(2);
+        expect(hostSend).toHaveBeenCalledTimes(1);
+        expect(winnerSend).toHaveBeenCalledTimes(1);
+        expect(database.sqlite.prepare("SELECT COUNT(*) count FROM giveaway_actions WHERE giveaway_id = ? AND action = 'winner_dm_failed'").get(giveaway.id).count).toBe(1);
         expect(database.sqlite.prepare('SELECT COUNT(*) count FROM giveaway_rounds WHERE giveaway_id = ?').get(giveaway.id).count).toBe(1);
+    });
+
+    test('marks a giveaway lost when its exact message is missing', async () => {
+        const channel = { id: 'channel1', messages: { fetch: jest.fn().mockResolvedValue(null) } };
+        const guild = { id: 'guild1', channels: { cache: new Map([['channel1', channel]]) },
+            members: { cache: new Map(), fetch: jest.fn() } };
+        service.client = { user: { id: 'bot' }, guilds: { cache: new Map([['guild1', guild]]) }, users: { fetch: jest.fn() } };
+        const giveaway = service.reserveGiveaway({ guildId: 'guild1', channelId: 'channel1', hostId: 'admin',
+            duration: '10s', winnerCount: 1, prize: 'Nitro' });
+        service.attachMessage(giveaway.id, 'message1');
+
+        await expect(service.endDiscordGiveaway(giveaway.id, 'admin')).rejects.toThrow('exact giveaway message');
+        expect(service.getGiveaway(giveaway.id).status).toBe('lost');
     });
 
     test('resumes an unannounced reroll without choosing another winner', async () => {
