@@ -211,6 +211,13 @@
       "when": 1787702400000,
       "tag": "0029_activity_level_tracks",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1787706000000,
+      "tag": "0030_voice_session_minimums",
+      "breakpoints": true
     }
   ]
 }

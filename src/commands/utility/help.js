@@ -219,17 +219,23 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/giveaway start` • `/giveaway edit prize` • `/counter add`\n' +
                     '`/economy balance` • `/economy game coinflip` • `/economy gang info` • `/economy lab status`\n' +
                     '`/server backup create` • `/server customize preset` • `/server discovery publish`\n' +
-                    '`/server stats days:60`\n' +
+                    '`/analytics days:60` • `/levels rank` • `/server logs add`\n' +
                     '`/mod user warn` • `/mod case view` • `/mod config setup`\n' +
                     '`/mod template set` • `/game warthunder stats`\n' +
                     '`/fun uwuify` • `/fun uwulock add`',
                 inline: false
             },
             {
+                name: 'Greed Text Aliases',
+                value: '`level`, `rank`, `xp`, `lvl` → `/levels rank` • `levels lb`, `levels top` → `/levels leaderboard`\n' +
+                    '`rankcard`, `rc` → `/levels rankcard view` • `rankcard colour`, `rankcard accent` → `/levels rankcard color`',
+                inline: false
+            },
+            {
                 name: 'Public Parity Map',
                 value:
                     'Greed source categories route through ByteBot\'s existing hubs as features land:\n' +
-                    '`/community` Levels, Socials • `/me` Information, Utility\n' +
+                    '`/levels` Levels • `/community` Socials • `/me` Information, Utility • `/analytics` Analytics\n' +
                     '`/server` Auto, Logs, Security, Server, Settings • `/ticket` Tickets • `/mod` Moderation\n' +
                     '`/fun` Fun, Manipulation, Roleplay, Snipe • `/boosterrole` Boosters • `/economy` Economy\n' +
                     '**Not yet available (planned):** LastFM, Voice\n' +

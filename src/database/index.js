@@ -1025,7 +1025,9 @@ const expectedSchema = {
         eligible_since: 'INTEGER',
         last_observed_at: 'INTEGER NOT NULL',
         remainder_seconds: 'INTEGER DEFAULT 0 NOT NULL',
-        awarded_xp: 'INTEGER DEFAULT 0 NOT NULL'
+        awarded_xp: 'INTEGER DEFAULT 0 NOT NULL',
+        eligible_seconds: 'INTEGER DEFAULT 0 NOT NULL',
+        xp_seconds_consumed: 'INTEGER DEFAULT 0 NOT NULL'
     },
     member_presence: {
         guild_id: 'TEXT NOT NULL',

@@ -1196,7 +1196,9 @@ const levelVoiceSessions = sqliteTable('level_voice_sessions', {
     eligibleSince: integer('eligible_since'),
     lastObservedAt: integer('last_observed_at').notNull(),
     remainderSeconds: integer('remainder_seconds').default(0).notNull(),
-    awardedXp: integer('awarded_xp').default(0).notNull()
+    awardedXp: integer('awarded_xp').default(0).notNull(),
+    eligibleSeconds: integer('eligible_seconds').default(0).notNull(),
+    xpSecondsConsumed: integer('xp_seconds_consumed').default(0).notNull()
 }, table => ({ pk: primaryKey({ columns: [table.guildId, table.userId] }) }));
 
 const memberPresence = sqliteTable('member_presence', {

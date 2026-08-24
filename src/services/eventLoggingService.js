@@ -3,6 +3,7 @@ const {
     ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, EmbedBuilder,
     MessageFlags, PermissionFlagsBits, StringSelectMenuBuilder
 } = require('discord.js');
+const config = require('../utils/config');
 
 const MODULES = [
     'messages', 'members', 'moderation', 'server', 'voice', 'channels',
@@ -107,6 +108,12 @@ class EventLoggingService {
             const channel = interaction.options.getChannel('channel');
             const rawModule = interaction.options.getString('module');
             if (!channel && !rawModule) {
+                for (const [key, value] of this.confirmations) {
+                    if (value.expiresAt < this.now()
+                        || (value.guildId === interaction.guildId && value.actorId === interaction.user.id)) {
+                        this.confirmations.delete(key);
+                    }
+                }
                 const token = crypto.randomBytes(8).toString('hex');
                 this.confirmations.set(token, {
                     guildId: interaction.guildId, actorId: interaction.user.id, expiresAt: this.now() + 10 * 60 * 1000
@@ -176,6 +183,7 @@ class EventLoggingService {
                 || confirmation.guildId !== interaction.guildId || confirmation.actorId !== interaction.user.id) {
                 throw new Error('That confirmation has expired or is not yours.');
             }
+            await this.assertRbac(interaction, 'remove');
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) throw new Error('You need Manage Server.');
             if (decision === 'confirm') this.sqlite.prepare(`DELETE FROM event_log_channels WHERE guild_id = ?`).run(interaction.guildId);
             return interaction.update({ content: decision === 'confirm' ? 'Removed all event log destinations.' : 'Removal cancelled.', components: [], allowedMentions: { parse: [] } });
@@ -186,6 +194,7 @@ class EventLoggingService {
         if (action !== 'add' || actorId !== interaction.user.id || !pending || pending.expiresAt < this.now()) {
             throw new Error('That event-log setup has expired or is not yours.');
         }
+        await this.assertRbac(interaction, 'add');
         if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) throw new Error('You need Manage Server.');
         if (field === 'channel') pending.channel = interaction.channels.first();
         else pending.module = this.module(interaction.values[0]);
@@ -197,6 +206,18 @@ class EventLoggingService {
         return interaction.update({
             content: `Added **${pending.module}** logs in <#${pending.channel.id}>.`, components: [], allowedMentions: { parse: [] }
         });
+    }
+
+    async assertRbac(interaction, subcommand) {
+        const command = this.client?.commands?.get?.('server');
+        if (!command) return;
+        const { checkUserPermissions } = require('../utils/permissions');
+        const { allowed } = await checkUserPermissions({
+            guild: interaction.guild, member: interaction.member, user: interaction.user,
+            channel: interaction.channel, channelId: interaction.channelId, commandName: 'server',
+            options: { getSubcommandGroup: () => 'logs', getSubcommand: () => subcommand }
+        }, command);
+        if (!allowed) throw new Error('This event-log action is disabled for you here.');
     }
 
     async log(guild, module, eventKey, { title, description, actorId = null, channelId = null } = {}) {
@@ -217,7 +238,7 @@ class EventLoggingService {
             VALUES (?, ?, ?, ?, ?, 0, ?, 'pending', ?)
         `).run(guild.id, eventKey, row.channel_id, module, JSON.stringify({
             title: String(title || `${module} event`).slice(0, 256),
-            description: String(description || 'No details available.').slice(0, 4096), color: row.color || '#5865F2'
+            description: String(description || 'No details available.').slice(0, 4096), color: row.color || config.brand.color
         }), now, now);
         await this.processOutbox();
         return rows.length;

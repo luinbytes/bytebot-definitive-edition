@@ -5,6 +5,7 @@ const {
     MessageFlags, ModalBuilder, PermissionFlagsBits, TextInputBuilder, TextInputStyle
 } = require('discord.js');
 const { ServerPresentationService } = require('./serverPresentationService');
+const config = require('../utils/config');
 
 const MAX_LEVEL = 999;
 
@@ -225,15 +226,19 @@ class LevelAnalyticsService {
             `).run(guildId, userId, present ? 1 : 0, now);
             const joined = present ? 1 : 0;
             const left = present ? 0 : 1;
+            const memberCount = this.sqlite.prepare(`
+                SELECT COUNT(*) AS count FROM member_presence WHERE guild_id = ? AND present = 1
+            `).get(guildId).count;
             this.sqlite.prepare(`
                 INSERT INTO server_daily_metrics
-                    (guild_id, activity_date, joins, leaves, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                    (guild_id, activity_date, joins, leaves, member_count, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(guild_id, activity_date) DO UPDATE SET
                     joins = joins + excluded.joins,
                     leaves = leaves + excluded.leaves,
+                    member_count = excluded.member_count,
                     updated_at = excluded.updated_at
-            `).run(guildId, day, joined, left, now);
+            `).run(guildId, day, joined, left, memberCount, now);
             return { accepted: true, joined, left };
         })();
     }
@@ -296,6 +301,10 @@ class LevelAnalyticsService {
         })();
     }
 
+    snapshotGuild(guild) {
+        return this.reconcileGuild(guild);
+    }
+
     reconcileVoiceState(oldState, newState) {
         const guild = newState?.guild || oldState?.guild;
         if (!guild?.id) return { settledSeconds: 0, xpAwarded: 0 };
@@ -309,11 +318,22 @@ class LevelAnalyticsService {
             const config = this.sqlite.prepare(`SELECT * FROM level_configs WHERE guild_id = ?`).get(guild.id);
             const peers = new Map();
             for (const state of states) peers.set(state.channelId, (peers.get(state.channelId) || 0) + 1);
-            const desired = new Map(states.map(state => [state.member.id, {
-                state,
-                eligible: Boolean(config.voice_enabled && !state.mute && !state.deaf
-                    && (!config.antiafk_enabled || peers.get(state.channelId) > 1))
-            }]));
+            const desired = new Map(states.map(state => {
+                const roles = roleIds(state.member);
+                const ignoredChannel = this.sqlite.prepare(`
+                    SELECT 1 FROM level_ignores WHERE guild_id = ? AND target_type = 'channel' AND target_id = ?
+                `).get(guild.id, state.channelId);
+                const ignoredRole = roles.length && this.sqlite.prepare(`
+                    SELECT 1 FROM level_ignores WHERE guild_id = ? AND target_type = 'role'
+                      AND target_id IN (${roles.map(() => '?').join(',')}) LIMIT 1
+                `).get(guild.id, ...roles);
+                return [state.member.id, {
+                    state,
+                    eligible: Boolean(config.voice_enabled && !state.mute && !state.deaf
+                        && !ignoredChannel && !ignoredRole
+                        && (!config.antiafk_enabled || peers.get(state.channelId) > 1))
+                }];
+            }));
             let settledSeconds = 0;
             let xpAwarded = 0;
             const roleReconcileUserIds = [];
@@ -324,10 +344,13 @@ class LevelAnalyticsService {
             for (const session of sessions) {
                 let remainder = session.remainder_seconds;
                 let sessionAwarded = session.awarded_xp;
+                let eligibleSeconds = session.eligible_seconds;
+                let xpSecondsConsumed = session.xp_seconds_consumed;
                 if (session.eligible_since != null) {
                     const seconds = Math.max(0, Math.floor((now - session.last_observed_at) / 1000));
                     if (seconds) {
                         settledSeconds += seconds;
+                        eligibleSeconds += seconds;
                         for (const segment of utcSegments(session.last_observed_at, seconds)) {
                             this.sqlite.prepare(`
                                 INSERT INTO activity_logs
@@ -364,9 +387,13 @@ class LevelAnalyticsService {
                             `).get(guild.id, type, id);
                             if (boost) targetMultiplier = Math.max(targetMultiplier, boost.multiplier);
                         }
-                        const total = remainder + seconds;
-                        const completeMinutes = Math.floor(total / 60);
-                        remainder = total % 60;
+                        const earnedSeconds = eligibleSeconds >= config.voice_min_seconds
+                            ? Math.floor(eligibleSeconds / 60) * 60
+                            : 0;
+                        const newXpSeconds = Math.max(0, earnedSeconds - xpSecondsConsumed);
+                        const completeMinutes = newXpSeconds / 60;
+                        xpSecondsConsumed += newXpSeconds;
+                        remainder = eligibleSeconds % 60;
                         const calculated = Math.floor(completeMinutes * config.voice_xp_per_minute
                             * Math.min(10, config.base_multiplier * targetMultiplier));
                         const award = Math.min(calculated, Math.max(0, config.voice_session_xp_cap - sessionAwarded));
@@ -404,13 +431,16 @@ class LevelAnalyticsService {
                 if (next.state.channelId !== session.channel_id) {
                     remainder = 0;
                     sessionAwarded = 0;
+                    eligibleSeconds = 0;
+                    xpSecondsConsumed = 0;
                 }
                 this.sqlite.prepare(`
                     UPDATE level_voice_sessions SET channel_id = ?, eligible_since = ?,
-                        last_observed_at = ?, remainder_seconds = ?, awarded_xp = ?
+                        last_observed_at = ?, remainder_seconds = ?, awarded_xp = ?,
+                        eligible_seconds = ?, xp_seconds_consumed = ?
                     WHERE guild_id = ? AND user_id = ?
                 `).run(next.state.channelId, next.eligible ? now : null, now, remainder,
-                    sessionAwarded, guild.id, session.user_id);
+                    sessionAwarded, eligibleSeconds, xpSecondsConsumed, guild.id, session.user_id);
                 desired.delete(session.user_id);
             }
 
@@ -459,7 +489,7 @@ class LevelAnalyticsService {
     async rankCard(user, member, guild) {
         const row = this.memberRow(guild.id, user.id);
         const prefs = this.sqlite.prepare(`SELECT * FROM level_rank_cards WHERE user_id = ?`).get(user.id) || {};
-        const accent = /^#[0-9a-f]{6}$/i.test(prefs.accent || '') ? prefs.accent : '#5865F2';
+        const accent = /^#[0-9a-f]{6}$/i.test(prefs.accent || '') ? prefs.accent : config.brand.color;
         const width = prefs.layout === 'compact' ? 760 : 900;
         const height = prefs.layout === 'compact' ? 220 : 280;
         const nextXp = row.level >= MAX_LEVEL ? row.xp : 100 * (row.level + 1) ** 2;
@@ -577,6 +607,28 @@ class LevelAnalyticsService {
         return Boolean(add.length || remove.length);
     }
 
+    async removeRewardRole(guild, roleId) {
+        const role = guild.roles.cache.get(roleId);
+        const bot = guild.members.me;
+        if (!role || role.managed || !bot.permissions.has(PermissionFlagsBits.ManageRoles)
+            || bot.roles.highest.comparePositionTo(role) <= 0) {
+            throw new Error('That reward role is no longer manageable by the bot.');
+        }
+        const members = await guild.members.fetch();
+        const affected = [...members.values()].filter(member => !member.user.bot && member.roles.cache.has(roleId));
+        const removed = [];
+        try {
+            for (const member of affected) {
+                await member.roles.remove(roleId, 'Level reward removed');
+                removed.push(member);
+            }
+        } catch (error) {
+            for (const member of removed) await member.roles.add(roleId, 'Restore failed level reward removal').catch(() => null);
+            throw error;
+        }
+        return affected;
+    }
+
     async announceLevel(message, result) {
         if (!result?.accepted || result.level <= result.previousLevel) return false;
         const config = this.sqlite.prepare(`SELECT * FROM level_configs WHERE guild_id = ?`).get(message.guild.id);
@@ -614,10 +666,15 @@ class LevelAnalyticsService {
                 new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId(id('dm')).setLabel(`DM: ${config.dm_enabled ? 'ON' : 'OFF'}`).setStyle(ButtonStyle.Secondary),
                     new ButtonBuilder().setCustomId(id('antiafk')).setLabel(`Anti-AFK: ${config.antiafk_enabled ? 'ON' : 'OFF'}`).setStyle(ButtonStyle.Secondary),
-                    new ButtonBuilder().setCustomId(id('message')).setLabel('Award Message').setStyle(ButtonStyle.Primary), back
+                    new ButtonBuilder().setCustomId(id('message')).setLabel('Award Message').setStyle(ButtonStyle.Primary),
+                    back,
+                    new ButtonBuilder().setCustomId(id('rules')).setLabel('XP Rules').setStyle(ButtonStyle.Secondary)
                 ),
                 new ActionRowBuilder().addComponents(
                     new ChannelSelectMenuBuilder().setCustomId(id('channel')).setPlaceholder('Choose the award channel').setChannelTypes(0)
+                ),
+                new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId(id('message-disable')).setLabel('Disable Award Message').setStyle(ButtonStyle.Danger)
                 )
             ], allowedMentions: { parse: [] }
         };
@@ -625,19 +682,25 @@ class LevelAnalyticsService {
             content: 'Level Roles',
             components: [new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(id('role-add')).setLabel('Add Reward').setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId(id('role-remove')).setLabel('Remove Reward').setStyle(ButtonStyle.Danger),
                 new ButtonBuilder().setCustomId(id('sync')).setLabel('Sync Roles').setStyle(ButtonStyle.Secondary),
                 new ButtonBuilder().setCustomId(id('stack')).setLabel(`Stack: ${config.stack_roles ? 'ON' : 'OFF'}`).setStyle(ButtonStyle.Secondary), back
             )], allowedMentions: { parse: [] }
         };
         return {
             content: 'Text and voice XP can be configured independently. Changes save automatically.',
-            components: [new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(id('text')).setLabel(`Text: ${config.text_enabled ? 'ON' : 'OFF'}`).setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId(id('voice')).setLabel(`Voice: ${config.voice_enabled ? 'ON' : 'OFF'}`).setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId(id('roles')).setLabel('Level Roles').setStyle(ButtonStyle.Secondary),
-                new ButtonBuilder().setCustomId(id('settings')).setLabel('More Settings').setStyle(ButtonStyle.Secondary),
-                new ButtonBuilder().setCustomId(id('reset')).setLabel('Reset All XP').setStyle(ButtonStyle.Danger)
-            )], allowedMentions: { parse: [] }
+            components: [
+                new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId(id('text')).setLabel(`Text: ${config.text_enabled ? 'ON' : 'OFF'}`).setStyle(ButtonStyle.Primary),
+                    new ButtonBuilder().setCustomId(id('voice')).setLabel(`Voice: ${config.voice_enabled ? 'ON' : 'OFF'}`).setStyle(ButtonStyle.Primary),
+                    new ButtonBuilder().setCustomId(id('roles')).setLabel('Level Roles').setStyle(ButtonStyle.Secondary),
+                    new ButtonBuilder().setCustomId(id('settings')).setLabel('More Settings').setStyle(ButtonStyle.Secondary),
+                    new ButtonBuilder().setCustomId(id('reset')).setLabel('Reset All XP').setStyle(ButtonStyle.Danger)
+                ),
+                new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId(id('cancel')).setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+                )
+            ], allowedMentions: { parse: [] }
         };
     }
 
@@ -650,6 +713,7 @@ class LevelAnalyticsService {
                 || confirmation.guildId !== interaction.guildId || confirmation.actorId !== interaction.user.id) {
                 throw new Error('That confirmation has expired or is not yours.');
             }
+            await this.assertRbac(interaction, 'reset', confirmation.scope === 'all' ? 'all' : 'user');
             if (decision === 'cancel') return interaction.update({ content: 'Reset cancelled.', components: [], allowedMentions: { parse: [] } });
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) throw new Error('You need Manage Server to reset XP.');
             this.sqlite.transaction(() => {
@@ -676,6 +740,7 @@ class LevelAnalyticsService {
         if (area !== 'setup' || actorId !== interaction.user.id || !interaction.guildId) {
             throw new Error('That levels control is not available to you.');
         }
+        await this.assertRbac(interaction, null, 'setup');
         if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
             throw new Error('You need Manage Server to use level setup.');
         }
@@ -691,7 +756,22 @@ class LevelAnalyticsService {
                 });
                 this.sqlite.prepare(`UPDATE level_configs SET award_message = ?, message_enabled = 1, updated_at = ? WHERE guild_id = ?`)
                     .run(script, this.now(), interaction.guildId);
-            } else if (action === 'role-add') {
+            } else if (action === 'rules') {
+                const rate = Number(interaction.fields.getTextInputValue('rate'));
+                const voiceXp = Number(interaction.fields.getTextInputValue('voice_xp'));
+                const voiceMin = Number(interaction.fields.getTextInputValue('voice_min'));
+                const voiceCap = Number(interaction.fields.getTextInputValue('voice_cap'));
+                if (!Number.isFinite(rate) || rate < 0 || rate > 10
+                    || !Number.isInteger(voiceXp) || voiceXp < 0 || voiceXp > 1000
+                    || !Number.isInteger(voiceMin) || voiceMin < 1 || voiceMin > 3600
+                    || !Number.isInteger(voiceCap) || voiceCap < 0 || voiceCap > 1_000_000) {
+                    throw new Error('Use rate 0–10, voice XP 0–1000, minimum 1–3600 seconds, and cap 0–1000000.');
+                }
+                this.sqlite.prepare(`
+                    UPDATE level_configs SET base_multiplier = ?, voice_xp_per_minute = ?,
+                        voice_min_seconds = ?, voice_session_xp_cap = ?, updated_at = ? WHERE guild_id = ?
+                `).run(rate, voiceXp, voiceMin, voiceCap, this.now(), interaction.guildId);
+            } else if (action === 'role-add' || action === 'role-remove') {
                 if (!interaction.member.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('You need Manage Roles.');
                 const role = interaction.guild.roles.cache.get(interaction.fields.getTextInputValue('role'));
                 const level = Number(interaction.fields.getTextInputValue('level'));
@@ -700,13 +780,22 @@ class LevelAnalyticsService {
                 if (!bot.permissions.has(PermissionFlagsBits.ManageRoles) || role.managed
                     || bot.roles.highest.comparePositionTo(role) <= 0
                     || interaction.member.roles.highest.comparePositionTo(role) <= 0) throw new Error('That role is above the manageable hierarchy.');
-                const count = this.sqlite.prepare(`SELECT COUNT(*) AS count FROM level_role_rewards WHERE guild_id = ?`).get(interaction.guildId).count;
-                if (count >= 50 && !this.sqlite.prepare(`SELECT 1 FROM level_role_rewards WHERE guild_id = ? AND level = ?`).get(interaction.guildId, level)) {
-                    throw new Error('A server can configure at most 50 level rewards.');
+                if (action === 'role-remove') {
+                    const configured = this.sqlite.prepare(`SELECT 1 FROM level_role_rewards WHERE guild_id = ? AND level = ? AND role_id = ?`)
+                        .get(interaction.guildId, level, role.id);
+                    const affected = configured ? await this.removeRewardRole(interaction.guild, role.id) : [];
+                    this.sqlite.prepare(`DELETE FROM level_role_rewards WHERE guild_id = ? AND level = ? AND role_id = ?`)
+                        .run(interaction.guildId, level, role.id);
+                    for (const member of affected) await this.reconcileMemberRoles(member);
+                } else {
+                    const count = this.sqlite.prepare(`SELECT COUNT(*) AS count FROM level_role_rewards WHERE guild_id = ?`).get(interaction.guildId).count;
+                    const prior = this.sqlite.prepare(`SELECT role_id FROM level_role_rewards WHERE guild_id = ? AND level = ?`).get(interaction.guildId, level);
+                    if (count >= 50 && !prior) throw new Error('A server can configure at most 50 level rewards.');
+                    if (prior && prior.role_id !== role.id) throw new Error('Remove the existing reward for that level first.');
+                    this.sqlite.prepare(`INSERT INTO level_role_rewards (guild_id, level, role_id, created_at) VALUES (?, ?, ?, ?)
+                        ON CONFLICT(guild_id, level) DO UPDATE SET role_id = excluded.role_id`)
+                        .run(interaction.guildId, level, role.id, this.now());
                 }
-                this.sqlite.prepare(`INSERT INTO level_role_rewards (guild_id, level, role_id, created_at) VALUES (?, ?, ?, ?)
-                    ON CONFLICT(guild_id, level) DO UPDATE SET role_id = excluded.role_id`)
-                    .run(interaction.guildId, level, role.id, this.now());
             }
             return interaction.reply({ content: 'Level setup updated.', flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] } });
         }
@@ -720,12 +809,21 @@ class LevelAnalyticsService {
                 .run(channel.id, this.now(), interaction.guildId);
             return interaction.update(this.setupPayload(interaction.guildId, actorId, 'settings'));
         }
-        if (action === 'message' || action === 'role-add') {
+        if (['message', 'rules', 'role-add', 'role-remove'].includes(action)) {
+            const current = this.sqlite.prepare(`SELECT * FROM level_configs WHERE guild_id = ?`).get(interaction.guildId);
             const modal = new ModalBuilder().setCustomId(`levels:setup:${action}:${actorId}`)
-                .setTitle(action === 'message' ? 'Custom Level Up Message' : 'Add Level Reward');
+                .setTitle(action === 'message' ? 'Custom Level Up Message'
+                    : action === 'rules' ? 'XP Rules'
+                        : action === 'role-add' ? 'Add Level Reward' : 'Remove Level Reward');
             if (action === 'message') modal.addComponents(new ActionRowBuilder().addComponents(
                 new TextInputBuilder().setCustomId('script').setLabel('Message').setStyle(TextInputStyle.Paragraph).setMaxLength(2000).setRequired(true)
             ));
+            else if (action === 'rules') modal.addComponents(
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('rate').setLabel('Server XP multiplier (0–10)').setStyle(TextInputStyle.Short).setValue(String(current.base_multiplier)).setRequired(true)),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('voice_xp').setLabel('XP per Minute').setStyle(TextInputStyle.Short).setValue(String(current.voice_xp_per_minute)).setRequired(true)),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('voice_min').setLabel('Min Voice Time (seconds)').setStyle(TextInputStyle.Short).setValue(String(current.voice_min_seconds)).setRequired(true)),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('voice_cap').setLabel('Max XP per Session').setStyle(TextInputStyle.Short).setValue(String(current.voice_session_xp_cap)).setRequired(true))
+            );
             else modal.addComponents(
                 new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('role').setLabel('Role ID').setStyle(TextInputStyle.Short).setRequired(true)),
                 new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('level').setLabel('Level').setStyle(TextInputStyle.Short).setRequired(true))
@@ -744,11 +842,38 @@ class LevelAnalyticsService {
             for (const member of members.values()) if (!member.user.bot) await this.reconcileMemberRoles(member);
             return interaction.update(this.setupPayload(interaction.guildId, actorId, 'roles'));
         }
+        if (action === 'message-disable') {
+            this.sqlite.prepare(`UPDATE level_configs SET message_enabled = 0, updated_at = ? WHERE guild_id = ?`)
+                .run(this.now(), interaction.guildId);
+            return interaction.update(this.setupPayload(interaction.guildId, actorId, 'settings'));
+        }
         if (action === 'reset') return this.beginReset(interaction, 'all');
+        if (action === 'cancel') return interaction.update({ content: 'Level setup closed.', components: [], allowedMentions: { parse: [] } });
         return interaction.update(this.setupPayload(interaction.guildId, actorId, action));
     }
 
+    async assertRbac(interaction, group, subcommand) {
+        const command = this.client?.commands?.get?.('levels');
+        if (!command) return;
+        const { checkUserPermissions } = require('../utils/permissions');
+        const { allowed } = await checkUserPermissions({
+            guild: interaction.guild, member: interaction.member, user: interaction.user,
+            channel: interaction.channel, channelId: interaction.channelId, commandName: 'levels',
+            options: {
+                getSubcommandGroup: () => group,
+                getSubcommand: () => subcommand
+            }
+        }, command);
+        if (!allowed) throw new Error('This levels action is disabled for you here.');
+    }
+
     beginReset(interaction, scope, userId = null) {
+        for (const [key, value] of this.confirmations) {
+            if (value.expiresAt < this.now()
+                || (value.guildId === interaction.guildId && value.actorId === interaction.user.id && value.scope === scope)) {
+                this.confirmations.delete(key);
+            }
+        }
         const token = crypto.randomBytes(8).toString('hex');
         this.confirmations.set(token, {
             guildId: interaction.guildId, actorId: interaction.user.id, scope, userId,
@@ -770,6 +895,11 @@ class LevelAnalyticsService {
         const group = interaction.options.getSubcommandGroup(false);
         const action = interaction.options.getSubcommand();
         if (!group && ['rank', 'leaderboard', 'roles'].includes(action)) {
+            const required = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks];
+            if (action === 'rank') required.push(PermissionFlagsBits.AttachFiles);
+            if (interaction.appPermissions && !interaction.appPermissions.has(required)) {
+                throw new Error('I need View Channel, Send Messages, Embed Links, and file access for that level view.');
+            }
             const privateReply = interaction.options.getBoolean?.('private') ?? false;
             if (action === 'rank') {
                 const user = interaction.options.getUser?.('member') || interaction.user;
@@ -995,9 +1125,10 @@ class LevelAnalyticsService {
             if (action === 'add') {
                 const count = this.sqlite.prepare(`SELECT COUNT(*) AS count FROM level_role_rewards WHERE guild_id = ?`)
                     .get(interaction.guildId).count;
-                const existing = this.sqlite.prepare(`SELECT 1 FROM level_role_rewards WHERE guild_id = ? AND level = ?`)
+                const existing = this.sqlite.prepare(`SELECT role_id FROM level_role_rewards WHERE guild_id = ? AND level = ?`)
                     .get(interaction.guildId, level);
                 if (!existing && count >= 50) throw new Error('A server can configure at most 50 level rewards.');
+                if (existing && existing.role_id !== role.id) throw new Error('Remove the existing reward for that level first.');
                 this.sqlite.prepare(`
                     INSERT INTO level_role_rewards (guild_id, level, role_id, created_at)
                     VALUES (?, ?, ?, ?)
@@ -1008,8 +1139,12 @@ class LevelAnalyticsService {
                     flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
                 });
             }
+            const configured = this.sqlite.prepare(`SELECT 1 FROM level_role_rewards WHERE guild_id = ? AND level = ? AND role_id = ?`)
+                .get(interaction.guildId, level, role.id);
+            const affected = configured ? await this.removeRewardRole(interaction.guild, role.id) : [];
             this.sqlite.prepare(`DELETE FROM level_role_rewards WHERE guild_id = ? AND level = ? AND role_id = ?`)
                 .run(interaction.guildId, level, role.id);
+            for (const member of affected) await this.reconcileMemberRoles(member);
             return interaction.reply({
                 content: `Removed level role configuration for level **${level}**.`,
                 flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
@@ -1092,6 +1227,9 @@ class LevelAnalyticsService {
         }
         if (group === 'rankcard') {
             if (action === 'view') {
+                if (interaction.appPermissions && !interaction.appPermissions.has(PermissionFlagsBits.AttachFiles)) {
+                    throw new Error('I need Attach Files to render rank cards.');
+                }
                 const user = interaction.options.getUser('member') || interaction.user;
                 const member = interaction.guild.members.cache.get(user.id)
                     || await interaction.guild.members.fetch(user.id).catch(() => null);

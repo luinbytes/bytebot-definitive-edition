@@ -528,3 +528,16 @@ Implementation is not complete until focused tests and review cover:
 | Logging | Union module choices and aliases; 15 distinct-channel cap; same-module fan-out and same-channel multi-module mappings; add/remove/view/color/typed-ignore responses; no-argument remove confirmation; one `(event, channel)` delivery under retries; inaccessible channel and missing audit-log handling. |
 | RBAC and safety | Caller and bot permission checks are path-specific; role hierarchy is rechecked; all destructive actions require the exact confirmation; logs cannot recurse on bot messages or leak another guild's data. |
 | Runtime | Only after this contract is accepted: focused unit/integration checks, generated command inspection, and a user-approved Discord test-guild proof for level awards, analytics events, live boards, and logging delivery. |
+
+## Implementation reconciliation
+
+| Contract surface | Canonical implementation | Focused evidence |
+| --- | --- | --- |
+| `/levels` registration and all member/config/live/boost/admin/reward/ignore/message/rankcard/reset/setup paths | `src/commands/utility/levels.js`, `src/services/levelAnalyticsService.js` | `tests/levelsAnalyticsCommands.test.js`, `tests/levelAnalyticsService.test.js` |
+| Lossless XP migration, daily analytics, idempotency, voice minimum/session carry, live boards, rank-card preferences, logging configuration/outbox | `drizzle/0027_level_tracks.sql`, `0028_levels_analytics_logging.sql`, `0029_activity_level_tracks.sql`, `0030_voice_session_minimums.sql`, `src/database/schema.js` | `tests/levelAnalyticsService.test.js`, `tests/databaseMigrations.test.js`, `tests/schema.test.js` |
+| `/analytics` and `/server stats` shared presentation and three-year retention | `src/commands/utility/analytics.js`, `src/commands/utility/stats.js`, `LevelAnalyticsService.pruneAnalytics` | `tests/statsCommand.test.js`, `tests/levelAnalyticsService.test.js` |
+| Twelve logging modules, 15-channel policy, typed ignores, color, fan-out, dedupe, and bounded retries | `src/services/eventLoggingService.js`, `src/events/eventLogging.js` | `tests/eventLoggingService.test.js` |
+| Path RBAC, real Discord permissions, actor-bound components, mention/image safety | command services plus `src/utils/permissions.js` and `src/services/serverPresentationService.js` | focused service tests and repository permission/security gates |
+
+Live Discord delivery remains a separate user-approved runtime proof under the
+acceptance matrix; the repository's mock Discord suite does not replace it.

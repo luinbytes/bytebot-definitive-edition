@@ -124,8 +124,8 @@ describe('LevelAnalyticsService', () => {
             .toEqual({ accepted: false, joined: 0, left: 0 });
 
         expect(database.sqlite.prepare(`
-            SELECT joins, leaves FROM server_daily_metrics WHERE guild_id = 'guild1'
-        `).get()).toEqual({ joins: 1, leaves: 1 });
+            SELECT joins, leaves, member_count FROM server_daily_metrics WHERE guild_id = 'guild1'
+        `).get()).toEqual({ joins: 1, leaves: 1, member_count: 0 });
     });
 
     test('startup baselines humans and current voice without inventing offline activity', () => {
@@ -197,6 +197,34 @@ describe('LevelAnalyticsService', () => {
         expect(database.sqlite.prepare(`
             SELECT voice_seconds FROM server_daily_metrics WHERE guild_id = 'guild1'
         `).get().voice_seconds).toBe(122);
+    });
+
+    test('voice XP honors the configured minimum and channel exclusions', () => {
+        database.sqlite.prepare(`
+            INSERT INTO level_configs (guild_id, voice_min_seconds, updated_at)
+            VALUES ('guild1', 120, 1)
+        `).run();
+        const first = { id: 'user1', user: { bot: false }, roles: { cache: new Map() } };
+        const second = { id: 'user2', user: { bot: false }, roles: { cache: new Map() } };
+        const cache = new Map();
+        const guild = { id: 'guild1', voiceStates: { cache } };
+        const firstState = { guild, member: first, channelId: 'voice1', mute: false, deaf: false };
+        const secondState = { guild, member: second, channelId: 'voice1', mute: false, deaf: false };
+        cache.set(first.id, firstState); cache.set(second.id, secondState);
+        service.reconcileVoiceState({ guild, member: first, channelId: null }, firstState);
+        service.reconcileVoiceState({ guild, member: second, channelId: null }, secondState);
+        now += 121_000;
+        cache.delete(second.id);
+        service.reconcileVoiceState(secondState, { guild, member: second, channelId: null, mute: false, deaf: false });
+        expect(database.sqlite.prepare(`SELECT xp FROM member_levels WHERE guild_id = 'guild1' ORDER BY user_id`).all())
+            .toEqual([{ xp: 10 }, { xp: 10 }]);
+
+        database.sqlite.prepare(`INSERT INTO level_ignores (guild_id, target_type, target_id, created_at) VALUES ('guild1', 'channel', 'voice2', 1)`).run();
+        const ignored = { guild, member: first, channelId: 'voice2', mute: false, deaf: false };
+        cache.set(first.id, ignored); cache.set(second.id, { ...ignored, member: second });
+        service.reconcileVoiceState(firstState, ignored);
+        now += 121_000;
+        expect(service.reconcileVoiceState(ignored, ignored).xpAwarded).toBe(0);
     });
 
     test('/levels config rate enforces Manage Server and persists the bounded value', async () => {
