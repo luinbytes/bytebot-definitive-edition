@@ -167,7 +167,7 @@ async function executeCommunityUtilityAdmin(interaction, client) {
         return await communityAdmin(interaction, client.communityUtilityService, subcommand);
     } catch (error) {
         const response = { ...EPHEMERAL, content: error.message || 'That community administration action failed.' };
-        if (interaction.deferred || interaction.replied) return interaction.editReply(response);
+        if (interaction.deferred || interaction.replied) return interaction.editReply({ content: response.content, allowedMentions: EPHEMERAL.allowedMentions });
         return interaction.reply(response);
     }
 }
