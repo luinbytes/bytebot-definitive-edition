@@ -60,6 +60,10 @@ the media layer does not acquire channel permissions or fetch arbitrary IDs.
 - Remote sources must be credential-free HTTP(S), resolve only to public IP
   addresses, stay pinned to a validated address for the request, complete in 10
   seconds, return a 2xx response, and must not redirect.
+- ByteBot conservatively excludes IPv4 protocol-anycast addresses inside
+  `192.0.0.0/24` and the globally reachable `64:ff9b::/96` NAT64 prefix. NAT64
+  can translate attacker-selected embedded IPv4 into loopback or private space;
+  neither exception is needed for Discord media input.
 - Both declared `Content-Length` and streamed bytes are bounded. Partial and
   oversized bodies are cancelled or destroyed.
 - Processing runs through `processImage` and one in-process FIFO slot by default.
