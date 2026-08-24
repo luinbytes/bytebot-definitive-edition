@@ -72,6 +72,11 @@ function createFreshSchema() {
             for (const constraint of table.uniqueConstraints) {
                 definitions.push(`UNIQUE (${constraint.columns.map(column => sqlIdentifier(column.name)).join(', ')})`);
             }
+            for (const constraint of table.checks) {
+                const query = db.dialect.sqlToQuery(constraint.value);
+                if (query.params.length) throw new Error(`Fresh-schema check ${constraint.name} must not use parameters`);
+                definitions.push(`CONSTRAINT ${sqlIdentifier(constraint.name)} CHECK (${query.sql.replaceAll(`${sqlIdentifier(table.name)}.`, '')})`);
+            }
 
             sqlite.exec(`CREATE TABLE ${sqlIdentifier(table.name)} (${definitions.join(', ')})`);
         }

@@ -60,14 +60,15 @@ async function showCommandDetails(interaction, client, commandName) {
         });
     }
 
-    const embed = embeds.brand(`Command: /${command.data.name}`, command.data.description)
+    const commandData = command.data.toJSON?.() || command.data;
+    const embed = embeds.brand(`Command: /${commandData.name}`, commandData.description)
         .addFields(
             { name: 'Category', value: `${categoryMetadata[command.category]?.icon || '📁'} ${command.category}`, inline: true },
             { name: 'Cooldown', value: `${command.cooldown || 3} seconds`, inline: true }
         );
 
-    if (command.data.options && command.data.options.length > 0) {
-        const groups = command.data.options.filter(opt => opt.type === 2);
+    if (commandData.options && commandData.options.length > 0) {
+        const groups = commandData.options.filter(opt => opt.type === 2);
         if (groups.length > 0) {
             const groupList = groups.map(group => {
                 const subcommands = (group.options || [])
@@ -77,15 +78,19 @@ async function showCommandDetails(interaction, client, commandName) {
                 return `\`${group.name}\`: ${subcommands}`;
             }).join('\n');
             embed.addFields({ name: 'Command Groups', value: groupList });
-            const direct = command.data.options.filter(opt => opt.type === 1).map(sub => sub.name);
+            const direct = commandData.options.filter(opt => opt.type === 1).map(sub => sub.name);
             if (direct.length) embed.addFields({ name: 'Direct Subcommands', value: direct.map(name => `\`${name}\``).join(', ') });
         } else {
-            const optionsList = command.data.options.map(opt => {
+            const optionsList = commandData.options.map(opt => {
                 const required = opt.required ? '(required)' : '(optional)';
                 return `\`${opt.name}\` ${required} - ${opt.description}`;
             }).join('\n');
             embed.addFields({ name: 'Options', value: optionsList });
         }
+    }
+
+    if (commandData.name === 'economy') {
+        embed.addFields({ name: 'Compatibility', value: '`bal` maps to `/economy balance`.' });
     }
 
     return interaction.reply({

@@ -38,6 +38,45 @@ describe('database migrations', () => {
 
         expect(achievementIndexes.some(index => index.unique === 1)).toBe(true);
         expect(settingsPrimaryKey).toEqual(['user_id', 'guild_id']);
+        expect(database.sqlite.prepare("PRAGMA table_info('economy_accounts')").all()
+            .filter(column => column.pk > 0).map(column => column.name))
+            .toEqual(['scope_type', 'scope_id', 'user_id']);
+        expect(() => database.sqlite.prepare(`INSERT INTO economy_accounts
+            (scope_type, scope_id, user_id, wallet, bank, created_at, updated_at)
+            VALUES ('guild', 'guild1', 'user1', -1, 0, 1, 1)`).run()).toThrow();
+    });
+
+    test('an existing database gains economy scope constraints without data loss', async () => {
+        const seed = new Database(process.env.DATABASE_URL);
+        seed.exec(`
+            CREATE TABLE legacy_sentinel (value TEXT NOT NULL);
+            INSERT INTO legacy_sentinel (value) VALUES ('keep me');
+            CREATE TABLE __drizzle_migrations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                hash TEXT NOT NULL,
+                created_at NUMERIC
+            );
+        `);
+        const appliedMigration = seed.prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)');
+        readMigrationFiles({ migrationsFolder: './drizzle' })
+            .filter(migration => migration.folderMillis < 1787605200000)
+            .forEach(migration => appliedMigration.run(migration.hash, migration.folderMillis));
+        seed.close();
+
+        database = require('../src/database');
+        await database.runMigrations();
+
+        expect(database.sqlite.prepare('SELECT value FROM legacy_sentinel').get().value).toBe('keep me');
+        expect(database.sqlite.prepare("PRAGMA table_info('economy_accounts')").all()
+            .filter(column => column.pk > 0).map(column => column.name))
+            .toEqual(['scope_type', 'scope_id', 'user_id']);
+        expect(database.sqlite.prepare("PRAGMA index_list('economy_ledger')").all().map(index => index.name))
+            .toEqual(expect.arrayContaining(['economy_ledger_transaction_idx', 'economy_ledger_account_idx']));
+        const insert = database.sqlite.prepare(`INSERT INTO economy_jobs
+            (guild_id, name, minimum, maximum, cooldown_seconds, created_by, created_at, updated_at)
+            VALUES ('guild1', 'worker2', 1, 2, 60, 'admin1', 1, 1)`);
+        insert.run();
+        expect(() => insert.run()).toThrow();
     });
 
     test('an existing database gains indexed guild-scoped UwU Lock state without data loss', async () => {

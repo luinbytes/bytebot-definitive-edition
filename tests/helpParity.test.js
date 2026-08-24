@@ -37,3 +37,20 @@ test('/bot help discovers every public Greed category without advertising unfini
     expect(parityField.value).toContain('/economy` Economy');
     expect(parityField.value).toContain('/ticket` Tickets');
 });
+
+test('/bot help records the Greed bal compatibility mapping', async () => {
+    const reply = jest.fn();
+    const economy = require('../src/commands/economy/economy');
+    economy.category = 'Economy';
+    const interaction = {
+        options: { getString: jest.fn().mockReturnValue('economy') },
+        reply
+    };
+
+    await help.execute(interaction, { commands: new Map([['economy', economy]]) });
+
+    const compatibility = reply.mock.calls[0][0].embeds[0].data.fields
+        .find(field => field.name === 'Compatibility');
+    expect(compatibility.value).toContain('`bal`');
+    expect(compatibility.value).toContain('/economy balance');
+});

@@ -1,4 +1,5 @@
-const { sqliteTable, text, integer, real, index, unique, primaryKey } = require('drizzle-orm/sqlite-core');
+const { sql } = require('drizzle-orm');
+const { sqliteTable, text, integer, real, index, unique, primaryKey, check } = require('drizzle-orm/sqlite-core');
 
 const guilds = sqliteTable('guilds', {
     id: text('id').primaryKey(),
@@ -1212,7 +1213,9 @@ const economyAccounts = sqliteTable('economy_accounts', {
     updatedAt: integer('updated_at').notNull()
 }, table => ({
     pk: primaryKey({ columns: [table.scopeType, table.scopeId, table.userId] }),
-    rankIdx: index('economy_accounts_rank_idx').on(table.scopeType, table.scopeId, table.wallet, table.bank)
+    rankIdx: index('economy_accounts_rank_idx').on(table.scopeType, table.scopeId, table.wallet, table.bank),
+    walletCheck: check('economy_accounts_wallet_check', sql`${table.wallet} BETWEEN 0 AND 1000000000000`),
+    bankCheck: check('economy_accounts_bank_check', sql`${table.bank} BETWEEN 0 AND 1000000000000`)
 }));
 
 const economyLedger = sqliteTable('economy_ledger', {
@@ -1233,7 +1236,9 @@ const economyLedger = sqliteTable('economy_ledger', {
     createdAt: integer('created_at').notNull()
 }, table => ({
     transactionIdx: index('economy_ledger_transaction_idx').on(table.transactionId),
-    accountIdx: index('economy_ledger_account_idx').on(table.scopeType, table.scopeId, table.userId, table.id)
+    accountIdx: index('economy_ledger_account_idx').on(table.scopeType, table.scopeId, table.userId, table.id),
+    walletBalanceCheck: check('economy_ledger_wallet_balance_check', sql`${table.walletBalance} BETWEEN 0 AND 1000000000000`),
+    bankBalanceCheck: check('economy_ledger_bank_balance_check', sql`${table.bankBalance} BETWEEN 0 AND 1000000000000`)
 }));
 
 const economyEarnedTotals = sqliteTable('economy_earned_totals', {

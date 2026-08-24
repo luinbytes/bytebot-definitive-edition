@@ -33,6 +33,8 @@ CREATE TABLE `economy_accounts` (
 	`bank` integer DEFAULT 0 NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
+	CONSTRAINT `economy_accounts_wallet_check` CHECK (`wallet` BETWEEN 0 AND 1000000000000),
+	CONSTRAINT `economy_accounts_bank_check` CHECK (`bank` BETWEEN 0 AND 1000000000000),
 	PRIMARY KEY (`scope_type`, `scope_id`, `user_id`)
 );
 --> statement-breakpoint
@@ -53,7 +55,9 @@ CREATE TABLE `economy_ledger` (
 	`actor_id` text NOT NULL,
 	`counterparty_id` text,
 	`reason` text,
-	`created_at` integer NOT NULL
+	`created_at` integer NOT NULL,
+	CONSTRAINT `economy_ledger_wallet_balance_check` CHECK (`wallet_balance` BETWEEN 0 AND 1000000000000),
+	CONSTRAINT `economy_ledger_bank_balance_check` CHECK (`bank_balance` BETWEEN 0 AND 1000000000000)
 );
 --> statement-breakpoint
 CREATE INDEX `economy_ledger_transaction_idx` ON `economy_ledger` (`transaction_id`);

@@ -24,6 +24,11 @@ built-in `worker` job pays a 100–250 base amount once per hour. Deposits,
 withdrawals, transfers, returned stakes, shop reversals, and administrator
 adjustments are not earnings and are never multiplied.
 
+Global mode always uses the fixed `coins` currency, 50,000 daily cap, zero
+starting balance, and built-in `worker` job. Guild configuration and custom
+jobs cannot alter that cross-guild scope, and members can view only their own
+global balance.
+
 ## Administration and RBAC
 
 The `/economy` root remains public so member commands stay discoverable.

@@ -55,20 +55,30 @@ describe('economy command', () => {
 
         const balance = interaction('balance');
         await command.execute(balance, { economyService: service });
-        expect(balance.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Wallet: **100') }));
+        expect(balance.reply.mock.calls[0][0].embeds[0].data.description).toContain('Wallet: **100');
+
+        service.setMode('user1', 'global');
+        service.open({ guildId: 'guild1', userId: 'user1' });
+        service.setMode('user2', 'global');
+        service.open({ guildId: 'guild1', userId: 'user2' });
+        const privateBalance = interaction('balance', {
+            member: { id: 'user2', bot: false, username: 'other' }, memberGuildMember: { id: 'user2' }, scope: 'global'
+        });
+        await command.execute(privateBalance, { economyService: service });
+        expect(privateBalance.reply.mock.calls[0][0].embeds[0].data.description)
+            .toContain('only view your own global balance');
+        service.setMode('user1', 'guild');
 
         const external = interaction('transfer', {
             member: { id: 'user2', bot: false, username: 'outside' }, amount: 1
         });
         await command.execute(external, { economyService: service });
-        expect(external.reply).toHaveBeenCalledWith(expect.objectContaining({
-            content: expect.stringContaining('non-bot server member')
-        }));
+        expect(external.reply.mock.calls[0][0].embeds[0].data.description).toContain('non-bot server member');
         expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(100);
 
         const denied = interaction('config', { currency_name: 'credits' });
         await command.execute(denied, { economyService: service });
-        expect(denied.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Manage Server') }));
+        expect(denied.reply.mock.calls[0][0].embeds[0].data.description).toContain('Manage Server');
         expect(service.config('guild1').currency_name).toBe('coins');
 
         database.sqlite.close();

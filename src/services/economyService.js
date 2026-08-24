@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { MessageFlags, PermissionFlagsBits } = require('discord.js');
+const embeds = require('../utils/embeds');
 
 const GLOBAL_SCOPE = 'global';
 const MAX_STARTING_BALANCE = 1000000;
@@ -9,6 +10,7 @@ const MAX_SCOPE_SUPPLY = 9000000000000000;
 const SIX_HOURS = 21600000;
 const MAX_EARNING_GUILDS = 30;
 const DEFAULT_JOB = { id: 'worker', name: 'worker', minimum: 100, maximum: 250, cooldownSeconds: 3600, builtIn: true };
+const GLOBAL_CONFIG = Object.freeze({ currency_name: 'coins', currency_emoji: '🪙', starting_balance: 0, daily_cap: 50000 });
 const CONFIRMATION_TTL = 10 * 60 * 1000;
 
 function digest(value) {
@@ -117,7 +119,11 @@ class EconomyService {
         return config;
     }
 
-    updateTotals(scopeType, scopeId, mintedDelta = 0n, destroyedDelta = 0n) {
+    scopeConfig(guildId, scope) {
+        return scope.scopeType === 'global' ? GLOBAL_CONFIG : this.requireEnabled(guildId);
+    }
+
+    updateTotals({ scopeType, scopeId }, mintedDelta = 0n, destroyedDelta = 0n) {
         const now = this.now();
         this.sqlite.prepare(`INSERT INTO economy_scope_totals
             (scope_type, scope_id, minted_text, destroyed_text, updated_at) VALUES (?, ?, '0', '0', ?)
@@ -144,14 +150,14 @@ class EconomyService {
         return value;
     }
 
-    account(scopeType, scopeId, userId) {
+    account({ scopeType, scopeId }, userId) {
         const row = this.sqlite.prepare(`SELECT * FROM economy_accounts
             WHERE scope_type = ? AND scope_id = ? AND user_id = ?`).get(scopeType, scopeId, userId);
         if (!row) throw new Error('Economy account not found.');
         return row;
     }
 
-    supply(scopeType, scopeId) {
+    supply({ scopeType, scopeId }) {
         const value = this.sqlite.prepare(`SELECT COALESCE(SUM(wallet + bank), 0) AS value FROM economy_accounts
             WHERE scope_type = ? AND scope_id = ?`).get(scopeType, scopeId).value;
         if (!Number.isSafeInteger(value)) throw new Error('Economy circulation exceeds the safe integer limit.');
@@ -183,20 +189,21 @@ class EconomyService {
 
     open({ guildId, userId, scope: requestedScope }) {
         return this.sqlite.transaction(() => {
-            const config = this.requireEnabled(guildId);
-            const { scopeType, scopeId } = this.scope(guildId, userId, requestedScope);
+            const scope = this.scope(guildId, userId, requestedScope);
+            const { scopeType, scopeId } = scope;
+            const config = this.scopeConfig(guildId, scope);
             const existing = this.sqlite.prepare(`SELECT 1 FROM economy_accounts
                 WHERE scope_type = ? AND scope_id = ? AND user_id = ?`).get(scopeType, scopeId, userId);
             if (existing) throw new Error('You already have an economy account.');
             const startingBalance = scopeType === 'guild' ? config.starting_balance : 0;
-            if (this.supply(scopeType, scopeId) + startingBalance > MAX_SCOPE_SUPPLY) {
+            if (this.supply(scope) + startingBalance > MAX_SCOPE_SUPPLY) {
                 throw new Error('This economy has reached its circulation limit.');
             }
             const now = this.now();
             this.sqlite.prepare(`INSERT INTO economy_accounts
                 (scope_type, scope_id, user_id, wallet, bank, created_at, updated_at)
                 VALUES (?, ?, ?, ?, 0, ?, ?)`).run(scopeType, scopeId, userId, startingBalance, now, now);
-            this.updateTotals(scopeType, scopeId, BigInt(startingBalance));
+            this.updateTotals(scope, BigInt(startingBalance));
             if (startingBalance > 0) {
                 this.sqlite.prepare(`INSERT INTO economy_ledger
                     (transaction_id, scope_type, scope_id, user_id, wallet_delta, bank_delta, supply_delta,
@@ -210,8 +217,9 @@ class EconomyService {
     }
 
     balance({ guildId, userId, scope: requestedScope }) {
-        this.requireEnabled(guildId);
-        const { scopeType, scopeId } = this.scope(guildId, userId, requestedScope);
+        const scope = this.scope(guildId, userId, requestedScope);
+        const { scopeType, scopeId } = scope;
+        this.scopeConfig(guildId, scope);
         const row = this.sqlite.prepare(`SELECT * FROM economy_accounts
             WHERE scope_type = ? AND scope_id = ? AND user_id = ?`).get(scopeType, scopeId, userId);
         if (!row) return null;
@@ -221,8 +229,9 @@ class EconomyService {
     }
 
     circulation({ guildId, userId, scope: requestedScope }) {
-        this.requireEnabled(guildId);
-        const { scopeType, scopeId } = this.scope(guildId, userId, requestedScope);
+        const scope = this.scope(guildId, userId, requestedScope);
+        const { scopeType, scopeId } = scope;
+        this.scopeConfig(guildId, scope);
         const aggregate = this.sqlite.prepare(`SELECT COALESCE(SUM(wallet + bank), 0) AS circulation,
             COUNT(*) AS accounts FROM economy_accounts WHERE scope_type = ? AND scope_id = ?`).get(scopeType, scopeId);
         if (!Number.isSafeInteger(aggregate.circulation)) throw new Error('Economy circulation exceeds the safe integer limit.');
@@ -236,10 +245,11 @@ class EconomyService {
 
     deposit({ guildId, userId, amount, all = false }) {
         return this.sqlite.transaction(() => {
-            this.requireEnabled(guildId);
-            const { scopeType, scopeId } = this.scope(guildId, userId);
+            const scope = this.scope(guildId, userId);
+            const { scopeType } = scope;
             if (scopeType !== 'guild') throw new Error('Deposit is only available in guild mode.');
-            const row = this.account(scopeType, scopeId, userId);
+            this.requireEnabled(guildId);
+            const row = this.account(scope, userId);
             const moved = all ? row.wallet : this.validateAmount(amount);
             if (moved < 1 || moved > row.wallet) throw new Error('Insufficient wallet balance.');
             return this.apply(row, {
@@ -251,10 +261,11 @@ class EconomyService {
 
     withdraw({ guildId, userId, amount, all = false }) {
         return this.sqlite.transaction(() => {
-            this.requireEnabled(guildId);
-            const { scopeType, scopeId } = this.scope(guildId, userId);
+            const scope = this.scope(guildId, userId);
+            const { scopeType } = scope;
             if (scopeType !== 'guild') throw new Error('Withdraw is only available in guild mode.');
-            const row = this.account(scopeType, scopeId, userId);
+            this.requireEnabled(guildId);
+            const row = this.account(scope, userId);
             const moved = all ? row.bank : this.validateAmount(amount);
             if (moved < 1 || moved > row.bank) throw new Error('Insufficient bank balance.');
             return this.apply(row, {
@@ -266,12 +277,12 @@ class EconomyService {
 
     transfer({ guildId, userId, targetId, amount }) {
         return this.sqlite.transaction(() => {
-            this.requireEnabled(guildId);
             if (userId === targetId) throw new Error('You cannot transfer money to yourself.');
             this.validateAmount(amount);
-            const { scopeType, scopeId } = this.scope(guildId, userId);
-            const sender = this.account(scopeType, scopeId, userId);
-            const target = this.account(scopeType, scopeId, targetId);
+            const scope = this.scope(guildId, userId);
+            this.scopeConfig(guildId, scope);
+            const sender = this.account(scope, userId);
+            const target = this.account(scope, targetId);
             const transactionId = this.randomUUID();
             const senderView = this.apply(sender, {
                 transactionId, walletDelta: -amount, bankDelta: 0, kind: 'transfer',
@@ -290,13 +301,14 @@ class EconomyService {
             this.requireEnabled(guildId);
             this.validateAmount(amount);
             const auditReason = this.validateReason(reason);
-            if (this.supply('guild', guildId) + amount > MAX_SCOPE_SUPPLY) throw new Error('This economy has reached its circulation limit.');
-            const row = this.account('guild', guildId, targetId);
+            const scope = { scopeType: 'guild', scopeId: guildId };
+            if (this.supply(scope) + amount > MAX_SCOPE_SUPPLY) throw new Error('This economy has reached its circulation limit.');
+            const row = this.account(scope, targetId);
             const result = this.apply(row, {
                 transactionId: this.randomUUID(), walletDelta: amount, bankDelta: 0,
                 supplyDelta: amount, kind: 'grant', actorId, counterpartyId: targetId, reason: auditReason
             });
-            this.updateTotals('guild', guildId, BigInt(amount));
+            this.updateTotals(scope, BigInt(amount));
             return result;
         }).immediate();
     }
@@ -306,7 +318,8 @@ class EconomyService {
             this.requireEnabled(guildId);
             this.validateAmount(amount);
             const auditReason = this.validateReason(reason);
-            const row = this.account('guild', guildId, targetId);
+            const scope = { scopeType: 'guild', scopeId: guildId };
+            const row = this.account(scope, targetId);
             if (row.wallet + row.bank < amount) throw new Error('That account does not have enough currency.');
             const walletDelta = -Math.min(row.wallet, amount);
             const bankDelta = -(amount + walletDelta);
@@ -314,7 +327,7 @@ class EconomyService {
                 transactionId: this.randomUUID(), walletDelta, bankDelta,
                 supplyDelta: -amount, kind, actorId, counterpartyId: targetId, reason: auditReason
             });
-            this.updateTotals('guild', guildId, 0n, BigInt(amount));
+            this.updateTotals(scope, 0n, BigInt(amount));
             return result;
         }).immediate();
     }
@@ -394,17 +407,18 @@ class EconomyService {
         return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1);
     }
 
-    earn({ guildId, userId, action, subjectId, baseAmount, cooldownMs, guildCreatedAt, memberJoinedAt }) {
+    earn({ guildId, userId, action, subjectId, cooldownSubjectId = subjectId, baseAmount, cooldownMs, guildCreatedAt, memberJoinedAt }) {
         return this.sqlite.transaction(() => {
-            const config = this.requireEnabled(guildId);
             this.checkAges(guildCreatedAt, memberJoinedAt);
-            const { scopeType, scopeId } = this.scope(guildId, userId);
-            const account = this.account(scopeType, scopeId, userId);
+            const scope = this.scope(guildId, userId);
+            const { scopeType, scopeId } = scope;
+            const config = this.scopeConfig(guildId, scope);
+            const account = this.account(scope, userId);
             const cooldownScopeType = action === 'daily' ? 'global' : scopeType;
             const cooldownScopeId = action === 'daily' ? GLOBAL_SCOPE : scopeId;
             const cooldown = this.sqlite.prepare(`SELECT available_at FROM economy_action_cooldowns
                 WHERE user_id = ? AND action = ? AND scope_type = ? AND scope_id = ? AND subject_id = ?`)
-                .get(userId, action, cooldownScopeType, cooldownScopeId, String(subjectId));
+                .get(userId, action, cooldownScopeType, cooldownScopeId, String(cooldownSubjectId));
             if (cooldown?.available_at > this.now()) throw new Error(`${action === 'daily' ? 'Your daily reward' : 'This job'} is on cooldown.`);
             const day = this.utcDay();
             this.sqlite.prepare(`INSERT INTO economy_earning_guilds (user_id, utc_day, guild_id, created_at)
@@ -417,19 +431,19 @@ class EconomyService {
             const remaining = config.daily_cap - earned;
             if (remaining < 1) throw new Error(`You have hit the daily earning cap of ${config.daily_cap}.`);
             const amount = Math.min(Math.floor(baseAmount * 3 / 2), remaining);
-            if (this.supply(scopeType, scopeId) + amount > MAX_SCOPE_SUPPLY) throw new Error('This economy has reached its circulation limit.');
+            if (this.supply(scope) + amount > MAX_SCOPE_SUPPLY) throw new Error('This economy has reached its circulation limit.');
             const result = this.apply(account, {
                 transactionId: this.randomUUID(), walletDelta: amount, bankDelta: 0,
                 supplyDelta: amount, kind: action, actorId: userId, reason: String(subjectId)
             });
-            this.updateTotals(scopeType, scopeId, BigInt(amount));
+            this.updateTotals(scope, BigInt(amount));
             this.sqlite.prepare(`INSERT INTO economy_earned_totals (user_id, utc_day, amount, updated_at)
                 VALUES (?, ?, ?, ?) ON CONFLICT (user_id, utc_day) DO UPDATE SET
                 amount = amount + excluded.amount, updated_at = excluded.updated_at`).run(userId, day, amount, this.now());
             this.sqlite.prepare(`INSERT INTO economy_action_cooldowns
                 (user_id, action, scope_type, scope_id, subject_id, available_at) VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT (user_id, action, scope_type, scope_id, subject_id) DO UPDATE SET available_at = excluded.available_at`)
-                .run(userId, action, cooldownScopeType, cooldownScopeId, String(subjectId), this.now() + cooldownMs);
+                .run(userId, action, cooldownScopeType, cooldownScopeId, String(cooldownSubjectId), this.now() + cooldownMs);
             return { ...result, amount, baseAmount };
         }).immediate();
     }
@@ -440,9 +454,14 @@ class EconomyService {
     }
 
     work(values) {
-        const job = this.job(values.guildId, values.job);
+        const scope = this.scope(values.guildId, values.userId);
+        if (scope.scopeType === 'global' && values.job && String(values.job).toLowerCase() !== DEFAULT_JOB.id) {
+            throw new Error('The global economy only uses the worker job.');
+        }
+        const job = scope.scopeType === 'global' ? DEFAULT_JOB : this.job(values.guildId, values.job);
         const baseAmount = this.randomInt(job.minimum, job.maximum + 1);
         return { ...this.earn({ ...values, action: 'work', subjectId: job.id, baseAmount,
+            cooldownSubjectId: `${values.guildId}:${job.id}`,
             cooldownMs: job.cooldownSeconds * 1000 }), job: job.name };
     }
 
@@ -488,10 +507,11 @@ class EconomyService {
 
     reservePurchase({ guildId, userId, item }) {
         return this.sqlite.transaction(() => {
-            this.requireEnabled(guildId);
-            const { scopeType, scopeId } = this.scope(guildId, userId);
+            const scope = this.scope(guildId, userId);
+            const { scopeType, scopeId } = scope;
             if (scopeType !== 'guild') throw new Error('The role shop is only available in guild mode.');
-            const account = this.account(scopeType, scopeId, userId);
+            this.requireEnabled(guildId);
+            const account = this.account(scope, userId);
             const transactionId = this.randomUUID();
             this.apply(account, {
                 transactionId, walletDelta: -item.price, bankDelta: 0,
@@ -530,7 +550,7 @@ class EconomyService {
             const purchase = this.sqlite.prepare(`SELECT * FROM economy_shop_purchases
                 WHERE id = ? AND status = 'pending'`).get(id);
             if (!purchase) return this.purchase(id);
-            const account = this.account(purchase.scope_type, purchase.scope_id, purchase.user_id);
+            const account = this.account({ scopeType: purchase.scope_type, scopeId: purchase.scope_id }, purchase.user_id);
             const reversalTransactionId = this.randomUUID();
             this.apply(account, {
                 transactionId: reversalTransactionId, walletDelta: purchase.price, bankDelta: 0,
@@ -604,7 +624,7 @@ class EconomyService {
         if (!config.enabled) throw new Error('Economy is not enabled in this server.');
         const plan = { action, guildId, actorId, reason: auditReason, enabled: Boolean(config.enabled) };
         if (action === 'disable') return plan;
-        const account = this.account('guild', guildId, targetId);
+        const account = this.account({ scopeType: 'guild', scopeId: guildId }, targetId);
         const pending = this.sqlite.prepare(`SELECT COUNT(*) AS count FROM economy_shop_purchases
             WHERE guild_id = ? AND user_id = ? AND status = 'pending'`).get(guildId, targetId).count;
         if (pending) throw new Error('Pending shop purchases must be reconciled before this account can be changed.');
@@ -656,14 +676,15 @@ class EconomyService {
     reset(values) {
         const plan = this.consumeConfirmation({ ...values, action: 'reset' }, values.confirmationCode);
         return this.sqlite.transaction(() => {
-            const account = this.account('guild', values.guildId, values.targetId);
+            const scope = { scopeType: 'guild', scopeId: values.guildId };
+            const account = this.account(scope, values.targetId);
             if (plan.total > 0) {
                 this.apply(account, {
                     transactionId: this.randomUUID(), walletDelta: -account.wallet, bankDelta: -account.bank,
                     supplyDelta: -plan.total, kind: 'reset', actorId: values.actorId, counterpartyId: values.targetId,
                     reason: this.validateReason(values.reason)
                 });
-                this.updateTotals('guild', values.guildId, 0n, BigInt(plan.total));
+                this.updateTotals(scope, 0n, BigInt(plan.total));
             }
             this.sqlite.prepare(`DELETE FROM economy_action_cooldowns
                 WHERE user_id = ? AND scope_type = 'guild' AND scope_id = ?`).run(values.targetId, values.guildId);
@@ -673,7 +694,7 @@ class EconomyService {
         }).immediate();
     }
 
-    reconcileTotals(scopeType, scopeId) {
+    reconcileTotals({ scopeType, scopeId }) {
         let minted = 0n;
         let destroyed = 0n;
         for (const { supply_delta: delta } of this.sqlite.prepare(`SELECT supply_delta FROM economy_ledger
@@ -705,7 +726,14 @@ class EconomyService {
     }
 
     async respond(interaction, content, ephemeral = false) {
-        const payload = { content, allowedMentions: { parse: [], repliedUser: false } };
+        const kind = content.startsWith('❌') ? 'error' : content.startsWith('✅') ? 'success'
+            : content.startsWith('⚠️') ? 'warn' : 'info';
+        const description = content.replace(/^[❌✅⚠️]\s*/u, '');
+        const chunks = description.match(/[\s\S]{1,4000}(?:\n|$)/g) || [description];
+        const payload = {
+            embeds: chunks.map((chunk, index) => embeds[kind](index ? 'Economy (continued)' : 'Economy', chunk.trim())),
+            allowedMentions: { parse: [], repliedUser: false }
+        };
         if (ephemeral) payload.flags = [MessageFlags.Ephemeral];
         if (interaction.deferred) return interaction.editReply(payload);
         if (interaction.replied) return interaction.followUp(payload);
@@ -791,9 +819,15 @@ class EconomyService {
                 const target = interaction.options.getUser('member') || interaction.user;
                 if (target.bot) throw new Error('Bots do not have economy accounts.');
                 const scope = interaction.options.getString('scope') || this.mode(userId);
+                if (target.id !== userId && !interaction.options.getMember?.('member')) {
+                    throw new Error('Choose a non-bot server member.');
+                }
+                if (scope === 'global' && target.id !== userId) {
+                    throw new Error('You can only view your own global balance.');
+                }
                 const result = this.balance({ guildId, userId: target.id, scope });
                 if (!result) throw new Error('That member does not have an economy account in this scope.');
-                const config = this.config(guildId);
+                const config = result.scopeType === 'global' ? GLOBAL_CONFIG : this.config(guildId);
                 return this.respond(interaction, this.formatBalance(result, `${config.currency_emoji} ${config.currency_name}`));
             }
             if (subcommand === 'mode') {
@@ -883,9 +917,13 @@ class EconomyService {
         const focused = interaction.options.getFocused().toLowerCase();
         let choices = [];
         try {
-            choices = (group === 'job' || subcommand === 'work')
-                ? this.listJobs(interaction.guildId).map(job => ({ name: `${job.name} (${job.minimum}-${job.maximum})`, value: String(job.id) }))
-                : this.listShopItems(interaction.guildId).map(item => ({ name: `${item.roleName} — ${item.price}`, value: String(item.id) }));
+            if (subcommand === 'work' && this.mode(interaction.user.id) === 'global') {
+                choices = [{ name: `${DEFAULT_JOB.name} (${DEFAULT_JOB.minimum}-${DEFAULT_JOB.maximum})`, value: DEFAULT_JOB.id }];
+            } else {
+                choices = (group === 'job' || subcommand === 'work')
+                    ? this.listJobs(interaction.guildId).map(job => ({ name: `${job.name} (${job.minimum}-${job.maximum})`, value: String(job.id) }))
+                    : this.listShopItems(interaction.guildId).map(item => ({ name: `${item.roleName} — ${item.price}`, value: String(item.id) }));
+            }
         } catch { /* disabled/unconfigured economy has no choices */ }
         return interaction.respond(choices.filter(choice => choice.name.toLowerCase().includes(focused)).slice(0, 25));
     }

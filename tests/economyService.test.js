@@ -91,7 +91,7 @@ describe('economy service', () => {
         expect(service.circulation({ guildId: 'guild1', userId: 'user1' })).toMatchObject({
             circulation: 130, minted: 300n, destroyed: 170n
         });
-        expect(service.reconcileTotals('guild', 'guild1')).toEqual({ minted: 300n, destroyed: 170n });
+        expect(service.reconcileTotals({ scopeType: 'guild', scopeId: 'guild1' })).toEqual({ minted: 300n, destroyed: 170n });
 
         expect(() => service.transfer({ guildId: 'guild1', userId: 'user1', targetId: 'user2', amount: 6 }))
             .toThrow('wallet');
@@ -127,6 +127,20 @@ describe('economy service', () => {
             guildId: 'guild1', userId: 'user1', job: 'helper',
             guildCreatedAt: now - 1000, memberJoinedAt: now - 21600000
         })).toThrow('server must be at least 6 hours old');
+    });
+
+    test('keeps global earnings on fixed defaults outside guild administrator control', () => {
+        service.enable('guild1', 'admin1');
+        service.configure('guild1', 'admin1', { dailyCap: 1 });
+        service.addJob({ guildId: 'guild1', actorId: 'admin1', name: 'rich', minimum: 1000, maximum: 1001, cooldownSeconds: 60 });
+        service.setMode('user1', 'global');
+        service.open({ guildId: 'guild2', userId: 'user1' });
+        const ages = { guildCreatedAt: now - 21600000, memberJoinedAt: now - 21600000 };
+
+        expect(() => service.work({ guildId: 'guild1', userId: 'user1', job: 'rich', ...ages }))
+            .toThrow('global economy only uses');
+        expect(service.work({ guildId: 'guild2', userId: 'user1', ...ages }))
+            .toMatchObject({ amount: 150, baseAmount: 100, wallet: 150, job: 'worker' });
     });
 
     test('delivers guild shop roles idempotently and reverses only a proven failed delivery', async () => {
@@ -196,9 +210,7 @@ describe('economy service', () => {
 
         for (let index = 1; index <= 31; index++) {
             const guildId = `guild${index}`;
-            if (index > 1) service.enable(guildId, 'admin1');
-            service.addJob({ guildId, actorId: 'admin1', name: 'helper', minimum: 100, maximum: 101, cooldownSeconds: 3600 });
-            const action = () => service.work({ guildId, userId: 'user1', job: 'helper', ...ages });
+            const action = () => service.work({ guildId, userId: 'user1', ...ages });
             if (index <= 30) expect(action()).toMatchObject({ amount: 150 });
             else expect(action).toThrow('at most 30 servers');
         }
