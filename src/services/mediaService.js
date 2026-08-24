@@ -211,7 +211,7 @@ class MediaService {
     constructor(options = {}) {
         this.fetch = options.fetch || pinnedFetch;
         this.lookup = options.lookup || (hostname => dns.lookup(hostname, { all: true, verbatim: true }));
-        this.timeoutMs = options.timeoutMs || 10000;
+        this.timeoutMs = boundedLimit(options.timeoutMs ?? 10000, 10000, 'Media download timeout');
         this.queue = options.queue || new ProcessingQueue(options.concurrency);
     }
 
@@ -331,6 +331,11 @@ class ProcessingQueue {
                 settled = true;
                 if (error) rejectResult(error);
                 else resolveResult(value);
+            }
+        }).catch(error => {
+            if (!settled) {
+                settled = true;
+                rejectResult(error);
             }
         }).finally(() => { this.pending--; });
         this.tail = completion.catch(() => {});
