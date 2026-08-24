@@ -416,4 +416,34 @@ describe('LevelAnalyticsService', () => {
         expect(send).toHaveBeenCalledTimes(1);
         expect(send).toHaveBeenCalledWith(payload);
     });
+
+    test('setup is actor-bound and reset-all consumes one confirmation', async () => {
+        database.sqlite.prepare(`
+            INSERT INTO member_levels
+                (guild_id, user_id, xp, level, text_xp, voice_xp, manual_adjustment,
+                 level_floor, message_count, voice_seconds, updated_at)
+            VALUES ('guild1', 'user1', 100, 1, 100, 0, 0, 0, 1, 0, 1)
+        `).run();
+        const permissions = { has: permission => permission === PermissionFlagsBits.ManageGuild };
+        const reply = jest.fn();
+        const guild = { id: 'guild1', members: { fetch: jest.fn(async () => new Map()) } };
+        await service.execute({
+            guildId: 'guild1', guild, user: { id: 'admin1' }, member: { permissions }, reply,
+            options: { getSubcommandGroup: () => null, getSubcommand: () => 'setup' }
+        });
+        expect(reply.mock.calls[0][0].components[0].components[0].data.custom_id).toBe('levels:setup:text:admin1');
+
+        await service.execute({
+            guildId: 'guild1', guild, user: { id: 'admin1' }, member: { permissions }, reply,
+            options: { getSubcommandGroup: () => 'reset', getSubcommand: () => 'all' }
+        });
+        const customId = reply.mock.calls[1][0].components[0].components[0].data.custom_id;
+        const confirmation = {
+            customId, guildId: 'guild1', guild, user: { id: 'admin1' }, member: { permissions },
+            update: jest.fn(), isModalSubmit: () => false, isChannelSelectMenu: () => false
+        };
+        await service.handleInteraction(confirmation);
+        expect(database.sqlite.prepare(`SELECT 1 FROM member_levels WHERE guild_id = 'guild1'`).get()).toBeUndefined();
+        await expect(service.handleInteraction(confirmation)).rejects.toThrow('expired');
+    });
 });

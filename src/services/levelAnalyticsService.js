@@ -1,4 +1,8 @@
-const { EmbedBuilder, MessageFlags, PermissionFlagsBits } = require('discord.js');
+const crypto = require('crypto');
+const {
+    ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, EmbedBuilder,
+    MessageFlags, ModalBuilder, PermissionFlagsBits, TextInputBuilder, TextInputStyle
+} = require('discord.js');
 
 const MAX_LEVEL = 999;
 
@@ -15,6 +19,7 @@ class LevelAnalyticsService {
         this.sqlite = sqlite;
         this.client = client;
         this.now = now;
+        this.confirmations = new Map();
     }
 
     recordMessage(message) {
@@ -472,6 +477,168 @@ class LevelAnalyticsService {
         return true;
     }
 
+    setupPayload(guildId, actorId, page = 'main') {
+        const config = this.sqlite.prepare(`SELECT * FROM level_configs WHERE guild_id = ?`).get(guildId);
+        const id = action => `levels:setup:${action}:${actorId}`;
+        const back = new ButtonBuilder().setCustomId(id('main')).setLabel('Back').setStyle(ButtonStyle.Secondary);
+        if (page === 'settings') return {
+            content: 'More Settings',
+            components: [
+                new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId(id('dm')).setLabel(`DM: ${config.dm_enabled ? 'ON' : 'OFF'}`).setStyle(ButtonStyle.Secondary),
+                    new ButtonBuilder().setCustomId(id('antiafk')).setLabel(`Anti-AFK: ${config.antiafk_enabled ? 'ON' : 'OFF'}`).setStyle(ButtonStyle.Secondary),
+                    new ButtonBuilder().setCustomId(id('message')).setLabel('Award Message').setStyle(ButtonStyle.Primary), back
+                ),
+                new ActionRowBuilder().addComponents(
+                    new ChannelSelectMenuBuilder().setCustomId(id('channel')).setPlaceholder('Choose the award channel').setChannelTypes(0)
+                )
+            ], allowedMentions: { parse: [] }
+        };
+        if (page === 'roles') return {
+            content: 'Level Roles',
+            components: [new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(id('role-add')).setLabel('Add Reward').setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId(id('sync')).setLabel('Sync Roles').setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder().setCustomId(id('stack')).setLabel(`Stack: ${config.stack_roles ? 'ON' : 'OFF'}`).setStyle(ButtonStyle.Secondary), back
+            )], allowedMentions: { parse: [] }
+        };
+        return {
+            content: 'Text and voice XP can be configured independently. Changes save automatically.',
+            components: [new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(id('text')).setLabel(`Text: ${config.text_enabled ? 'ON' : 'OFF'}`).setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId(id('voice')).setLabel(`Voice: ${config.voice_enabled ? 'ON' : 'OFF'}`).setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId(id('roles')).setLabel('Level Roles').setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder().setCustomId(id('settings')).setLabel('More Settings').setStyle(ButtonStyle.Secondary),
+                new ButtonBuilder().setCustomId(id('reset')).setLabel('Reset All XP').setStyle(ButtonStyle.Danger)
+            )], allowedMentions: { parse: [] }
+        };
+    }
+
+    async handleInteraction(interaction) {
+        if (interaction.customId.startsWith('levels:confirm:') || interaction.customId.startsWith('levels:cancel:')) {
+            const [, decision, token] = interaction.customId.split(':');
+            const confirmation = this.confirmations.get(token);
+            this.confirmations.delete(token);
+            if (!confirmation || confirmation.expiresAt < this.now()
+                || confirmation.guildId !== interaction.guildId || confirmation.actorId !== interaction.user.id) {
+                throw new Error('That confirmation has expired or is not yours.');
+            }
+            if (decision === 'cancel') return interaction.update({ content: 'Reset cancelled.', components: [], allowedMentions: { parse: [] } });
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) throw new Error('You need Manage Server to reset XP.');
+            this.sqlite.transaction(() => {
+                if (confirmation.scope === 'all') {
+                    this.sqlite.prepare(`DELETE FROM member_levels WHERE guild_id = ?`).run(interaction.guildId);
+                    this.sqlite.prepare(`DELETE FROM level_voice_sessions WHERE guild_id = ?`).run(interaction.guildId);
+                } else {
+                    this.sqlite.prepare(`DELETE FROM member_levels WHERE guild_id = ? AND user_id = ?`)
+                        .run(interaction.guildId, confirmation.userId);
+                    this.sqlite.prepare(`DELETE FROM level_voice_sessions WHERE guild_id = ? AND user_id = ?`)
+                        .run(interaction.guildId, confirmation.userId);
+                }
+            })();
+            const members = confirmation.scope === 'all'
+                ? await interaction.guild.members.fetch()
+                : [await interaction.guild.members.fetch(confirmation.userId).catch(() => null)];
+            for (const member of members.values()) if (member && !member.user.bot) await this.reconcileMemberRoles(member);
+            return interaction.update({
+                content: confirmation.scope === 'all' ? 'All XP has been reset for this server' : `XP has been reset for <@${confirmation.userId}>`,
+                components: [], allowedMentions: { parse: [] }
+            });
+        }
+        const [, area, action, actorId] = interaction.customId.split(':');
+        if (area !== 'setup' || actorId !== interaction.user.id || !interaction.guildId) {
+            throw new Error('That levels control is not available to you.');
+        }
+        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+            throw new Error('You need Manage Server to use level setup.');
+        }
+        this.sqlite.prepare(`INSERT OR IGNORE INTO level_configs (guild_id, updated_at) VALUES (?, ?)`)
+            .run(interaction.guildId, this.now());
+        if (interaction.isModalSubmit()) {
+            if (action === 'message') {
+                const script = interaction.fields.getTextInputValue('script');
+                if ([...script].length > 2000) throw new Error('Message must be 2000 characters or less.');
+                this.client.richContentService.renderLevel(script, {
+                    guild: interaction.guild, member: interaction.member, user: interaction.user,
+                    level: { current: 1, next: 2, rank: 1, xp: 100, nextXp: 400 }
+                });
+                this.sqlite.prepare(`UPDATE level_configs SET award_message = ?, message_enabled = 1, updated_at = ? WHERE guild_id = ?`)
+                    .run(script, this.now(), interaction.guildId);
+            } else if (action === 'role-add') {
+                if (!interaction.member.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('You need Manage Roles.');
+                const role = interaction.guild.roles.cache.get(interaction.fields.getTextInputValue('role'));
+                const level = Number(interaction.fields.getTextInputValue('level'));
+                if (!role || !Number.isInteger(level) || level < 1 || level > MAX_LEVEL) throw new Error('Use a valid role ID and level from 1 to 999.');
+                const bot = interaction.guild.members.me;
+                if (!bot.permissions.has(PermissionFlagsBits.ManageRoles) || role.managed
+                    || bot.roles.highest.comparePositionTo(role) <= 0
+                    || interaction.member.roles.highest.comparePositionTo(role) <= 0) throw new Error('That role is above the manageable hierarchy.');
+                const count = this.sqlite.prepare(`SELECT COUNT(*) AS count FROM level_role_rewards WHERE guild_id = ?`).get(interaction.guildId).count;
+                if (count >= 50 && !this.sqlite.prepare(`SELECT 1 FROM level_role_rewards WHERE guild_id = ? AND level = ?`).get(interaction.guildId, level)) {
+                    throw new Error('A server can configure at most 50 level rewards.');
+                }
+                this.sqlite.prepare(`INSERT INTO level_role_rewards (guild_id, level, role_id, created_at) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(guild_id, level) DO UPDATE SET role_id = excluded.role_id`)
+                    .run(interaction.guildId, level, role.id, this.now());
+            }
+            return interaction.reply({ content: 'Level setup updated.', flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] } });
+        }
+        if (interaction.isChannelSelectMenu()) {
+            const channel = interaction.channels.first();
+            const permissions = interaction.guild.members.me.permissionsIn(channel);
+            if (!permissions.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks])) {
+                throw new Error('I need View Channel, Send Messages, and Embed Links there.');
+            }
+            this.sqlite.prepare(`UPDATE level_configs SET award_channel_id = ?, updated_at = ? WHERE guild_id = ?`)
+                .run(channel.id, this.now(), interaction.guildId);
+            return interaction.update(this.setupPayload(interaction.guildId, actorId, 'settings'));
+        }
+        if (action === 'message' || action === 'role-add') {
+            const modal = new ModalBuilder().setCustomId(`levels:setup:${action}:${actorId}`)
+                .setTitle(action === 'message' ? 'Custom Level Up Message' : 'Add Level Reward');
+            if (action === 'message') modal.addComponents(new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId('script').setLabel('Message').setStyle(TextInputStyle.Paragraph).setMaxLength(2000).setRequired(true)
+            ));
+            else modal.addComponents(
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('role').setLabel('Role ID').setStyle(TextInputStyle.Short).setRequired(true)),
+                new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('level').setLabel('Level').setStyle(TextInputStyle.Short).setRequired(true))
+            );
+            return interaction.showModal(modal);
+        }
+        if (['text', 'voice', 'dm', 'antiafk', 'stack'].includes(action)) {
+            const column = { text: 'text_enabled', voice: 'voice_enabled', dm: 'dm_enabled', antiafk: 'antiafk_enabled', stack: 'stack_roles' }[action];
+            this.sqlite.prepare(`UPDATE level_configs SET ${column} = NOT ${column}, updated_at = ? WHERE guild_id = ?`)
+                .run(this.now(), interaction.guildId);
+            return interaction.update(this.setupPayload(interaction.guildId, actorId, ['dm', 'antiafk'].includes(action) ? 'settings' : action === 'stack' ? 'roles' : 'main'));
+        }
+        if (action === 'sync') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('You need Manage Roles.');
+            const members = await interaction.guild.members.fetch();
+            for (const member of members.values()) if (!member.user.bot) await this.reconcileMemberRoles(member);
+            return interaction.update(this.setupPayload(interaction.guildId, actorId, 'roles'));
+        }
+        if (action === 'reset') return this.beginReset(interaction, 'all');
+        return interaction.update(this.setupPayload(interaction.guildId, actorId, action));
+    }
+
+    beginReset(interaction, scope, userId = null) {
+        const token = crypto.randomBytes(8).toString('hex');
+        this.confirmations.set(token, {
+            guildId: interaction.guildId, actorId: interaction.user.id, scope, userId,
+            expiresAt: this.now() + 10 * 60 * 1000
+        });
+        const warning = scope === 'all'
+            ? '**WARNING:** This will delete **ALL** text and voice XP data for this server. This action **cannot be undone**.\n\nAre you sure you want to continue?'
+            : `Reset all XP for <@${userId}>?`;
+        return interaction.reply({
+            content: warning,
+            components: [new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(`levels:confirm:${token}`).setLabel(scope === 'all' ? 'Yes, Reset All XP' : 'Confirm Reset').setStyle(ButtonStyle.Danger),
+                new ButtonBuilder().setCustomId(`levels:cancel:${token}`).setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+            )], flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+        });
+    }
+
     async execute(interaction) {
         const group = interaction.options.getSubcommandGroup(false);
         const action = interaction.options.getSubcommand();
@@ -510,6 +677,17 @@ class LevelAnalyticsService {
                 ? rewards.map(reward => `Level **${reward.level}** — <@&${reward.role_id}>`).join('\n')
                 : 'No level role rewards have been configured.';
             return interaction.reply({ content, flags: privateReply ? [MessageFlags.Ephemeral] : [], allowedMentions: { parse: [] } });
+        }
+        if (!group && action === 'setup') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                throw new Error('You need Manage Server to use level setup.');
+            }
+            this.sqlite.prepare(`INSERT OR IGNORE INTO level_configs (guild_id, updated_at) VALUES (?, ?)`)
+                .run(interaction.guildId, this.now());
+            return interaction.reply({
+                ...this.setupPayload(interaction.guildId, interaction.user.id),
+                flags: [MessageFlags.Ephemeral]
+            });
         }
         if (group === 'config') {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
@@ -755,6 +933,26 @@ class LevelAnalyticsService {
             `).run(interaction.guildId, script, this.now());
             return interaction.reply({
                 content: 'Custom level up message has been set.',
+                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+            });
+        }
+        if (group === 'reset') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                throw new Error('You need Manage Server to reset XP.');
+            }
+            if (action === 'all') return this.beginReset(interaction, 'all');
+            const user = interaction.options.getUser('member', true);
+            this.sqlite.transaction(() => {
+                this.sqlite.prepare(`DELETE FROM member_levels WHERE guild_id = ? AND user_id = ?`)
+                    .run(interaction.guildId, user.id);
+                this.sqlite.prepare(`DELETE FROM level_voice_sessions WHERE guild_id = ? AND user_id = ?`)
+                    .run(interaction.guildId, user.id);
+            })();
+            const member = interaction.guild.members.cache.get(user.id)
+                || await interaction.guild.members.fetch(user.id).catch(() => null);
+            if (member) await this.reconcileMemberRoles(member);
+            return interaction.reply({
+                content: `XP has been reset for <@${user.id}>`,
                 flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
             });
         }

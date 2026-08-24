@@ -146,5 +146,9 @@ module.exports = {
     async execute(interaction, client) {
         if (!client.levelAnalyticsService) throw new Error('Level service is unavailable');
         return client.levelAnalyticsService.execute(interaction);
+    },
+    async handleInteraction(interaction, client) {
+        if (!client.levelAnalyticsService) throw new Error('Level service is unavailable');
+        return client.levelAnalyticsService.handleInteraction(interaction);
     }
 };
