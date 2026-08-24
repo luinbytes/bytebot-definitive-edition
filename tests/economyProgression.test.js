@@ -133,8 +133,12 @@ describe('economy games and progression', () => {
         expect(service.setGangBanner({
             guildId: 'guild1', userId: 'user2', url: 'https://example.com/banner.png'
         }).bannerUrl).toBe('https://example.com/banner.png');
+        service.open({ guildId: 'guild1', userId: 'user3' });
+        const pending = service.inviteToGang({ guildId: 'guild1', userId: 'user2', targetId: 'user3' });
         expect(service.leaveGang({ guildId: 'guild1', userId: 'user1' })).toBe(true);
         expect(service.disbandGang({ guildId: 'guild1', userId: 'user2' })).toBe(true);
+        expect(database.sqlite.prepare('SELECT status, gang_id FROM economy_gang_invites WHERE id = ?').get(pending.id))
+            .toEqual({ status: 'revoked', gang_id: null });
         expect(() => service.gangInfo({ guildId: 'guild1', userId: 'user2' })).toThrow('not in a gang');
     });
 
@@ -186,6 +190,15 @@ describe('economy games and progression', () => {
             customId: nextId, guildId: 'guild1', user: { id: 'user2' }, update, reply
         });
         expect(reply.mock.calls[0][0].embeds[0].data.description).toContain('does not belong');
+
+        const oldToken = nextId.split(':')[3];
+        now += 600001;
+        await service.handleInteraction({
+            customId: nextId, guildId: 'guild1', user: { id: 'user1' }, update, reply
+        });
+        expect(service.pageTokens.has(oldToken)).toBe(false);
+        service.leaderboardView('guild1', 'user1');
+        expect(service.pageTokens.size).toBe(1);
     });
 
     test('refunds active games and pauses laboratories while the economy is disabled', () => {

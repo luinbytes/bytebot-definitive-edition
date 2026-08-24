@@ -19,15 +19,22 @@ module.exports = {
     name: Events.InteractionCreate,
     async execute(interaction, client) {
         // Prevent duplicate processing of the same interaction
-        if (processedInteractions.has(interaction.id)) {
+        const duplicate = processedInteractions.has(interaction.id);
+        const economyLabReplay = duplicate && interaction.isChatInputCommand?.()
+            && interaction.commandName === 'economy'
+            && interaction.options?.getSubcommandGroup?.(false) === 'lab';
+        if (duplicate && !economyLabReplay) {
             logger.debug(`Skipping duplicate interaction: ${interaction.id}`);
             return;
         }
-        processedInteractions.add(interaction.id);
+        if (!duplicate) processedInteractions.add(interaction.id);
         if (interaction.customId?.startsWith('economy:')
             && (interaction.isButton() || interaction.isStringSelectMenu())) {
             if (!client.economyService) {
-                return interaction.reply({ content: 'Economy is temporarily unavailable.', flags: [MessageFlags.Ephemeral] }).catch(() => null);
+                return interaction.reply({
+                    embeds: [embeds.error('Economy Unavailable', 'Economy is temporarily unavailable.')],
+                    flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+                }).catch(() => null);
             }
             await client.economyService.handleInteraction(interaction);
             return;
@@ -556,7 +563,7 @@ module.exports = {
         const defaultCooldownDuration = 3;
         const cooldownAmount = (command.cooldown ?? defaultCooldownDuration) * 1000;
 
-        if (timestamps.has(interaction.user.id)) {
+        if (!economyLabReplay && timestamps.has(interaction.user.id)) {
             const expirationTime = timestamps.get(interaction.user.id) + cooldownAmount;
 
             if (now < expirationTime) {
@@ -578,7 +585,7 @@ module.exports = {
         }
 
         // Update database tracking
-        try {
+        if (!economyLabReplay) try {
             await dbLog.insert('users',
                 () => db.insert(users).values({
                     id: interaction.user.id,
@@ -598,15 +605,17 @@ module.exports = {
             logger.error(`Failed to update user stats: ${error}`);
         }
 
-        timestamps.set(interaction.user.id, now);
-        setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
+        if (!economyLabReplay) {
+            timestamps.set(interaction.user.id, now);
+            setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
+        }
 
         // 7. Execution
         try {
             await command.execute(interaction, client);
 
             // 8. Activity Streak Tracking (only on successful command execution)
-            if (client.activityStreakService && interaction.guild) {
+            if (!economyLabReplay && client.activityStreakService && interaction.guild) {
                 try {
                     await client.activityStreakService.recordActivity(
                         interaction.user.id,

@@ -49,6 +49,8 @@ describe('database migrations', () => {
             .toContainEqual(expect.objectContaining({ name: 'economy_gang_members_one_owner', unique: 1, partial: 1 }));
         expect(database.sqlite.prepare("PRAGMA foreign_key_list('economy_lab_operations')").all())
             .toContainEqual(expect.objectContaining({ table: 'economy_labs', on_delete: 'SET NULL' }));
+        expect(database.sqlite.prepare("PRAGMA foreign_key_list('economy_gang_invites')").all())
+            .toContainEqual(expect.objectContaining({ table: 'economy_gangs', on_delete: 'SET NULL' }));
         expect(() => database.sqlite.prepare(`INSERT INTO economy_accounts
             (scope_type, scope_id, user_id, wallet, bank, created_at, updated_at)
             VALUES ('guild', 'guild1', 'user1', -1, 0, 1, 1)`).run()).toThrow();

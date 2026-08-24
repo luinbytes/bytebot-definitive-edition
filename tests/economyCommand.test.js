@@ -98,6 +98,13 @@ describe('economy command', () => {
         expect(game.reply.mock.calls[0][0].components).toHaveLength(1);
         expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(90);
 
+        service.createGang({ guildId: 'guild1', userId: 'user1', name: 'BYTE' });
+        const gangInfo = interaction('info', { group: 'gang' });
+        await command.execute(gangInfo, { economyService: service });
+        const gangDescription = gangInfo.reply.mock.calls[0][0].embeds[0].data.description;
+        expect(gangDescription).toContain('Created: <t:');
+        expect(gangDescription).toContain('<@user1> — owner');
+
         database.sqlite.close();
         delete process.env.DATABASE_URL;
         fs.rmSync(tempDir, { recursive: true, force: true });

@@ -332,7 +332,8 @@ updated_at)`, with a case-insensitive unique `(guild_id, name)` index.
 `economy_gang_members` stores `(guild_id, gang_id, user_id, role, joined_at)`
 with a unique `(guild_id, user_id)` membership index. `economy_gang_invites`
 stores an invite ID,
-gang/guild/inviter/invitee IDs, status, nonce, created/expiry/acted timestamps,
+nullable gang ID for durable post-disband history, guild/inviter/invitee IDs,
+status, nonce, created/expiry/acted timestamps,
 and a unique pending invite key. The transaction that accepts an invite checks
 expiry, actor, gang capacity, and existing membership before writing both the
 membership and terminal invite state.

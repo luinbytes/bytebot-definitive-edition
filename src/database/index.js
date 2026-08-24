@@ -1160,7 +1160,7 @@ const expectedSchema = {
     economy_gang_invites: {
         id: 'TEXT PRIMARY KEY',
         guild_id: 'TEXT NOT NULL',
-        gang_id: 'TEXT NOT NULL',
+        gang_id: 'TEXT',
         inviter_id: 'TEXT NOT NULL',
         invitee_id: 'TEXT NOT NULL',
         status: "TEXT DEFAULT 'pending' NOT NULL",

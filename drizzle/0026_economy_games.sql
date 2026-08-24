@@ -38,7 +38,7 @@ CREATE UNIQUE INDEX `economy_gangs_name_unique` ON `economy_gangs` (`guild_id`,`
 --> statement-breakpoint
 CREATE TABLE `economy_gang_members` (
     `guild_id` text NOT NULL,
-    `gang_id` text NOT NULL,
+    `gang_id` text,
     `user_id` text NOT NULL,
     `role` text NOT NULL,
     `joined_at` integer NOT NULL,
@@ -62,7 +62,7 @@ CREATE TABLE `economy_gang_invites` (
     `created_at` integer NOT NULL,
     `expires_at` integer NOT NULL,
     `acted_at` integer,
-    CONSTRAINT `economy_gang_invites_gang_fk` FOREIGN KEY (`gang_id`) REFERENCES `economy_gangs`(`id`) ON DELETE CASCADE,
+    CONSTRAINT `economy_gang_invites_gang_fk` FOREIGN KEY (`gang_id`) REFERENCES `economy_gangs`(`id`) ON DELETE SET NULL,
     CONSTRAINT `economy_gang_invites_status_check` CHECK (`status` IN ('pending','accepted','declined','expired','revoked'))
 );
 --> statement-breakpoint

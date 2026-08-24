@@ -585,8 +585,9 @@ class EconomyService {
     }
 
     actGame({ guildId, userId, sessionId, nonce, action, value }) {
-        this.requireEnabled(guildId);
-        const row = this.sqlite.prepare('SELECT * FROM economy_game_sessions WHERE id = ?').get(sessionId);
+        return this.sqlite.transaction(() => {
+            this.requireEnabled(guildId);
+            const row = this.sqlite.prepare('SELECT * FROM economy_game_sessions WHERE id = ?').get(sessionId);
         if (!row || row.guild_id !== guildId || row.nonce !== nonce) throw new Error('That game session is invalid.');
         if (row.user_id !== userId) throw new Error('That game session does not belong to you.');
         if (GAME_STATUS.has(row.status)) return this.gameSession(row);
@@ -629,7 +630,8 @@ class EconomyService {
         }
         this.sqlite.prepare(`UPDATE economy_game_sessions SET state_json = ? WHERE id = ? AND status = 'active'`)
             .run(JSON.stringify(state), row.id);
-        return this.gameSession(this.sqlite.prepare('SELECT * FROM economy_game_sessions WHERE id = ?').get(row.id));
+            return this.gameSession(this.sqlite.prepare('SELECT * FROM economy_game_sessions WHERE id = ?').get(row.id));
+        }).immediate();
     }
 
     reconcileGameSessions() {
@@ -847,6 +849,8 @@ class EconomyService {
         return this.sqlite.transaction(() => {
             const member = this.gangMembership(guildId, userId);
             if (!member || member.role !== 'owner') throw new Error('Only the gang owner can disband it.');
+            this.sqlite.prepare(`UPDATE economy_gang_invites SET status = 'revoked', acted_at = ?
+                WHERE gang_id = ? AND status = 'pending'`).run(this.now(), member.gang_id);
             return Boolean(this.sqlite.prepare('DELETE FROM economy_gangs WHERE id = ? AND owner_id = ?').run(member.gang_id, userId).changes);
         }).immediate();
     }
@@ -1544,6 +1548,9 @@ class EconomyService {
             ? board.rows.map((row, index) => `**${offset + index + 1}.** <@${row.userId}> — **${row.total}**`).join('\n')
             : 'No economy accounts are on this page.';
         if (!board.hasPrevious && !board.hasNext) return { content, components: [] };
+        for (const [key, page] of this.pageTokens) {
+            if (page.expiresAt <= this.now()) this.pageTokens.delete(key);
+        }
         const pageToken = token || this.randomBytes(12).toString('hex').slice(0, 24);
         this.pageTokens.set(pageToken, { guildId, userId, expiresAt: this.now() + GAME_SESSION_TTL });
         return {
@@ -1585,6 +1592,7 @@ class EconomyService {
                 const offset = Number(parts[2]);
                 const token = parts[3];
                 const page = this.pageTokens.get(token);
+                if (page?.expiresAt <= this.now()) this.pageTokens.delete(token);
                 if (!page || page.expiresAt <= this.now() || page.guildId !== interaction.guildId || page.userId !== interaction.user.id) {
                     throw new Error('That leaderboard page has expired or does not belong to you.');
                 }
@@ -1623,7 +1631,8 @@ class EconomyService {
                 }
                 if (subcommand === 'info') {
                     const gang = this.gangInfo({ guildId, userId });
-                    return this.respond(interaction, `**${gang.name}**\nOwner: <@${gang.ownerId}>\nMembers: **${gang.members.length}/25**${gang.bannerUrl ? `\nBanner: ${gang.bannerUrl}` : ''}`);
+                    const members = gang.members.map(member => `<@${member.userId}> — ${member.role}`).join('\n');
+                    return this.respond(interaction, `**${gang.name}**\nOwner: <@${gang.ownerId}>\nCreated: <t:${Math.floor(gang.createdAt / 1000)}:F>\nMembers: **${gang.members.length}/25**\n${members}${gang.bannerUrl ? `\nBanner: ${gang.bannerUrl}` : ''}`);
                 }
                 if (subcommand === 'invite') {
                     const target = this.target(interaction);

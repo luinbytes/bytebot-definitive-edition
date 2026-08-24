@@ -1362,7 +1362,7 @@ const economyGangMembers = sqliteTable('economy_gang_members', {
 const economyGangInvites = sqliteTable('economy_gang_invites', {
     id: text('id').primaryKey(),
     guildId: text('guild_id').notNull(),
-    gangId: text('gang_id').notNull().references(() => economyGangs.id, { onDelete: 'cascade' }),
+    gangId: text('gang_id').references(() => economyGangs.id, { onDelete: 'set null' }),
     inviterId: text('inviter_id').notNull(),
     inviteeId: text('invitee_id').notNull(),
     status: text('status').default('pending').notNull(),
