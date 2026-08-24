@@ -388,6 +388,31 @@ class VoiceMasterService {
                     ].join('\n'))],
                     allowedMentions: { parse: [] }
                 });
+            case 'claim': {
+                if (pod.owner_id === interaction.user.id) throw new Error('You already own this voice channel.');
+                if (channel.members.has(pod.owner_id)) throw new Error('The current owner is still in this voice channel.');
+                this.requireChannelPermissions(interaction.guild, channel, [PermissionFlagsBits.ManageRoles]);
+                const won = this.sqlite.prepare(`UPDATE bytepods SET owner_id = ?, owner_left_at = NULL,
+                    reclaim_request_pending = 0, generation = generation + 1
+                    WHERE guild_id = ? AND channel_id = ? AND owner_id = ? AND generation = ?
+                    AND state = 'active' AND bot_owned = 1`)
+                    .run(interaction.user.id, interaction.guildId, channel.id, pod.owner_id, pod.generation);
+                if (!won.changes) throw new Error('Another member claimed this channel first.');
+                try {
+                    await channel.permissionOverwrites.edit(pod.owner_id, {
+                        ManageChannels: null, MoveMembers: null
+                    });
+                    await channel.permissionOverwrites.edit(interaction.user.id, {
+                        ViewChannel: true, Connect: true, ManageChannels: true, MoveMembers: true
+                    });
+                } catch (error) {
+                    this.sqlite.prepare(`UPDATE bytepods SET owner_id = ?, generation = generation + 1
+                        WHERE guild_id = ? AND channel_id = ? AND owner_id = ? AND generation = ?`)
+                        .run(pod.owner_id, interaction.guildId, channel.id, interaction.user.id, pod.generation + 1);
+                    throw error;
+                }
+                break;
+            }
             case 'delete': {
                 const won = this.sqlite.prepare(`UPDATE bytepods SET state = 'deleting', generation = generation + 1
                     WHERE guild_id = ? AND channel_id = ? AND owner_id = ? AND state = 'active' AND bot_owned = 1`)

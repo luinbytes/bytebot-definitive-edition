@@ -261,4 +261,68 @@ describe('VoiceMaster lifecycle', () => {
         ]);
         expect(temporary.delete).not.toHaveBeenCalled();
     });
+
+    test('claim atomically transfers control after the persisted owner leaves', async () => {
+        const channels = new Map();
+        const category = { id: 'category-1', type: ChannelType.GuildCategory, delete: jest.fn() };
+        const join = { id: 'join-1', type: ChannelType.GuildVoice, send: jest.fn(async () => ({ id: 'interface-1' })), delete: jest.fn() };
+        const temporary = {
+            id: 'temporary-1', type: ChannelType.GuildVoice, members: new Map(),
+            permissionOverwrites: { edit: jest.fn(async () => {}) },
+            send: jest.fn(async () => ({ id: 'controls-1' })), delete: jest.fn(),
+            setName: jest.fn(async value => { temporary.name = value; })
+        };
+        const create = jest.fn(async values => {
+            const channel = values.type === ChannelType.GuildCategory
+                ? category
+                : values.name === 'Join to Create' ? join : temporary;
+            channels.set(channel.id, channel);
+            return channel;
+        });
+        const voiceStates = new Map();
+        const owner = {
+            id: 'owner-1', user: { id: 'owner-1', bot: false, username: 'Owner' }, displayName: 'Owner',
+            permissions: { has: () => false }, roles: { cache: new Map() },
+            voice: { channelId: 'join-1', channel: join, setChannel: jest.fn(async channel => {
+                owner.voice.channelId = channel.id; owner.voice.channel = channel;
+                voiceStates.set(owner.id, { channelId: channel.id }); channel.members.set(owner.id, owner);
+            }) }
+        };
+        const claimant = {
+            id: 'claimant-1', user: { id: 'claimant-1', bot: false, username: 'Claimant' },
+            permissions: { has: () => false }, roles: { cache: new Map() },
+            voice: { channelId: 'temporary-1', channel: temporary }
+        };
+        voiceStates.set(owner.id, { channelId: 'join-1' });
+        const guild = {
+            id: 'guild-1', name: 'Guild',
+            members: { me: { id: 'bot-1', permissions: { has: () => true } } },
+            roles: { everyone: { id: 'guild-1' } }, voiceStates: { cache: voiceStates },
+            channels: { cache: channels, create, fetch: jest.fn(async id => channels.get(id) || null) }
+        };
+        const { VoiceMasterService } = require('../src/services/voiceMasterService');
+        const service = new VoiceMasterService({ sqlite: database.sqlite, delay: async () => {} });
+        await service.execute(interaction(guild, 'setup'));
+        await service.handleVoiceState({ channelId: null }, { member: owner, guild, channelId: 'join-1', channel: join, client: {} });
+        temporary.members.set(claimant.id, claimant);
+        temporary.members.delete(owner.id);
+        owner.voice.channelId = null;
+        owner.voice.channel = null;
+        await service.handleVoiceState(
+            { channelId: 'temporary-1', channel: temporary },
+            { member: owner, guild, channelId: null, channel: null, client: {} }
+        );
+
+        await service.execute(memberInteraction(guild, claimant, 'claim'));
+        await service.execute(memberInteraction(guild, claimant, 'rename', { name: 'Claimed Room' }));
+        await service.execute(memberInteraction(guild, owner, 'rename', { name: 'Old Owner Room' }));
+
+        expect(temporary.permissionOverwrites.edit).toHaveBeenCalledWith('owner-1', {
+            ManageChannels: null, MoveMembers: null
+        });
+        expect(temporary.permissionOverwrites.edit).toHaveBeenCalledWith('claimant-1', expect.objectContaining({
+            ManageChannels: true, MoveMembers: true
+        }));
+        expect(temporary.name).toBe('Claimed Room');
+    });
 });
