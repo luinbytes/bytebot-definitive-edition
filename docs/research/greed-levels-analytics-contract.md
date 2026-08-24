@@ -17,9 +17,9 @@ or an absent command row.
 
 | Source | Evidence used | Resolution |
 | --- | --- | --- |
-| [Current Levels guide](https://greed.best/docs/configuration/levels) and its [official source](https://raw.githubusercontent.com/greedbest/docs/main/configuration/levels.mdx) | Public prefix-command syntax, member/admin split, text/voice XP claims, setup controls, anti-spam, voice eligibility, aliases, reset warning. | The raw first-party source is the reproducible text baseline; the hosted page confirms the same rendered content. It does not establish XP rates, formulas, cooldowns, role caps, or exact Discord permissions. |
+| [Current hosted Levels guide](https://greed.best/docs/configuration/levels) and its [official source](https://raw.githubusercontent.com/greedbest/docs/main/configuration/levels.mdx) | Public prefix-command syntax, member/admin split, text/voice XP claims, direct configuration controls, level-up script variables, rank-card controls, aliases, and reset warning. | The hosted guide is newer and materially richer than the current raw MDX: it adds direct text/voice/channel/message/DM/anti-AFK commands, script syntax, and rank-card controls. The hosted first-party page therefore wins for current behavior; the raw source remains a reproducible older baseline. Neither establishes XP rates, formulas, cooldowns, role caps, or a complete Discord permission matrix. |
 | [Current Logging guide](https://greed.best/docs/configuration/logging) and [official source](https://raw.githubusercontent.com/greedbest/docs/main/configuration/logging.mdx) | Log setup/removal/view syntax, module names, moderation-log setting, and module descriptions. | The raw source is the reproducible baseline. The hosted page is newer in presentation and uses singular event names plus an interactive no-argument form; those are retained as compatibility aliases, not silently merged into a single Greed fact. |
-| [Current Greed homepage](https://greed.best/) | Greed says it tracks “messages, reactions, voice, and membership over time” and renders cards/charts. | This establishes product-level analytics categories only. It does not establish a command, option names, chart grain, membership definitions, or historical backfill behavior. |
+| [Current Greed homepage](https://greed.best/) | Greed shows `,analytics`, a “Server analytics for …” response, and says it tracks messages, reactions, voice, and membership over time with cards/charts. | This establishes the public command name and product-level analytics categories. It does not establish option names, chart grain, membership definitions, or historical backfill behavior. |
 | [Current Premium guide](https://greed.best/docs/premium) | Analytics retention is 60 days free / 3 years Server Premium; “Server stats card” is named as Premium-only; free/premium log-channel caps are 4/15. | These are the current numeric entitlement facts. ByteBot has no billing service, so it provides the highest documented non-billing allowance (15 log channels and 1,095 days) and labels that as a ByteBot policy. |
 | [Current command catalog](https://greed.best/commands) | The catalog claims to list every command with arguments and permissions. | The page is client-rendered; its public HTML exposes the claim and controls but not the Levels, analytics, or Logs rows. It cannot prove exact registration, option types, permissions, or Premium flags. |
 | [Pinned official English i18n tree](https://github.com/greedbest/i18n/tree/3dadc41852a09567add8a6b2b522d5e2b1a53b2f/locales/en/commands) at [commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](https://github.com/greedbest/i18n/commit/3dadc41852a09567add8a6b2b522d5e2b1a53b2f) | Exact public names, descriptions, response copy, errors, setup labels, limits explicitly present in English JSON. | This is the exact localization baseline for the pinned snapshot. A localized path proves a public subject/message surface, not that it is currently registered or that the JSON contains its option schema/permission. |
@@ -36,15 +36,23 @@ files as duplicate commands.
 
 ### Current guide syntax
 
-The current guide describes a dual-track system with text and voice XP, an
-interactive setup menu, member views, leaderboards, role rewards, and
-administrative management. These are exact public prefix strings; the square
-and round brackets below are the guide's notation, not Discord option schemas.
+The current hosted guide describes a dual-track system with text and voice XP,
+an interactive setup menu, direct configuration commands, member views,
+leaderboards, role rewards, rank-card styling, and administrative management.
+These are exact public prefix strings; the square and round brackets below are
+the guide's notation, not Discord option schemas. Rows found only on the newer
+hosted page are marked as such rather than attributed to the older raw MDX.
 
 | Public string | Public behavior and exact options | Public limits/permissions evidenced |
 | --- | --- | --- |
 | `,levels setup` | Opens interactive setup. It can independently toggle Text and Voice XP, choose an Award Channel, customize an Award Message, and manage Level Roles. | No numeric limits. Pinned setup copy explicitly says `You need **Manage Server** permission`; the guide itself does not state a permission. |
+| `,level text` / `,level voice` | Hosted-only direct toggles for text and voice XP. | The hosted guide says leveling is enabled by default; it does not publish numeric XP rules. |
+| `,level channel #channel` | Hosted-only direct award-channel setting. | Channel is required in the displayed syntax. |
+| `,level message [script]`, `,level message disable`, `,level message` | Hosted-only direct set, disable, and current-message views. Level-up delivery occurs only when both an award channel and message are configured. | The hosted page documents Greed script/embed syntax and the variables listed below. Pinned copy caps the serialized custom message at 2,000 characters. |
+| `,level dm` | Hosted-only toggle between sending level-up messages in the configured channel and by DM. | No delivery fallback is documented. |
+| `,level antiafk` | Hosted-only toggle for voice anti-AFK eligibility. | The same page says voice XP requires the member to be unmuted and not alone. It does not publish a timer or threshold. |
 | `,level [@user]` | Shows current level, total XP, and progress to the next level with a custom rank card. | Optional member. Aliases are `,rank`, `,xp`, `,lvl`. |
+| `,rankcard` / `,rc` | Hosted-only rank-card view/configuration surface. `,rankcard color [hex]` changes the accent; `reset` restores it. `colour` and `accent` are aliases. | The hosted page says User Premium or a vote unlocks styling and separately advertises dashboard controls for colours, type, background image, and avatar-border width. Exact type choices and numeric bounds are not public; ByteBot exposes the capability without a billing/vote gate using owned bounds below. |
 | `,levels leaderboard [total/text/voice]` | Shows top members sorted by total, text, or voice XP. | Choice set is exactly `total`, `text`, `voice`; page size, maximum page, tie-break, and permission are not public. Aliases: `,levels lb`, `,levels top`. |
 | `,levels roles` | Lists roles configured as rewards for reaching levels. | No list cap or permission is public. |
 | `,levels live text` | Creates a self-updating text-XP leaderboard in the current channel. | The guide does not state update interval or permission; pinned i18n describes automatic updates every 5 minutes. |
@@ -60,6 +68,23 @@ protection. It says voice XP is earned by staying in voice channels and
 requires the member to be unmuted and not alone in a channel. It gives no
 formula, amount, cooldown, session cap, XP carry/rounding rule, or definition
 of “alone.” Those are ByteBot-owned rules below.
+
+The hosted guide's level-up script surface is part of parity, not a two-token
+template. It documents rich embed/script syntax, reusable
+`{cscript:name}` references, and these variables:
+
+- level: `{level}`, `{level.current}`, `{level.next}`, `{level.rank}`,
+  `{level.xp}`, `{level.next_xp}`;
+- user: `{user}`, `{user.mention}`, `{user.name}`, `{user.id}`,
+  `{user.avatar}`, `{user.display_name}`, `{user.top_role}`, `{user.color}`;
+- guild: `{guild}`, `{guild.name}`, `{guild.id}`, `{guild.member_count}`,
+  `{guild.icon}`, `{guild.boost_count}`, `{guild.boost_tier}`.
+
+Reusable script names are limited to 32 lowercase letters, digits, hyphens,
+or underscores, with at most 100 saved scripts per server. ByteBot already has
+a rich-content renderer and saved custom-script surface from the preceding
+parity slice; level-up delivery reuses that implementation and its existing
+mention/URL safety rather than adding a second template language.
 
 ### Pinned English localization
 
@@ -162,25 +187,26 @@ fact rather than normalized into a different response.
 The logging docs do not expose exact Discord option types, whether a module
 can be attached to more than one channel simultaneously, per-event payload
 fields, retention, edit/delete content limits, audit-log correlation rules,
-or permissions. The pinned `add` success says events can be moved from a prior
-channel; ByteBot therefore treats a `(guild,module)` mapping as unique unless a
-future first-party source proves multi-channel fan-out.
+or permissions. Because the current Premium guide defines a 15-*channel* cap
+while only 12 modules exist, ByteBot counts distinct destinations and permits
+module fan-out as an explicit ByteBot-owned cardinality rule; it does not
+misreport that undocumented shape as Greed behavior.
 
 ## Analytics evidence and current ByteBot state
 
 ### What Greed publicly claims
 
-The homepage's exact marketing statement is that Greed “tracks messages,
-reactions, voice, and membership over time” and renders cards/charts. The
+The homepage demonstrates `,analytics`, a response headed “Server analytics
+for …”, and says Greed “tracks messages, reactions, voice, and membership over
+time” while rendering cards/charts. The
 current Premium guide gives only two analytics numbers: 60 days of retention
 for free servers and 3 years for Server Premium; it names “Server stats card”
-as a Server Premium-only feature. Neither source identifies a public analytics
-command, subcommand, option, default range, chart period, user/member drilldown,
-join/leave definition, message/reaction semantics, voice eligibility, or
-response copy. The pinned English registry contains no `analytics` file and no
-unambiguous stats-card command path. The current command catalog's rendered
-rows are unavailable to a non-interactive fetch. These are evidence gaps, not
-permission to invent a Greed command.
+as a Server Premium-only feature. These sources establish the command name but
+not subcommands, options, default range, chart period, user/member drilldown,
+join/leave definition, message/reaction semantics, or voice eligibility. The
+pinned English registry contains no `analytics` file and no option schema. The
+current command catalog's rendered rows are unavailable to a non-interactive
+fetch. ByteBot-owned options remain labeled below.
 
 ### Existing ByteBot evidence
 
@@ -226,12 +252,15 @@ metadata cannot replace those path-specific checks.
 | `/levels rank` | optional `member`, optional `private` | Any guild member; read-only. This is the slash presentation of Greed's `,level` plus `,rank`, `,xp`, and `,lvl` aliases. The pinned `levels stats` localization is the response source. |
 | `/levels leaderboard` | optional `metric` choice `total`, `text`, `voice`; optional `page`; optional `private` | Any guild member; read-only. |
 | `/levels roles` | optional `page`; optional `private` | Any guild member; read-only. |
+| `/levels config text|voice|dm|antiafk` | each subcommand takes required boolean `enabled` | Manage Server. Explicit booleans make slash state deterministic while help records Greed's prefix toggles. Text/voice default enabled; DM default disabled; anti-AFK default enabled. |
+| `/levels config channel` | required `channel` | Manage Server plus bot delivery preflight in the selected channel. |
 | `/levels live text|voice` | Subcommands `text` and `voice`; optional `channel` (defaults current) | Manage Server plus bot Send Messages, Embed Links, and message edit/delete in the target channel. |
-| `/levels boost add|remove|list` | `add` takes a role/channel target and multiplier; `remove` takes the target; `list` has no required option | Manage Server. Merely referencing a role as an XP condition does not mutate it, so no caller/bot Manage Roles check is invented. `add` multiplier is 0–10 from pinned validation; remove/list are ByteBot-owned completion paths because only `add` is publicly documented. |
+| `/levels boost add|remove|list` | `add` takes optional `role`, optional `channel`, and required `multiplier`; `remove` takes optional `role` and optional `channel`; exactly one typed target is required; `list` has no required option | Manage Server. Discord has no role-or-channel union option, so separate typed options preserve autocomplete and runtime validation rejects zero or two targets. Merely referencing a role as an XP condition does not mutate it, so no caller/bot Manage Roles check is invented. `add` multiplier is 0–10 from pinned validation; remove/list are ByteBot-owned completion paths because only `add` is publicly documented. |
 | `/levels admin award|removexp|setxp|setlevel` | `award`/`removexp` take `member` and amount; `setxp` takes `member` and total XP; `setlevel` takes `member` and level | Manage Server; amount is non-negative for set, positive for removal; level is 1–999 from pinned validation. |
 | `/levels reward add|remove|sync|stack` | `add`/`remove` take role + level; `sync` has no required option; `stack` takes `on`/`off` | Manage Server; all role actions additionally require Manage Roles/hierarchy. `stack` exact values are pinned; reward grouping is a Discord-compatible mapping. |
 | `/levels ignore channel|role|list` | `channel` or `role` target; `list` no option | Manage Server. Role-ignore/list are pinned handler surfaces; group shape is ByteBot-owned. |
-| `/levels message set|view` | `set` takes message (max 2,000); `view` no option | Manage Server; only `{user}` and `{level}` variables are accepted. |
+| `/levels message set|view|disable` | `set` takes a rich-content script (max 2,000); `view` and `disable` take no option | Manage Server. Rendering reuses ByteBot's existing script/custom-script service and supports the hosted variable set above. Announcements are sent only when a channel and enabled message exist; DM mode selects DM instead of channel and a failed DM is reported but not reposted elsewhere. |
+| `/levels rankcard view|color|style` | `view` takes optional `member`; `color` takes required `color` (`#RRGGBB` or `reset`); `style` takes optional `background` attachment, optional `layout` (`classic`/`compact`), and optional `avatar_border` (0–20) | Any member may view and customize their own card; viewing another member is read-only. Accent/reset are current hosted command behavior. Background, type, and border-width controls match the hosted dashboard capabilities; the exact choices/bounds are not public, so the stated values are versioned ByteBot-owned UI rules. No Premium/vote gate is applied. |
 | `/levels reset user|all` | `user` takes `member`; `all` takes a one-time confirmation | Manage Server; reset-all requires explicit confirmation and deletes all text/voice XP, matching the pinned warning. |
 | `/levels setup` | Interactive setup action; all settings are component/modal-driven | Manage Server; role reward changes additionally require Manage Roles and hierarchy preflight. |
 
@@ -240,27 +269,27 @@ one-subcommand nesting limit and stays below 25 root options. Help displays
 Greed aliases `level`, `rank`, `xp`, `lvl`, `levels lb`, and `levels top` as
 text compatibility names; it does not register duplicate slash commands.
 
-### Analytics (`/server stats`, existing Server presentation category)
+### Analytics (`/analytics`, Utility presentation category; `/server stats` compatibility path)
 
-Keep `/server stats` as the one registered server view, backed by the existing
-unregistered Utility handler, with the existing `days` (1-1,095, default 60)
-and `private` options. Use component
-pages/charts inside that response for metric drilldowns rather than adding a
-second `/analytics` root. Greed's `analytics` marketing term is a help/ledger
-mapping only; no Greed command is asserted.
+The current homepage explicitly demonstrates `,analytics`, so ByteBot registers
+the visible `/analytics` root. The existing `/server stats` path remains a
+compatibility alias backed by the same handler/service; the internal Utility
+`stats` module remains `register: false`. Both paths render the same cards and
+component pages and never duplicate persistence or calculations.
 
 | Slash path | Options | Contract |
 | --- | --- | --- |
-| `/server stats` | optional `days`, optional `private`, optional `metric` choice `all/messages/reactions/voice/membership` | Sum only persisted daily rows. `membership` must say unavailable until daily join/leave/snapshot rows exist. Metric pages/charts are components on this response. |
+| `/analytics` | optional `days`, optional `private`, optional `metric` choice `all/messages/reactions/voice/membership` | Exact public command-name mapping. Sum only persisted daily rows; metric cards/charts are components on this response. |
+| `/server stats` | same options as `/analytics` | Existing ByteBot compatibility path calling the same handler. |
 
-No `/analytics` Greed-compatible path is claimed until a first-party source
-names it. The help/category ledger may label these rows `Analytics` while the
-implementation remains under the existing Utility `/stats` command.
+Membership history before the first reliable baseline is labeled unavailable,
+not rendered as zero activity.
 
 ### Logging (`/server logs`, existing Administration/Server hub)
 
-Extend the existing `/server logs set` group rather than adding an unbounded
-top-level root:
+Extend the existing `/server logs` group rather than adding an unbounded
+top-level root. Preserve the current `/server logs set` subcommand as a
+compatibility alias for the dedicated moderation-log setting:
 
 | Slash path | Options | Mapping |
 | --- | --- | --- |
@@ -268,13 +297,14 @@ top-level root:
 | `/server logs view` | optional `private` | `,logs view`. |
 | `/server logs remove` | optional `channel`; optional `module` | `,logs remove [channel] [module]`; no options removes all only after confirmation. |
 | `/server logs color` | required `channel`, `module`, six-digit `hex` | Pinned `logs color`; validate `#RRGGBB` before write. |
-| `/server logs ignore` | required `target` (member or channel) | Pinned `logs ignore`; include list/view in the same response. |
+| `/server logs ignore` | optional `member`; optional `channel` | Pinned `logs ignore`; Discord has no member-or-channel union option, so exactly one typed target is required. Include list/view in the same response. |
 | `/server logs modlog` | optional `channel` | Existing `/config logs` compatibility plus Greed `,settings modlog [channel]` copy. |
+| `/server logs set` | same optional `channel` as `modlog` | Existing public ByteBot compatibility alias; delegates to the exact `modlog` handler and is not repurposed for general event routing. |
 
 All log configuration paths require Manage Server and a bot channel preflight;
 read-only view is visible to members but redacts inaccessible channel names.
-The existing `/config logs` path remains supported as the moderation-case-log
-alias and is not removed.
+The existing `/config logs` path also remains supported as a moderation-case-
+log alias and is not removed.
 
 ## RBAC and Discord/API boundary
 
@@ -313,9 +343,13 @@ existing streak update seam without incrementing `activity_logs` a second time.
 The minimum schema additions are:
 
 - guild-scoped level config: enabled text/voice flags, award channel/message,
-  text cooldown, voice rate/minimum/session cap, base multiplier, stacking;
+  DM and anti-AFK flags, text cooldown, voice rate/minimum/session cap, base
+  multiplier, stacking;
 - additive columns on canonical `member_levels` for text XP, voice XP, signed
-  manual adjustment, message count, voice seconds, and cooldown timestamps;
+  manual adjustment, preserved level floor, message count, voice seconds, and
+  cooldown timestamps;
+- member-scoped rank-card preferences for accent, layout, background asset, and
+  avatar-border width;
 - guild-scoped level role rewards keyed by `(guild_id, level)` plus ignored
   channels/roles;
 - persisted live leaderboard messages keyed by `(guild_id, channel_id, metric)`
@@ -325,6 +359,17 @@ The minimum schema additions are:
 - a bounded idempotency ledger for events with stable Discord IDs, plus
   reaction-placement, active-voice-session, and member-presence state tables
   whose unique keys make state transitions idempotent.
+
+The upgrade migration is deliberately lossless. For every existing
+`member_levels` row it sets `text_xp = 0`, `voice_xp = 0`,
+`manual_adjustment = existing xp`, and `level_floor = existing level`, while
+leaving the cached `xp` and `level` values byte-for-byte unchanged. Automatic
+activity subsequently computes `xp = max(0, text_xp + voice_xp +
+manual_adjustment)` and `level = max(level_floor, formula(xp))`, so an upgrade
+cannot lower an existing member's level or break giveaway level eligibility.
+An explicit Manage Server `setxp`, `setlevel`, or reset is the only operation
+allowed to replace/remove that legacy floor and may therefore lower a level.
+Fresh rows use a zero floor and the versioned formula normally.
 
 Each accepted message event transaction inserts its stable message ID, updates
 the daily rows, and updates `member_levels` when XP is earned. Reaction adds
@@ -342,6 +387,21 @@ provide historical joins. On first enable, the service records the current
 member count as a baseline and reports “history unavailable before
 <baseline-date>.” It never backfills joins/leaves from current member lists.
 
+Startup and reconnect use current Discord state only as a new baseline:
+
+- after the ready/guild cache phase, current non-bot members are upserted as
+  present and the day's human-member snapshot is updated without incrementing
+  joins;
+- previously present members absent from the current guild are marked absent
+  without incrementing leaves because their departure time occurred while the
+  bot was offline and is unknowable;
+- persisted voice sessions are closed at their last observed timestamp with no
+  XP or analytics added for the offline gap, then currently eligible non-bot
+  voice members are seeded into new sessions at startup time; and
+- bots/webhooks are excluded from text, reaction, voice, membership events, and
+  member-count snapshots. Enabling the feature later follows the same baseline
+  rules, so it never manufactures history.
+
 Analytics retention is bounded by age to 1,095 days (three years), not to
 1,095 physical rows: per-user `activity_logs` may contain many rows for the
 same guild/date. A scheduled prune deletes daily analytics and expired dedupe
@@ -350,11 +410,14 @@ audited and never deletes level balances, role configuration, or immutable
 security logs. Query ranges are clamped to 1-1,095 days, with a default of 60.
 There is no hidden “unlimited” storage mode.
 
-Logging configuration writes are transactional. A guild/module mapping is
-unique; adding the same mapping is idempotent, moving it updates one row, and
-removing an absent mapping is a no-op with the documented empty-state copy.
-Log delivery uses a bounded outbox retry (three attempts, exponential delays)
-and stores a dedupe key so reconnects cannot duplicate the same event. Source
+Logging configuration writes are transactional. A mapping is unique by
+`(guild_id, module, channel_id)`, so one module may fan out to multiple
+channels and one channel may receive multiple modules. The 15-channel cap
+counts distinct configured channel IDs, not mapping rows; adding another
+module to an already-configured channel consumes no slot. Adding the same
+mapping is idempotent and removing an absent mapping is a no-op. Delivery
+deduplicates each `(event, channel)` pair and fans out once to every mapped
+channel. A bounded outbox retries three times with exponential delays. Source
 content is truncated to Discord's message/embed limits and never used as a
 query or executable script.
 
@@ -367,6 +430,7 @@ can change them through a migration rather than silently changing balances.
 | Rule | ByteBot value |
 | --- | --- |
 | Level cap | 999, matching the pinned public validation string. |
+| Level switches | Text and voice enabled by default, matching the current hosted guide. DM delivery defaults off and anti-AFK defaults on; those two defaults are not public Greed facts. |
 | XP formula | Level `n` requires `100 × n²` total XP; level is `min(999, floor(sqrt(totalXP / 100)))`. XP is integer and never negative. |
 | Text XP | 20 XP per eligible message; one award per user/guild every 60 seconds. The event still counts in analytics when it is ineligible for XP. |
 | Text anti-abuse | Bots, DMs, webhooks, and empty content earn no XP and no analytics count. Configured level channel/role exclusions block XP only; an otherwise accepted human guild message still counts in analytics. A user is capped at 20,000 text XP/day; rejected XP is not queued or retroactively awarded. |
@@ -375,7 +439,8 @@ can change them through a migration rather than silently changing balances.
 | Multipliers | Default server rate is 1.0x. Role and channel multipliers are each in `[0,10]`; the effective rate is the server rate times the highest applicable role/channel multiplier, clamped to 10.0x. Level-role stacking does not change XP multiplier math. XP is rounded down after multiplication. |
 | Manual XP | `text_xp` and `voice_xp` remain activity tracks. A signed `manual_adjustment` records admin changes; cached canonical `xp` is `max(0, text_xp + voice_xp + manual_adjustment)`. `award` adds a positive adjustment, `removexp` subtracts without taking total below zero, and `setxp`/`setlevel` replace the adjustment so the requested total/threshold is exact. Track leaderboards therefore remain truthful after admin changes. |
 | Level roles | At most 50 reward rows per guild; one role per level. Stacking defaults off: reconciliation keeps only the highest configured reward at or below the member's level. With stacking on it keeps every configured reward at or below the level. XP commits enqueue reconciliation; reads never mutate roles. Resets commit level state first, then the retryable reconciler removes obsolete configured rewards. |
-| Level-up message | Default `Congratulations {user}, you reached level {level}!`; custom message max 2,000 Unicode characters; only `{user}` and `{level}` variables are substituted. Disabled means no announcement. |
+| Level-up message | No announcement is sent until both an award channel and enabled message are configured, matching the hosted guide. Custom serialized script max 2,000 Unicode characters. Rendering and `{cscript:name}` reuse the existing rich-content service with the complete documented level/user/guild variable set above. DM mode sends there instead; failed DMs are not silently rerouted. |
+| Rank card | Every member receives the same ungated card renderer. Accent defaults to ByteBot purple; `reset` restores it. ByteBot-owned style values are `classic`/`compact`, background images up to 5 MiB from an attachment or HTTPS URL, and avatar-border width 0–20 pixels. Image fetches use existing URL-safety rules, byte/type limits, and no arbitrary local paths. |
 | Live board | One board per `(guild, channel, metric)`, 10 entries per page, page 1 default, max 100 pages/1,000 rows, update every 5 minutes. Ties sort by total XP descending then user ID ascending. A missing/deleted message is recreated while the configuration remains active and the bot still has target-channel permissions; the original administrator need not remain in the guild. |
 | Analytics | Daily UTC buckets. `messages` counts accepted non-bot guild message-create events; `reactions` counts add events; `voice` counts observed eligible voice seconds converted to minutes for display; `membership` counts join/leave events plus the latest daily member snapshot. Missing history is rendered as unavailable, never zero-filled as historical fact. |
 | Analytics ranges | Default 60 days; minimum 1; maximum and retention 1,095 days. A request outside the bound returns a validation error before querying. |
@@ -389,10 +454,10 @@ analytics rows in place.
 
 ## Evidence gaps and exclusions
 
-- No public Greed analytics command, slash schema, response copy, chart/card
-  layout, metric grain, user drilldown, default range, join/leave definition,
-  or analytics permission was found in current docs, the client-rendered
-  catalog, or the pinned English registry.
+- The current homepage establishes the public `,analytics` name and response
+  subject, but no public Greed slash schema, option list, chart/card layout,
+  metric grain, user drilldown, default range, join/leave definition, or
+  analytics permission was found.
 - Greed's homepage says membership is tracked but does not say whether that
   means joins, leaves, net membership, snapshots, retention cohorts, boosts,
   or member profile changes. ByteBot must expose only its persisted definitions.
@@ -401,8 +466,9 @@ analytics rows in place.
   or whether Premium changes sampling/granularity. ByteBot uses one bounded
   three-year daily policy and labels it ByteBot-owned.
 - XP formulas, amounts, cooldowns, voice session behavior, leaderboard pages,
-  role caps, and all Level permissions beyond the pinned setup Manage Server
-  copy are undocumented. The deterministic table above is not parity evidence.
+  role caps, exact rank-card type/border choices, and all Level permissions
+  beyond the pinned setup Manage Server copy are undocumented. The
+  deterministic table above is not parity evidence.
 - Current hosted logging and raw source disagree on singular/plural module
   names, interactive no-argument setup, and `soundboard`; ByteBot accepts the
   union with canonical plural persistence. The pinned add error says Premium
@@ -423,12 +489,12 @@ Implementation is not complete until focused tests and review cover:
 
 | Area | Acceptance evidence |
 | --- | --- |
-| Command contract | Generated slash JSON includes visible `/levels`, `/server stats`, and `/server logs` paths; the internal `stats` handler remains unregistered; options have the stated ranges/choices; help lists prefix aliases without duplicate roots. |
-| Levels math | Table-driven XP/level boundaries at 0, 99, 100, 399, 100,000, and level 999 cap; multiplier order, stack toggle, role thresholds, message variables, and 2,000-character validation. |
-| Event ingestion | Bot/DM/ignored filtering; one XP cooldown; voice mute/alone/minimum/session split; membership baseline; stable message IDs and state-driven reaction/voice/member dedupe; duplicate/retry delivery produces one counter. |
-| Persistence | Fresh and upgrade migrations preserve `member_levels`, existing `activity_logs`, and existing `/stats` output; unique guild/user/date and guild/event keys reject cross-guild collisions; transactions do not partially award XP. |
+| Command contract | Generated slash JSON includes visible `/levels`, `/analytics`, `/server stats`, and `/server logs` paths; `/server logs set` remains the modlog alias; the internal `stats` handler remains unregistered; typed role/channel and member/channel options reject zero or two targets; help lists prefix aliases without duplicate state/handlers. |
+| Levels math and presentation | Table-driven XP/level boundaries at 0, 99, 100, 399, 100,000, and level 999 cap; multiplier order, stack toggle, role thresholds, complete hosted message variables/custom-script reuse, 2,000-character validation, DM/channel delivery, and rank-card color/reset/style bounds without a Premium gate. |
+| Event ingestion | Bot/DM/ignored filtering; one XP cooldown; voice mute/alone/minimum/session split; reaction add/remove/re-add placement transitions; stable message IDs and state-driven reaction/voice/member dedupe; duplicate/retry delivery produces one counter. Startup/enable baselines exclude bots, do not manufacture offline joins/leaves/voice time, and seed current eligible voice sessions at `now`. |
+| Persistence | Fresh and upgrade migrations preserve `member_levels`, existing `activity_logs`, existing `/stats` output, and giveaway eligibility. Upgrade tests prove existing XP/level are unchanged, automatic XP cannot lower the legacy level floor, and only explicit admin set/reset can replace it. Unique guild/user/date and guild/event keys reject cross-guild collisions; transactions do not partially award XP. |
 | Analytics | Exact daily sums for messages, reactions, voice minutes, joins, leaves, and snapshots; unavailable-history labels; 1/60/1,095 range boundaries; prune deletes only old daily rows and is resumable. |
 | Live boards | 5-minute scheduler, one board identity, actor/guild binding, stale/deleted-message recreation, deterministic pagination/ties, and no duplicate boards on retries. |
-| Logging | Union module choices and aliases; channel cap 15; add/move/remove/view/color/ignore responses; no-argument remove confirmation; outbox retry/dedupe; inaccessible channel and missing audit-log handling. |
+| Logging | Union module choices and aliases; 15 distinct-channel cap; same-module fan-out and same-channel multi-module mappings; add/remove/view/color/typed-ignore responses; no-argument remove confirmation; one `(event, channel)` delivery under retries; inaccessible channel and missing audit-log handling. |
 | RBAC and safety | Caller and bot permission checks are path-specific; role hierarchy is rechecked; all destructive actions require the exact confirmation; logs cannot recurse on bot messages or leak another guild's data. |
 | Runtime | Only after this contract is accepted: focused unit/integration checks, generated command inspection, and a user-approved Discord test-guild proof for level awards, analytics events, live boards, and logging delivery. |
