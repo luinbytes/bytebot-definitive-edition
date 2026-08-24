@@ -2,10 +2,11 @@ const crypto = require('crypto');
 const dns = require('dns').promises;
 const net = require('net');
 const { privateAddress } = require('./serverPresentationService');
+const { UserFacingError } = require('../utils/errorHandlerUtil');
 
 function evaluateExpression(input) {
     const expression = String(input || '').trim();
-    if (!expression || expression.length > 500) throw new Error('Invalid expression.');
+    if (!expression || expression.length > 500) throw new UserFacingError('Invalid expression.');
 
     const tokens = [];
     for (let offset = 0; offset < expression.length;) {
@@ -16,7 +17,7 @@ function evaluateExpression(input) {
             continue;
         }
         const token = remaining.match(/^(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?|^\*\*|^[()+\-*/%]/i)?.[0];
-        if (!token) throw new Error('Invalid expression.');
+        if (!token) throw new UserFacingError('Invalid expression.');
         tokens.push(token);
         offset += token.length;
     }
@@ -32,12 +33,12 @@ function evaluateExpression(input) {
     function primary() {
         if (take('(')) {
             const value = add();
-            if (!take(')')) throw new Error('Invalid expression.');
+            if (!take(')')) throw new UserFacingError('Invalid expression.');
             return value;
         }
         const token = tokens[index++];
         const value = Number(token);
-        if (!token || !Number.isFinite(value)) throw new Error('Invalid expression.');
+        if (!token || !Number.isFinite(value)) throw new UserFacingError('Invalid expression.');
         return value;
     }
 
@@ -75,8 +76,8 @@ function evaluateExpression(input) {
     }
 
     const result = add();
-    if (index !== tokens.length) throw new Error('Invalid expression.');
-    if (!Number.isFinite(result)) throw new Error('The result must be finite.');
+    if (index !== tokens.length) throw new UserFacingError('Invalid expression.');
+    if (!Number.isFinite(result)) throw new UserFacingError('The result must be finite.');
     return result;
 }
 
@@ -92,47 +93,78 @@ class InformationLookupService {
     }
 
     async json(url, options = {}) {
-        const response = await this.fetch(url, {
-            ...options,
-            redirect: 'error',
-            signal: options.signal || AbortSignal.timeout(10000)
-        });
-        if (!response.ok) throw new Error('Lookup provider request failed.');
+        let response;
+        try {
+            response = await this.fetch(url, {
+                ...options,
+                redirect: 'error',
+                signal: options.signal || AbortSignal.timeout(10000)
+            });
+        } catch { throw new UserFacingError('Lookup provider request failed.'); }
+        if (!response.ok) throw new UserFacingError('Lookup provider request failed.');
         const type = response.headers.get('content-type') || '';
-        const length = Number(response.headers.get('content-length') || 0);
-        if (!type.toLowerCase().includes('application/json') || length > 2 * 1024 * 1024) {
-            throw new Error('Lookup provider returned an invalid payload.');
+        if (!type.toLowerCase().includes('application/json')) {
+            throw new UserFacingError('Lookup provider returned an invalid payload.');
         }
-        const bytes = await response.arrayBuffer();
-        if (bytes.byteLength > 2 * 1024 * 1024) throw new Error('Lookup provider returned an invalid payload.');
-        try { return JSON.parse(Buffer.from(bytes).toString('utf8')); }
-        catch { throw new Error('Lookup provider returned an invalid payload.'); }
+        const bytes = await this.boundedBody(response, 2 * 1024 * 1024, 'Lookup provider returned an invalid payload.');
+        try { return JSON.parse(bytes.toString('utf8')); }
+        catch { throw new UserFacingError('Lookup provider returned an invalid payload.'); }
     }
 
     async image(url) {
-        const response = await this.fetch(url, { redirect: 'error', signal: AbortSignal.timeout(10000) });
+        let response;
+        try {
+            response = await this.fetch(url, { redirect: 'error', signal: AbortSignal.timeout(10000) });
+        } catch { throw new UserFacingError('Image provider request failed.'); }
         const type = response.headers.get('content-type') || '';
-        const length = Number(response.headers.get('content-length') || 0);
-        if (!response.ok || !/^image\/(?:png|jpe?g|webp)$/i.test(type.split(';')[0].trim())
-            || length > 8 * 1024 * 1024) throw new Error('Image provider returned an invalid payload.');
-        const bytes = await response.arrayBuffer();
-        if (bytes.byteLength > 8 * 1024 * 1024) throw new Error('Image provider returned an invalid payload.');
-        return Buffer.from(bytes);
+        if (!response.ok || !/^image\/(?:png|jpe?g|webp)$/i.test(type.split(';')[0].trim())) {
+            throw new UserFacingError('Image provider returned an invalid payload.');
+        }
+        return this.boundedBody(response, 8 * 1024 * 1024, 'Image provider returned an invalid payload.');
+    }
+
+    async boundedBody(response, limit, message) {
+        const declared = response.headers.get('content-length');
+        if (declared !== null && (!/^\d+$/.test(declared) || Number(declared) > limit)) {
+            throw new UserFacingError(message);
+        }
+        const reader = response.body?.getReader?.();
+        if (!reader) throw new UserFacingError(message);
+        const chunks = [];
+        let size = 0;
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                size += value.byteLength;
+                if (size > limit) {
+                    await reader.cancel();
+                    throw new UserFacingError(message);
+                }
+                chunks.push(Buffer.from(value));
+            }
+        } catch (error) {
+            if (error instanceof UserFacingError) throw error;
+            throw new UserFacingError(message);
+        }
+        return Buffer.concat(chunks, size);
     }
 
     async publicUrl(input, httpsOnly = false) {
         const value = String(input || '').trim();
-        if (!value || value.length > 2048) throw new Error('Use a valid public website URL.');
+        if (!value || value.length > 2048) throw new UserFacingError('Use a valid public website URL.');
         let url;
-        try { url = new URL(value); } catch { throw new Error('Use a valid public website URL.'); }
+        try { url = new URL(value); } catch { throw new UserFacingError('Use a valid public website URL.'); }
         if ((httpsOnly ? url.protocol !== 'https:' : !['http:', 'https:'].includes(url.protocol))
-            || url.username || url.password) throw new Error('Use a valid public website URL.');
+            || url.username || url.password) throw new UserFacingError('Use a valid public website URL.');
         const literal = url.hostname.replace(/^\[|\]$/g, '');
-        if (net.isIP(literal) && privateAddress(literal)) throw new Error('The URL must use a public address.');
-        const resolved = await this.lookup(url.hostname);
+        if (net.isIP(literal) && privateAddress(literal)) throw new UserFacingError('The URL must use a public address.');
+        let resolved;
+        try { resolved = await this.lookup(url.hostname); }
+        catch { throw new UserFacingError('The website address could not be resolved.'); }
         const addresses = Array.isArray(resolved) ? resolved : [resolved];
         if (!addresses.length || addresses.some(entry => privateAddress(entry.address || entry))) {
-            throw new Error('The URL must use a public address.');
+            throw new UserFacingError('The URL must use a public address.');
         }
         return url;
     }
@@ -144,20 +176,20 @@ class InformationLookupService {
 
     async screenshot(input) {
         const url = await this.publicUrl(input, true);
-        if (!this.screenshotProvider) throw new Error('Screenshot service is not configured.');
-        if (!this.screenshotProvider.includes('{url}')) throw new Error('Screenshot service is not configured correctly.');
+        if (!this.screenshotProvider) throw new UserFacingError('Screenshot service is not configured.');
+        if (!this.screenshotProvider.includes('{url}')) throw new UserFacingError('Screenshot service is not configured correctly.');
         let provider;
         try { provider = new URL(this.screenshotProvider.replace('{url}', encodeURIComponent(url.toString()))); }
-        catch { throw new Error('Screenshot service is not configured correctly.'); }
+        catch { throw new UserFacingError('Screenshot service is not configured correctly.'); }
         if (provider.protocol !== 'https:' || provider.username || provider.password) {
-            throw new Error('Screenshot service is not configured correctly.');
+            throw new UserFacingError('Screenshot service is not configured correctly.');
         }
         return this.image(provider);
     }
 
     async weather(input) {
         const location = String(input || '').trim();
-        if (!location || location.length > 100) throw new Error('Provide a location up to 100 characters.');
+        if (!location || location.length > 100) throw new UserFacingError('Provide a location up to 100 characters.');
         const search = new URL('https://geocoding-api.open-meteo.com/v1/search');
         search.searchParams.set('name', location);
         search.searchParams.set('count', '1');
@@ -165,7 +197,7 @@ class InformationLookupService {
         search.searchParams.set('format', 'json');
         const place = (await this.json(search))?.results?.[0];
         if (!place || !Number.isFinite(place.latitude) || !Number.isFinite(place.longitude)
-            || typeof place.name !== 'string') throw new Error(`No weather data found for ${location}.`);
+            || typeof place.name !== 'string') throw new UserFacingError(`No weather data found for ${location}.`);
 
         const forecast = new URL('https://api.open-meteo.com/v1/forecast');
         forecast.searchParams.set('latitude', String(place.latitude));
@@ -179,7 +211,7 @@ class InformationLookupService {
         if (values.some(value => !Number.isFinite(value))
             || typeof data?.daily?.sunrise?.[0] !== 'string'
             || typeof data?.daily?.sunset?.[0] !== 'string') {
-            throw new Error('Weather provider returned an invalid payload.');
+            throw new UserFacingError('Weather provider returned an invalid payload.');
         }
         return {
             location: [place.name, place.country].filter(value => typeof value === 'string').join(', '),
@@ -194,11 +226,11 @@ class InformationLookupService {
 
     async define(input) {
         const word = String(input || '').trim();
-        if (!word || word.length > 100) throw new Error('Provide a word up to 100 characters.');
+        if (!word || word.length > 100) throw new UserFacingError('Provide a word up to 100 characters.');
         const url = new URL('https://api.urbandictionary.com/v0/define');
         url.searchParams.set('term', word);
         const rows = (await this.json(url))?.list;
-        if (!Array.isArray(rows)) throw new Error('Definition provider returned an invalid payload.');
+        if (!Array.isArray(rows)) throw new UserFacingError('Definition provider returned an invalid payload.');
         const definitions = rows.slice(0, 5).map(row => {
             let permalink;
             try {
@@ -208,7 +240,7 @@ class InformationLookupService {
                 }
             } catch { /* Invalid provider URL is omitted. */ }
             if (typeof row.definition !== 'string' || !Number.isFinite(row.thumbs_up) || !Number.isFinite(row.thumbs_down)) {
-                throw new Error('Definition provider returned an invalid payload.');
+                throw new UserFacingError('Definition provider returned an invalid payload.');
             }
             return {
                 definition: row.definition.slice(0, 1000),
@@ -218,7 +250,7 @@ class InformationLookupService {
                 ...(permalink && { url: permalink })
             };
         });
-        if (!definitions.length) throw new Error(`No definitions found for ${word}.`);
+        if (!definitions.length) throw new UserFacingError(`No definitions found for ${word}.`);
         return definitions;
     }
 
@@ -226,15 +258,15 @@ class InformationLookupService {
         const requestedLanguage = String(languageInput || '').trim();
         const text = String(textInput || '').trim();
         if (!requestedLanguage || requestedLanguage.length > 50 || !/^[a-z][a-z -]*$/i.test(requestedLanguage)) {
-            throw new Error('Use a valid language code or name.');
+            throw new UserFacingError('Use a valid language code or name.');
         }
-        if (!text || text.length > 2000) throw new Error('Provide 1-2000 characters to translate.');
-        if (!this.translationProvider) throw new Error('Translation service is not configured.');
+        if (!text || text.length > 2000) throw new UserFacingError('Provide 1-2000 characters to translate.');
+        if (!this.translationProvider) throw new UserFacingError('Translation service is not configured.');
         let endpoint;
         try { endpoint = new URL('translate', this.translationProvider); }
-        catch { throw new Error('Translation service is not configured correctly.'); }
+        catch { throw new UserFacingError('Translation service is not configured correctly.'); }
         if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password) {
-            throw new Error('Translation service is not configured correctly.');
+            throw new UserFacingError('Translation service is not configured correctly.');
         }
         let language = requestedLanguage.toLowerCase();
         if (!/^[a-z]{2,3}(?:-[a-z]{2})?$/.test(language)) {
@@ -244,7 +276,7 @@ class InformationLookupService {
                 && entry.name.toLowerCase() === language
                 && typeof entry.code === 'string'
                 && /^[a-z]{2,3}(?:-[a-z]{2})?$/i.test(entry.code));
-            if (!match) throw new Error(`Language ${requestedLanguage} was not found.`);
+            if (!match) throw new UserFacingError(`Language ${requestedLanguage} was not found.`);
             language = match.code.toLowerCase();
         }
         const payload = await this.json(endpoint, {
@@ -260,7 +292,7 @@ class InformationLookupService {
         });
         if (typeof payload?.translatedText !== 'string' || !payload.translatedText
             || payload.translatedText.length > 4000) {
-            throw new Error('Translation provider returned an invalid payload.');
+            throw new UserFacingError('Translation provider returned an invalid payload.');
         }
         return payload.translatedText;
     }

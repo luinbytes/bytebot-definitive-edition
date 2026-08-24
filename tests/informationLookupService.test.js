@@ -84,6 +84,23 @@ test('QR generation validates and bounds the provider image without fetching the
     expect(fetch.mock.calls[0][0].hostname).toBe('quickchart.io');
 });
 
+test('provider bodies are stopped at the byte limit without relying on Content-Length', async () => {
+    const oversized = new ReadableStream({
+        start(controller) {
+            controller.enqueue(new Uint8Array(2 * 1024 * 1024));
+            controller.enqueue(new Uint8Array([1]));
+            controller.close();
+        }
+    });
+    const service = new InformationLookupService({
+        fetch: jest.fn().mockResolvedValue(new Response(oversized, {
+            headers: { 'content-type': 'application/json' }
+        }))
+    });
+
+    await expect(service.json('https://provider.example/data')).rejects.toThrow('invalid payload');
+});
+
 test('name history records only observed former names in the existing automation store', () => {
     const sqlite = new Database(':memory:');
     sqlite.exec(`CREATE TABLE automation_rules (

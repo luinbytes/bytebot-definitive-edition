@@ -1,6 +1,7 @@
 const { AttachmentBuilder, SlashCommandBuilder } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const { evaluateExpression } = require('../../services/informationLookupService');
+const { UserFacingError } = require('../../utils/errorHandlerUtil');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -27,7 +28,7 @@ module.exports = {
     async execute(interaction, client) {
         const action = interaction.options.getSubcommand();
         const service = client.informationLookupService;
-        if (!service) throw new Error('Lookup service is temporarily unavailable.');
+        if (!service) throw new UserFacingError('Lookup service is temporarily unavailable.');
 
         if (action === 'calculate') {
             const expression = interaction.options.getString('expression', true);

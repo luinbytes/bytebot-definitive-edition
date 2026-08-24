@@ -3,7 +3,9 @@
  * Tests standardized error handling functions
  */
 
-const { handleCommandError, handleDMError, generateErrorId, safeReply } = require('../src/utils/errorHandlerUtil');
+const {
+    UserFacingError, handleCommandError, handleDMError, generateErrorId, publicErrorMessage, safeReply
+} = require('../src/utils/errorHandlerUtil');
 const logger = require('../src/utils/logger');
 
 // Mock logger
@@ -23,6 +25,11 @@ jest.mock('../src/utils/embeds', () => ({
 describe('Error Handler Utility', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+    });
+
+    test('only explicitly user-facing errors expose their diagnostic', () => {
+        expect(publicErrorMessage(new UserFacingError('Provider is unavailable.'))).toBe('Provider is unavailable.');
+        expect(publicErrorMessage(new Error('secret provider detail'))).toBeNull();
     });
 
     describe('generateErrorId', () => {

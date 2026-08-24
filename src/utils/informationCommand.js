@@ -1,5 +1,7 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const embeds = require('./embeds');
+const { UserFacingError } = require('./errorHandlerUtil');
+const { paginateArray, sendPaginatedMessage } = require('./paginationUtil');
 
 async function executeMemberLookup(interaction, client) {
     const group = interaction.options.getSubcommandGroup(false);
@@ -9,7 +11,7 @@ async function executeMemberLookup(interaction, client) {
     if (action === 'banner') {
         const current = await client.users.fetch(user.id, { force: true }).catch(() => null);
         const url = current?.bannerURL?.({ size: 4096, extension: 'png' });
-        if (!url) throw new Error(`${user.username} does not have a banner.`);
+        if (!url) throw new UserFacingError(`${user.username} does not have a banner.`);
         return interaction.reply({
             embeds: [embeds.brand(`${user.username}'s Banner`).setImage(url)],
             allowedMentions: { parse: [] }
@@ -17,13 +19,13 @@ async function executeMemberLookup(interaction, client) {
     }
 
     if (action === 'server-avatar' || action === 'server-banner') {
-        if (!interaction.guild) throw new Error('This lookup can only be used in a server.');
+        if (!interaction.guild) throw new UserFacingError('This lookup can only be used in a server.');
         const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-        if (!member) throw new Error('That user is not a member of this server.');
+        if (!member) throw new UserFacingError('That user is not a member of this server.');
         const url = action === 'server-avatar'
             ? member.avatarURL?.({ size: 4096, extension: 'png' })
             : member.bannerURL?.({ size: 4096, extension: 'png' });
-        if (!url) throw new Error(`${user.username} does not have a ${action.replace('-', ' ')}.`);
+        if (!url) throw new UserFacingError(`${user.username} does not have a ${action.replace('-', ' ')}.`);
         return interaction.reply({
             embeds: [embeds.brand(`${user.username}'s ${action === 'server-avatar' ? 'Server Avatar' : 'Server Banner'}`).setImage(url)],
             allowedMentions: { parse: [] }
@@ -31,7 +33,7 @@ async function executeMemberLookup(interaction, client) {
     }
 
     const history = client.informationLookupService?.nameHistory(interaction.guild.id, user.id) || [];
-    if (!history.length) throw new Error(`No name history found for ${user.username}.`);
+    if (!history.length) throw new UserFacingError(`No name history found for ${user.username}.`);
     return interaction.reply({
         embeds: [embeds.brand(`${user.username}'s Names`, history
             .map(entry => `**${entry.name}** · <t:${Math.floor(entry.recordedAt / 1000)}:R>`)
@@ -49,12 +51,12 @@ function inviteCode(input) {
     const value = String(input || '').trim();
     if (/^[\w-]{2,64}$/.test(value)) return value;
     let url;
-    try { url = new URL(value); } catch { throw new Error('Provide a valid Discord invite code or URL.'); }
+    try { url = new URL(value); } catch { throw new UserFacingError('Provide a valid Discord invite code or URL.'); }
     const parts = url.pathname.split('/').filter(Boolean);
     const code = url.hostname === 'discord.gg' ? parts[0]
         : (['discord.com', 'www.discord.com'].includes(url.hostname) && parts[0] === 'invite' ? parts[1] : null);
     if (url.protocol !== 'https:' || !code || !/^[\w-]{2,64}$/.test(code)) {
-        throw new Error('Provide a valid Discord invite code or URL.');
+        throw new UserFacingError('Provide a valid Discord invite code or URL.');
     }
     return code;
 }
@@ -65,11 +67,11 @@ async function resolveServer(interaction, client, input) {
     if (/^\d{17,19}$/.test(value)) {
         let guild = client.guilds?.cache?.get(value);
         if (!guild && client.guilds?.fetch) guild = await client.guilds.fetch(value).catch(() => null);
-        if (!guild) throw new Error('ByteBot could not fetch that server.');
+        if (!guild) throw new UserFacingError('ByteBot could not fetch that server.');
         return guild;
     }
     const invite = await client.fetchInvite(inviteCode(value)).catch(() => null);
-    if (!invite?.guild) throw new Error('ByteBot could not fetch that server.');
+    if (!invite?.guild) throw new UserFacingError('ByteBot could not fetch that server.');
     return invite.guild;
 }
 
@@ -82,16 +84,27 @@ async function executeServerLookup(interaction, client) {
             ?.sort((left, right) => right.position - left.position)
             ?.first?.();
         const role = interaction.options.getRole('role') || fallback;
-        if (!role) throw new Error('Provide a role to view.');
+        if (!role) throw new UserFacingError('Provide a role to view.');
         if (action === 'members') {
-            await interaction.guild.members.fetch();
+            await interaction.guild.members.fetch().catch(() => {
+                throw new UserFacingError('ByteBot could not fetch this server\'s members.');
+            });
             const members = [...role.members.values()];
-            const shown = members.slice(0, 25).map(member => `<@${member.id}>`);
-            return interaction.reply({
-                embeds: [embeds.brand(`Members in ${role.name}`, shown.length
-                    ? `${shown.join('\n')}${members.length > shown.length ? `\n…and ${members.length - shown.length} more.` : ''}`
-                    : 'No members have this role.')],
-                allowedMentions: { parse: [] }
+            const pages = paginateArray(members, 25);
+            if (!pages.length) pages.push([]);
+            await interaction.deferReply();
+            return sendPaginatedMessage({
+                interaction,
+                deferred: true,
+                totalPages: pages.length,
+                customIdPrefix: 'role-members',
+                renderPage: async page => {
+                    const start = page * 25;
+                    const shown = pages[page].map(member => `<@${member.id}>`);
+                    return embeds.brand(`Members in ${role.name}`, shown.length
+                        ? `${start + 1}-${start + shown.length} of ${members.length}\n${shown.join('\n')}`
+                        : 'No members have this role.');
+                }
             });
         }
         const permissions = role.permissions.toArray();
@@ -122,7 +135,7 @@ async function executeServerLookup(interaction, client) {
             });
         }
         const invite = await client.fetchInvite(inviteCode(interaction.options.getString('invite', true))).catch(() => null);
-        if (!invite?.code || !invite.guild) throw new Error('Failed to fetch invite information.');
+        if (!invite?.code || !invite.guild) throw new UserFacingError('Failed to fetch invite information.');
         const embed = embeds.brand(`Invite: ${invite.guild.name}`)
             .addFields(
                 { name: 'Code', value: invite.code, inline: true },
@@ -138,9 +151,9 @@ async function executeServerLookup(interaction, client) {
     if (group === 'permissions' && action === 'view') {
         const user = interaction.options.getUser('user') || interaction.user;
         const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-        if (!member) throw new Error('That user is not a member of this server.');
+        if (!member) throw new UserFacingError('That user is not a member of this server.');
         const permissions = member.permissions.toArray();
-        if (!permissions.length) throw new Error(`${user.username} has no Discord permissions here.`);
+        if (!permissions.length) throw new UserFacingError(`${user.username} has no Discord permissions here.`);
         return interaction.reply({
             embeds: [embeds.brand(`${user.username}'s Permissions`, permissions.map(value => `\`${value}\``).join(', '))],
             allowedMentions: { parse: [] }
@@ -151,13 +164,13 @@ async function executeServerLookup(interaction, client) {
         const url = action === 'icon'
             ? guild.iconURL?.({ size: 4096, extension: 'png' })
             : guild.bannerURL?.({ size: 4096, extension: 'png' });
-        if (!url) throw new Error(`That server does not have a ${action}.`);
+        if (!url) throw new UserFacingError(`That server does not have a ${action}.`);
         return interaction.reply({
             embeds: [embeds.brand(`${guild.name}'s ${action === 'icon' ? 'Icon' : 'Banner'}`).setImage(url)],
             allowedMentions: { parse: [] }
         });
     }
-    throw new Error(`Unsupported server lookup: ${group} ${action}`);
+    throw new UserFacingError(`Unsupported server lookup: ${group} ${action}`);
 }
 
 module.exports = { executeMemberLookup, executeServerLookup, resolveServer };

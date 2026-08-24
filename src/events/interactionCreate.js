@@ -6,6 +6,7 @@ const { db } = require('../database/index');
 const { users, commandPermissions, customAchievements } = require('../database/schema');
 const { sql, eq, and } = require('drizzle-orm');
 const { dbLog } = require('../utils/dbLogger');
+const { publicErrorMessage } = require('../utils/errorHandlerUtil');
 
 // Track processed interactions to prevent duplicates
 const processedInteractions = new Set();
@@ -665,7 +666,10 @@ module.exports = {
                 channelId: interaction.channelId
             });
 
-            const errorMessage = embeds.error('Critical Error', 'An unexpected error occurred while executing this command. The developers have been notified.');
+            const diagnostic = publicErrorMessage(error);
+            const errorMessage = diagnostic
+                ? embeds.error('Unable to Complete Request', diagnostic)
+                : embeds.error('Critical Error', 'An unexpected error occurred while executing this command. The developers have been notified.');
 
             try {
                 if (interaction.replied || interaction.deferred) {

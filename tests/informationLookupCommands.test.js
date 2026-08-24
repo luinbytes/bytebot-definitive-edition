@@ -113,6 +113,34 @@ test('/server role info reports Discord role facts without requiring admin acces
     ]));
 });
 
+test('/server role members paginates every resolved member in pages of 25', async () => {
+    const server = require('../src/commands/administration/server');
+    const members = new Map(Array.from({ length: 26 }, (_, index) => {
+        const id = String(223456789012345678n + BigInt(index));
+        return [id, { id }];
+    }));
+    const collector = { on: jest.fn() };
+    const message = { createMessageComponentCollector: jest.fn().mockReturnValue(collector) };
+    const interaction = {
+        user: { id: '123456789012345678' },
+        guild: { id: '123456789012345678', members: { fetch: jest.fn().mockResolvedValue() } },
+        options: {
+            getSubcommandGroup: jest.fn().mockReturnValue('role'),
+            getSubcommand: jest.fn().mockReturnValue('members'),
+            getRole: jest.fn().mockReturnValue({ id: '423456789012345678', name: 'Members', members })
+        },
+        deferReply: jest.fn().mockResolvedValue(),
+        editReply: jest.fn().mockResolvedValue(message)
+    };
+
+    await server.execute(interaction, {});
+
+    expect(interaction.deferReply).toHaveBeenCalled();
+    expect(interaction.editReply.mock.calls[0][0].embeds[0].data.description).toContain('1-25 of 26');
+    expect(interaction.editReply.mock.calls[0][0].components).toHaveLength(1);
+    expect(message.createMessageComponentCollector).toHaveBeenCalled();
+});
+
 test('/server invite info validates through Discord and reports unavailable fields honestly', async () => {
     const server = require('../src/commands/administration/server');
     const reply = jest.fn();
