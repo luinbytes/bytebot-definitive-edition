@@ -20,6 +20,22 @@ function xml(value) {
     return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[char]);
 }
 
+function utcSegments(start, seconds) {
+    const segments = [];
+    let cursor = start;
+    let remaining = seconds;
+    while (remaining > 0) {
+        const date = new Date(cursor);
+        const midnight = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1);
+        const available = Math.max(1, Math.floor((midnight - cursor) / 1000));
+        const length = Math.min(remaining, available);
+        segments.push({ day: date.toISOString().slice(0, 10), seconds: length });
+        cursor += length * 1000;
+        remaining -= length;
+    }
+    return segments;
+}
+
 class LevelAnalyticsService {
     constructor({ sqlite, client = null, images = null, now = Date.now }) {
         this.sqlite = sqlite;
@@ -284,7 +300,6 @@ class LevelAnalyticsService {
         const guild = newState?.guild || oldState?.guild;
         if (!guild?.id) return { settledSeconds: 0, xpAwarded: 0 };
         const now = this.now();
-        const day = new Date(now).toISOString().slice(0, 10);
         const states = [...(guild.voiceStates?.cache?.values?.() || [])]
             .filter(state => state.channelId && !state.member?.user?.bot);
 
@@ -313,26 +328,28 @@ class LevelAnalyticsService {
                     const seconds = Math.max(0, Math.floor((now - session.last_observed_at) / 1000));
                     if (seconds) {
                         settledSeconds += seconds;
-                        this.sqlite.prepare(`
-                            INSERT INTO activity_logs
-                                (user_id, guild_id, activity_date, voice_seconds, updated_at)
-                            VALUES (?, ?, ?, ?, ?)
-                            ON CONFLICT(user_id, guild_id, activity_date) DO UPDATE SET
-                                voice_seconds = voice_seconds + excluded.voice_seconds,
-                                updated_at = excluded.updated_at
-                        `).run(session.user_id, guild.id, day, seconds, now);
-                        this.sqlite.prepare(`
-                            UPDATE activity_logs SET voice_minutes = CAST(voice_seconds / 60 AS INTEGER)
-                            WHERE user_id = ? AND guild_id = ? AND activity_date = ?
-                        `).run(session.user_id, guild.id, day);
-                        this.sqlite.prepare(`
-                            INSERT INTO server_daily_metrics
-                                (guild_id, activity_date, voice_seconds, updated_at)
-                            VALUES (?, ?, ?, ?)
-                            ON CONFLICT(guild_id, activity_date) DO UPDATE SET
-                                voice_seconds = voice_seconds + excluded.voice_seconds,
-                                updated_at = excluded.updated_at
-                        `).run(guild.id, day, seconds, now);
+                        for (const segment of utcSegments(session.last_observed_at, seconds)) {
+                            this.sqlite.prepare(`
+                                INSERT INTO activity_logs
+                                    (user_id, guild_id, activity_date, voice_seconds, updated_at)
+                                VALUES (?, ?, ?, ?, ?)
+                                ON CONFLICT(user_id, guild_id, activity_date) DO UPDATE SET
+                                    voice_seconds = voice_seconds + excluded.voice_seconds,
+                                    updated_at = excluded.updated_at
+                            `).run(session.user_id, guild.id, segment.day, segment.seconds, now);
+                            this.sqlite.prepare(`
+                                UPDATE activity_logs SET voice_minutes = CAST(voice_seconds / 60 AS INTEGER)
+                                WHERE user_id = ? AND guild_id = ? AND activity_date = ?
+                            `).run(session.user_id, guild.id, segment.day);
+                            this.sqlite.prepare(`
+                                INSERT INTO server_daily_metrics
+                                    (guild_id, activity_date, voice_seconds, updated_at)
+                                VALUES (?, ?, ?, ?)
+                                ON CONFLICT(guild_id, activity_date) DO UPDATE SET
+                                    voice_seconds = voice_seconds + excluded.voice_seconds,
+                                    updated_at = excluded.updated_at
+                            `).run(guild.id, segment.day, segment.seconds, now);
+                        }
 
                         const active = desired.get(session.user_id)?.state;
                         const observedMember = active?.member
@@ -1195,3 +1212,4 @@ class LevelAnalyticsService {
 
 module.exports = LevelAnalyticsService;
 module.exports.levelForXp = levelForXp;
+module.exports.utcSegments = utcSegments;

@@ -504,4 +504,14 @@ describe('LevelAnalyticsService', () => {
         expect(database.sqlite.prepare(`SELECT message_id, revision FROM level_live_boards WHERE guild_id = 'guild1'`).get())
             .toEqual({ message_id: 'board2', revision: 2 });
     });
+
+    test('voice accounting splits real seconds at UTC midnight', () => {
+        const { levelForXp, utcSegments } = require('../src/services/levelAnalyticsService');
+        expect(utcSegments(Date.UTC(2026, 7, 24, 23, 59, 30), 61)).toEqual([
+            { day: '2026-08-24', seconds: 30 },
+            { day: '2026-08-25', seconds: 31 }
+        ]);
+        expect([0, 99, 100, 399, 100_000, Number.MAX_SAFE_INTEGER].map(levelForXp))
+            .toEqual([0, 0, 1, 1, 31, 999]);
+    });
 });
