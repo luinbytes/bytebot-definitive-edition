@@ -12,6 +12,15 @@ function functionBody(source, name) {
 }
 
 describe('Interaction acknowledgement timing', () => {
+    test('central handler routes economy buttons and selects before slash handling', () => {
+        const source = readFile('src/events/interactionCreate.js');
+        const route = source.indexOf("interaction.customId.startsWith('economy:')");
+        const slash = source.indexOf('if (!interaction.isChatInputCommand()) return;');
+
+        expect(route).toBeGreaterThan(-1);
+        expect(route).toBeLessThan(slash);
+    });
+
     test('central handler defers long-running commands before command usage writes', () => {
         const source = readFile('src/events/interactionCreate.js');
         const deferIndex = source.indexOf('if (command.longRunning)');

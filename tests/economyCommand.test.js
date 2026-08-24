@@ -37,7 +37,10 @@ describe('economy command', () => {
         const database = require('../src/database');
         await database.runMigrations();
         const { EconomyService } = require('../src/services/economyService');
-        const service = new EconomyService({ sqlite: database.sqlite, now: () => Date.UTC(2026, 0, 1, 12) });
+        const service = new EconomyService({
+            sqlite: database.sqlite, now: () => Date.UTC(2026, 0, 1, 12),
+            randomInt: minimum => minimum, randomBytes: () => Buffer.from('economy-command')
+        });
         const command = require('../src/commands/economy/economy');
         service.enable('guild1', 'admin1');
         service.configure('guild1', 'admin1', { startingBalance: 100 });
@@ -45,13 +48,14 @@ describe('economy command', () => {
         service.open({ guildId: 'guild1', userId: 'user2' });
 
         const interaction = (subcommand, values = {}, canManage = false) => ({
+            id: values.id || `interaction-${subcommand}`,
             guildId: 'guild1', guild: { id: 'guild1', createdTimestamp: Date.UTC(2025, 0, 1) },
             user: { id: 'user1', bot: false }, member: {
                 id: 'user1', joinedTimestamp: Date.UTC(2025, 0, 1),
                 permissions: { has: permission => canManage && permission === PermissionFlagsBits.ManageGuild }
             },
             options: {
-                getSubcommandGroup: () => null, getSubcommand: () => subcommand,
+                getSubcommandGroup: () => values.group || null, getSubcommand: () => subcommand,
                 getString: name => values[name] ?? null, getInteger: name => values[name] ?? null,
                 getBoolean: name => values[name] ?? null, getUser: name => values[name] ?? null,
                 getMember: name => values[`${name}GuildMember`] ?? null,
@@ -87,6 +91,12 @@ describe('economy command', () => {
         await command.execute(denied, { economyService: service });
         expect(denied.reply.mock.calls[0][0].embeds[0].data.description).toContain('Manage Server');
         expect(service.config('guild1').currency_name).toBe('coins');
+
+        const game = interaction('ladder', { group: 'game', amount: 10 });
+        await command.execute(game, { economyService: service });
+        expect(game.reply.mock.calls[0][0].embeds[0].data.description).toContain('ByteBot-owned rules');
+        expect(game.reply.mock.calls[0][0].components).toHaveLength(1);
+        expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(90);
 
         database.sqlite.close();
         delete process.env.DATABASE_URL;

@@ -50,6 +50,47 @@ describe('economy games and progression', () => {
             .toMatchObject({ minted: 40250n, destroyed: 100n, circulation: 40150 });
     });
 
+    test('covers every public game with bounded bets and one active interactive session', () => {
+        const games = [
+            ['coinflip', 'heads'], ['dice'], ['gamble'], ['roulette', 'green'],
+            ['highlow', 'higher'], ['slots'], ['plinko'], ['scratch']
+        ];
+        for (const [game, choice] of games) {
+            expect(service.playGame({ guildId: 'guild1', userId: 'user1', game, bet: 10, choice }).status)
+                .not.toBe('active');
+        }
+        expect(() => service.playGame({ guildId: 'guild1', userId: 'user1', game: 'coinflip', bet: 9, choice: 'heads' }))
+            .toThrow('between 10 and 1,000,000');
+
+        const ladder = service.playGame({ guildId: 'guild1', userId: 'user1', game: 'ladder', bet: 10 });
+        expect(() => service.playGame({ guildId: 'guild1', userId: 'user1', game: 'crash', bet: 10 })).toThrow('active');
+        const climbed = service.actGame({
+            guildId: 'guild1', userId: 'user1', sessionId: ladder.id, nonce: ladder.nonce, action: 'climb'
+        });
+        expect(service.actGame({
+            guildId: 'guild1', userId: 'user1', sessionId: ladder.id, nonce: ladder.nonce, action: 'cashout'
+        }).status).toBe('cashed_out');
+        expect(climbed.state.rung).toBe(1);
+
+        const bombs = service.playGame({ guildId: 'guild1', userId: 'user1', game: 'bombs', bet: 10 });
+        expect(service.gameComponents(bombs)[0].toJSON().components[0].options).toHaveLength(25);
+        const safe = Array.from({ length: 25 }, (_, cell) => cell).find(cell => !bombs.state.bombs.includes(cell));
+        service.actGame({ guildId: 'guild1', userId: 'user1', sessionId: bombs.id, nonce: bombs.nonce, action: 'reveal', value: safe });
+        expect(service.actGame({ guildId: 'guild1', userId: 'user1', sessionId: bombs.id, nonce: bombs.nonce, action: 'cashout' }).status)
+            .toBe('cashed_out');
+
+        const crash = service.playGame({ guildId: 'guild1', userId: 'user1', game: 'crash', bet: 10 });
+        expect(service.actGame({ guildId: 'guild1', userId: 'user1', sessionId: crash.id, nonce: crash.nonce, action: 'cashout' }).status)
+            .toBe('cashed_out');
+
+        const blackjack = service.playGame({ guildId: 'guild1', userId: 'user1', game: 'blackjack', bet: 10 });
+        if (blackjack.status === 'active') {
+            expect(service.actGame({
+                guildId: 'guild1', userId: 'user1', sessionId: blackjack.id, nonce: blackjack.nonce, action: 'stand'
+            }).status).not.toBe('active');
+        }
+    });
+
     test('binds interactive sessions to one actor and refunds an expired wager once', () => {
         const session = service.playGame({ guildId: 'guild1', userId: 'user1', game: 'ladder', bet: 100 });
         expect(session).toMatchObject({ status: 'active', game: 'ladder', bet: 100 });
@@ -89,6 +130,12 @@ describe('economy games and progression', () => {
                 expect.objectContaining({ userId: 'user1', role: 'admin' }),
                 expect.objectContaining({ userId: 'user2', role: 'owner' })
             ]));
+        expect(service.setGangBanner({
+            guildId: 'guild1', userId: 'user2', url: 'https://example.com/banner.png'
+        }).bannerUrl).toBe('https://example.com/banner.png');
+        expect(service.leaveGang({ guildId: 'guild1', userId: 'user1' })).toBe(true);
+        expect(service.disbandGang({ guildId: 'guild1', userId: 'user2' })).toBe(true);
+        expect(() => service.gangInfo({ guildId: 'guild1', userId: 'user2' })).toThrow('not in a gang');
     });
 
     test('accrues, collects, and replays laboratory operations durably', () => {
@@ -105,10 +152,67 @@ describe('economy games and progression', () => {
         expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(10150);
     });
 
+    test('applies the fixed laboratory upgrade and ampoule tables atomically', () => {
+        service.grant({ guildId: 'guild1', actorId: 'admin1', targetId: 'user1', amount: 20000, reason: 'Test funds' });
+        service.buyLab({ guildId: 'guild1', userId: 'user1', operationId: 'op-buy' });
+        expect(service.buyAmpoules({
+            guildId: 'guild1', userId: 'user1', operationId: 'op-ampoules', amount: 2
+        })).toMatchObject({ ampoules: 3, wallet: 26000 });
+        expect(service.upgradeLab({ guildId: 'guild1', userId: 'user1', operationId: 'op-upgrade' }))
+            .toMatchObject({ level: 2, storage: 2000, wallet: 16000 });
+        expect(service.labStatus({ guildId: 'guild1', userId: 'user1' })).toMatchObject({ hourly: 300, nextUpgrade: 15000 });
+    });
+
     test('orders the committed guild leaderboard with a stable tie break', () => {
         expect(service.leaderboard({ guildId: 'guild1' }).rows.map(row => row.userId)).toEqual(['user1', 'user2']);
         service.transfer({ guildId: 'guild1', userId: 'user2', targetId: 'user1', amount: 1 });
         expect(service.leaderboard({ guildId: 'guild1' }).rows.map(row => row.userId)).toEqual(['user1', 'user2']);
         expect(service.leaderboard({ guildId: 'guild1', offset: 25 }).rows).toEqual([]);
+    });
+
+    test('binds leaderboard pages to the requesting member', async () => {
+        for (let index = 3; index <= 27; index++) service.open({ guildId: 'guild1', userId: `user${index}` });
+        const first = service.leaderboardView('guild1', 'user1');
+        const nextId = first.components[0].toJSON().components[1].custom_id;
+        const update = jest.fn(async payload => payload);
+        const reply = jest.fn(async payload => payload);
+
+        await service.handleInteraction({
+            customId: nextId, guildId: 'guild1', user: { id: 'user1' }, update, reply
+        });
+        expect(update.mock.calls[0][0].embeds[0].data.description).toContain('26.');
+
+        await service.handleInteraction({
+            customId: nextId, guildId: 'guild1', user: { id: 'user2' }, update, reply
+        });
+        expect(reply.mock.calls[0][0].embeds[0].data.description).toContain('does not belong');
+    });
+
+    test('refunds active games and pauses laboratories while the economy is disabled', () => {
+        const session = service.playGame({ guildId: 'guild1', userId: 'user1', game: 'ladder', bet: 100 });
+        service.buyLab({ guildId: 'guild1', userId: 'user1', operationId: 'op-buy' });
+        const preview = service.issueConfirmation({ action: 'disable', guildId: 'guild1', actorId: 'admin1', reason: 'Maintenance' });
+
+        service.disable({ guildId: 'guild1', actorId: 'admin1', reason: 'Maintenance', confirmationCode: preview.confirmationCode });
+        expect(database.sqlite.prepare('SELECT status FROM economy_game_sessions WHERE id = ?').get(session.id).status).toBe('refunded');
+        now += 7200000;
+        service.enable('guild1', 'admin1');
+        now += 3600000;
+        expect(service.labStatus({ guildId: 'guild1', userId: 'user1' }).stored).toBe(100);
+    });
+
+    test('forfeits active games on reset while preserving laboratory replay records', () => {
+        const session = service.playGame({ guildId: 'guild1', userId: 'user1', game: 'ladder', bet: 100 });
+        service.buyLab({ guildId: 'guild1', userId: 'user1', operationId: 'op-buy' });
+        const preview = service.issueConfirmation({
+            action: 'reset', guildId: 'guild1', actorId: 'admin1', targetId: 'user1', reason: 'Fresh start'
+        });
+
+        service.reset({
+            guildId: 'guild1', actorId: 'admin1', targetId: 'user1', reason: 'Fresh start', confirmationCode: preview.confirmationCode
+        });
+        expect(database.sqlite.prepare('SELECT status FROM economy_game_sessions WHERE id = ?').get(session.id).status).toBe('forfeited');
+        expect(database.sqlite.prepare('SELECT COUNT(*) AS count FROM economy_labs WHERE user_id = ?').get('user1').count).toBe(0);
+        expect(database.sqlite.prepare('SELECT lab_id FROM economy_lab_operations WHERE operation_id = ?').get('op-buy').lab_id).toBeNull();
     });
 });

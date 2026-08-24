@@ -1,5 +1,8 @@
 const crypto = require('crypto');
-const { MessageFlags, PermissionFlagsBits, RESTJSONErrorCodes } = require('discord.js');
+const {
+    MessageFlags, PermissionFlagsBits, RESTJSONErrorCodes,
+    ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder
+} = require('discord.js');
 const embeds = require('../utils/embeds');
 
 const GLOBAL_SCOPE = 'global';
@@ -57,6 +60,7 @@ class EconomyService {
         this.randomBytes = options.randomBytes || crypto.randomBytes;
         this.setTimeout = options.setTimeout || setTimeout;
         this.confirmations = new Map();
+        this.pageTokens = new Map();
     }
 
     config(guildId) {
@@ -64,12 +68,16 @@ class EconomyService {
     }
 
     enable(guildId, actorId) {
-        if (this.config(guildId)?.enabled) throw new Error('Economy is already enabled in this server.');
-        const now = this.now();
-        this.sqlite.prepare(`INSERT INTO economy_configs (guild_id, enabled, updated_by, updated_at)
-            VALUES (?, 1, ?, ?) ON CONFLICT (guild_id) DO UPDATE SET enabled = 1,
-            updated_by = excluded.updated_by, updated_at = excluded.updated_at`).run(guildId, actorId, now);
-        return this.config(guildId);
+        return this.sqlite.transaction(() => {
+            if (this.config(guildId)?.enabled) throw new Error('Economy is already enabled in this server.');
+            const now = this.now();
+            this.sqlite.prepare(`INSERT INTO economy_configs (guild_id, enabled, updated_by, updated_at)
+                VALUES (?, 1, ?, ?) ON CONFLICT (guild_id) DO UPDATE SET enabled = 1,
+                updated_by = excluded.updated_by, updated_at = excluded.updated_at`).run(guildId, actorId, now);
+            this.sqlite.prepare(`UPDATE economy_labs SET last_accrual_at = ?, paused_at = NULL, updated_at = ?
+                WHERE guild_id = ? AND paused_at IS NOT NULL`).run(now, now, guildId);
+            return this.config(guildId);
+        }).immediate();
     }
 
     configure(guildId, actorId, values) {
@@ -475,6 +483,10 @@ class EconomyService {
         return this.sqlite.transaction(() => {
             const scope = { scopeType: 'guild', scopeId: guildId };
             const account = this.guildAccount(guildId, userId);
+            if (INTERACTIVE_GAMES.has(game) && this.sqlite.prepare(`SELECT 1 FROM economy_game_sessions
+                WHERE guild_id = ? AND user_id = ? AND status = 'active'`).get(guildId, userId)) {
+                throw new Error('Finish your active economy game first.');
+            }
             if (account.wallet < bet) throw new Error('Insufficient wallet balance.');
             const transactionId = this.randomUUID();
             const debited = this.apply(account, {
@@ -487,6 +499,24 @@ class EconomyService {
             const createdAt = this.now();
             if (INTERACTIVE_GAMES.has(game)) {
                 const state = this.interactiveState(game);
+                const natural = game === 'blackjack' && this.handValue(state.player) === 21;
+                if (natural) {
+                    const credit = this.gameCredit(bet, 2);
+                    const row = this.account(scope, userId);
+                    if (this.supply(scope) + credit > MAX_SCOPE_SUPPLY) throw new Error('This economy has reached its circulation limit.');
+                    this.apply(row, {
+                        transactionId, walletDelta: credit, bankDelta: 0, supplyDelta: credit,
+                        kind: 'game_settlement', actorId: userId
+                    });
+                    this.updateTotals(scope, BigInt(credit));
+                    this.sqlite.prepare(`INSERT INTO economy_game_sessions
+                        (id, guild_id, scope_type, scope_id, user_id, game, bet, state_json, status, nonce,
+                         transaction_id, created_at, expires_at, settled_at, settlement_amount)
+                        VALUES (?, ?, 'guild', ?, ?, ?, ?, ?, 'won', ?, ?, ?, ?, ?, ?)`)
+                        .run(id, guildId, guildId, userId, game, bet, JSON.stringify(state), nonce,
+                            transactionId, createdAt, createdAt + GAME_SESSION_TTL, createdAt, credit);
+                    return this.gameSession(this.sqlite.prepare('SELECT * FROM economy_game_sessions WHERE id = ?').get(id));
+                }
                 this.sqlite.prepare(`INSERT INTO economy_game_sessions
                     (id, guild_id, scope_type, scope_id, user_id, game, bet, state_json, status, nonce,
                      transaction_id, created_at, expires_at)
@@ -1225,7 +1255,8 @@ class EconomyService {
     }
 
     async reconcile() {
-        if (!this.client) return { reconciled: 0, pending: 0 };
+        const games = this.reconcileGameSessions();
+        if (!this.client) return { reconciled: 0, pending: 0, refundedGames: games.refunded };
         let reconciled = 0;
         const purchases = this.sqlite.prepare(`SELECT id FROM economy_shop_purchases
             WHERE status = 'pending' ORDER BY created_at, id`).all();
@@ -1240,7 +1271,7 @@ class EconomyService {
         }
         const pending = this.sqlite.prepare(`SELECT COUNT(*) AS count FROM economy_shop_purchases
             WHERE status = 'pending'`).get().count;
-        return { reconciled, pending };
+        return { reconciled, pending, refundedGames: games.refunded };
     }
 
     async reconcileGuildPurchases(guild) {
@@ -1276,18 +1307,37 @@ class EconomyService {
         if (!config) throw new Error('Economy has not been set up in this server.');
         if (!config.enabled) throw new Error('Economy is not enabled in this server.');
         const plan = { action, guildId, actorId, reason: auditReason, enabled: Boolean(config.enabled) };
-        if (action === 'disable') return plan;
+        if (action === 'disable') return Object.assign(plan, this.disableFeaturePlan(guildId));
         const account = this.account({ scopeType: 'guild', scopeId: guildId }, targetId);
         const pending = this.sqlite.prepare(`SELECT COUNT(*) AS count FROM economy_shop_purchases
             WHERE guild_id = ? AND user_id = ? AND status = 'pending'`).get(guildId, targetId).count;
         if (pending) throw new Error('Pending shop purchases must be reconciled before this account can be changed.');
         Object.assign(plan, { targetId, wallet: account.wallet, bank: account.bank, total: account.wallet + account.bank });
+        if (action === 'reset') Object.assign(plan, this.resetFeaturePlan(guildId, targetId));
         if (action === 'destroy') {
             this.validateAmount(amount);
             if (amount > plan.total) throw new Error('That account does not have enough currency.');
             plan.amount = amount;
         }
         return plan;
+    }
+
+    resetFeaturePlan(guildId, userId) {
+        return {
+            activeGame: this.sqlite.prepare(`SELECT id, bet, transaction_id, state_json, expires_at
+                FROM economy_game_sessions WHERE guild_id = ? AND user_id = ? AND status = 'active'`).get(guildId, userId) || null,
+            lab: this.sqlite.prepare(`SELECT id, level, ampoules, stored_amount, storage_cap, last_accrual_at, paused_at, updated_at
+                FROM economy_labs WHERE guild_id = ? AND user_id = ?`).get(guildId, userId) || null
+        };
+    }
+
+    disableFeaturePlan(guildId) {
+        return {
+            activeGames: this.sqlite.prepare(`SELECT id, user_id, bet, transaction_id, state_json, expires_at
+                FROM economy_game_sessions WHERE guild_id = ? AND status = 'active' ORDER BY id`).all(guildId),
+            labs: this.sqlite.prepare(`SELECT id, user_id, level, ampoules, stored_amount, storage_cap,
+                last_accrual_at, paused_at, updated_at FROM economy_labs WHERE guild_id = ? ORDER BY id`).all(guildId)
+        };
     }
 
     confirmationKey(values) {
@@ -1333,6 +1383,15 @@ class EconomyService {
             const account = this.account(scope, values.targetId);
             const removed = account.wallet + account.bank;
             if (removed !== plan.total) throw new Error('The economy action plan changed. Preview it again.');
+            if (digest(this.resetFeaturePlan(values.guildId, values.targetId)) !== digest({ activeGame: plan.activeGame, lab: plan.lab })) {
+                throw new Error('The economy action plan changed. Preview it again.');
+            }
+            this.sqlite.prepare(`UPDATE economy_game_sessions SET status = 'forfeited', settled_at = ?, settlement_amount = 0
+                WHERE guild_id = ? AND user_id = ? AND status = 'active'`).run(this.now(), values.guildId, values.targetId);
+            this.sqlite.prepare(`UPDATE economy_lab_operations SET lab_id = NULL
+                WHERE lab_id IN (SELECT id FROM economy_labs WHERE guild_id = ? AND user_id = ?)`)
+                .run(values.guildId, values.targetId);
+            this.sqlite.prepare('DELETE FROM economy_labs WHERE guild_id = ? AND user_id = ?').run(values.guildId, values.targetId);
             if (removed > 0) {
                 this.apply(account, {
                     transactionId: this.randomUUID(), walletDelta: -account.wallet, bankDelta: -account.bank,
@@ -1368,10 +1427,32 @@ class EconomyService {
     }
 
     disable(values) {
-        this.consumeConfirmation({ ...values, action: 'disable' }, values.confirmationCode);
-        this.sqlite.prepare(`UPDATE economy_configs SET enabled = 0, updated_by = ?, updated_at = ?
-            WHERE guild_id = ?`).run(values.actorId, this.now(), values.guildId);
-        return this.config(values.guildId);
+        const plan = this.consumeConfirmation({ ...values, action: 'disable' }, values.confirmationCode);
+        return this.sqlite.transaction(() => {
+            if (digest(this.disableFeaturePlan(values.guildId)) !== digest({ activeGames: plan.activeGames, labs: plan.labs })) {
+                throw new Error('The economy action plan changed. Preview it again.');
+            }
+            const scope = { scopeType: 'guild', scopeId: values.guildId };
+            for (const session of plan.activeGames) {
+                const account = this.account(scope, session.user_id);
+                if (account.wallet + session.bet > MAX_AMOUNT) throw new Error('An active game refund would exceed its wallet limit.');
+                this.apply(account, {
+                    transactionId: session.transaction_id, walletDelta: session.bet, bankDelta: 0,
+                    supplyDelta: session.bet, kind: 'game_refund', actorId: session.user_id
+                });
+                this.updateTotals(scope, BigInt(session.bet));
+                this.sqlite.prepare(`UPDATE economy_game_sessions SET status = 'refunded', settled_at = ?, settlement_amount = ?
+                    WHERE id = ? AND status = 'active'`).run(this.now(), session.bet, session.id);
+            }
+            for (const lab of plan.labs) {
+                const projected = this.labProjection(lab);
+                this.sqlite.prepare(`UPDATE economy_labs SET stored_amount = ?, last_accrual_at = ?, paused_at = ?, updated_at = ?
+                    WHERE id = ?`).run(projected.stored, this.now(), this.now(), this.now(), lab.id);
+            }
+            this.sqlite.prepare(`UPDATE economy_configs SET enabled = 0, updated_by = ?, updated_at = ?
+                WHERE guild_id = ?`).run(values.actorId, this.now(), values.guildId);
+            return this.config(values.guildId);
+        }).immediate();
     }
 
     canManage(interaction) {
@@ -1382,14 +1463,15 @@ class EconomyService {
         if (!this.canManage(interaction)) throw new Error('You need Manage Server to use this economy action.');
     }
 
-    async respond(interaction, content, ephemeral = false) {
+    async respond(interaction, content, ephemeral = false, components = []) {
         const kind = content.startsWith('❌') ? 'error' : content.startsWith('✅') ? 'success'
             : content.startsWith('⚠️') ? 'warn' : 'info';
         const description = content.replace(/^[❌✅⚠️]\s*/u, '');
         const chunks = description.match(/[\s\S]{1,4000}(?:\n|$)/g) || [description];
         const payload = {
             embeds: chunks.map((chunk, index) => embeds[kind](index ? 'Economy (continued)' : 'Economy', chunk.trim())),
-            allowedMentions: { parse: [], repliedUser: false }
+            allowedMentions: { parse: [], repliedUser: false },
+            components
         };
         if (ephemeral) payload.flags = [MessageFlags.Ephemeral];
         if (interaction.deferred) return interaction.editReply(payload);
@@ -1415,12 +1497,183 @@ class EconomyService {
         return `**${result.userId}**\nWallet: **${result.wallet} ${currency}**\nBank: **${result.bank} ${currency}**\nTotal: **${result.total} ${currency}**\nRank: **#${result.rank}**\nScope: **${result.scopeType}**`;
     }
 
+    gameComponents(session) {
+        if (session.status !== 'active') return [];
+        const id = action => `economy:game:${action}:${session.id}:${session.nonce}`;
+        if (session.game === 'bombs') {
+            const options = Array.from({ length: 25 }, (_, value) => value)
+                .filter(value => !session.state.revealed.includes(value))
+                .map(value => ({ label: `Cell ${value + 1}`, value: String(value) }));
+            const rows = [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
+                .setCustomId(id('reveal')).setPlaceholder('Choose a cell').addOptions(options))];
+            if (session.state.revealed.length) rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder()
+                .setCustomId(id('cashout')).setLabel('Cash out').setStyle(ButtonStyle.Success)));
+            return rows;
+        }
+        const actions = session.game === 'ladder'
+            ? [['climb', 'Climb', ButtonStyle.Primary], ...(session.state.rung ? [['cashout', 'Cash out', ButtonStyle.Success]] : [])]
+            : session.game === 'crash'
+                ? [['advance', 'Advance', ButtonStyle.Primary], ['cashout', 'Cash out', ButtonStyle.Success]]
+                : [['hit', 'Hit', ButtonStyle.Primary], ['stand', 'Stand', ButtonStyle.Secondary]];
+        return [new ActionRowBuilder().addComponents(actions.map(([action, label, style]) => new ButtonBuilder()
+            .setCustomId(id(action)).setLabel(label).setStyle(style)))];
+    }
+
+    formatGame(session) {
+        const state = session.state;
+        const detail = session.game === 'ladder' ? `Rung: **${state.rung}/6**`
+            : session.game === 'crash' ? `Current: **${(state.current / 100).toFixed(2)}x**`
+                : session.game === 'bombs' ? `Safe cells: **${state.revealed.length}/22**`
+                    : session.game === 'blackjack' ? `Your hand: **${this.handValue(state.player)}**`
+                        : Object.entries(state).map(([key, value]) => `${key}: **${Array.isArray(value) ? value.join(' ') : value}**`).join('\n');
+        if (session.status === 'active') return `**${session.game}** • Bet: **${session.bet}**\n${detail}\nByteBot-owned rules.`;
+        return `**${session.game}** • **${session.status}**\nCredit: **${session.credit}** • Net: **${session.net}**\n${detail}\nTransaction: \`${session.transactionId}\``;
+    }
+
+    gangInviteComponents(invite) {
+        const id = action => `economy:gang:${action}:${invite.id}:${invite.nonce}`;
+        return [new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(id('accept')).setLabel('Accept').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId(id('decline')).setLabel('Decline').setStyle(ButtonStyle.Secondary)
+        )];
+    }
+
+    leaderboardView(guildId, userId, offset = 0, token) {
+        const board = this.leaderboard({ guildId, offset });
+        const content = board.rows.length
+            ? board.rows.map((row, index) => `**${offset + index + 1}.** <@${row.userId}> — **${row.total}**`).join('\n')
+            : 'No economy accounts are on this page.';
+        if (!board.hasPrevious && !board.hasNext) return { content, components: [] };
+        const pageToken = token || this.randomBytes(12).toString('hex').slice(0, 24);
+        this.pageTokens.set(pageToken, { guildId, userId, expiresAt: this.now() + GAME_SESSION_TTL });
+        return {
+            content,
+            components: [new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(`economy:leaderboard:${Math.max(0, offset - 25)}:${pageToken}`)
+                    .setLabel('Previous').setStyle(ButtonStyle.Secondary).setDisabled(!board.hasPrevious),
+                new ButtonBuilder().setCustomId(`economy:leaderboard:${offset + 25}:${pageToken}`)
+                    .setLabel('Next').setStyle(ButtonStyle.Primary).setDisabled(!board.hasNext)
+            )]
+        };
+    }
+
+    async handleInteraction(interaction) {
+        try {
+            const parts = interaction.customId.split(':');
+            if (parts[1] === 'game') {
+                const [, , action, sessionId, nonce] = parts;
+                const result = this.actGame({
+                    guildId: interaction.guildId, userId: interaction.user.id, sessionId, nonce, action,
+                    value: action === 'reveal' ? Number(interaction.values?.[0]) : undefined
+                });
+                return interaction.update({
+                    embeds: [embeds.info('Economy', this.formatGame(result))],
+                    components: this.gameComponents(result), allowedMentions: { parse: [] }
+                });
+            }
+            if (parts[1] === 'gang') {
+                const [, , action, inviteId, nonce] = parts;
+                const result = this.respondGangInvite({
+                    guildId: interaction.guildId, userId: interaction.user.id, inviteId, nonce, accept: action === 'accept'
+                });
+                return interaction.update({
+                    embeds: [embeds.success('Economy', `Gang invite **${result.status}**.`)],
+                    components: [], allowedMentions: { parse: [] }
+                });
+            }
+            if (parts[1] === 'leaderboard') {
+                const offset = Number(parts[2]);
+                const token = parts[3];
+                const page = this.pageTokens.get(token);
+                if (!page || page.expiresAt <= this.now() || page.guildId !== interaction.guildId || page.userId !== interaction.user.id) {
+                    throw new Error('That leaderboard page has expired or does not belong to you.');
+                }
+                const view = this.leaderboardView(interaction.guildId, interaction.user.id, offset, token);
+                return interaction.update({
+                    embeds: [embeds.info('Economy', view.content)], components: view.components, allowedMentions: { parse: [] }
+                });
+            }
+            throw new Error('Unknown economy interaction.');
+        } catch (error) {
+            return interaction.reply({
+                embeds: [embeds.error('Economy', error.message)], flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+            });
+        }
+    }
+
     async handleCommand(interaction) {
         try {
             const group = interaction.options.getSubcommandGroup(false);
             const subcommand = interaction.options.getSubcommand();
             const guildId = interaction.guildId;
             const userId = interaction.user.id;
+            if (group === 'game') {
+                const choice = interaction.options.getString('side')
+                    || interaction.options.getString('bet') || interaction.options.getString('guess');
+                const result = this.playGame({
+                    guildId, userId, game: subcommand,
+                    bet: interaction.options.getInteger('amount'), choice
+                });
+                return this.respond(interaction, this.formatGame(result), false, this.gameComponents(result));
+            }
+            if (group === 'gang') {
+                if (subcommand === 'create') {
+                    const gang = this.createGang({ guildId, userId, name: interaction.options.getString('name') });
+                    return this.respond(interaction, `✅ Created gang **${gang.name}**.`);
+                }
+                if (subcommand === 'info') {
+                    const gang = this.gangInfo({ guildId, userId });
+                    return this.respond(interaction, `**${gang.name}**\nOwner: <@${gang.ownerId}>\nMembers: **${gang.members.length}/25**${gang.bannerUrl ? `\nBanner: ${gang.bannerUrl}` : ''}`);
+                }
+                if (subcommand === 'invite') {
+                    const target = this.target(interaction);
+                    const invite = this.inviteToGang({ guildId, userId, targetId: target.id });
+                    return this.respond(interaction, `<@${target.id}>, you were invited to a gang.`, false, this.gangInviteComponents(invite));
+                }
+                if (subcommand === 'promote') {
+                    const target = this.target(interaction);
+                    this.promoteGang({ guildId, userId, targetId: target.id });
+                    return this.respond(interaction, `✅ Promoted **${target.username || target.id}** to gang admin.`);
+                }
+                if (subcommand === 'transfer') {
+                    const target = this.target(interaction);
+                    this.transferGang({ guildId, userId, targetId: target.id });
+                    return this.respond(interaction, `✅ Transferred gang ownership to **${target.username || target.id}**.`);
+                }
+                if (subcommand === 'setbanner') {
+                    const result = this.setGangBanner({ guildId, userId, url: interaction.options.getString('url') });
+                    return this.respond(interaction, `✅ Gang banner set to ${result.bannerUrl}.`);
+                }
+                if (subcommand === 'leave') {
+                    this.leaveGang({ guildId, userId });
+                    return this.respond(interaction, '✅ You left the gang.');
+                }
+                this.disbandGang({ guildId, userId });
+                return this.respond(interaction, '✅ Gang disbanded.');
+            }
+            if (group === 'lab') {
+                const operationId = interaction.id;
+                if (subcommand === 'buy') {
+                    const result = this.buyLab({ guildId, userId, operationId });
+                    return this.respond(interaction, `✅ Bought a level **${result.level}** laboratory. Wallet: **${result.wallet}**.`);
+                }
+                if (subcommand === 'status') {
+                    const result = this.labStatus({ guildId, userId });
+                    return this.respond(interaction, `Level: **${result.level}/10**\nAmpoules: **${result.ampoules}/5**\nEarnings/hour: **${result.hourly}**\nStored: **${result.stored}/${result.storage}**\nNext upgrade: **${result.nextUpgrade ?? 'max'}**\nByteBot-owned rules.`);
+                }
+                if (subcommand === 'upgrade') {
+                    const result = this.upgradeLab({ guildId, userId, operationId });
+                    return this.respond(interaction, `✅ Upgraded laboratory to level **${result.level}**. Wallet: **${result.wallet}**.`);
+                }
+                if (subcommand === 'ampoules') {
+                    const result = this.buyAmpoules({
+                        guildId, userId, operationId, amount: interaction.options.getInteger('amount')
+                    });
+                    return this.respond(interaction, `✅ Laboratory now has **${result.ampoules}/5** ampoules. Wallet: **${result.wallet}**.`);
+                }
+                const result = this.collectLab({ guildId, userId, operationId });
+                return this.respond(interaction, `✅ Collected **${result.collected}**. Wallet: **${result.wallet}**.`);
+            }
             if (group === 'job') {
                 if (subcommand === 'list') {
                     const jobs = this.listJobs(guildId);
@@ -1529,6 +1782,22 @@ class EconomyService {
             if (subcommand === 'circulation') {
                 const result = this.circulation({ guildId, userId, scope: interaction.options.getString('scope') || undefined });
                 return this.respond(interaction, `Scope: **${result.scopeType}**\nCirculation: **${result.circulation}**\nMinted: **${result.minted}**\nDestroyed: **${result.destroyed}**\nAccounts: **${result.accounts}**`);
+            }
+            if (subcommand === 'crime') {
+                const result = this.crime({
+                    guildId, userId, guildCreatedAt: interaction.guild.createdTimestamp,
+                    memberJoinedAt: interaction.member.joinedTimestamp
+                });
+                return this.respond(interaction, `${result.status === 'won' ? '✅ Earned' : '⚠️ Lost'} **${result.amount}**. Wallet: **${result.wallet}**.`);
+            }
+            if (subcommand === 'rob') {
+                const target = this.target(interaction);
+                const result = this.rob({ guildId, userId, targetId: target.id });
+                return this.respond(interaction, `${result.status === 'won' ? '✅ Robbed' : '⚠️ Lost'} **${result.amount}**${result.status === 'won' ? ` from **${target.username || target.id}**` : ''}. Wallet: **${result.wallet}**.`);
+            }
+            if (subcommand === 'leaderboard') {
+                const view = this.leaderboardView(guildId, userId);
+                return this.respond(interaction, view.content, false, view.components);
             }
 
             this.requireManage(interaction);

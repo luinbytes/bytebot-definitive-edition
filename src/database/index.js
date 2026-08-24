@@ -77,6 +77,13 @@ function createFreshSchema() {
                 if (query.params.length) throw new Error(`Fresh-schema check ${constraint.name} must not use parameters`);
                 definitions.push(`CONSTRAINT ${sqlIdentifier(constraint.name)} CHECK (${query.sql.replaceAll(`${sqlIdentifier(table.name)}.`, '')})`);
             }
+            for (const foreignKey of table.foreignKeys) {
+                const reference = foreignKey.reference();
+                const foreignTableName = reference.foreignTable[Symbol.for('drizzle:Name')];
+                const onDelete = foreignKey.onDelete ? ` ON DELETE ${foreignKey.onDelete.toUpperCase()}` : '';
+                const onUpdate = foreignKey.onUpdate ? ` ON UPDATE ${foreignKey.onUpdate.toUpperCase()}` : '';
+                definitions.push(`CONSTRAINT ${sqlIdentifier(foreignKey.getName())} FOREIGN KEY (${reference.columns.map(column => sqlIdentifier(column.name)).join(', ')}) REFERENCES ${sqlIdentifier(foreignTableName)} (${reference.foreignColumns.map(column => sqlIdentifier(column.name)).join(', ')})${onDelete}${onUpdate}`);
+            }
 
             sqlite.exec(`CREATE TABLE ${sqlIdentifier(table.name)} (${definitions.join(', ')})`);
         }

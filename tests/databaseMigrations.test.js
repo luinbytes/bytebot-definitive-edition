@@ -43,9 +43,18 @@ describe('database migrations', () => {
             .toEqual(['scope_type', 'scope_id', 'user_id']);
         expect(database.sqlite.prepare("PRAGMA index_list('economy_shop_purchases')").all())
             .toContainEqual(expect.objectContaining({ name: 'economy_shop_purchases_one_pending_item', unique: 1, partial: 1 }));
+        expect(database.sqlite.prepare("PRAGMA index_list('economy_game_sessions')").all())
+            .toContainEqual(expect.objectContaining({ name: 'economy_game_sessions_one_active', unique: 1, partial: 1 }));
+        expect(database.sqlite.prepare("PRAGMA index_list('economy_gang_members')").all())
+            .toContainEqual(expect.objectContaining({ name: 'economy_gang_members_one_owner', unique: 1, partial: 1 }));
+        expect(database.sqlite.prepare("PRAGMA foreign_key_list('economy_lab_operations')").all())
+            .toContainEqual(expect.objectContaining({ table: 'economy_labs', on_delete: 'SET NULL' }));
         expect(() => database.sqlite.prepare(`INSERT INTO economy_accounts
             (scope_type, scope_id, user_id, wallet, bank, created_at, updated_at)
             VALUES ('guild', 'guild1', 'user1', -1, 0, 1, 1)`).run()).toThrow();
+        expect(() => database.sqlite.prepare(`INSERT INTO economy_game_sessions
+            (id, guild_id, scope_type, scope_id, user_id, game, bet, status, nonce, transaction_id, created_at, expires_at)
+            VALUES ('bad', 'guild1', 'global', 'global', 'user1', 'coinflip', 9, 'active', 'n', 't', 1, 2)`).run()).toThrow();
     });
 
     test('an existing database gains economy scope constraints without data loss', async () => {

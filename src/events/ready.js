@@ -331,8 +331,8 @@ module.exports = {
             const { sqlite } = require('../database');
             client.economyService = new EconomyService({ client, sqlite });
             const recovery = await client.economyService.reconcile();
-            if (recovery.reconciled || recovery.pending) {
-                logger.info(`Economy shop recovery: ${recovery.reconciled} reconciled, ${recovery.pending} pending`);
+            if (recovery.reconciled || recovery.pending || recovery.refundedGames) {
+                logger.info(`Economy recovery: ${recovery.reconciled} shops reconciled, ${recovery.pending} pending, ${recovery.refundedGames} games refunded`);
             }
             logger.success('Economy service initialized');
         } catch (e) {

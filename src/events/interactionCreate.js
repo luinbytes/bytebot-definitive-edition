@@ -24,6 +24,13 @@ module.exports = {
             return;
         }
         processedInteractions.add(interaction.id);
+        if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('economy:')) {
+            if (!client.economyService) {
+                return interaction.reply({ content: 'Economy is temporarily unavailable.', flags: [MessageFlags.Ephemeral] }).catch(() => null);
+            }
+            await client.economyService.handleInteraction(interaction);
+            return;
+        }
         if (interaction.isButton() && interaction.customId.startsWith('giveaway:')) {
             if (!client.giveawayService) {
                 return interaction.reply({ content: 'Giveaway service is temporarily unavailable.', flags: [MessageFlags.Ephemeral] }).catch(() => null);
