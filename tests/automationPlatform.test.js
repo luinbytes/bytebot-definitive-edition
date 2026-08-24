@@ -1,7 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { PermissionFlagsBits } = require('discord.js');
+const { Collection, PermissionFlagsBits } = require('discord.js');
 
 describe('message and member automation platform', () => {
     let tempDir;
@@ -263,6 +263,34 @@ describe('message and member automation platform', () => {
         await service.handleMessage(wrong);
         expect(wrong.react).toHaveBeenCalledWith('❌');
         expect(await service.get('guild1', 'delete-message', 'message3')).toEqual(expect.objectContaining({ nextRunAt: expect.any(Number) }));
+    });
+
+    test('metric counters expose and idempotently update every evidenced metric', async () => {
+        const command = require('../src/commands/utility/counter').data.toJSON();
+        const add = command.options.find(option => option.name === 'add');
+        expect(add.options.find(option => option.name === 'metric').choices.map(choice => choice.value))
+            .toEqual(['members', 'bots', 'online', 'voice']);
+        const channel = { id: 'channel1', name: 'bots: 1', setName: jest.fn(function setName(name) { this.name = name; }) };
+        const guild = {
+            id: 'guild1', memberCount: 3, channels: { cache: new Map([['channel1', channel]]) },
+            members: { cache: new Collection([
+                ['user1', { user: { bot: false }, presence: { status: 'online' } }],
+                ['user2', { user: { bot: false }, presence: { status: 'offline' } }],
+                ['bot1', { user: { bot: true }, presence: { status: 'idle' } }]
+            ]) }
+        };
+        const AutomationService = require('../src/services/automationService');
+        service = new AutomationService({ guilds: { cache: new Map([['guild1', guild]]) } });
+        await service.upsert({ guildId: 'guild1', kind: 'counter', key: 'channel1', config: {
+            mode: 'metric', channelId: 'channel1', metric: 'bots', intervalMs: 300000
+        }, nextRunAt: Date.now() - 1, createdBy: 'admin1' });
+        await service.runDue();
+        expect(channel.setName).not.toHaveBeenCalled();
+        await service.upsert({ guildId: 'guild1', kind: 'counter', key: 'channel1', config: {
+            mode: 'metric', channelId: 'channel1', metric: 'online', intervalMs: 300000
+        }, nextRunAt: Date.now() - 1, createdBy: 'admin1' });
+        await service.runDue();
+        expect(channel.setName).toHaveBeenCalledWith('online: 2', 'Automation counter');
     });
 
     test('tracking uses configured availability windows and arms matching personal notifications', async () => {

@@ -876,6 +876,90 @@ const expectedSchema = {
         stars: 'INTEGER NOT NULL',
         comment: 'TEXT',
         created_at: 'INTEGER NOT NULL'
+    },
+    giveaway_configs: {
+        guild_id: 'TEXT PRIMARY KEY',
+        dm_creator: 'INTEGER DEFAULT 0 NOT NULL',
+        dm_winners: 'INTEGER DEFAULT 0 NOT NULL',
+        template: 'TEXT',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    giveaway_presets: {
+        guild_id: 'TEXT NOT NULL',
+        name: 'TEXT NOT NULL',
+        script: 'TEXT NOT NULL',
+        created_by: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    giveaway_blacklist: {
+        guild_id: 'TEXT NOT NULL',
+        role_id: 'TEXT NOT NULL',
+        created_by: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    giveaway_role_limits: {
+        guild_id: 'TEXT NOT NULL',
+        role_id: 'TEXT NOT NULL',
+        max_entries: 'INTEGER NOT NULL',
+        created_by: 'TEXT NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    member_levels: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        xp: 'INTEGER DEFAULT 0 NOT NULL',
+        level: 'INTEGER DEFAULT 0 NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    giveaways: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        message_id: 'TEXT',
+        host_id: 'TEXT NOT NULL',
+        prize: 'TEXT NOT NULL',
+        description: 'TEXT',
+        required_role_id: 'TEXT',
+        image_url: 'TEXT',
+        thumbnail_url: 'TEXT',
+        winner_count: 'INTEGER NOT NULL',
+        min_level: 'INTEGER',
+        max_level: 'INTEGER',
+        template_snapshot: 'TEXT',
+        status: "TEXT DEFAULT 'pending' NOT NULL",
+        ends_at: 'INTEGER NOT NULL',
+        created_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL',
+        ended_at: 'INTEGER'
+    },
+    giveaway_entries: {
+        giveaway_id: 'INTEGER NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        entries: 'INTEGER DEFAULT 1 NOT NULL',
+        created_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    giveaway_rounds: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        giveaway_id: 'INTEGER NOT NULL',
+        round_number: 'INTEGER NOT NULL',
+        candidates_snapshot: 'TEXT NOT NULL',
+        exclusions_snapshot: 'TEXT NOT NULL',
+        winners_snapshot: 'TEXT NOT NULL',
+        actor_id: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL',
+        delivery_token: 'TEXT',
+        delivery_lease_until: 'INTEGER',
+        announced_at: 'INTEGER'
+    },
+    giveaway_actions: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        giveaway_id: 'INTEGER NOT NULL',
+        actor_id: 'TEXT NOT NULL',
+        action: 'TEXT NOT NULL',
+        detail: 'TEXT',
+        created_at: 'INTEGER NOT NULL'
     }
 };
 
@@ -910,7 +994,13 @@ const compatibilityUniqueKeys = {
     ticket_blacklist: ['guild_id', 'target_type', 'target_id'],
     ticket_profiles: ['guild_id', 'user_id'],
     tickets: ['guild_id', 'number'],
-    ticket_members: ['ticket_id', 'target_type', 'target_id']
+    ticket_members: ['ticket_id', 'target_type', 'target_id'],
+    giveaway_presets: ['guild_id', 'name'],
+    giveaway_blacklist: ['guild_id', 'role_id'],
+    giveaway_role_limits: ['guild_id', 'role_id'],
+    member_levels: ['guild_id', 'user_id'],
+    giveaway_entries: ['giveaway_id', 'user_id'],
+    giveaway_rounds: ['giveaway_id', 'round_number']
 };
 
 function hasUniqueKey(tableName, columns) {

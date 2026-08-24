@@ -388,9 +388,15 @@ class AutomationService {
                 return;
             }
             if (rule.kind === 'counter' && config.mode === 'metric') {
-                const value = config.metric === 'members' ? guild.memberCount
-                    : [...(guild.voiceStates?.cache?.values?.() || [])].filter(state => state.channelId).length;
-                await channel.setName(`${config.label || config.metric}: ${value}`, 'Automation counter');
+                const value = {
+                    members: () => guild.memberCount,
+                    bots: () => guild.members.cache.filter(member => member.user.bot).size,
+                    online: () => guild.members.cache.filter(member => member.presence?.status && member.presence.status !== 'offline').size,
+                    voice: () => [...(guild.voiceStates?.cache?.values?.() || [])].filter(state => state.channelId).length
+                }[config.metric]?.();
+                if (value === undefined) throw new Error(`Unknown counter metric: ${config.metric}`);
+                const name = `${config.label || config.metric}: ${value}`;
+                if (channel.name !== name) await channel.setName(name, 'Automation counter');
             } else {
                 const nonce = `${rule.id}${String(rule.nextRunAt).slice(-15)}`;
                 if (rule.kind === 'sticky' && rule.lastMessageId) await channel.messages.delete(rule.lastMessageId).catch(() => null);

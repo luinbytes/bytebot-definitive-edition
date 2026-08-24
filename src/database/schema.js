@@ -1033,6 +1033,103 @@ const ticketRatings = sqliteTable('ticket_ratings', {
     createdAt: integer('created_at').notNull()
 });
 
+const giveawayConfigs = sqliteTable('giveaway_configs', {
+    guildId: text('guild_id').primaryKey(),
+    dmCreator: integer('dm_creator', { mode: 'boolean' }).default(false).notNull(),
+    dmWinners: integer('dm_winners', { mode: 'boolean' }).default(false).notNull(),
+    template: text('template'),
+    updatedAt: integer('updated_at').notNull()
+});
+
+const giveawayPresets = sqliteTable('giveaway_presets', {
+    guildId: text('guild_id').notNull(),
+    name: text('name').notNull(),
+    script: text('script').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.name] }) }));
+
+const giveawayBlacklist = sqliteTable('giveaway_blacklist', {
+    guildId: text('guild_id').notNull(),
+    roleId: text('role_id').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.roleId] }) }));
+
+const giveawayRoleLimits = sqliteTable('giveaway_role_limits', {
+    guildId: text('guild_id').notNull(),
+    roleId: text('role_id').notNull(),
+    maxEntries: integer('max_entries').notNull(),
+    createdBy: text('created_by').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.roleId] }) }));
+
+const memberLevels = sqliteTable('member_levels', {
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    xp: integer('xp').default(0).notNull(),
+    level: integer('level').default(0).notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.userId] }) }));
+
+const giveaways = sqliteTable('giveaways', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    messageId: text('message_id'),
+    hostId: text('host_id').notNull(),
+    prize: text('prize').notNull(),
+    description: text('description'),
+    requiredRoleId: text('required_role_id'),
+    imageUrl: text('image_url'),
+    thumbnailUrl: text('thumbnail_url'),
+    winnerCount: integer('winner_count').notNull(),
+    minLevel: integer('min_level'),
+    maxLevel: integer('max_level'),
+    templateSnapshot: text('template_snapshot'),
+    status: text('status').default('pending').notNull(),
+    endsAt: integer('ends_at').notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    endedAt: integer('ended_at')
+}, table => ({
+    messageUnique: unique().on(table.messageId),
+    dueIdx: index('giveaways_due_idx').on(table.status, table.endsAt),
+    guildStatusIdx: index('giveaways_guild_status_idx').on(table.guildId, table.status)
+}));
+
+const giveawayEntries = sqliteTable('giveaway_entries', {
+    giveawayId: integer('giveaway_id').notNull(),
+    userId: text('user_id').notNull(),
+    entries: integer('entries').default(1).notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.giveawayId, table.userId] }) }));
+
+const giveawayRounds = sqliteTable('giveaway_rounds', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    giveawayId: integer('giveaway_id').notNull(),
+    roundNumber: integer('round_number').notNull(),
+    candidatesSnapshot: text('candidates_snapshot').notNull(),
+    exclusionsSnapshot: text('exclusions_snapshot').notNull(),
+    winnersSnapshot: text('winners_snapshot').notNull(),
+    actorId: text('actor_id').notNull(),
+    createdAt: integer('created_at').notNull(),
+    deliveryToken: text('delivery_token'),
+    deliveryLeaseUntil: integer('delivery_lease_until'),
+    announcedAt: integer('announced_at')
+}, table => ({ numberUnique: unique().on(table.giveawayId, table.roundNumber) }));
+
+const giveawayActions = sqliteTable('giveaway_actions', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    giveawayId: integer('giveaway_id').notNull(),
+    actorId: text('actor_id').notNull(),
+    action: text('action').notNull(),
+    detail: text('detail'),
+    createdAt: integer('created_at').notNull()
+}, table => ({ giveawayIdx: index('giveaway_actions_giveaway_idx').on(table.giveawayId, table.id) }));
+
 module.exports = {
     guilds,
     lifecycleMessages,
@@ -1115,5 +1212,14 @@ module.exports = {
     ticketMembers,
     ticketActions,
     ticketTranscripts,
-    ticketRatings
+    ticketRatings,
+    giveawayConfigs,
+    giveawayPresets,
+    giveawayBlacklist,
+    giveawayRoleLimits,
+    memberLevels,
+    giveaways,
+    giveawayEntries,
+    giveawayRounds,
+    giveawayActions
 };
