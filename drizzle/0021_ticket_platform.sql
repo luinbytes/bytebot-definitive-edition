@@ -21,6 +21,7 @@ CREATE TABLE `ticket_panels` (
 	`name` text NOT NULL,
 	`mode` text DEFAULT 'dropdown' NOT NULL,
 	`default_category_id` text,
+	`message_script` text,
 	`channel_id` text,
 	`message_id` text,
 	`enabled` integer DEFAULT true NOT NULL,

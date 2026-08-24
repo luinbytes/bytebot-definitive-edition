@@ -144,6 +144,31 @@ describe('ticket platform', () => {
         expect(service.authorize(ticket, trainee, 'claim')).toBe(false);
     });
 
+    test('opens a marked private channel and persists the option access snapshot', async () => {
+        const panel = service.createPanel('guild1', 'support', 'button', 'admin');
+        const option = service.addOption(panel.id, { label: 'Billing' });
+        service.setOptionRole(option.id, 'support-role', 'support');
+        const channel = { id: 'channel1', send: jest.fn(async () => ({})), delete: jest.fn() };
+        const guild = {
+            id: 'guild1', roles: { everyone: { id: 'guild1' } },
+            members: { me: { id: 'bot', permissions: { has: () => true } } },
+            channels: { cache: new Map(), create: jest.fn(async () => channel) }
+        };
+        const interaction = {
+            guild, user: { id: 'user1' },
+            member: { id: 'user1', guild, roles: { cache: new Map() } }
+        };
+
+        const ticket = await service.openTicket(interaction, option.id);
+
+        expect(guild.channels.create).toHaveBeenCalledWith(expect.objectContaining({
+            name: 'ticket-1', topic: expect.stringContaining('ByteBot ticket:1'),
+            permissionOverwrites: expect.arrayContaining([expect.objectContaining({ id: 'support-role' })])
+        }));
+        expect(ticket.channelId).toBe('channel1');
+        expect(service.getTicket(ticket.id).accessSnapshot.supportRoleIds).toEqual(['support-role']);
+    });
+
     test('saves and logs the transcript before deleting the exact tracked channel', async () => {
         const ticket = service.reserveTicket({ guildId: 'guild1', openerId: 'user1' });
         service.attachChannel(ticket.id, 'channel1');
@@ -170,6 +195,18 @@ describe('ticket platform', () => {
         await expect(service.deleteDiscordTicket(service.getTicket(ticket.id), channel, 'staff1')).rejects.toThrow('disk full');
 
         expect(channel.delete).not.toHaveBeenCalled();
-        expect(service.getTicket(ticket.id).status).toBe('closed');
+        expect(service.getTicket(ticket.id).status).toBe('open');
+    });
+
+    test('stores only the first rating for a deleted ticket', async () => {
+        const ticket = service.reserveTicket({ guildId: 'guild1', openerId: 'user1' });
+        service.markDeleted(ticket.id, 'staff1');
+        const interaction = { user: { id: 'user1' }, update: jest.fn(async payload => payload) };
+
+        await service.handleRating(interaction, ticket.id, 5);
+        await service.handleRating(interaction, ticket.id, 1);
+
+        expect(database.sqlite.prepare('SELECT stars FROM ticket_ratings WHERE ticket_id = ?').get(ticket.id).stars).toBe(5);
+        expect(interaction.update).toHaveBeenLastCalledWith({ content: 'Your rating was already saved.', components: [] });
     });
 });

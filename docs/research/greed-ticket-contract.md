@@ -39,7 +39,7 @@ Discord allows only a root, optional group, and subcommand, so configuration tha
 | `/ticket add`, `remove`, `rename`, `claim`, `unclaim`, `close`, `reopen`, `delete`, `transcript`, `move`, `reason` | Run the ticket lifecycle in the current channel. Destructive delete requires confirmation. |
 | `/ticket list`, `/ticket stats` | Show bounded, permission-filtered tickets or aggregate/staff counts. No undocumented time grammar is promised. |
 
-Buttons and select menus carry signed, versioned ByteBot custom IDs and route through the existing central interaction handler. Forms use the modal components supported by the installed discord.js version; unsupported current-platform field types are not emulated. Managers state the five-field limit and reject invalid or stale submissions.
+Buttons and select menus carry namespaced ByteBot custom IDs and route through the existing central interaction handler. Every handler rechecks the guild, channel, ticket state, and caller authorization instead of trusting the ID. Forms use the modal components supported by the installed discord.js version; unsupported current-platform field types are not emulated. Managers state the five-field limit and reject invalid or stale submissions.
 
 ## RBAC and Discord permissions
 

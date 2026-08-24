@@ -757,6 +757,7 @@ const expectedSchema = {
         name: 'TEXT NOT NULL',
         mode: "TEXT DEFAULT 'dropdown' NOT NULL",
         default_category_id: 'TEXT',
+        message_script: 'TEXT',
         channel_id: 'TEXT',
         message_id: 'TEXT',
         enabled: 'INTEGER DEFAULT 1 NOT NULL',

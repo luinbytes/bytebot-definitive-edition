@@ -894,6 +894,7 @@ const ticketPanels = sqliteTable('ticket_panels', {
     name: text('name').notNull(),
     mode: text('mode').default('dropdown').notNull(),
     defaultCategoryId: text('default_category_id'),
+    messageScript: text('message_script'),
     channelId: text('channel_id'),
     messageId: text('message_id'),
     enabled: integer('enabled', { mode: 'boolean' }).default(true).notNull(),

@@ -30,4 +30,6 @@ test('/bot help discovers every public Greed category without advertising unfini
     expect(commonPaths.value).toContain('/server security antinuke-settings');
     expect(commonPaths.value).toContain('/server antiraid settings');
     expect(commonPaths.value).toContain('/server automod filter');
+    expect(commonPaths.value).toContain('/ticket setup');
+    expect(parityField.value).toContain('/ticket` Tickets');
 });
