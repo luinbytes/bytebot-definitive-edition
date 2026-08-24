@@ -414,6 +414,48 @@ class LevelAnalyticsService {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
                 throw new Error('You need Manage Server to configure levels.');
             }
+            const switches = {
+                text: ['text_enabled', 'Text XP'],
+                voice: ['voice_enabled', 'Voice XP'],
+                dm: ['dm_enabled', 'Level-up DMs'],
+                antiafk: ['antiafk_enabled', 'Voice anti-AFK']
+            };
+            if (switches[action]) {
+                const enabled = interaction.options.getBoolean('enabled', true);
+                const now = this.now();
+                this.sqlite.prepare(`INSERT OR IGNORE INTO level_configs (guild_id, updated_at) VALUES (?, ?)`)
+                    .run(interaction.guildId, now);
+                const [column, label] = switches[action];
+                this.sqlite.prepare(`UPDATE level_configs SET ${column} = ?, updated_at = ? WHERE guild_id = ?`)
+                    .run(enabled ? 1 : 0, now, interaction.guildId);
+                return interaction.reply({
+                    content: `${label} is now **${enabled ? 'enabled' : 'disabled'}**.`,
+                    flags: [MessageFlags.Ephemeral],
+                    allowedMentions: { parse: [] }
+                });
+            }
+            if (action === 'channel') {
+                const channel = interaction.options.getChannel('channel', true);
+                const botPermissions = interaction.guild.members.me.permissionsIn(channel);
+                if (!botPermissions.has([
+                    PermissionFlagsBits.ViewChannel,
+                    PermissionFlagsBits.SendMessages,
+                    PermissionFlagsBits.EmbedLinks
+                ])) throw new Error('I need View Channel, Send Messages, and Embed Links in the award channel.');
+                const now = this.now();
+                this.sqlite.prepare(`
+                    INSERT INTO level_configs (guild_id, award_channel_id, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(guild_id) DO UPDATE SET
+                        award_channel_id = excluded.award_channel_id,
+                        updated_at = excluded.updated_at
+                `).run(interaction.guildId, channel.id, now);
+                return interaction.reply({
+                    content: `Level-up channel set to <#${channel.id}>.`,
+                    flags: [MessageFlags.Ephemeral],
+                    allowedMentions: { parse: [] }
+                });
+            }
             if (action === 'rate') {
                 const multiplier = interaction.options.getNumber('multiplier', true);
                 if (!Number.isFinite(multiplier) || multiplier < 0 || multiplier > 10) {

@@ -224,4 +224,27 @@ describe('LevelAnalyticsService', () => {
             content: 'XP gain multiplier has been set to **2.5x**.'
         }));
     });
+
+    test('/levels config switches persist explicit state instead of ambiguous toggles', async () => {
+        const interaction = {
+            guildId: 'guild1',
+            guild: { id: 'guild1' },
+            member: { permissions: { has: permission => permission === PermissionFlagsBits.ManageGuild } },
+            options: {
+                getSubcommandGroup: () => 'config',
+                getSubcommand: () => 'text',
+                getBoolean: name => name === 'enabled' ? false : null
+            },
+            reply: jest.fn()
+        };
+
+        await service.execute(interaction);
+
+        expect(database.sqlite.prepare(`
+            SELECT text_enabled FROM level_configs WHERE guild_id = 'guild1'
+        `).get().text_enabled).toBe(0);
+        expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({
+            content: 'Text XP is now **disabled**.'
+        }));
+    });
 });
