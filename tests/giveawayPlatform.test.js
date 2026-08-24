@@ -214,6 +214,27 @@ describe('giveaway platform', () => {
         expect(database.sqlite.prepare('SELECT COUNT(*) count FROM giveaway_rounds WHERE giveaway_id = ?').get(giveaway.id).count).toBe(2);
     });
 
+    test('stops retrying a reroll whose exact message is gone', async () => {
+        const members = ['user1', 'user2'].map(id => ({ id, user: { id, bot: false }, roles: { cache: new Map() } }));
+        const channel = { id: 'channel1', messages: { fetch: jest.fn().mockResolvedValue(null) } };
+        const guild = { id: 'guild1', channels: { cache: new Map([['channel1', channel]]) },
+            members: { cache: new Map(members.map(member => [member.id, member])), fetch: jest.fn() } };
+        service.client = { user: { id: 'bot' }, guilds: { cache: new Map([['guild1', guild]]) }, users: { fetch: jest.fn() } };
+        const giveaway = service.reserveGiveaway({ guildId: 'guild1', channelId: 'channel1', hostId: 'admin',
+            duration: '10s', winnerCount: 1, prize: 'Nitro' });
+        service.attachMessage(giveaway.id, 'message1');
+        for (const member of members) service.enter(giveaway.id, member);
+        const first = service.claimEnd(giveaway.id, 'admin', members);
+        service.completeEnd(giveaway.id, 'admin', first.round.deliveryToken);
+        const pending = service.createReroll(giveaway.id, 'admin', members);
+        database.sqlite.prepare('UPDATE giveaway_rounds SET delivery_lease_until = 0 WHERE id = ?').run(pending.round.id);
+
+        await service.reconcile();
+
+        expect(service.getGiveaway(giveaway.id).status).toBe('lost');
+        expect(service.dueRerolls()).toHaveLength(0);
+    });
+
     test('rejects bot entrants and scripted controls', () => {
         const giveaway = service.reserveGiveaway({ guildId: 'guild1', channelId: 'channel1', hostId: 'admin',
             duration: '10s', winnerCount: 1, prize: 'Nitro' });

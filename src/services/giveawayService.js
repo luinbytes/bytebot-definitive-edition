@@ -485,7 +485,11 @@ class GiveawayService {
         if (!delivery.claimed) throw new Error('That reroll is already being announced.');
         const { round } = delivery;
         const { guild, channel, message } = await this.resourceFor(giveaway);
-        if (!message) throw new Error('The exact giveaway message is no longer available.');
+        if (!message) {
+            this.sqlite.prepare("UPDATE giveaways SET status = 'lost', updated_at = ? WHERE id = ? AND status = 'ended'").run(this.now(), id);
+            this.recordAction(id, actorId, 'message_lost');
+            throw new Error('The exact giveaway message is no longer available.');
+        }
         await message.edit(this.messagePayload(giveaway, { guild, channel }, round));
         const announced = this.sqlite.prepare(`UPDATE giveaway_rounds SET announced_at = ?, delivery_token = NULL,
             delivery_lease_until = NULL WHERE id = ? AND announced_at IS NULL AND delivery_token = ?`)
