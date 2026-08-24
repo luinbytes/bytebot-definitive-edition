@@ -580,7 +580,7 @@ class VoiceMasterService {
             if (deletionConfirmed) this.failCreation(reservation.creation, error.message);
             else this.sqlite.prepare(`UPDATE voice_master_creations SET state = 'deleting', channel_id = ?,
                     error = ?, updated_at = ? WHERE guild_id = ? AND source_channel_id = ?
-                    AND member_id = ? AND generation = ? AND state IN ('pending','deleting')`)
+                    AND member_id = ? AND generation = ? AND state IN ('pending','deleting','active')`)
                 .run(channel.id, `Cleanup pending: ${error.message}`.slice(0, 500), this.now(), guild.id,
                     source.channel_id, member.id, reservation.creation.generation);
             logger.warn(`VoiceMaster creation failed in ${guild.id}: ${error.message}`);
@@ -591,7 +591,7 @@ class VoiceMasterService {
     failCreation(creation, error) {
         this.sqlite.prepare(`UPDATE voice_master_creations SET channel_id = NULL, state = 'failed',
             error = ?, updated_at = ? WHERE guild_id = ? AND source_channel_id = ?
-            AND member_id = ? AND generation = ? AND state IN ('pending','deleting')`)
+            AND member_id = ? AND generation = ? AND state IN ('pending','deleting','active')`)
             .run(String(error).slice(0, 500), this.now(), creation.guild_id,
                 creation.source_channel_id, creation.member_id, creation.generation);
     }
@@ -1017,12 +1017,10 @@ class VoiceMasterService {
                         const parsed = JSON.parse(snapshot);
                         await this.restorePermission(channel, pod.owner_id, parsed.previous);
                         await this.restorePermission(channel, interaction.user.id, parsed.next);
-                        this.sqlite.prepare(`UPDATE bytepods SET state = 'active', pending_owner_id = NULL,
-                            claim_snapshot = NULL,
-                            owner_left_at = CASE WHEN state = 'claim_cancelled' THEN NULL ELSE owner_left_at END
-                            WHERE guild_id = ? AND channel_id = ? AND owner_id = ?
-                            AND state IN ('claiming','claim_cancelled')`)
-                            .run(interaction.guildId, channel.id, pod.owner_id);
+                        this.completeClaimCompensation({
+                            ...pod, guild_id: interaction.guildId, channel_id: channel.id,
+                            pending_owner_id: interaction.user.id, state: 'claiming'
+                        });
                     } catch (restoreError) {
                         logger.warn(`VoiceMaster claim compensation failed for ${channel.id}: ${restoreError.message}`);
                     }
@@ -1079,6 +1077,27 @@ class VoiceMasterService {
             AND owner_left_at IS NOT NULL AND source_channel_id IS NOT NULL`)
             .get(guildId, channelId, pod.owner_id, nextOwnerId, pod.generation);
         if (!active) throw new Error('The channel owner returned before the claim completed.');
+    }
+
+    completeClaimCompensation(pod) {
+        const current = this.sqlite.prepare(`SELECT * FROM bytepods
+            WHERE guild_id = ? AND channel_id = ? AND owner_id = ? AND pending_owner_id = ?
+            AND state IN ('claiming','claim_cancelled')`).get(
+            pod.guild_id, pod.channel_id, pod.owner_id, pod.pending_owner_id
+        );
+        if (!current) return false;
+        const expectedGeneration = current.state === 'claim_cancelled' && pod.state === 'claiming'
+            ? pod.generation + 1
+            : pod.generation;
+        if (current.generation !== expectedGeneration) return false;
+        return Boolean(this.sqlite.prepare(`UPDATE bytepods SET state = 'active', pending_owner_id = NULL,
+            claim_snapshot = NULL,
+            owner_left_at = CASE WHEN state = 'claim_cancelled' THEN NULL ELSE owner_left_at END
+            WHERE guild_id = ? AND channel_id = ? AND owner_id = ? AND pending_owner_id = ?
+            AND state = ? AND generation = ?`).run(
+            current.guild_id, current.channel_id, current.owner_id, current.pending_owner_id,
+            current.state, current.generation
+        ).changes);
     }
 
     async targetMember(interaction) {
@@ -1515,10 +1534,7 @@ class VoiceMasterService {
                 const snapshot = JSON.parse(pod.claim_snapshot);
                 await this.restorePermission(channel, pod.owner_id, snapshot.previous);
                 await this.restorePermission(channel, pod.pending_owner_id, snapshot.next);
-                this.sqlite.prepare(`UPDATE bytepods SET state = 'active', pending_owner_id = NULL, claim_snapshot = NULL,
-                    owner_left_at = CASE WHEN state = 'claim_cancelled' THEN NULL ELSE owner_left_at END
-                    WHERE guild_id = ? AND channel_id = ? AND state IN ('claiming','claim_cancelled')`)
-                    .run(pod.guild_id, pod.channel_id);
+                this.completeClaimCompensation(pod);
             } catch (error) {
                 result.failures.push({ guildId: pod.guild_id, channelId: pod.channel_id, error: error.message });
             }

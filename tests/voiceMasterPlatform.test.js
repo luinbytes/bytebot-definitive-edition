@@ -254,6 +254,50 @@ describe('VoiceMaster lifecycle', () => {
         expect(member.voice.setChannel).toHaveBeenLastCalledWith(temporary);
     });
 
+    test('move failure after activation keeps the created channel retryable', async () => {
+        const category = { id: 'category-1', type: ChannelType.GuildCategory, children: { cache: new Map() } };
+        const temporary = {
+            id: 'temporary-1', type: ChannelType.GuildVoice, members: new Map(),
+            send: jest.fn(async () => ({ id: 'controls-1' })),
+            delete: jest.fn().mockRejectedValueOnce(new Error('Discord unavailable')).mockResolvedValueOnce(undefined)
+        };
+        const channels = new Map([[category.id, category]]);
+        const member = {
+            id: 'member-1', displayName: 'Member', user: { id: 'member-1', bot: false, username: 'Member' },
+            voice: { setChannel: jest.fn(async () => { throw new Error('Move failed'); }) }
+        };
+        const guild = {
+            id: 'guild-1', voiceStates: { cache: new Map([[member.id, { channelId: 'join-1' }]]) },
+            members: { me: { id: 'bot-1', permissions: { has: () => true } } },
+            roles: { everyone: { id: 'guild-1' } },
+            channels: {
+                cache: channels,
+                create: jest.fn(async () => { channels.set(temporary.id, temporary); return temporary; }),
+                fetch: jest.fn(async id => channels.get(id) || null)
+            }
+        };
+        database.sqlite.prepare(`INSERT INTO voice_master_configs
+            (guild_id, state, generation, category_id, primary_channel_id, updated_at)
+            VALUES ('guild-1', 'active', 1, 'category-1', 'join-1', 1)`).run();
+        database.sqlite.prepare(`INSERT INTO voice_master_sources
+            (channel_id, guild_id, category_id, state, is_primary, owned, created_at)
+            VALUES ('join-1', 'guild-1', 'category-1', 'active', 1, 1, 1)`).run();
+        const { VoiceMasterService } = require('../src/services/voiceMasterService');
+        const service = new VoiceMasterService({
+            client: { guilds: { fetch: jest.fn(async () => guild) } }, sqlite: database.sqlite
+        });
+
+        await service.handleVoiceState({ channelId: null }, { guild, member, channelId: 'join-1' });
+
+        expect(database.sqlite.prepare('SELECT COUNT(*) count FROM bytepods').get().count).toBe(0);
+        expect(database.sqlite.prepare('SELECT state, channel_id FROM voice_master_creations').get())
+            .toEqual({ state: 'deleting', channel_id: temporary.id });
+        await service.retryScheduledCleanup();
+        expect(temporary.delete).toHaveBeenCalledTimes(2);
+        expect(database.sqlite.prepare('SELECT state, channel_id FROM voice_master_creations').get())
+            .toEqual({ state: 'failed', channel_id: null });
+    });
+
     test('empty cleanup deletes only the exact persisted owned channel once', async () => {
         const channels = new Map();
         const category = { id: 'category-1', type: ChannelType.GuildCategory, delete: jest.fn() };
@@ -776,6 +820,51 @@ describe('VoiceMaster lifecycle', () => {
         }, 'claimant-1')).toThrow('owner returned');
         expect(database.sqlite.prepare('SELECT role_id FROM voice_master_join_roles WHERE channel_id = ?')
             .get('temporary-1').role_id).toBe('join-role');
+    });
+
+    test('claim recovery cannot overwrite a newer owner-return generation', async () => {
+        let releaseRestore;
+        let restoreStarted;
+        const gate = new Promise(resolve => { releaseRestore = resolve; });
+        const started = new Promise(resolve => { restoreStarted = resolve; });
+        const deleteOverwrite = jest.fn()
+            .mockResolvedValueOnce(undefined)
+            .mockImplementationOnce(async () => { restoreStarted(); await gate; })
+            .mockResolvedValue(undefined);
+        const channel = {
+            id: 'temporary-1', guildId: 'guild-1', type: ChannelType.GuildVoice,
+            permissionOverwrites: { delete: deleteOverwrite }
+        };
+        const guild = {
+            id: 'guild-1', channels: { cache: new Map([[channel.id, channel]]), fetch: jest.fn(async () => channel) }
+        };
+        database.sqlite.prepare(`INSERT INTO bytepods
+            (channel_id, guild_id, owner_id, original_owner_id, owner_left_at, source_channel_id,
+             state, generation, bot_owned, pending_owner_id, claim_snapshot, created_at)
+            VALUES ('temporary-1', 'guild-1', 'owner-1', 'owner-1', 1, 'join-1',
+                'claiming', 3, 1, 'claimant-1', ?, 1)`)
+            .run(JSON.stringify({ previous: { exists: false }, next: { exists: false } }));
+        const { VoiceMasterService } = require('../src/services/voiceMasterService');
+        const service = new VoiceMasterService({
+            client: { guilds: { fetch: jest.fn(async () => guild) } }, sqlite: database.sqlite
+        });
+        const result = { failures: [] };
+
+        const recovery = service.reconcilePendingOperations(result);
+        await started;
+        await service.handleOwnerReturn(guild, { id: 'owner-1' }, channel.id);
+        database.sqlite.prepare(`UPDATE bytepods SET generation = 5
+            WHERE channel_id = 'temporary-1' AND state = 'claim_cancelled'`).run();
+        releaseRestore();
+        await recovery;
+
+        expect(database.sqlite.prepare('SELECT state, generation FROM bytepods').get())
+            .toEqual({ state: 'claim_cancelled', generation: 5 });
+        await service.reconcilePendingOperations(result);
+        expect(database.sqlite.prepare(`SELECT state, generation, pending_owner_id, owner_left_at
+            FROM bytepods`).get()).toEqual({
+            state: 'active', generation: 5, pending_owner_id: null, owner_left_at: null
+        });
     });
 
     test('access updates serialize per member and keep the newest durable effect', async () => {
