@@ -40,17 +40,17 @@ function privateAddress(address) {
     if (words.slice(0, 5).every(word => word === 0) && words[5] === 0xFFFF) {
         return privateAddress(`${words[6] >> 8}.${words[6] & 255}.${words[7] >> 8}.${words[7] & 255}`);
     }
-    return words.every(word => word === 0)
-        || (words.slice(0, 7).every(word => word === 0) && words[7] === 1)
-        || (words[0] & 0xFE00) === 0xFC00
-        || (words[0] & 0xFFC0) === 0xFE80
-        || (words[0] & 0xFFC0) === 0xFEC0
-        || (words[0] & 0xFF00) === 0xFF00
-        || (words[0] === 0x0064 && words[1] === 0xFF9B && words[2] === 1)
-        || (words[0] === 0x0100 && words.slice(1, 4).every(word => word === 0))
-        || (words[0] === 0x2001 && words[1] === 2 && words[2] === 0)
-        || (words[0] === 0x2001 && (words[1] & 0xFFF0) === 0x0010)
-        || (words[0] === 0x2001 && words[1] === 0x0DB8)
+    if ((words[0] & 0xE000) !== 0x2000) return true;
+    if (words[0] === 0x2001 && (words[1] & 0xFE00) === 0) {
+        const exactAnycast = words[1] === 1 && words.slice(2, 7).every(word => word === 0)
+            && [1, 2, 3].includes(words[7]);
+        const globalAllocation = words[1] === 3
+            || (words[1] === 4 && words[2] === 0x0112)
+            || (words[1] & 0xFFF0) === 0x0020
+            || (words[1] & 0xFFF0) === 0x0030;
+        if (!exactAnycast && !globalAllocation) return true;
+    }
+    return (words[0] === 0x2001 && words[1] === 0x0DB8)
         || words[0] === 0x2002
         || (words[0] === 0x3FFF && (words[1] & 0xF000) === 0);
 }

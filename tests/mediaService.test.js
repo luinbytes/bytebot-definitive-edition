@@ -3,6 +3,16 @@ const fs = require('fs');
 const VALID_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlS4AAAAASUVORK5CYII=', 'base64');
 
 describe('media service', () => {
+    test('keeps IANA globally reachable IPv6 allocations public', () => {
+        const { privateAddress } = require('../src/services/mediaService');
+        expect(privateAddress('2606:4700:4700::1111')).toBe(false);
+        expect(privateAddress('2001:1::1')).toBe(false);
+        expect(privateAddress('2001:3::1')).toBe(false);
+        expect(privateAddress('2001:4:112::1')).toBe(false);
+        expect(privateAddress('2001:20::1')).toBe(false);
+        expect(privateAddress('2620:4f:8000::1')).toBe(false);
+    });
+
     test('resolves the documented image-source order', () => {
         const { resolveImageInput } = require('../src/services/mediaService');
         const attachment = { url: 'https://cdn.discordapp.com/direct.png' };
@@ -47,6 +57,10 @@ describe('media service', () => {
         await expect(service.image('http://192.0.0.1/image.png')).rejects.toThrow('public address');
         await expect(service.image('http://[2001:2::1]/image.png')).rejects.toThrow('public address');
         await expect(service.image('http://[2001:10::1]/image.png')).rejects.toThrow('public address');
+        await expect(service.image('http://[64:ff9b::7f00:1]/image.png')).rejects.toThrow('public address');
+        await expect(service.image('http://[100:0:0:1::1]/image.png')).rejects.toThrow('public address');
+        await expect(service.image('http://[2001:1::4]/image.png')).rejects.toThrow('public address');
+        await expect(service.image('http://[5f00::1]/image.png')).rejects.toThrow('public address');
 
         fetch.mockResolvedValueOnce({
             statusCode: 200,
