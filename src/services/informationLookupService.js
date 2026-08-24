@@ -85,6 +85,7 @@ class InformationLookupService {
     constructor(options = {}) {
         this.fetch = options.fetch || globalThis.fetch;
         this.lookup = options.lookup || (hostname => dns.lookup(hostname, { all: true, verbatim: true }));
+        this.lookupTimeout = options.lookupTimeout || 5000;
         this.screenshotProvider = options.screenshotProvider ?? process.env.SCREENSHOT_API_URL;
         this.translationProvider = options.translationProvider ?? process.env.LIBRETRANSLATE_URL;
         this.translationKey = options.translationKey ?? process.env.LIBRETRANSLATE_API_KEY;
@@ -160,8 +161,18 @@ class InformationLookupService {
         const literal = url.hostname.replace(/^\[|\]$/g, '');
         if (net.isIP(literal) && privateAddress(literal)) throw new UserFacingError('The URL must use a public address.');
         let resolved;
-        try { resolved = await this.lookup(url.hostname); }
+        let timeout;
+        try {
+            resolved = await Promise.race([
+                this.lookup(url.hostname),
+                new Promise((_, reject) => {
+                    timeout = setTimeout(() => reject(new Error('DNS timeout')), this.lookupTimeout);
+                    timeout.unref?.();
+                })
+            ]);
+        }
         catch { throw new UserFacingError('The website address could not be resolved.'); }
+        finally { clearTimeout(timeout); }
         const addresses = Array.isArray(resolved) ? resolved : [resolved];
         if (!addresses.length || addresses.some(entry => privateAddress(entry.address || entry))) {
             throw new UserFacingError('The URL must use a public address.');

@@ -1,7 +1,7 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const embeds = require('./embeds');
 const { UserFacingError } = require('./errorHandlerUtil');
-const { paginateArray, sendPaginatedMessage } = require('./paginationUtil');
+const { sendPaginatedMessage } = require('./paginationUtil');
 
 async function executeMemberLookup(interaction, client) {
     const group = interaction.options.getSubcommandGroup(false);
@@ -86,23 +86,25 @@ async function executeServerLookup(interaction, client) {
         const role = interaction.options.getRole('role') || fallback;
         if (!role) throw new UserFacingError('Provide a role to view.');
         if (action === 'members') {
-            await interaction.guild.members.fetch().catch(() => {
-                throw new UserFacingError('ByteBot could not fetch this server\'s members.');
-            });
-            const members = [...role.members.values()];
-            const pages = paginateArray(members, 25);
-            if (!pages.length) pages.push([]);
+            const total = role.members.size;
+            const totalPages = Math.max(1, Math.ceil(total / 25));
             await interaction.deferReply();
             return sendPaginatedMessage({
                 interaction,
                 deferred: true,
-                totalPages: pages.length,
+                totalPages,
                 customIdPrefix: 'role-members',
                 renderPage: async page => {
                     const start = page * 25;
-                    const shown = pages[page].map(member => `<@${member.id}>`);
+                    const shown = [];
+                    let index = 0;
+                    for (const member of role.members.values()) {
+                        if (index >= start && shown.length < 25) shown.push(`<@${member.id}>`);
+                        if (shown.length === 25) break;
+                        index++;
+                    }
                     return embeds.brand(`Members in ${role.name}`, shown.length
-                        ? `${start + 1}-${start + shown.length} of ${members.length}\n${shown.join('\n')}`
+                        ? `${start + 1}-${start + shown.length} of ${total}\n${shown.join('\n')}`
                         : 'No members have this role.');
                 }
             });

@@ -123,7 +123,7 @@ test('/server role members paginates every resolved member in pages of 25', asyn
     const message = { createMessageComponentCollector: jest.fn().mockReturnValue(collector) };
     const interaction = {
         user: { id: '123456789012345678' },
-        guild: { id: '123456789012345678', members: { fetch: jest.fn().mockResolvedValue() } },
+        guild: { id: '123456789012345678' },
         options: {
             getSubcommandGroup: jest.fn().mockReturnValue('role'),
             getSubcommand: jest.fn().mockReturnValue('members'),

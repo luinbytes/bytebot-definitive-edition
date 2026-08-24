@@ -19,6 +19,15 @@ test('web lookups reject private destinations before contacting a provider', asy
     expect(fetch).not.toHaveBeenCalled();
 });
 
+test('web lookup DNS validation has a bounded wait', async () => {
+    const service = new InformationLookupService({
+        lookup: jest.fn(() => new Promise(() => {})),
+        lookupTimeout: 1
+    });
+
+    await expect(service.publicUrl('https://example.com')).rejects.toThrow('could not be resolved');
+});
+
 test('weather returns only validated current provider fields', async () => {
     const json = value => new Response(JSON.stringify(value), {
         headers: { 'content-type': 'application/json' }
