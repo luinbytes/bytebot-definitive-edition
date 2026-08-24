@@ -1,4 +1,7 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const {
+    ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder,
+    TextInputBuilder, TextInputStyle
+} = require('discord.js');
 const embeds = require('../utils/embeds');
 
 const ACTIONS = [
@@ -29,4 +32,19 @@ function voiceMasterInterface(channelId) {
     };
 }
 
-module.exports = { voiceMasterInterface };
+function voiceMasterRenameModal(scopeId) {
+    return new ModalBuilder()
+        .setCustomId(`voicemaster:${scopeId}:rename-submit`)
+        .setTitle('Rename Voice Channel')
+        .addComponents(new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+                .setCustomId('name')
+                .setLabel('New channel name')
+                .setStyle(TextInputStyle.Short)
+                .setMinLength(1)
+                .setMaxLength(100)
+                .setRequired(true)
+        ));
+}
+
+module.exports = { voiceMasterInterface, voiceMasterRenameModal };

@@ -1,7 +1,7 @@
-const { ChannelType, PermissionFlagsBits } = require('discord.js');
+const { ChannelType, MessageFlags, PermissionFlagsBits } = require('discord.js');
 const embeds = require('../utils/embeds');
 const logger = require('../utils/logger');
-const { voiceMasterInterface } = require('../components/voiceMasterControls');
+const { voiceMasterInterface, voiceMasterRenameModal } = require('../components/voiceMasterControls');
 
 const SETUP_PERMISSIONS = [
     PermissionFlagsBits.ViewChannel,
@@ -39,6 +39,42 @@ class VoiceMasterService {
         }
         if (!group && OWNER_ACTIONS.has(subcommand)) return this.executeOwnerAction(interaction, subcommand);
         return interaction.editReply({ embeds: [embeds.error('Not Available', `VoiceMaster ${group ? `${group} ` : ''}${subcommand} is not available yet.`)] });
+    }
+
+    async handleInteraction(interaction) {
+        const [namespace, scopeId, action] = String(interaction.customId || '').split(':');
+        if (namespace !== 'voicemaster' || !scopeId || !action) return;
+        if (interaction.isButton() && action === 'rename') {
+            return interaction.showModal(voiceMasterRenameModal(scopeId));
+        }
+
+        let mappedAction = action;
+        const values = {};
+        if (interaction.isModalSubmit() && action === 'rename-submit') {
+            mappedAction = 'rename';
+            values.name = interaction.fields.getTextInputValue('name');
+        } else if (interaction.isButton() && (action === 'increase' || action === 'decrease')) {
+            const current = interaction.member.voice?.channel?.userLimit || 0;
+            values.limit = action === 'increase' ? Math.min(99, current + 1) : Math.max(0, current - 1);
+            mappedAction = 'limit';
+        }
+        if (!OWNER_ACTIONS.has(mappedAction)) return;
+        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+        const commandInteraction = new Proxy(interaction, {
+            get(target, property) {
+                if (property === 'options') {
+                    return {
+                        getInteger: name => values[name] ?? null,
+                        getString: name => values[name] ?? null,
+                        getMember: () => null,
+                        getUser: () => null
+                    };
+                }
+                const value = target[property];
+                return typeof value === 'function' ? value.bind(target) : value;
+            }
+        });
+        return this.executeOwnerAction(commandInteraction, mappedAction);
     }
 
     requireAdmin(interaction) {

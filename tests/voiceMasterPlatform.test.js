@@ -46,6 +46,18 @@ function adminInteraction(guild, subcommand, values = {}, group = null) {
     return result;
 }
 
+function componentInteraction(guild, member, action) {
+    return {
+        guild, guildId: guild.id, member, user: member.user,
+        customId: `voicemaster:temporary-1:${action}`,
+        isButton: () => true,
+        isModalSubmit: () => false,
+        deferReply: jest.fn(async () => {}),
+        editReply: jest.fn(async payload => payload),
+        showModal: jest.fn(async () => {})
+    };
+}
+
 describe('VoiceMaster lifecycle', () => {
     let tempDir;
     let database;
@@ -277,17 +289,24 @@ describe('VoiceMaster lifecycle', () => {
         await service.execute(memberInteraction(guild, owner, 'permit', { user: target }));
         await service.execute(memberInteraction(guild, owner, 'drag', { user: target }));
         await service.execute(memberInteraction(guild, owner, 'reject', { user: target }));
+        const increase = componentInteraction(guild, owner, 'increase');
+        await service.handleInteraction(increase);
+        const rename = componentInteraction(guild, owner, 'rename');
+        await service.handleInteraction(rename);
+        const outsiderDelete = componentInteraction(guild, outsider, 'delete');
+        await service.handleInteraction(outsiderDelete);
         await service.execute(memberInteraction(guild, outsider, 'delete'));
 
         expect(overwrites.edit).toHaveBeenCalledWith('guild-1', { Connect: false });
         expect(overwrites.edit).toHaveBeenCalledWith('guild-1', { ViewChannel: false });
         expect([temporary.userLimit, temporary.name, temporary.bitrate, temporary.rtcRegion]).toEqual([
-            12, 'Focus Room', 80000, 'eu-west'
+            13, 'Focus Room', 80000, 'eu-west'
         ]);
         expect(overwrites.edit).toHaveBeenCalledWith('target-1', { ViewChannel: true, Connect: true });
         expect(target.voice.setChannel).toHaveBeenCalledWith(temporary);
         expect(overwrites.edit).toHaveBeenCalledWith('target-1', { Connect: false });
         expect(target.voice.disconnect).toHaveBeenCalledTimes(1);
+        expect(rename.showModal).toHaveBeenCalledTimes(1);
         expect(temporary.delete).not.toHaveBeenCalled();
     });
 
