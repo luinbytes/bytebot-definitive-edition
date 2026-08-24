@@ -9,7 +9,8 @@ const data = new SlashCommandBuilder().setName('counter').setDescription('Config
         .addChannelOption(option => option.setName('channel').setDescription('Counting or metric channel').setRequired(true)))
     .addSubcommand(sub => sub.setName('add').setDescription('Create a live metric channel')
         .addStringOption(option => option.setName('metric').setDescription('Metric').setRequired(true).addChoices(
-            { name: 'Members', value: 'members' }, { name: 'Voice members', value: 'voice' }))
+            { name: 'Members', value: 'members' }, { name: 'Bots', value: 'bots' },
+            { name: 'Online members', value: 'online' }, { name: 'Voice members', value: 'voice' }))
         .addStringOption(option => option.setName('kind').setDescription('Channel kind').setRequired(true).addChoices(
             { name: 'Voice', value: 'voice' }, { name: 'Text', value: 'text' }, { name: 'Category', value: 'category' },
             { name: 'Announcement', value: 'announcement' }, { name: 'Stage', value: 'stage' })))
@@ -18,7 +19,8 @@ const data = new SlashCommandBuilder().setName('counter').setDescription('Config
     .addSubcommand(sub => sub.setName('update').setDescription('Change a live counter metric')
         .addChannelOption(option => option.setName('channel').setDescription('Metric channel').setRequired(true))
         .addStringOption(option => option.setName('metric').setDescription('Metric').setRequired(true).addChoices(
-            { name: 'Members', value: 'members' }, { name: 'Voice members', value: 'voice' })))
+            { name: 'Members', value: 'members' }, { name: 'Bots', value: 'bots' },
+            { name: 'Online members', value: 'online' }, { name: 'Voice members', value: 'voice' })))
     .addSubcommand(sub => sub.setName('remove').setDescription('Stop updating a metric channel')
         .addChannelOption(option => option.setName('channel').setDescription('Metric channel').setRequired(true)));
 
@@ -32,7 +34,7 @@ module.exports = {
         const action = interaction.options.getSubcommand();
         const guildId = interaction.guild.id;
         if (action === 'options') return interaction.editReply({
-            content: 'Counting: `/counter enable #channel`. Metrics: `members`, `voice`. Channel kinds: `voice`, `text`, `category`, `announcement`, `stage`.',
+            content: 'Counting: `/counter enable #channel`. Metrics: `members`, `bots`, `online`, `voice`. Channel kinds: `voice`, `text`, `category`, `announcement`, `stage`.',
             flags: [MessageFlags.Ephemeral]
         });
         if (action === 'list') {
@@ -50,7 +52,7 @@ module.exports = {
             const channel = await interaction.guild.channels.create({ name: `${metric}-0`, type, reason: `Metric counter created by ${interaction.user.id}` });
             try {
                 await service.upsert({ guildId, kind: 'counter', key: channel.id, config: {
-                    mode: 'metric', channelId: channel.id, metric, kind, intervalMs: 300000
+                    mode: 'metric', channelId: channel.id, metric, kind, owned: true, intervalMs: 300000
                 }, nextRunAt: Date.now(), createdBy: interaction.user.id });
             } catch (error) {
                 await channel.delete('Counter setup failed').catch(() => null);
@@ -89,6 +91,11 @@ module.exports = {
             const reset = config.mode === 'counting' ? { ...config, current: 0, lastUserId: null } : config;
             await service.upsert({ guildId, kind: 'counter', key: channel.id, config: reset, enabled: false, createdBy: interaction.user.id });
             return interaction.editReply({ content: `Counter disabled${config.mode === 'counting' ? ' and reset' : ''} in ${channel}.`, flags: [MessageFlags.Ephemeral] });
+        }
+        const rule = await service.get(guildId, 'counter', channel.id);
+        if (rule) {
+            const config = JSON.parse(rule.config || '{}');
+            if (config.mode === 'metric' && config.owned) await channel.delete(`Metric counter removed by ${interaction.user.id}`);
         }
         const removed = await service.remove(guildId, 'counter', channel.id);
         return interaction.editReply({ content: removed ? `Counter removed from ${channel}.` : 'That channel is not configured.', flags: [MessageFlags.Ephemeral] });

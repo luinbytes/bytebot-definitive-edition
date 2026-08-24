@@ -317,6 +317,16 @@ module.exports = {
         }
 
         try {
+            const { GiveawayService } = require('../services/giveawayService');
+            client.giveawayService = new GiveawayService(client);
+            await client.giveawayService.reconcile();
+            client.giveawayService.start();
+            logger.success('Giveaway service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize giveaway service: ${e}`);
+        }
+
+        try {
             const { TicketService } = require('../services/ticketService');
             client.ticketService = new TicketService(client);
             await client.ticketService.reconcile();

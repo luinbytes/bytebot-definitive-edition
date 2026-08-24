@@ -24,6 +24,13 @@ module.exports = {
             return;
         }
         processedInteractions.add(interaction.id);
+        if (interaction.isButton() && interaction.customId.startsWith('giveaway:')) {
+            if (!client.giveawayService) {
+                return interaction.reply({ content: 'Giveaway service is temporarily unavailable.', flags: [MessageFlags.Ephemeral] }).catch(() => null);
+            }
+            await client.giveawayService.handleInteraction(interaction);
+            return;
+        }
         if ((interaction.isButton() || interaction.isAnySelectMenu() || interaction.isModalSubmit())
             && interaction.customId.startsWith('ticket:')) {
             if (!client.ticketService) {
