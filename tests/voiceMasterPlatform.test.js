@@ -120,4 +120,56 @@ describe('VoiceMaster lifecycle', () => {
         expect(member.voice.setChannel).toHaveBeenCalledTimes(2);
         expect(member.voice.setChannel).toHaveBeenLastCalledWith(temporary);
     });
+
+    test('empty cleanup deletes only the exact persisted owned channel once', async () => {
+        const channels = new Map();
+        const category = { id: 'category-1', type: ChannelType.GuildCategory, delete: jest.fn() };
+        const join = { id: 'join-1', type: ChannelType.GuildVoice, send: jest.fn(async () => ({ id: 'interface-1' })), delete: jest.fn() };
+        const temporary = {
+            id: 'temporary-1', type: ChannelType.GuildVoice, members: new Map(),
+            send: jest.fn(async () => ({ id: 'controls-1' })), delete: jest.fn(async () => channels.delete('temporary-1'))
+        };
+        const create = jest.fn(async values => {
+            const channel = values.type === ChannelType.GuildCategory
+                ? category
+                : values.name === 'Join to Create' ? join : temporary;
+            channels.set(channel.id, channel);
+            return channel;
+        });
+        const voiceStates = new Map();
+        const member = {
+            id: 'member-1', user: { id: 'member-1', bot: false, username: 'Member' }, displayName: 'Member',
+            voice: { channelId: 'join-1', setChannel: jest.fn(async channel => {
+                member.voice.channelId = channel.id;
+                voiceStates.set(member.id, { channelId: channel.id });
+                channel.members.set(member.id, member);
+            }) }
+        };
+        voiceStates.set(member.id, { channelId: 'join-1' });
+        const guild = {
+            id: 'guild-1', name: 'Guild',
+            members: { me: { id: 'bot-1', permissions: { has: () => true } } },
+            roles: { everyone: { id: 'guild-1' } }, voiceStates: { cache: voiceStates },
+            channels: { cache: channels, create, fetch: jest.fn(async id => channels.get(id) || null) }
+        };
+        const { VoiceMasterService } = require('../src/services/voiceMasterService');
+        const service = new VoiceMasterService({ sqlite: database.sqlite, delay: async () => {} });
+        await service.execute(interaction(guild, 'setup'));
+        await service.handleVoiceState(
+            { channelId: null },
+            { member, guild, channelId: 'join-1', channel: join, client: {} }
+        );
+        temporary.members.delete(member.id);
+        member.voice.channelId = null;
+        voiceStates.set(member.id, { channelId: null });
+        const leave = { member, guild, channelId: null, channel: null, client: {} };
+
+        await Promise.all([
+            service.handleVoiceState({ channelId: 'temporary-1', channel: temporary }, leave),
+            service.handleVoiceState({ channelId: 'temporary-1', channel: temporary }, leave)
+        ]);
+
+        expect(temporary.delete).toHaveBeenCalledTimes(1);
+        expect(join.delete).not.toHaveBeenCalled();
+    });
 });

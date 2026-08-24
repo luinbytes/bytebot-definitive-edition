@@ -11,10 +11,11 @@ const SETUP_PERMISSIONS = [
 ];
 
 class VoiceMasterService {
-    constructor({ client = null, sqlite, now = Date.now }) {
+    constructor({ client = null, sqlite, now = Date.now, delay = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
         this.client = client;
         this.sqlite = sqlite;
         this.now = now;
+        this.delay = delay;
     }
 
     config(guildId) {
@@ -152,8 +153,12 @@ class VoiceMasterService {
         const member = newState.member;
         const guild = newState.guild;
         if (!member || member.user?.bot || !guild) return false;
+        let handled = false;
+        if (oldState.channelId && oldState.channelId !== newState.channelId) {
+            handled = await this.handleOwnedLeave(guild, oldState.channelId, member.id);
+        }
         const source = this.source(guild.id, newState.channelId);
-        if (!source || !source.temporary_enabled || oldState.channelId === newState.channelId) return false;
+        if (!source || !source.temporary_enabled || oldState.channelId === newState.channelId) return handled;
 
         const reservation = this.reserveCreation(guild.id, source.channel_id, member.id);
         if (!reservation.acquired) return this.reuseCreation(guild, member, reservation.creation);
@@ -241,6 +246,59 @@ class VoiceMasterService {
             AND member_id = ? AND generation = ?`)
             .run(String(error).slice(0, 500), this.now(), creation.guild_id,
                 creation.source_channel_id, creation.member_id, creation.generation);
+    }
+
+    async handleOwnedLeave(guild, channelId, memberId) {
+        const initial = this.sqlite.prepare(`SELECT * FROM bytepods
+            WHERE guild_id = ? AND channel_id = ? AND state = 'active' AND bot_owned = 1`)
+            .get(guild.id, channelId);
+        if (!initial) return false;
+        await this.delay(1000);
+        const channel = guild.channels.cache.get(channelId)
+            || await guild.channels.fetch(channelId).catch(() => null);
+        if (!channel || channel.type !== ChannelType.GuildVoice) return true;
+        if (channel.members.size > 0) {
+            if (initial.owner_id === memberId && !channel.members.has(memberId)) {
+                this.sqlite.prepare(`UPDATE bytepods SET owner_left_at = ?, generation = generation + 1
+                    WHERE guild_id = ? AND channel_id = ? AND owner_id = ? AND state = 'active'`)
+                    .run(this.now(), guild.id, channelId, memberId);
+            }
+            return true;
+        }
+        const won = this.sqlite.prepare(`UPDATE bytepods SET state = 'deleting', generation = generation + 1
+            WHERE guild_id = ? AND channel_id = ? AND state = 'active' AND bot_owned = 1
+            AND NOT EXISTS (SELECT 1 FROM voice_master_creations
+                WHERE guild_id = ? AND channel_id = ? AND state = 'pending')`)
+            .run(guild.id, channelId, guild.id, channelId);
+        if (!won.changes) return true;
+
+        try {
+            await channel.delete('VoiceMaster channel became empty');
+            this.clearOwnedChannel(guild.id, channelId);
+        } catch (error) {
+            if (error.code === 10003) {
+                this.clearOwnedChannel(guild.id, channelId);
+            } else {
+                this.sqlite.prepare(`UPDATE bytepods SET state = 'active', cleanup_after = ?
+                    WHERE guild_id = ? AND channel_id = ? AND state = 'deleting'`)
+                    .run(this.now() + 5000, guild.id, channelId);
+                logger.warn(`VoiceMaster cleanup failed for ${channelId}: ${error.message}`);
+            }
+        }
+        return true;
+    }
+
+    clearOwnedChannel(guildId, channelId) {
+        this.sqlite.transaction(() => {
+            this.sqlite.prepare('DELETE FROM voice_master_access WHERE guild_id = ? AND channel_id = ?')
+                .run(guildId, channelId);
+            this.sqlite.prepare('DELETE FROM voice_master_creations WHERE guild_id = ? AND channel_id = ?')
+                .run(guildId, channelId);
+            this.sqlite.prepare('DELETE FROM bytepod_active_sessions WHERE guild_id = ? AND pod_id = ?')
+                .run(guildId, channelId);
+            this.sqlite.prepare('DELETE FROM bytepods WHERE guild_id = ? AND channel_id = ? AND bot_owned = 1')
+                .run(guildId, channelId);
+        })();
     }
 }
 
