@@ -183,6 +183,13 @@
       "when": 1787605200000,
       "tag": "0025_economy_core",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1787608800000,
+      "tag": "0026_economy_games",
+      "breakpoints": true
     }
   ]
 }

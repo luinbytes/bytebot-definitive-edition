@@ -16,10 +16,17 @@ describe('economy command', () => {
         expect(command.permissions).toEqual([]);
         expect(direct).toEqual([
             'open', 'balance', 'mode', 'deposit', 'withdraw', 'daily', 'work', 'transfer',
-            'config', 'circulation', 'enable', 'preset', 'grant', 'remove', 'reset', 'destroy', 'disable'
+            'config', 'circulation', 'enable', 'preset', 'grant', 'remove', 'reset', 'destroy', 'disable',
+            'crime', 'rob', 'leaderboard'
         ]);
-        expect(groups).toEqual({ job: ['list', 'add', 'remove'], shop: ['list', 'buy', 'add', 'remove'] });
-        expect(json.options).toHaveLength(19);
+        expect(groups).toEqual({
+            job: ['list', 'add', 'remove'],
+            shop: ['list', 'buy', 'add', 'remove'],
+            game: ['coinflip', 'dice', 'gamble', 'roulette', 'highlow', 'slots', 'plinko', 'bombs', 'ladder', 'crash', 'scratch', 'blackjack'],
+            gang: ['create', 'disband', 'info', 'invite', 'leave', 'promote', 'transfer', 'setbanner'],
+            lab: ['buy', 'status', 'upgrade', 'ampoules', 'collect']
+        });
+        expect(json.options).toHaveLength(25);
         expect(PermissionFlagsBits.ManageGuild).toBeDefined();
     });
 
