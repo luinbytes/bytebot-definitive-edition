@@ -35,6 +35,17 @@ function memberInteraction(guild, member, subcommand, values = {}) {
     };
 }
 
+function adminInteraction(guild, subcommand, values = {}, group = null) {
+    const member = {
+        id: 'admin-1', user: { id: 'admin-1' },
+        permissions: { has: permission => permission === PermissionFlagsBits.Administrator },
+        roles: { cache: new Map() }, voice: {}
+    };
+    const result = memberInteraction(guild, member, subcommand, values);
+    result.options.getSubcommandGroup = () => group;
+    return result;
+}
+
 describe('VoiceMaster lifecycle', () => {
     let tempDir;
     let database;
@@ -342,5 +353,45 @@ describe('VoiceMaster lifecycle', () => {
             ManageChannels: true, MoveMembers: true
         }));
         expect(temporary.name).toBe('Claimed Room');
+    });
+
+    test('secondary channels stay user-owned while reset removes only setup resources', async () => {
+        const channels = new Map();
+        const category = { id: 'category-1', type: ChannelType.GuildCategory, delete: jest.fn(async () => channels.delete('category-1')) };
+        const join = {
+            id: 'join-1', type: ChannelType.GuildVoice,
+            send: jest.fn(async () => ({ id: 'interface-1' })),
+            delete: jest.fn(async () => channels.delete('join-1'))
+        };
+        const secondary = { id: 'secondary-1', type: ChannelType.GuildVoice, delete: jest.fn() };
+        const secondaryCategory = { id: 'category-2', type: ChannelType.GuildCategory };
+        const create = jest.fn(async values => {
+            const channel = values.type === ChannelType.GuildCategory ? category : join;
+            channels.set(channel.id, channel);
+            return channel;
+        });
+        channels.set(secondary.id, secondary);
+        channels.set(secondaryCategory.id, secondaryCategory);
+        const guild = {
+            id: 'guild-1', name: 'Guild',
+            members: { me: { id: 'bot-1', permissions: { has: () => true } } },
+            roles: { everyone: { id: 'guild-1' } },
+            channels: { cache: channels, create, fetch: jest.fn(async id => channels.get(id) || null) }
+        };
+        const { VoiceMasterService } = require('../src/services/voiceMasterService');
+        const service = new VoiceMasterService({ sqlite: database.sqlite });
+        await service.execute(adminInteraction(guild, 'setup'));
+        await service.execute(adminInteraction(guild, 'add', { channel: secondary }, 'secondary'));
+        await service.execute(adminInteraction(guild, 'category', {
+            channel: secondary, category: secondaryCategory
+        }, 'secondary'));
+        await service.execute(adminInteraction(guild, 'list', {}, 'secondary'));
+        await service.execute(adminInteraction(guild, 'remove', { channel: secondary }, 'secondary'));
+        await service.execute(adminInteraction(guild, 'reset'));
+        await service.execute(adminInteraction(guild, 'reset'));
+
+        expect(secondary.delete).not.toHaveBeenCalled();
+        expect(join.delete).toHaveBeenCalledTimes(1);
+        expect(category.delete).toHaveBeenCalledTimes(1);
     });
 });

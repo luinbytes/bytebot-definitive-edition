@@ -31,6 +31,8 @@ class VoiceMasterService {
         const subcommand = interaction.options.getSubcommand();
         if (subcommand === 'setup') return this.setup(interaction);
         if (subcommand === 'sendinterface') return this.sendInterface(interaction);
+        if (subcommand === 'reset') return this.reset(interaction);
+        if (group === 'secondary') return this.executeSecondary(interaction, subcommand);
         if (!group && OWNER_ACTIONS.has(subcommand)) return this.executeOwnerAction(interaction, subcommand);
         return interaction.editReply({ embeds: [embeds.error('Not Available', `VoiceMaster ${group ? `${group} ` : ''}${subcommand} is not available yet.`)] });
     }
@@ -109,6 +111,86 @@ class VoiceMasterService {
             return interaction.editReply({ embeds: [embeds.success('Interface Sent', `Sent the VoiceMaster interface in ${channel}.`)] });
         } catch (error) {
             return interaction.editReply({ embeds: [embeds.error('Interface Failed', error.message)] });
+        }
+    }
+
+    async executeSecondary(interaction, action) {
+        try {
+            this.requireAdmin(interaction);
+            const config = this.config(interaction.guildId);
+            if (!config || config.state !== 'active') throw new Error('VoiceMaster is not setup for this server.');
+            if (action === 'list') {
+                const rows = this.sqlite.prepare(`SELECT channel_id, category_id FROM voice_master_sources
+                    WHERE guild_id = ? AND is_primary = 0 ORDER BY created_at, channel_id LIMIT 25`)
+                    .all(interaction.guildId);
+                const description = rows.length
+                    ? rows.map(row => `<#${row.channel_id}>${row.category_id ? ` → <#${row.category_id}>` : ''}`).join('\n')
+                    : 'No secondary join-to-create channels.';
+                return interaction.editReply({
+                    embeds: [embeds.info('Secondary VoiceMaster Channels', description)],
+                    allowedMentions: { parse: [] }
+                });
+            }
+
+            const channel = interaction.options.getChannel('channel');
+            if (!channel || channel.type !== ChannelType.GuildVoice) throw new Error('Choose a server voice channel.');
+            if (action === 'add') {
+                const count = this.sqlite.prepare(`SELECT COUNT(*) count FROM voice_master_sources
+                    WHERE guild_id = ? AND is_primary = 0`).get(interaction.guildId).count;
+                if (count >= 25) throw new Error('This server already has 25 secondary join channels.');
+                this.sqlite.prepare(`INSERT INTO voice_master_sources
+                    (channel_id, guild_id, category_id, is_primary, owned, created_at)
+                    VALUES (?, ?, ?, 0, 0, ?)`)
+                    .run(channel.id, interaction.guildId, channel.parentId || config.category_id, this.now());
+            } else if (action === 'category') {
+                const category = interaction.options.getChannel('category');
+                if (!category || category.type !== ChannelType.GuildCategory) throw new Error('Choose a server category.');
+                const changed = this.sqlite.prepare(`UPDATE voice_master_sources SET category_id = ?
+                    WHERE guild_id = ? AND channel_id = ? AND is_primary = 0`)
+                    .run(category.id, interaction.guildId, channel.id);
+                if (!changed.changes) throw new Error('That secondary join channel is not configured.');
+            } else if (action === 'remove') {
+                const removed = this.sqlite.prepare(`DELETE FROM voice_master_sources
+                    WHERE guild_id = ? AND channel_id = ? AND is_primary = 0 AND owned = 0`)
+                    .run(interaction.guildId, channel.id);
+                if (!removed.changes) throw new Error('That secondary join channel is not configured.');
+            } else {
+                throw new Error('Unknown secondary VoiceMaster action.');
+            }
+            return interaction.editReply({ embeds: [embeds.success('VoiceMaster Updated', `Updated secondary channel ${channel}.`)] });
+        } catch (error) {
+            return interaction.editReply({ embeds: [embeds.error('VoiceMaster Configuration Failed', error.message)] });
+        }
+    }
+
+    async reset(interaction) {
+        try {
+            this.requireAdmin(interaction);
+            const config = this.config(interaction.guildId);
+            if (!config || config.state !== 'active') throw new Error('VoiceMaster is not setup for this server.');
+            this.sqlite.prepare("UPDATE voice_master_configs SET state = 'resetting', updated_at = ? WHERE guild_id = ? AND state = 'active'")
+                .run(this.now(), interaction.guildId);
+            const primary = this.sqlite.prepare(`SELECT * FROM voice_master_sources
+                WHERE guild_id = ? AND is_primary = 1 AND owned = 1`).get(interaction.guildId);
+            if (primary) {
+                const channel = interaction.guild.channels.cache.get(primary.channel_id)
+                    || await interaction.guild.channels.fetch(primary.channel_id).catch(() => null);
+                if (channel) await channel.delete('VoiceMaster reset');
+            }
+            if (config.category_id) {
+                const category = interaction.guild.channels.cache.get(config.category_id)
+                    || await interaction.guild.channels.fetch(config.category_id).catch(() => null);
+                if (category?.type === ChannelType.GuildCategory) await category.delete('VoiceMaster reset');
+            }
+            this.sqlite.transaction(() => {
+                this.sqlite.prepare('DELETE FROM voice_master_sources WHERE guild_id = ?').run(interaction.guildId);
+                this.sqlite.prepare('DELETE FROM voice_master_configs WHERE guild_id = ?').run(interaction.guildId);
+            })();
+            return interaction.editReply({ embeds: [embeds.success('VoiceMaster Reset', 'VoiceMaster setup resources were removed.')] });
+        } catch (error) {
+            this.sqlite.prepare("UPDATE voice_master_configs SET state = 'active', updated_at = ? WHERE guild_id = ? AND state = 'resetting'")
+                .run(this.now(), interaction.guildId);
+            return interaction.editReply({ embeds: [embeds.error('VoiceMaster Reset Failed', error.message)] });
         }
     }
 
