@@ -312,7 +312,7 @@ an excuse to add a repository layer or event bus.
 - `id` (opaque UUID primary key), `guild_id`, `scope_type`, `scope_id`,
   `user_id`, `game`, `bet`, `state_json`, `status`, `created_at`,
   `expires_at`, `settled_at`, `settlement_amount`, and `transaction_id`;
-- status values `active`, `won`, `lost`, `cashed_out`, `expired`, `refunded`;
+- status values `active`, `won`, `lost`, `cashed_out`, `refunded`, `forfeited`;
 - a partial unique index permits at most one `active` session per
   `(scope_type, scope_id, user_id)`; and
 - `state_json` contains only the minimum persisted game state and a server
@@ -340,11 +340,16 @@ membership and terminal invite state.
 ### Laboratories
 
 `economy_labs` stores one row per `(guild_id, user_id)` with level, ampoules,
-stored amount, storage cap, last accrual timestamp, and update timestamp.
+stored amount, storage cap, last accrual timestamp, optional paused timestamp,
+and update timestamp.
 `economy_lab_operations` stores an operation UUID, lab/user/guild IDs, kind,
-input amount, result amount, and created time with a unique operation ID.
-This gives retries a durable answer without using an in-memory idempotency
-map.
+input amount, result amount, exact result JSON, and created time with a unique
+operation ID.
+The operation UUID is the Discord interaction ID, not a newly generated ID.
+Discord redelivery of the same interaction therefore returns its committed
+row; a later invocation has a new ID and is an intentional new operation.
+This gives platform retries a durable answer without an in-memory map or an
+undocumented slash option.
 
 All monetary mutations follow the #48 sequence: validate scope, account,
 eligibility, limits, and current committed balance inside an immediate
@@ -575,6 +580,12 @@ safety behavior is therefore preserved by this explicit ByteBot rule.
   immediate transaction that marks the invite accepted and inserts the
   member. Decline and expiry only mark the invite terminal. Disband marks all
   pending invites revoked and removes memberships in one transaction.
+- Ownership transfer conditionally updates the gang only when the actor is
+  still `owner_id`, changes the target member role from `member` or `admin` to
+  `owner`, changes the former owner's member role to `admin`, and commits all
+  three writes in one immediate transaction. A partial unique owner-role index
+  permits exactly one `owner` member per gang; a stale concurrent transfer
+  changes zero rows and fails without splitting authority.
 
 ### Laboratory rule table
 
@@ -612,6 +623,62 @@ the evidenced no-earnings state. Lab earnings do not consume the #48
 daily/work cap, but account, operation, scope-supply, and wallet bounds still
 apply. Buy, upgrade, ampoules, and collect each use a unique operation ID so a
 retry cannot charge or credit twice.
+
+Buy, upgrade, and ampoule debits append `lab_buy`, `lab_upgrade`, and
+`lab_ampoules` ledger rows respectively with negative wallet and
+`supply_delta` values, and update lifetime destroyed totals in the same
+transaction. Collection appends `lab_collect` with its positive wallet and
+`supply_delta`, and updates lifetime minted totals. Uncollected stored lab
+earnings are not circulation and never appear in the ledger.
+
+### Destructive and disabled lifecycle
+
+- A reset preview fingerprints the target account, any active game session,
+  and the laboratory row. In the confirmed reset transaction, an active game
+  becomes terminal `forfeited` with no refund or additional supply delta, the
+  lab and its operation rows are removed, cooldowns are cleared, and the
+  account is burned/deleted under #48's existing reset ledger rule. Historical
+  game/lab ledger rows and completed sessions remain immutable. Gang
+  membership is social state and is preserved by an account reset.
+- A disable preview fingerprints every active game session and laboratory row.
+  The confirmed disable transaction refunds each active wager exactly once,
+  marks each session `refunded`, projects every lab to the disable timestamp,
+  stores that capped amount, and sets `paused_at` before changing the config to
+  disabled. If any refund would exceed the account wallet bound, the entire
+  disable fails without mutation so the account can be brought below the bound
+  and previewed again.
+  Re-enable sets `last_accrual_at` to the re-enable timestamp and clears
+  `paused_at`; disabled wall time never accrues. Member game/lab commands and
+  components reject while disabled after performing no mutation.
+- Destroy only burns the administrator-requested current account amount. It
+  does not cancel a game or lab; a later declared settlement may still change
+  that account, exactly as a later daily/work action can. Its exact-plan check
+  remains the #48 wallet/bank check.
+
+### Required database invariants
+
+- `economy_game_sessions` checks `scope_type = 'guild'`, `scope_id = guild_id`,
+  `game` is one of the twelve contracted names, bet is 10–1,000,000, and
+  status is one of `active`, `won`, `lost`, `cashed_out`, `refunded`, or
+  `forfeited`. A partial unique index allows one active row per
+  `(guild_id, user_id)`.
+- `economy_gang_members` checks role in `owner|admin|member`, uniquely indexes
+  `(guild_id, user_id)`, and has a partial unique `(gang_id)` index for
+  `role = 'owner'`. Gang names use a case-insensitive unique `(guild_id, name)`
+  index. Invite status is limited to
+  `pending|accepted|declined|expired|revoked`; one partial unique pending row
+  is allowed per `(guild_id, gang_id, invitee_id)`.
+- `economy_labs` checks level 1–10, ampoules 1–5, `storage_cap = level * 1000`,
+  and `stored_amount BETWEEN 0 AND storage_cap`. `paused_at` is nullable and
+  must be present while the owning guild economy is disabled by service
+  transitions. Lab operation kind is limited to
+  `buy|upgrade|ampoules|collect`, monetary input/result fields are
+  non-negative, exact result JSON is required, and the Discord interaction ID
+  is the primary key.
+- Foreign keys cascade gang members/invites with a disbanded gang and lab
+  operations with a removed lab. Service transactions still re-check all
+  ownership, capacity, balance, expiry, and status conditions; constraints are
+  the final guard, not the only guard.
 
 ### Leaderboard page behavior
 
