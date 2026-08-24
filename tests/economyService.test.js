@@ -333,4 +333,25 @@ describe('economy service', () => {
         expect(() => service.reset({ ...values, confirmationCode: preview.confirmationCode })).toThrow('plan changed');
         expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(101);
     });
+
+    test('rejects destroy when the confirmed wallet and bank split changes before its transaction', () => {
+        service.enable('guild1', 'admin1');
+        service.configure('guild1', 'admin1', { startingBalance: 100 });
+        service.open({ guildId: 'guild1', userId: 'user1' });
+        const values = {
+            action: 'destroy', guildId: 'guild1', actorId: 'admin1', targetId: 'user1',
+            amount: 40, reason: 'Correction'
+        };
+        const preview = service.issueConfirmation(values);
+        const consume = service.consumeConfirmation.bind(service);
+        service.consumeConfirmation = (...args) => {
+            const plan = consume(...args);
+            database.sqlite.prepare(`UPDATE economy_accounts SET wallet = wallet - 1, bank = bank + 1
+                WHERE scope_type = 'guild' AND scope_id = 'guild1' AND user_id = 'user1'`).run();
+            return plan;
+        };
+
+        expect(() => service.destroy({ ...values, confirmationCode: preview.confirmationCode })).toThrow('plan changed');
+        expect(service.balance({ guildId: 'guild1', userId: 'user1' })).toMatchObject({ wallet: 99, bank: 1 });
+    });
 });

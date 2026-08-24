@@ -320,13 +320,16 @@ class EconomyService {
         }).immediate();
     }
 
-    burn({ guildId, actorId, targetId, amount, reason, kind }) {
+    burn({ guildId, actorId, targetId, amount, reason, kind, expectedPlan }) {
         return this.sqlite.transaction(() => {
             this.requireEnabled(guildId);
             this.validateAmount(amount);
             const auditReason = this.validateReason(reason);
             const scope = { scopeType: 'guild', scopeId: guildId };
             const row = this.account(scope, targetId);
+            if (expectedPlan && (row.wallet !== expectedPlan.wallet || row.bank !== expectedPlan.bank)) {
+                throw new Error('The economy action plan changed. Preview it again.');
+            }
             if (row.wallet + row.bank < amount) throw new Error('That account does not have enough currency.');
             const walletDelta = -Math.min(row.wallet, amount);
             const bankDelta = -(amount + walletDelta);
@@ -701,8 +704,8 @@ class EconomyService {
     }
 
     destroy(values) {
-        this.consumeConfirmation({ ...values, action: 'destroy' }, values.confirmationCode);
-        return this.burn({ ...values, kind: 'destroy' });
+        const plan = this.consumeConfirmation({ ...values, action: 'destroy' }, values.confirmationCode);
+        return this.burn({ ...values, kind: 'destroy', expectedPlan: plan });
     }
 
     reset(values) {
