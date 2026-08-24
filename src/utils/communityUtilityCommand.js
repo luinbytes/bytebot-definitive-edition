@@ -58,8 +58,7 @@ async function confessionAdmin(interaction, service, subcommand) {
             PermissionFlagsBits.AddReactions, PermissionFlagsBits.ManageMessages], ['View Channel', 'Send Messages', 'Embed Links', 'Add Reactions', 'Manage Messages']);
         const panel = await channel.send(service.panelPayload(guildId));
         try {
-            service.setConfessionConfig(guildId, channel.id);
-            service.setPanelMessage(guildId, panel.id);
+            service.setConfessionPanel(guildId, channel.id, panel.id);
         } catch (error) {
             await panel.delete().catch(() => null);
             throw error;

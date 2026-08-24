@@ -124,6 +124,14 @@ class CommunityUtilityService {
             .run(messageId, this.now(), guildId);
     }
 
+    setConfessionPanel(guildId, channelId, messageId) {
+        this.sqlite.transaction(() => {
+            this.setConfessionConfig(guildId, channelId);
+            this.setPanelMessage(guildId, messageId);
+        }).immediate();
+        return this.confessionConfig(guildId);
+    }
+
     disableConfessions(guildId) {
         return Boolean(this.sqlite.prepare('UPDATE confession_configs SET enabled = 0, panel_message_id = NULL, updated_at = ? WHERE guild_id = ?')
             .run(this.now(), guildId).changes);
