@@ -93,7 +93,7 @@ describe('Intent command hubs', () => {
             'create', 'list', 'view', 'rename', 'delete', 'restore'
         ]);
         expect(optionNames(findOption(command, 'backup').options.find(option => option.name === 'restore').options)).toEqual([
-            'backup_id', 'mode', 'roles', 'channels', 'emojis', 'stickers', 'bytebot', 'confirm'
+            'backup_id', 'mode', 'roles', 'channels', 'emojis', 'stickers', 'bytebot', 'confirmation'
         ]);
         expect(optionNames(findOption(command, 'customize').options)).toEqual([
             'name', 'avatar', 'banner', 'bio', 'reset', 'preset'

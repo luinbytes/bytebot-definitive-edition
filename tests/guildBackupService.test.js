@@ -256,7 +256,27 @@ describe('guild backups', () => {
             .toBe('Original');
         expect(database.sqlite.prepare("SELECT reason FROM moderation_logs WHERE guild_id = 'guild1'").get().reason)
             .toBe('Keep this');
-        expect(service.view('guild1', 'admin1', 'backup-1').payload.bytebot.moderation_logs).toBeUndefined();
+        const payload = service.view('guild1', 'admin1', 'backup-1').payload.bytebot;
+        expect(payload.moderation_logs).toBeUndefined();
+        expect(payload.forced_nicknames).toBeUndefined();
+        expect(payload.uwu_lock_members).toBeUndefined();
+        expect(payload.server_listings).toBeUndefined();
+    });
+
+    test('requires a fresh preview code bound to the exact restore plan', () => {
+        const guild = {
+            id: 'guild1', roles: { cache: new Map() }, channels: { cache: new Map() },
+            emojis: { cache: new Map() }, stickers: { cache: new Map() }
+        };
+        service.create({ guild, creatorId: 'admin1', name: 'Previewed' });
+        const values = { guild, creatorId: 'admin1', id: 'backup-1', mode: 'merge', sections: ['roles'] };
+        const preview = service.issuePreview(values);
+
+        expect(() => service.consumePreview(values, 'wrong-code')).toThrow('valid confirmation code');
+        expect(service.consumePreview(values, preview.confirmationCode)).toEqual(expect.objectContaining({
+            backupId: 'backup-1', sections: ['roles']
+        }));
+        expect(() => service.consumePreview(values, preview.confirmationCode)).toThrow('valid confirmation code');
     });
 
     test('rejects corrupted or unknown payloads and enforces five backups per creator', () => {

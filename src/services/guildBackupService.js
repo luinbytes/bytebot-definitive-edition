@@ -3,6 +3,7 @@ const { PermissionFlagsBits } = require('discord.js');
 
 const SCHEMA_VERSION = 1;
 const MAX_BACKUPS = 5;
+const RESTORE_PREVIEW_TTL = 10 * 60 * 1000;
 const SECTIONS = ['roles', 'channels', 'emojis', 'stickers', 'bytebot'];
 const RESTORABLE_CHANNEL_TYPES = new Set([0, 2, 4, 13, 15]);
 const BYTEBOT_TABLES = [
@@ -10,7 +11,6 @@ const BYTEBOT_TABLES = [
     { name: 'lifecycle_messages', keys: ['guild_id', 'type'] },
     { name: 'moderation_config', keys: ['guild_id'], omit: ['next_case_number'] },
     { name: 'lockdown_ignores', keys: ['guild_id', 'channel_id'] },
-    { name: 'forced_nicknames', keys: ['guild_id', 'user_id'] },
     { name: 'antinuke_config', keys: ['guild_id'] },
     { name: 'antinuke_modules', keys: ['guild_id', 'module'] },
     { name: 'antinuke_admins', keys: ['guild_id', 'user_id'] },
@@ -32,7 +32,6 @@ const BYTEBOT_TABLES = [
     { name: 'fake_permissions', keys: ['guild_id', 'role_id', 'permission'] },
     { name: 'denied_role_permissions', keys: ['guild_id', 'permission'] },
     { name: 'protected_targets', keys: ['guild_id', 'target_type', 'target_id'] },
-    { name: 'uwu_lock_members', keys: ['guild_id', 'user_id'] },
     { name: 'birthday_config', keys: ['guild_id'], omit: ['last_check'] },
     { name: 'auto_responses', keys: ['guild_id', 'trigger', 'channel_id', 'match_type'] },
     { name: 'automation_rules', keys: ['guild_id', 'kind', 'key'], omit: ['last_run_at', 'last_message_id', 'run_count', 'lease_token', 'lease_expires_at'],
@@ -49,10 +48,10 @@ const BYTEBOT_TABLES = [
     { name: 'giveaway_presets', keys: ['guild_id', 'name'] },
     { name: 'giveaway_blacklist', keys: ['guild_id', 'role_id'] },
     { name: 'giveaway_role_limits', keys: ['guild_id', 'role_id'] },
-    { name: 'customization_presets', keys: ['guild_id', 'name'] },
-    { name: 'server_listings', keys: ['guild_id'] }
+    { name: 'customization_presets', keys: ['guild_id', 'name'] }
 ];
 const BYTEBOT_TABLE_NAMES = new Set(BYTEBOT_TABLES.map(table => table.name));
+const restorePreviews = new Map();
 
 function sqlIdentifier(value) {
     return `"${value.replaceAll('"', '""')}"`;
@@ -255,6 +254,35 @@ class GuildBackupService {
             remove.stickers = selected.includes('stickers') ? serializeStickers(guild).length : 0;
         }
         return { backupId: backup.id, mode, sections: selected, create: counts, remove };
+    }
+
+    issuePreview(values) {
+        const plan = this.preview(values);
+        const code = crypto.randomBytes(5).toString('hex');
+        for (const [key, preview] of restorePreviews) {
+            if (preview.expiresAt < this.now()) restorePreviews.delete(key);
+        }
+        restorePreviews.set(`${values.guild.id}:${values.creatorId}:${values.id}`, {
+            code,
+            expiresAt: this.now() + RESTORE_PREVIEW_TTL,
+            fingerprint: digest(JSON.stringify(plan))
+        });
+        return { ...plan, confirmationCode: code };
+    }
+
+    consumePreview(values, code) {
+        const key = `${values.guild.id}:${values.creatorId}:${values.id}`;
+        const issued = restorePreviews.get(key);
+        if (!issued || issued.expiresAt < this.now() || issued.code !== String(code || '')) {
+            throw new Error('Preview this exact restore again to get a valid confirmation code.');
+        }
+        const plan = this.preview(values);
+        if (issued.fingerprint !== digest(JSON.stringify(plan))) {
+            restorePreviews.delete(key);
+            throw new Error('The restore plan changed. Preview it again before restoring.');
+        }
+        restorePreviews.delete(key);
+        return plan;
     }
 
     requirePermissions(guild, sections, mode, backup) {
@@ -475,4 +503,4 @@ class GuildBackupService {
     }
 }
 
-module.exports = { BYTEBOT_TABLES, GuildBackupService, SCHEMA_VERSION, SECTIONS };
+module.exports = { BYTEBOT_TABLES, GuildBackupService, RESTORE_PREVIEW_TTL, SCHEMA_VERSION, SECTIONS };

@@ -88,6 +88,11 @@ module.exports = {
                 eq(activityLogs.guildId, guild.id),
                 gte(activityLogs.activityDate, since)
             )).get();
+            const activityCoverage = await db.select({
+                firstDate: sql`MIN(${activityLogs.activityDate})`
+            }).from(activityLogs).where(eq(activityLogs.guildId, guild.id)).get();
+            const coverage = !activityCoverage?.firstDate ? ' · no stored activity'
+                : activityCoverage.firstDate > since ? ` · stored since ${activityCoverage.firstDate}` : '';
 
             // Moderation actions count
             const modStats = await db.select({
@@ -146,7 +151,7 @@ module.exports = {
                     { name: 'Mod Actions', value: `${totalModActions}`, inline: true },
                     { name: 'Active BytePods', value: `${activePodCount}`, inline: true },
 
-                    { name: `Last ${days} Days`, value: `${Number(rangeStats?.messages || 0).toLocaleString()} messages · ${Number(rangeStats?.reactions || 0).toLocaleString()} reactions · ${Number(rangeStats?.voiceMinutes || 0).toLocaleString()} voice minutes · ${Number(rangeStats?.commands || 0).toLocaleString()} commands`, inline: false },
+                    { name: `Last ${days} Days${coverage}`, value: `${Number(rangeStats?.messages || 0).toLocaleString()} messages · ${Number(rangeStats?.reactions || 0).toLocaleString()} reactions · ${Number(rangeStats?.voiceMinutes || 0).toLocaleString()} voice minutes · ${Number(rangeStats?.commands || 0).toLocaleString()} commands`, inline: false },
 
                     // Row 5: Voice Leaderboard
                     { name: 'Top Voice Users', value: topVoiceText, inline: false }

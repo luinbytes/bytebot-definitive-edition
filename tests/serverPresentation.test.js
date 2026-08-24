@@ -1,6 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const http = require('http');
 
 describe('server presentation', () => {
     let tempDir;
@@ -54,6 +55,29 @@ describe('server presentation', () => {
             reason: 'Reset ByteBot server customization'
         });
         await expect(service.image('http://[::ffff:127.0.0.1]/avatar.png')).rejects.toThrow('public address');
+        await service.image('https://cdn.discordapp.com/avatar.png');
+        expect(service.fetch).toHaveBeenLastCalledWith(expect.any(URL), expect.objectContaining({
+            address: '93.184.216.34', family: 4
+        }));
+    });
+
+    test('pins the validated address into the native HTTP lookup', async () => {
+        const { pinnedFetch } = require('../src/services/serverPresentationService');
+        const response = {};
+        const request = { on: jest.fn() };
+        const get = jest.spyOn(http, 'get').mockImplementation((_url, options, callback) => {
+            const resolved = jest.fn();
+            options.lookup('image.example', {}, resolved);
+            expect(resolved).toHaveBeenCalledWith(null, '93.184.216.34', 4);
+            callback(response);
+            return request;
+        });
+
+        await expect(pinnedFetch(new URL('http://image.example/avatar.png'), {
+            address: '93.184.216.34', family: 4
+        })).resolves.toBe(response);
+        expect(get).toHaveBeenCalledTimes(1);
+        get.mockRestore();
     });
 
     test('creates, previews, applies, lists, and removes guild-scoped profile presets', async () => {

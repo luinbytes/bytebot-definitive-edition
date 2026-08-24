@@ -1,6 +1,8 @@
 const dns = require('dns').promises;
 const net = require('net');
 const crypto = require('crypto');
+const http = require('http');
+const https = require('https');
 const { PermissionFlagsBits } = require('discord.js');
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -28,6 +30,17 @@ function privateAddress(address) {
     }
     return normalized === '::' || normalized === '::1' || normalized.startsWith('fc')
         || normalized.startsWith('fd') || /^fe[89ab]/.test(normalized) || normalized.startsWith('ff');
+}
+
+function pinnedFetch(url, { address, family, signal }) {
+    const transport = url.protocol === 'https:' ? https : http;
+    return new Promise((resolve, reject) => {
+        const request = transport.get(url, {
+            signal,
+            lookup: (_hostname, _options, callback) => callback(null, address, family)
+        }, resolve);
+        request.on('error', reject);
+    });
 }
 
 function rowToPreset(row) {
@@ -75,7 +88,7 @@ function inviteCode(value) {
 class ServerPresentationService {
     constructor(options) {
         this.sqlite = options.sqlite;
-        this.fetch = options.fetch || global.fetch;
+        this.fetch = options.fetch || pinnedFetch;
         this.lookup = options.lookup || ((hostname) => dns.lookup(hostname, { all: true, verbatim: true }));
         this.now = options.now || Date.now;
         this.randomUUID = options.randomUUID || crypto.randomUUID;
@@ -96,15 +109,20 @@ class ServerPresentationService {
         if (!resolved.length || resolved.some(entry => privateAddress(entry.address || entry))) {
             throw new Error('Images must be hosted at a public address.');
         }
+        const destination = resolved[0];
+        const address = destination.address || destination;
         const response = await this.fetch(url, {
-            redirect: 'error',
+            address,
+            family: destination.family || net.isIP(address),
             signal: typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
                 ? AbortSignal.timeout(10000)
                 : undefined
         });
-        if (!response.ok) throw new Error('Image download failed.');
-        const type = response.headers.get('content-type')?.split(';')[0].trim();
-        const length = Number(response.headers.get('content-length') || 0);
+        const status = response.status ?? response.statusCode;
+        if (response.ok === false || status < 200 || status >= 300) throw new Error('Image download failed.');
+        const header = name => response.headers.get?.(name) ?? response.headers[name];
+        const type = header('content-type')?.split(';')[0].trim();
+        const length = Number(header('content-length') || 0);
         if (!IMAGE_TYPE.test(type || '')) throw new Error('Images must be PNG, JPG, GIF, or WebP.');
         if (length > MAX_IMAGE_BYTES) throw new Error('Images cannot exceed 8 MB.');
         if (response.body?.getReader) {
@@ -120,6 +138,19 @@ class ServerPresentationService {
                     throw new Error('Images cannot exceed 8 MB.');
                 }
                 chunks.push(Buffer.from(value));
+            }
+            return Buffer.concat(chunks, total);
+        }
+        if (response[Symbol.asyncIterator]) {
+            const chunks = [];
+            let total = 0;
+            for await (const chunk of response) {
+                total += chunk.length;
+                if (total > MAX_IMAGE_BYTES) {
+                    response.destroy();
+                    throw new Error('Images cannot exceed 8 MB.');
+                }
+                chunks.push(chunk);
             }
             return Buffer.concat(chunks, total);
         }
@@ -266,4 +297,4 @@ class ServerPresentationService {
     }
 }
 
-module.exports = { MAX_IMAGE_BYTES, ServerPresentationService, inviteCode, privateAddress };
+module.exports = { MAX_IMAGE_BYTES, ServerPresentationService, inviteCode, pinnedFetch, privateAddress };

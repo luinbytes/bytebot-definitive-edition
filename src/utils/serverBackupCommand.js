@@ -27,7 +27,8 @@ function addBackupGroup(builder) {
             for (const section of SECTIONS) {
                 sub.addBooleanOption(opt => opt.setName(section).setDescription(`Restore ${section}`));
             }
-            return sub.addBooleanOption(opt => opt.setName('confirm').setDescription('Apply the previewed restore'));
+            return sub.addStringOption(opt => opt.setName('confirmation').setDescription('Code from the exact restore preview')
+                .setMinLength(8).setMaxLength(36));
         }));
 }
 
@@ -107,10 +108,12 @@ async function executeBackup(interaction) {
             mode: interaction.options.getString('mode') || 'merge',
             sections
         };
-        if (!interaction.options.getBoolean('confirm')) {
-            const plan = service.preview(values);
-            return respond(interaction, `Restore preview for \`${id}\` (**${plan.mode}**)\nCreate: ${counts(plan.create)}\nRemove: ${counts(plan.remove)}\nRun the command again with \`confirm:True\` to apply it.`);
+        const confirmation = interaction.options.getString('confirmation');
+        if (!confirmation) {
+            const plan = service.issuePreview(values);
+            return respond(interaction, `Restore preview for \`${id}\` (**${plan.mode}**)\nCreate: ${counts(plan.create)}\nRemove: ${counts(plan.remove)}\nRun the exact command again with \`confirmation:${plan.confirmationCode}\` within 10 minutes to apply it.`);
         }
+        service.consumePreview(values, confirmation);
         const result = await service.restore({ ...values, confirmed: true });
         return respond(interaction, `Restore finished.\nCreated: ${counts(result.created)}\nRemoved: ${counts(result.removed)}\nFailures: ${result.failures.length
             ? result.failures.map(failure => `${failure.section}/${failure.name}: ${failure.error}`).join('\n').slice(0, 1200)

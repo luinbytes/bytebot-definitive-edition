@@ -15,9 +15,9 @@ A backup stores schema version 1, its source server and creator, timestamps, a S
 
 ByteBot excludes messages, webhooks, application commands, global bot branding, Discord server branding/settings, member roles and nicknames, moderation evidence, incidents, activity history, transcripts, live tickets, live giveaways, reminders, and active voice/session state. Scheduler leases and runtime counters are stripped from included automation configuration.
 
-`/server backup restore` defaults to a read-only preview. Choose `merge` to replace matching configuration while retaining unrelated rows, or `destructive` to remove selected current structure before recreation. Section switches select roles, channels, emojis, stickers, or ByteBot configuration. Set `confirm:True` only after checking the preview.
+`/server backup restore` defaults to a read-only preview. Choose `merge` to replace matching configuration while retaining unrelated rows, or `destructive` to remove selected current structure before recreation. Section switches select roles, channels, emojis, stickers, or ByteBot configuration. The preview returns a 10-minute confirmation code bound to that exact plan; repeat the command with `confirmation:<code>` to apply it.
 
-Restore stays in the source server and creator scope. ByteBot checks its current Discord permissions, role hierarchy, blocked-role policy, channel deletability, payload version, and digest before mutation. Role and channel IDs are remapped into channel overwrites and ByteBot configuration. Discord operations report per-item failures; ByteBot configuration restores in one SQLite transaction.
+Restore stays in the source server and creator scope. ByteBot checks its current Discord permissions, role hierarchy, blocked-role policy, channel deletability, payload version, digest, and preview fingerprint before mutation. Role and channel IDs are remapped into channel overwrites and ByteBot configuration. Discord operations report per-item failures; ByteBot configuration restores in one SQLite transaction. Member nickname/uwulock state and discovery consent are excluded from the configuration allowlist.
 
 ## Per-server ByteBot profile
 
@@ -35,6 +35,6 @@ Nickname length is 32 characters and bio length is 190. Avatar and banner inputs
 
 ## Server statistics card
 
-`/server stats` and its `/stats server` handler render the existing Discord embed card. The optional `days` range accepts 1–1095 days. The range field sums persisted messages, reactions, voice minutes, and commands for this server. Current Discord structure and ByteBot counts remain visible. ByteBot does not invent historical joins, leaves, or metrics that it never stored.
+`/server stats` and its `/stats server` handler render the existing Discord embed card. The optional `days` range accepts 1–1095 days. The range field sums persisted messages, reactions, voice minutes, and commands for this server and labels when stored activity starts later than the requested range. Current Discord structure and ByteBot counts remain visible. ByteBot does not invent historical joins, leaves, or metrics that it never stored.
 
 Greed's public sources do not define its discovery slash command, listing schema, stats-card layout, or card font/effect values. ByteBot labels its directory as ByteBot-owned and keeps fixed embed styling until a first-party source defines those missing details. See [the source contract](../research/greed-backup-customization-discovery-contract.md).

@@ -113,7 +113,7 @@ describe('/stats server', () => {
         const embed = editReply.mock.calls[0][0].embeds[0];
         const commandsField = embed.data.fields.find(field => field.name === 'Commands Run');
         expect(commandsField.value).toBe('3 (2 users)');
-        expect(embed.data.fields.find(field => field.name === 'Last 60 Days').value)
+        expect(embed.data.fields.find(field => field.name === 'Last 60 Days · stored since 2026-07-30').value)
             .toBe('20 messages · 6 reactions · 8 voice minutes · 3 commands');
     });
 });
