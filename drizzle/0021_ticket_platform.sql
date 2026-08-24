@@ -122,6 +122,7 @@ CREATE TABLE `tickets` (
 	`claimer_id` text,
 	`reason` text,
 	`form_snapshot` text,
+	`access_snapshot` text,
 	`inactivity_deadline` integer,
 	`warned_at` integer,
 	`created_at` integer NOT NULL,

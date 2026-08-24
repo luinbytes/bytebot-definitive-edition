@@ -57,6 +57,7 @@ const shutdown = async (signal) => {
         if (client.automationService?.cleanup) {
             await client.automationService.cleanup();
         }
+        client.ticketService?.cleanup?.();
         await require('./services/automodService').cleanup();
         require('./services/antiraidService').clearWindows();
         if (client.starboardService && client.starboardService.cleanup) {

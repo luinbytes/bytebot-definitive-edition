@@ -62,6 +62,14 @@ module.exports = {
             }
         }
 
+        if (client.ticketService) {
+            try {
+                await client.ticketService.handleMessage(message);
+            } catch (error) {
+                logger.error('Ticket activity handler error:', error);
+            }
+        }
+
         // Activity streak tracking
         if (client.activityStreakService) {
             try {

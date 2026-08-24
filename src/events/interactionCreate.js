@@ -24,6 +24,14 @@ module.exports = {
             return;
         }
         processedInteractions.add(interaction.id);
+        if ((interaction.isButton() || interaction.isAnySelectMenu() || interaction.isModalSubmit())
+            && interaction.customId.startsWith('ticket:')) {
+            if (!client.ticketService) {
+                return interaction.reply({ content: 'Ticket service is temporarily unavailable.', flags: [MessageFlags.Ephemeral] }).catch(() => null);
+            }
+            await client.ticketService.handleInteraction(interaction);
+            return;
+        }
         if (interaction.isButton() && interaction.customId.startsWith('rich:custom:')) {
             if (!client.richContentService) return interaction.reply({ content: 'Custom responses are temporarily unavailable.', flags: [MessageFlags.Ephemeral] });
             try {

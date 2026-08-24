@@ -736,52 +736,146 @@ const expectedSchema = {
         enabled: 'INTEGER DEFAULT 1 NOT NULL'
     },
     ticket_configs: {
-        guild_id: 'TEXT PRIMARY KEY', next_number: 'INTEGER DEFAULT 1 NOT NULL',
-        default_category_id: 'TEXT', support_role_id: 'TEXT',
+        guild_id: 'TEXT PRIMARY KEY',
+        next_number: 'INTEGER DEFAULT 1 NOT NULL',
+        default_category_id: 'TEXT',
+        support_role_id: 'TEXT',
         opening_message: "TEXT DEFAULT 'Thanks for contacting support.' NOT NULL",
-        button_label: "TEXT DEFAULT 'Create ticket' NOT NULL", button_style: "TEXT DEFAULT 'primary' NOT NULL",
-        dms_enabled: 'INTEGER DEFAULT 0 NOT NULL', inactivity_hours: 'INTEGER',
-        limit_mode: "TEXT DEFAULT 'one_total' NOT NULL", log_channel_id: 'TEXT',
-        ratings_enabled: 'INTEGER DEFAULT 0 NOT NULL', vouch_channel_id: 'TEXT', updated_at: 'INTEGER NOT NULL'
+        button_label: "TEXT DEFAULT 'Create ticket' NOT NULL",
+        button_style: "TEXT DEFAULT 'primary' NOT NULL",
+        dms_enabled: 'INTEGER DEFAULT 0 NOT NULL',
+        inactivity_hours: 'INTEGER',
+        limit_mode: "TEXT DEFAULT 'one_total' NOT NULL",
+        log_channel_id: 'TEXT',
+        ratings_enabled: 'INTEGER DEFAULT 0 NOT NULL',
+        vouch_channel_id: 'TEXT',
+        updated_at: 'INTEGER NOT NULL'
     },
     ticket_panels: {
-        id: 'INTEGER PRIMARY KEY AUTOINCREMENT', guild_id: 'TEXT NOT NULL', name: 'TEXT NOT NULL',
-        mode: "TEXT DEFAULT 'dropdown' NOT NULL", default_category_id: 'TEXT', channel_id: 'TEXT', message_id: 'TEXT',
-        enabled: 'INTEGER DEFAULT 1 NOT NULL', created_by: 'TEXT NOT NULL', created_at: 'INTEGER NOT NULL', updated_at: 'INTEGER NOT NULL'
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        name: 'TEXT NOT NULL',
+        mode: "TEXT DEFAULT 'dropdown' NOT NULL",
+        default_category_id: 'TEXT',
+        channel_id: 'TEXT',
+        message_id: 'TEXT',
+        enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        created_by: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
     },
     ticket_topics: {
-        id: 'INTEGER PRIMARY KEY AUTOINCREMENT', guild_id: 'TEXT NOT NULL', name: 'TEXT NOT NULL', description: 'TEXT',
-        category_id: 'TEXT', embed_script: 'TEXT', created_at: 'INTEGER NOT NULL', updated_at: 'INTEGER NOT NULL'
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        name: 'TEXT NOT NULL',
+        description: 'TEXT',
+        category_id: 'TEXT',
+        embed_script: 'TEXT',
+        created_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
     },
-    ticket_topic_roles: { topic_id: 'INTEGER NOT NULL', role_id: 'TEXT NOT NULL' },
-    ticket_forms: { id: 'INTEGER PRIMARY KEY AUTOINCREMENT', panel_id: 'INTEGER NOT NULL', name: 'TEXT NOT NULL', created_at: 'INTEGER NOT NULL' },
+    ticket_topic_roles: {
+        topic_id: 'INTEGER NOT NULL',
+        role_id: 'TEXT NOT NULL'
+    },
+    ticket_forms: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        panel_id: 'INTEGER NOT NULL',
+        name: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
     ticket_form_fields: {
-        id: 'INTEGER PRIMARY KEY AUTOINCREMENT', form_id: 'INTEGER NOT NULL', label: 'TEXT NOT NULL',
-        type: "TEXT DEFAULT 'short' NOT NULL", placeholder: 'TEXT', required: 'INTEGER DEFAULT 1 NOT NULL', position: 'INTEGER NOT NULL'
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        form_id: 'INTEGER NOT NULL',
+        label: 'TEXT NOT NULL',
+        type: "TEXT DEFAULT 'short' NOT NULL",
+        placeholder: 'TEXT',
+        required: 'INTEGER DEFAULT 1 NOT NULL',
+        position: 'INTEGER NOT NULL'
     },
     ticket_options: {
-        id: 'INTEGER PRIMARY KEY AUTOINCREMENT', panel_id: 'INTEGER NOT NULL', label: 'TEXT NOT NULL', description: 'TEXT', emoji: 'TEXT',
-        style: "TEXT DEFAULT 'primary' NOT NULL", category_id: 'TEXT', topic_id: 'INTEGER', form_id: 'INTEGER',
-        close_on_leave: 'INTEGER DEFAULT 0 NOT NULL', trainee_claim: 'INTEGER DEFAULT 0 NOT NULL',
-        enabled: 'INTEGER DEFAULT 1 NOT NULL', position: 'INTEGER NOT NULL'
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        panel_id: 'INTEGER NOT NULL',
+        label: 'TEXT NOT NULL',
+        description: 'TEXT',
+        emoji: 'TEXT',
+        style: "TEXT DEFAULT 'primary' NOT NULL",
+        category_id: 'TEXT',
+        topic_id: 'INTEGER',
+        form_id: 'INTEGER',
+        close_on_leave: 'INTEGER DEFAULT 0 NOT NULL',
+        trainee_claim: 'INTEGER DEFAULT 0 NOT NULL',
+        enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        position: 'INTEGER NOT NULL'
     },
-    ticket_option_roles: { option_id: 'INTEGER NOT NULL', role_id: 'TEXT NOT NULL', kind: 'TEXT NOT NULL' },
+    ticket_option_roles: {
+        option_id: 'INTEGER NOT NULL',
+        role_id: 'TEXT NOT NULL',
+        kind: 'TEXT NOT NULL'
+    },
     ticket_blacklist: {
-        guild_id: 'TEXT NOT NULL', target_type: 'TEXT NOT NULL', target_id: 'TEXT NOT NULL',
-        created_by: 'TEXT NOT NULL', created_at: 'INTEGER NOT NULL'
+        guild_id: 'TEXT NOT NULL',
+        target_type: 'TEXT NOT NULL',
+        target_id: 'TEXT NOT NULL',
+        created_by: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
     },
-    ticket_profiles: { guild_id: 'TEXT NOT NULL', user_id: 'TEXT NOT NULL', greeting: 'TEXT NOT NULL', updated_at: 'INTEGER NOT NULL' },
+    ticket_profiles: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        greeting: 'TEXT NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
     tickets: {
-        id: 'INTEGER PRIMARY KEY AUTOINCREMENT', guild_id: 'TEXT NOT NULL', number: 'INTEGER NOT NULL', opener_id: 'TEXT NOT NULL',
-        panel_id: 'INTEGER', option_id: 'INTEGER', topic_id: 'INTEGER', topic_name: 'TEXT', channel_id: 'TEXT',
-        status: "TEXT DEFAULT 'pending' NOT NULL", claimer_id: 'TEXT', reason: 'TEXT', form_snapshot: 'TEXT',
-        inactivity_deadline: 'INTEGER', warned_at: 'INTEGER', created_at: 'INTEGER NOT NULL', updated_at: 'INTEGER NOT NULL',
-        closed_at: 'INTEGER', deleted_at: 'INTEGER'
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        number: 'INTEGER NOT NULL',
+        opener_id: 'TEXT NOT NULL',
+        panel_id: 'INTEGER',
+        option_id: 'INTEGER',
+        topic_id: 'INTEGER',
+        topic_name: 'TEXT',
+        channel_id: 'TEXT',
+        status: "TEXT DEFAULT 'pending' NOT NULL",
+        claimer_id: 'TEXT',
+        reason: 'TEXT',
+        form_snapshot: 'TEXT',
+        access_snapshot: 'TEXT',
+        inactivity_deadline: 'INTEGER',
+        warned_at: 'INTEGER',
+        created_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL',
+        closed_at: 'INTEGER',
+        deleted_at: 'INTEGER'
     },
-    ticket_members: { ticket_id: 'INTEGER NOT NULL', target_type: 'TEXT NOT NULL', target_id: 'TEXT NOT NULL', added_by: 'TEXT NOT NULL', created_at: 'INTEGER NOT NULL' },
-    ticket_actions: { id: 'INTEGER PRIMARY KEY AUTOINCREMENT', ticket_id: 'INTEGER NOT NULL', actor_id: 'TEXT NOT NULL', action: 'TEXT NOT NULL', detail: 'TEXT', created_at: 'INTEGER NOT NULL' },
-    ticket_transcripts: { ticket_id: 'INTEGER PRIMARY KEY', html: 'TEXT NOT NULL', created_at: 'INTEGER NOT NULL', updated_at: 'INTEGER NOT NULL' },
-    ticket_ratings: { ticket_id: 'INTEGER PRIMARY KEY', user_id: 'TEXT NOT NULL', stars: 'INTEGER NOT NULL', comment: 'TEXT', created_at: 'INTEGER NOT NULL' }
+    ticket_members: {
+        ticket_id: 'INTEGER NOT NULL',
+        target_type: 'TEXT NOT NULL',
+        target_id: 'TEXT NOT NULL',
+        added_by: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    ticket_actions: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        ticket_id: 'INTEGER NOT NULL',
+        actor_id: 'TEXT NOT NULL',
+        action: 'TEXT NOT NULL',
+        detail: 'TEXT',
+        created_at: 'INTEGER NOT NULL'
+    },
+    ticket_transcripts: {
+        ticket_id: 'INTEGER PRIMARY KEY',
+        html: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    ticket_ratings: {
+        ticket_id: 'INTEGER PRIMARY KEY',
+        user_id: 'TEXT NOT NULL',
+        stars: 'INTEGER NOT NULL',
+        comment: 'TEXT',
+        created_at: 'INTEGER NOT NULL'
+    }
 };
 
 const compatibilityUniqueKeys = {

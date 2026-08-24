@@ -986,6 +986,7 @@ const tickets = sqliteTable('tickets', {
     claimerId: text('claimer_id'),
     reason: text('reason'),
     formSnapshot: text('form_snapshot'),
+    accessSnapshot: text('access_snapshot'),
     inactivityDeadline: integer('inactivity_deadline'),
     warnedAt: integer('warned_at'),
     createdAt: integer('created_at').notNull(),

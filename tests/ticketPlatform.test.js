@@ -114,4 +114,62 @@ describe('ticket platform', () => {
         expect(html).toContain('A &amp; B');
         expect(html).not.toContain('<script>');
     });
+
+    test('enforces only the publicly evidenced and Discord-native configuration limits', () => {
+        for (let index = 1; index <= 15; index++) service.createPanel('guild1', `panel-${index}`, 'dropdown', 'admin');
+        expect(() => service.createPanel('guild1', 'panel-16', 'button', 'admin')).toThrow('maximum of 15 panels');
+
+        for (let index = 1; index <= 25; index++) service.createTopic('guild1', `topic-${index}`);
+        expect(() => service.createTopic('guild1', 'topic-26')).toThrow('maximum of 25 topics');
+
+        const panel = service.getPanel('guild1', 'panel-1');
+        const form = service.createForm(panel.id, 'intake');
+        for (let index = 1; index <= 5; index++) service.addFormField(form.id, { label: `Question ${index}` });
+        expect(() => service.addFormField(form.id, { label: 'Question 6' })).toThrow('at most five fields');
+    });
+
+    test('snapshots support authorization so configuration cleanup cannot orphan a live ticket', () => {
+        const ticket = service.reserveTicket({
+            guildId: 'guild1', openerId: 'user1',
+            accessSnapshot: { supportRoleIds: ['support'], traineeRoleIds: ['trainee'], traineeClaim: false }
+        });
+        const member = {
+            id: 'staff1', guild: { id: 'guild1', ownerId: 'owner' },
+            permissions: { has: () => false }, roles: { cache: new Map([['support', {}]]) }
+        };
+        const trainee = { ...member, id: 'trainee1', roles: { cache: new Map([['trainee', {}]]) } };
+
+        expect(service.authorize(ticket, member, 'manage')).toBe(true);
+        expect(service.authorize(ticket, trainee, 'view')).toBe(true);
+        expect(service.authorize(ticket, trainee, 'claim')).toBe(false);
+    });
+
+    test('saves and logs the transcript before deleting the exact tracked channel', async () => {
+        const ticket = service.reserveTicket({ guildId: 'guild1', openerId: 'user1' });
+        service.attachChannel(ticket.id, 'channel1');
+        service.updateConfig('guild1', { logChannelId: 'logs' });
+        service.createTranscript = jest.fn(async () => ({ html: '<html></html>', attachment: {} }));
+        service.log = jest.fn(async () => ({}));
+        service.notifyOpener = jest.fn(async () => true);
+        const channel = { delete: jest.fn(async () => {}) };
+
+        await service.deleteDiscordTicket(service.getTicket(ticket.id), channel, 'staff1');
+
+        expect(service.createTranscript.mock.invocationCallOrder[0]).toBeLessThan(channel.delete.mock.invocationCallOrder[0]);
+        expect(service.log.mock.invocationCallOrder[0]).toBeLessThan(channel.delete.mock.invocationCallOrder[0]);
+        expect(service.getTicket(ticket.id).status).toBe('deleted');
+    });
+
+    test('never deletes a channel when transcript persistence fails', async () => {
+        const ticket = service.reserveTicket({ guildId: 'guild1', openerId: 'user1' });
+        service.attachChannel(ticket.id, 'channel1');
+        service.updateConfig('guild1', { logChannelId: 'logs' });
+        service.createTranscript = jest.fn(async () => { throw new Error('disk full'); });
+        const channel = { delete: jest.fn() };
+
+        await expect(service.deleteDiscordTicket(service.getTicket(ticket.id), channel, 'staff1')).rejects.toThrow('disk full');
+
+        expect(channel.delete).not.toHaveBeenCalled();
+        expect(service.getTicket(ticket.id).status).toBe('closed');
+    });
 });
