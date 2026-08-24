@@ -92,9 +92,11 @@ describe('giveaway platform', () => {
         const retry = service.claimEnd(giveaway.id, 'admin', ['user1', 'user2', 'user3'].map(member));
 
         expect(first.created).toBe(true);
+        expect(first.claimed).toBe(true);
         expect(first.round.winnerIds).toHaveLength(2);
         expect(new Set(first.round.winnerIds).size).toBe(2);
         expect(retry.created).toBe(false);
+        expect(retry.claimed).toBe(false);
         expect(retry.round.winnerIds).toEqual(first.round.winnerIds);
         expect(database.sqlite.prepare('SELECT COUNT(*) count FROM giveaway_rounds WHERE giveaway_id = ?').get(giveaway.id).count).toBe(1);
     });
@@ -123,6 +125,7 @@ describe('giveaway platform', () => {
         service.updateConfig('guild1', { dmCreator: true, dmWinners: true });
 
         const claimed = service.claimEnd(giveaway.id, 'bot', [...members.values()]);
+        database.sqlite.prepare('UPDATE giveaway_rounds SET delivery_lease_until = 0 WHERE id = ?').run(claimed.round.id);
         const { GiveawayService } = require('../src/services/giveawayService');
         service = new GiveawayService(client, { sqlite: database.sqlite, now: () => 1000, randomInt: () => 0 });
         await service.reconcile();
@@ -198,12 +201,13 @@ describe('giveaway platform', () => {
         service.attachMessage(giveaway.id, 'message1');
         for (const value of members.values()) service.enter(giveaway.id, value);
         const first = service.claimEnd(giveaway.id, 'admin', [...members.values()]);
-        service.completeEnd(giveaway.id, 'admin');
+        service.completeEnd(giveaway.id, 'admin', first.round.deliveryToken);
         const pending = service.createReroll(giveaway.id, 'admin', [...members.values()]);
+        database.sqlite.prepare('UPDATE giveaway_rounds SET delivery_lease_until = 0 WHERE id = ?').run(pending.round.id);
 
         const resumed = await service.rerollDiscordGiveaway(giveaway.id, 'admin');
 
-        expect(resumed.id).toBe(pending.id);
+        expect(resumed.id).toBe(pending.round.id);
         expect(resumed.winnerIds).not.toEqual(first.round.winnerIds);
         expect(database.sqlite.prepare('SELECT COUNT(*) count FROM giveaway_rounds WHERE giveaway_id = ?').get(giveaway.id).count).toBe(2);
     });

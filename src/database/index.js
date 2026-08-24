@@ -949,6 +949,8 @@ const expectedSchema = {
         winners_snapshot: 'TEXT NOT NULL',
         actor_id: 'TEXT NOT NULL',
         created_at: 'INTEGER NOT NULL',
+        delivery_token: 'TEXT',
+        delivery_lease_until: 'INTEGER',
         announced_at: 'INTEGER'
     },
     giveaway_actions: {

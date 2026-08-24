@@ -1116,6 +1116,8 @@ const giveawayRounds = sqliteTable('giveaway_rounds', {
     winnersSnapshot: text('winners_snapshot').notNull(),
     actorId: text('actor_id').notNull(),
     createdAt: integer('created_at').notNull(),
+    deliveryToken: text('delivery_token'),
+    deliveryLeaseUntil: integer('delivery_lease_until'),
     announcedAt: integer('announced_at')
 }, table => ({ numberUnique: unique().on(table.giveawayId, table.roundNumber) }));
 

@@ -88,6 +88,8 @@ CREATE TABLE `giveaway_rounds` (
 	`winners_snapshot` text NOT NULL,
 	`actor_id` text NOT NULL,
 	`created_at` integer NOT NULL,
+	`delivery_token` text,
+	`delivery_lease_until` integer,
 	`announced_at` integer
 );
 --> statement-breakpoint
