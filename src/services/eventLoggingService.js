@@ -34,6 +34,9 @@ class EventLoggingService {
     add(guild, channel, module) {
         module = this.module(module);
         this.preflight(guild, channel);
+        if (module === 'moderation' && !guild.members.me.permissions.has(PermissionFlagsBits.ViewAuditLog)) {
+            throw new Error('I need View Audit Log for moderation event logs.');
+        }
         const exists = this.sqlite.prepare(`
             SELECT 1 FROM event_log_channels WHERE guild_id = ? AND module = ? AND channel_id = ?
         `).get(guild.id, module, channel.id);
@@ -72,7 +75,11 @@ class EventLoggingService {
                 WHERE guild_id = ? ORDER BY module, channel_id
             `).all(interaction.guildId);
             const content = rows.length
-                ? rows.map(row => `**${row.module}** → <#${row.channel_id}>${row.color ? ` · ${row.color}` : ''}`).join('\n')
+                ? rows.map(row => {
+                    const channel = interaction.guild.channels.cache.get(row.channel_id);
+                    const visible = channel && interaction.member.permissionsIn(channel).has(PermissionFlagsBits.ViewChannel);
+                    return `**${row.module}** → ${visible ? `<#${row.channel_id}>` : '*inaccessible channel*'}${row.color ? ` · ${row.color}` : ''}`;
+                }).join('\n')
                 : 'No event log destinations are configured.';
             return interaction.reply({
                 content, flags: interaction.options.getBoolean('private') ? [MessageFlags.Ephemeral] : [], allowedMentions: { parse: [] }

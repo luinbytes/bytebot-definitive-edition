@@ -1,7 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { PermissionFlagsBits } = require('discord.js');
+const { Events, PermissionFlagsBits } = require('discord.js');
 
 describe('EventLoggingService', () => {
     let database;
@@ -33,7 +33,7 @@ describe('EventLoggingService', () => {
     function guild(channels) {
         return {
             id: 'guild1',
-            members: { me: { permissionsIn: () => ({ has: () => true }) } },
+            members: { me: { permissions: { has: () => true }, permissionsIn: () => ({ has: () => true }) } },
             channels: { cache: new Map(channels.map(channel => [channel.id, channel])), fetch: jest.fn() }
         };
     }
@@ -85,5 +85,23 @@ describe('EventLoggingService', () => {
         await service.handleInteraction(component);
         expect(database.sqlite.prepare(`SELECT 1 FROM event_log_channels`).get()).toBeUndefined();
         await expect(service.handleInteraction(component)).rejects.toThrow('expired');
+    });
+
+    test('the shared adapter routes human events and rejects bot-authored loops', async () => {
+        const adapter = require('../src/events/eventLogging');
+        const log = jest.fn();
+        const guild = { id: 'guild1' };
+        const client = { eventLoggingService: { log }, guilds: { cache: new Map() } };
+        const message = {
+            id: 'message1', guild, guildId: guild.id, channelId: 'channel1', content: 'deleted',
+            author: { id: 'user1', bot: false }
+        };
+        await adapter.execute(Events.MessageDelete, message, client);
+        expect(log).toHaveBeenCalledWith(guild, 'messages', 'messageDelete:message1', expect.objectContaining({
+            actorId: 'user1', channelId: 'channel1'
+        }));
+        message.author.bot = true;
+        await adapter.execute(Events.MessageDelete, message, client);
+        expect(log).toHaveBeenCalledTimes(1);
     });
 });

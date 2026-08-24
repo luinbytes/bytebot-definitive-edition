@@ -492,6 +492,22 @@ module.exports = {
 
     async execute(interaction, client) {
         if (interaction.options.getSubcommandGroup(false) === 'logs'
+            && ['set', 'modlog'].includes(interaction.options.getSubcommand())) {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                throw new Error('You need Manage Server to configure moderation logs.');
+            }
+            const channel = interaction.options.getChannel('channel');
+            if (channel && !interaction.guild.members.me.permissionsIn(channel).has([
+                PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks
+            ])) throw new Error('I need View Channel, Send Messages, and Embed Links in that moderation log channel.');
+            if (channel) sqlite.prepare(`UPDATE guilds SET log_channel = ? WHERE id = ?`).run(channel.id, interaction.guildId);
+            const current = channel?.id || sqlite.prepare(`SELECT log_channel FROM guilds WHERE id = ?`).get(interaction.guildId)?.log_channel;
+            return interaction.reply({
+                content: current ? `Moderation log channel has been set to <#${current}>` : 'A moderation log channel has not been configured.',
+                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+            });
+        }
+        if (interaction.options.getSubcommandGroup(false) === 'logs'
             && !['set', 'modlog'].includes(interaction.options.getSubcommand())) {
             if (!client.eventLoggingService) throw new Error('Event logging service is unavailable');
             return client.eventLoggingService.execute(interaction);
