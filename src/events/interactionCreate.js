@@ -24,7 +24,8 @@ module.exports = {
             return;
         }
         processedInteractions.add(interaction.id);
-        if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('economy:')) {
+        if (interaction.customId?.startsWith('economy:')
+            && (interaction.isButton() || interaction.isStringSelectMenu())) {
             if (!client.economyService) {
                 return interaction.reply({ content: 'Economy is temporarily unavailable.', flags: [MessageFlags.Ephemeral] }).catch(() => null);
             }
