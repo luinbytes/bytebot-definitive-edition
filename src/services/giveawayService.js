@@ -58,6 +58,7 @@ class GiveawayService {
         this.randomInt = options.randomInt || crypto.randomInt;
         this.interval = null;
         this.running = false;
+        this.endJobs = new Map();
     }
 
     cleanup() {
@@ -403,12 +404,15 @@ class GiveawayService {
         }
     }
 
-    async endDiscordGiveaway(id, actorId) {
+    async finishDiscordGiveaway(id, actorId) {
         const before = this.getGiveaway(id);
         if (!before) throw new Error('Giveaway not found.');
+        if (before.status === 'ended') {
+            const round = rowToRound(this.sqlite.prepare('SELECT * FROM giveaway_rounds WHERE giveaway_id = ? AND round_number = 1').get(id));
+            return { giveaway: before, round };
+        }
         const members = await this.membersFor(before);
         const claimed = this.claimEnd(id, actorId, members);
-        if (before.status === 'ended') return { giveaway: before, round: claimed.round };
         const giveaway = this.getGiveaway(id);
         const { guild, channel, message } = await this.resourceFor(giveaway);
         if (!message) {
@@ -420,6 +424,15 @@ class GiveawayService {
         const ended = this.completeEnd(id, actorId);
         await this.notifyResult(giveaway, claimed.round, guild);
         return { giveaway: ended, round: claimed.round };
+    }
+
+    async endDiscordGiveaway(id, actorId) {
+        if (this.endJobs.has(id)) return this.endJobs.get(id);
+        const job = this.finishDiscordGiveaway(id, actorId);
+        this.endJobs.set(id, job);
+        try { return await job; } finally {
+            if (this.endJobs.get(id) === job) this.endJobs.delete(id);
+        }
     }
 
     createReroll(id, actorId, members) {
@@ -480,11 +493,26 @@ class GiveawayService {
     async editDiscordGiveaway(giveaway, changes, actorId) {
         if (changes.imageUrl !== undefined) changes.imageUrl = this.validateUrl(changes.imageUrl);
         if (changes.thumbnailUrl !== undefined) changes.thumbnailUrl = this.validateUrl(changes.thumbnailUrl);
+        const { guild, channel, message } = await this.resourceFor(giveaway);
+        if (!message) {
+            this.sqlite.prepare("UPDATE giveaways SET status = 'lost', updated_at = ? WHERE id = ? AND status = 'active'").run(this.now(), giveaway.id);
+            this.recordAction(giveaway.id, actorId, 'message_lost');
+            throw new Error('The exact giveaway message is no longer available.');
+        }
+        const required = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ReadMessageHistory];
+        if (!guild.members.me.permissionsIn(channel).has(required)) {
+            throw new Error('I need View Channel, Send Messages, Embed Links, and Read Message History there.');
+        }
         const updated = this.updateGiveaway(giveaway.id, changes, actorId);
-        const { guild, channel, message } = await this.resourceFor(updated);
-        if (!message) throw new Error('The exact giveaway message is no longer available.');
         await message.edit(this.messagePayload(updated, { guild, channel }));
         return updated;
+    }
+
+    validateTemplate(guildId, script, interaction) {
+        return this.templatePayload({ id: 0, guildId, prize: 'Prize', winnerCount: 1, hostId: interaction.user.id,
+            endsAt: this.now() + 3600000, requiredRoleId: null, description: null, minLevel: null, maxLevel: null,
+            imageUrl: null, thumbnailUrl: null, templateSnapshot: script }, { guild: interaction.guild, channel: interaction.channel });
     }
 
     option(interaction, method, name) {
@@ -523,9 +551,7 @@ class GiveawayService {
             }
             if (action === 'template' && !group) {
                 const script = this.option(interaction, 'getString', 'script');
-                if (script) this.templatePayload({ id: 0, guildId, prize: 'Prize', winnerCount: 1, hostId: interaction.user.id,
-                    endsAt: this.now() + 3600000, requiredRoleId: null, description: null, minLevel: null, maxLevel: null,
-                    imageUrl: null, thumbnailUrl: null, templateSnapshot: script }, { guild: interaction.guild, channel: interaction.channel });
+                if (script) this.validateTemplate(guildId, script, interaction);
                 this.updateConfig(guildId, { template: script || null });
                 return interaction.editReply({ content: script ? 'Giveaway template updated.' : 'Giveaway template cleared.' });
             }
@@ -534,9 +560,7 @@ class GiveawayService {
                 const name = this.option(interaction, 'getString', 'name');
                 if (action === 'save') {
                     const script = this.option(interaction, 'getString', 'script');
-                    this.templatePayload({ id: 0, guildId, prize: 'Prize', winnerCount: 1, hostId: interaction.user.id,
-                        endsAt: this.now() + 3600000, requiredRoleId: null, description: null, minLevel: null, maxLevel: null,
-                        imageUrl: null, thumbnailUrl: null, templateSnapshot: script }, { guild: interaction.guild, channel: interaction.channel });
+                    this.validateTemplate(guildId, script, interaction);
                     this.savePreset(guildId, name, script, interaction.user.id);
                     return interaction.editReply({ content: `Preset **${name.toLowerCase()}** saved.` });
                 }

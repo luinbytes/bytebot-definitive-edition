@@ -149,6 +149,43 @@ describe('giveaway platform', () => {
         expect(service.getGiveaway(giveaway.id).status).toBe('lost');
     });
 
+    test('shares one end job across overlapping callers', async () => {
+        let release;
+        service.finishDiscordGiveaway = jest.fn(() => new Promise(resolve => { release = resolve; }));
+
+        const first = service.endDiscordGiveaway(1, 'admin');
+        const second = service.endDiscordGiveaway(1, 'bot');
+        expect(service.finishDiscordGiveaway).toHaveBeenCalledTimes(1);
+        release({ giveaway: { id: 1 }, round: { winnerIds: ['user1'] } });
+
+        await expect(Promise.all([first, second])).resolves.toEqual([
+            { giveaway: { id: 1 }, round: { winnerIds: ['user1'] } },
+            { giveaway: { id: 1 }, round: { winnerIds: ['user1'] } }
+        ]);
+    });
+
+    test('checks edit permissions before mutation and marks missing messages lost', async () => {
+        let allowed = false;
+        const message = { edit: jest.fn() };
+        const channel = { id: 'channel1', messages: { fetch: jest.fn()
+            .mockResolvedValueOnce(message).mockResolvedValueOnce(null) } };
+        const guild = { id: 'guild1', channels: { cache: new Map([['channel1', channel]]) },
+            members: { me: { permissionsIn: () => ({ has: () => allowed }) } } };
+        service.client = { guilds: { cache: new Map([['guild1', guild]]) } };
+        const giveaway = service.reserveGiveaway({ guildId: 'guild1', channelId: 'channel1', hostId: 'admin',
+            duration: '10s', winnerCount: 1, prize: 'Nitro' });
+        service.attachMessage(giveaway.id, 'message1');
+
+        await expect(service.editDiscordGiveaway(service.getGiveaway(giveaway.id), { prize: 'Changed' }, 'admin'))
+            .rejects.toThrow('View Channel');
+        expect(service.getGiveaway(giveaway.id).prize).toBe('Nitro');
+        expect(message.edit).not.toHaveBeenCalled();
+        allowed = true;
+        await expect(service.editDiscordGiveaway(service.getGiveaway(giveaway.id), { prize: 'Changed' }, 'admin'))
+            .rejects.toThrow('exact giveaway message');
+        expect(service.getGiveaway(giveaway.id).status).toBe('lost');
+    });
+
     test('resumes an unannounced reroll without choosing another winner', async () => {
         const member = id => ({ id, user: { id, bot: false }, roles: { cache: new Map() } });
         const members = new Map([['user1', member('user1')], ['user2', member('user2')]]);

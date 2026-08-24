@@ -1,6 +1,11 @@
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType, MessageFlags } = require('discord.js');
 const { formatRules } = require('../../utils/automationCommand');
 
+const METRIC_CHOICES = [
+    { name: 'Members', value: 'members' }, { name: 'Bots', value: 'bots' },
+    { name: 'Online members', value: 'online' }, { name: 'Voice members', value: 'voice' }
+];
+
 const data = new SlashCommandBuilder().setName('counter').setDescription('Configure counting and metric channels')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).setDMPermission(false)
     .addSubcommand(sub => sub.setName('enable').setDescription('Enable or resume a counter channel')
@@ -8,9 +13,7 @@ const data = new SlashCommandBuilder().setName('counter').setDescription('Config
     .addSubcommand(sub => sub.setName('disable').setDescription('Disable a counter and reset sequential counting')
         .addChannelOption(option => option.setName('channel').setDescription('Counting or metric channel').setRequired(true)))
     .addSubcommand(sub => sub.setName('add').setDescription('Create a live metric channel')
-        .addStringOption(option => option.setName('metric').setDescription('Metric').setRequired(true).addChoices(
-            { name: 'Members', value: 'members' }, { name: 'Bots', value: 'bots' },
-            { name: 'Online members', value: 'online' }, { name: 'Voice members', value: 'voice' }))
+        .addStringOption(option => option.setName('metric').setDescription('Metric').setRequired(true).addChoices(...METRIC_CHOICES))
         .addStringOption(option => option.setName('kind').setDescription('Channel kind').setRequired(true).addChoices(
             { name: 'Voice', value: 'voice' }, { name: 'Text', value: 'text' }, { name: 'Category', value: 'category' },
             { name: 'Announcement', value: 'announcement' }, { name: 'Stage', value: 'stage' })))
@@ -18,9 +21,7 @@ const data = new SlashCommandBuilder().setName('counter').setDescription('Config
     .addSubcommand(sub => sub.setName('list').setDescription('List configured counting and metric channels'))
     .addSubcommand(sub => sub.setName('update').setDescription('Change a live counter metric')
         .addChannelOption(option => option.setName('channel').setDescription('Metric channel').setRequired(true))
-        .addStringOption(option => option.setName('metric').setDescription('Metric').setRequired(true).addChoices(
-            { name: 'Members', value: 'members' }, { name: 'Bots', value: 'bots' },
-            { name: 'Online members', value: 'online' }, { name: 'Voice members', value: 'voice' })))
+        .addStringOption(option => option.setName('metric').setDescription('Metric').setRequired(true).addChoices(...METRIC_CHOICES)))
     .addSubcommand(sub => sub.setName('remove').setDescription('Stop updating a metric channel')
         .addChannelOption(option => option.setName('channel').setDescription('Metric channel').setRequired(true)));
 
