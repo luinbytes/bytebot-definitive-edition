@@ -188,7 +188,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
         .setThumbnail(client.user.displayAvatarURL())
         .setDescription(
             '**Welcome to ByteBot!**\n\n' +
-            'Start with an intent hub: `/community`, `/me`, `/server`, `/pod`, `/mod`, `/economy`, `/game`, `/fun`, or `/bot`.\n\n' +
+            'Start with an intent hub: `/community`, `/me`, `/server`, `/lookup`, `/pod`, `/mod`, `/economy`, `/game`, `/fun`, or `/bot`.\n\n' +
             `📊 **${totalCommands}** commands • **${sortedCategories.length}** categories`
         )
         .addFields(
@@ -198,6 +198,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/community` member progress, achievements, BytePods, and community features\n' +
                     '`/me` personal settings, reminders, bookmarks, birthdays, streaks\n' +
                     '`/server` setup, lifecycle messages, suggestions, starboard, achievements, security\n' +
+                    '`/lookup` calculations, translation, web images, weather, and definitions\n' +
                     '`/pod` BytePod actions and settings\n' +
                     '`/mod` member actions, cases, invoke templates, setup, logs, and channel controls\n' +
                     '`/economy` balances, games, crime, gangs, labs, role shops, and administration\n' +
@@ -219,7 +220,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/giveaway start` • `/giveaway edit prize` • `/counter add`\n' +
                     '`/economy balance` • `/economy game coinflip` • `/economy gang info` • `/economy lab status`\n' +
                     '`/server backup create` • `/server customize preset` • `/server discovery publish`\n' +
-                    '`/server stats days:60`\n' +
+                    '`/server stats days:60` • `/server role info` • `/lookup weather`\n' +
                     '`/mod user warn` • `/mod case view` • `/mod config setup`\n' +
                     '`/mod template set` • `/game warthunder stats`\n' +
                     '`/fun uwuify` • `/fun uwulock add`',
@@ -229,7 +230,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                 name: 'Public Parity Map',
                 value:
                     'Greed source categories route through ByteBot\'s existing hubs as features land:\n' +
-                    '`/community` Levels, Socials • `/me` Information, Utility\n' +
+                    '`/community` Levels, Socials • `/me` Information • `/lookup` Information, Utility\n' +
                     '`/server` Auto, Logs, Security, Server, Settings • `/ticket` Tickets • `/mod` Moderation\n' +
                     '`/fun` Fun, Manipulation, Roleplay, Snipe • `/boosterrole` Boosters • `/economy` Economy\n' +
                     '**Not yet available (planned):** LastFM, Voice\n' +

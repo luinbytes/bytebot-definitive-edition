@@ -26,9 +26,12 @@ const client = new Client({
     ],
 });
 
+const { InformationLookupService } = require('./services/informationLookupService');
+
 client.commands = new Collection();
 client.contextMenus = new Collection();
 client.cooldowns = new Collection();
+client.informationLookupService = new InformationLookupService();
 
 // Error handling for future-proofing
 process.on('unhandledRejection', (reason, promise) => {

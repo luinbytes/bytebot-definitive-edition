@@ -105,6 +105,7 @@ describe('Intent command hubs', () => {
             'publish', 'list', 'view', 'bump', 'remove'
         ]);
         expect(optionNames(findOption(command, 'permissions').options)).toEqual([
+            'view',
             'add',
             'remove',
             'list',

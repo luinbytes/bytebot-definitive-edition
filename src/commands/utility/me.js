@@ -1,5 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { executeAliasCommand } = require('../../utils/commandAlias');
+const { executeMemberLookup } = require('../../utils/informationCommand');
 
 const TARGETS = {
     avatar: { commandName: 'avatar', requirePath: 'src/commands/utility/avatar.js' },
@@ -66,6 +67,15 @@ module.exports = {
             .setName('info')
             .setDescription('View your profile or another user profile')
             .addUserOption(opt => opt.setName('user').setDescription('User to view')))
+        .addSubcommand(sub => sub.setName('banner').setDescription('View your banner or another user banner')
+            .addUserOption(opt => opt.setName('user').setDescription('User to view')))
+        .addSubcommand(sub => sub.setName('server-avatar').setDescription('View a member server avatar')
+            .addUserOption(opt => opt.setName('user').setDescription('Member to view')))
+        .addSubcommand(sub => sub.setName('server-banner').setDescription('View a member server banner')
+            .addUserOption(opt => opt.setName('user').setDescription('Member to view')))
+        .addSubcommandGroup(group => group.setName('name').setDescription('Recorded username history')
+            .addSubcommand(sub => sub.setName('history').setDescription('View recorded username history')
+                .addUserOption(opt => opt.setName('user').setDescription('User to view'))))
         .addSubcommandGroup(group => group
             .setName('settings')
             .setDescription('Manage personal settings')
@@ -168,6 +178,11 @@ module.exports = {
                 .addBooleanOption(opt => opt.setName('private').setDescription('Show only to you')))),
 
     async execute(interaction, client) {
+        const group = interaction.options.getSubcommandGroup(false);
+        const action = interaction.options.getSubcommand(false);
+        if (group === 'name' || ['banner', 'server-avatar', 'server-banner'].includes(action)) {
+            return executeMemberLookup(interaction, client);
+        }
         return executeAliasCommand(interaction, client, aliasFor(interaction));
     }
 };
