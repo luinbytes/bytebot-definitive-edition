@@ -997,6 +997,114 @@ const expectedSchema = {
         bumped_at: 'INTEGER NOT NULL',
         updated_by: 'TEXT NOT NULL',
         updated_at: 'INTEGER NOT NULL'
+    },
+    economy_configs: {
+        guild_id: 'TEXT PRIMARY KEY',
+        enabled: 'INTEGER DEFAULT 0 NOT NULL',
+        currency_name: "TEXT DEFAULT 'coins' NOT NULL",
+        currency_emoji: "TEXT DEFAULT '🪙' NOT NULL",
+        starting_balance: 'INTEGER DEFAULT 0 NOT NULL',
+        daily_cap: 'INTEGER DEFAULT 50000 NOT NULL',
+        preset: "TEXT DEFAULT 'standard' NOT NULL",
+        updated_by: 'TEXT NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    economy_modes: {
+        user_id: 'TEXT PRIMARY KEY',
+        scope_type: "TEXT DEFAULT 'guild' NOT NULL",
+        updated_at: 'INTEGER NOT NULL'
+    },
+    economy_scope_totals: {
+        scope_type: 'TEXT NOT NULL',
+        scope_id: 'TEXT NOT NULL',
+        minted_text: "TEXT DEFAULT '0' NOT NULL",
+        destroyed_text: "TEXT DEFAULT '0' NOT NULL",
+        updated_at: 'INTEGER NOT NULL'
+    },
+    economy_accounts: {
+        scope_type: 'TEXT NOT NULL',
+        scope_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        wallet: 'INTEGER DEFAULT 0 NOT NULL',
+        bank: 'INTEGER DEFAULT 0 NOT NULL',
+        created_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    economy_ledger: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        transaction_id: 'TEXT NOT NULL',
+        scope_type: 'TEXT NOT NULL',
+        scope_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        wallet_delta: 'INTEGER DEFAULT 0 NOT NULL',
+        bank_delta: 'INTEGER DEFAULT 0 NOT NULL',
+        supply_delta: 'INTEGER DEFAULT 0 NOT NULL',
+        wallet_balance: 'INTEGER NOT NULL',
+        bank_balance: 'INTEGER NOT NULL',
+        kind: 'TEXT NOT NULL',
+        actor_id: 'TEXT NOT NULL',
+        counterparty_id: 'TEXT',
+        reason: 'TEXT',
+        created_at: 'INTEGER NOT NULL'
+    },
+    economy_earned_totals: {
+        user_id: 'TEXT NOT NULL',
+        utc_day: 'TEXT NOT NULL',
+        amount: 'INTEGER DEFAULT 0 NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    economy_earning_guilds: {
+        user_id: 'TEXT NOT NULL',
+        utc_day: 'TEXT NOT NULL',
+        guild_id: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    economy_action_cooldowns: {
+        user_id: 'TEXT NOT NULL',
+        action: 'TEXT NOT NULL',
+        scope_type: 'TEXT NOT NULL',
+        scope_id: 'TEXT NOT NULL',
+        subject_id: 'TEXT NOT NULL',
+        available_at: 'INTEGER NOT NULL'
+    },
+    economy_jobs: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        name: 'TEXT NOT NULL',
+        minimum: 'INTEGER NOT NULL',
+        maximum: 'INTEGER NOT NULL',
+        cooldown_seconds: 'INTEGER NOT NULL',
+        created_by: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    economy_shop_items: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        role_id: 'TEXT NOT NULL',
+        role_name: 'TEXT NOT NULL',
+        price: 'INTEGER NOT NULL',
+        created_by: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    economy_shop_purchases: {
+        id: 'TEXT PRIMARY KEY',
+        transaction_id: 'TEXT NOT NULL',
+        reversal_transaction_id: 'TEXT',
+        guild_id: 'TEXT NOT NULL',
+        item_id: 'INTEGER NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        scope_type: 'TEXT NOT NULL',
+        scope_id: 'TEXT NOT NULL',
+        role_id: 'TEXT NOT NULL',
+        price: 'INTEGER NOT NULL',
+        status: "TEXT DEFAULT 'pending' NOT NULL",
+        error: 'TEXT',
+        created_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL',
+        delivered_at: 'INTEGER',
+        reversed_at: 'INTEGER'
     }
 };
 
@@ -1039,7 +1147,14 @@ const compatibilityUniqueKeys = {
     giveaway_entries: ['giveaway_id', 'user_id'],
     giveaway_rounds: ['giveaway_id', 'round_number'],
     guild_backups: ['guild_id', 'creator_id', 'name'],
-    customization_presets: ['guild_id', 'name']
+    customization_presets: ['guild_id', 'name'],
+    economy_scope_totals: ['scope_type', 'scope_id'],
+    economy_accounts: ['scope_type', 'scope_id', 'user_id'],
+    economy_earned_totals: ['user_id', 'utc_day'],
+    economy_earning_guilds: ['user_id', 'utc_day', 'guild_id'],
+    economy_action_cooldowns: ['user_id', 'action', 'scope_type', 'scope_id', 'subject_id'],
+    economy_jobs: ['guild_id', 'name'],
+    economy_shop_items: ['guild_id', 'role_id']
 };
 
 function hasUniqueKey(tableName, columns) {
