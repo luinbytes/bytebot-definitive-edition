@@ -483,4 +483,52 @@ describe('VoiceMaster lifecycle', () => {
         expect(owner.roles.add).toHaveBeenCalledWith('join-role', 'VoiceMaster channel joined');
         expect(owner.roles.remove).toHaveBeenCalledWith('join-role', 'VoiceMaster channel left');
     });
+
+    test('restart reconciliation reports ambiguous and missing channels without deleting them', async () => {
+        const channels = new Map();
+        const category = { id: 'category-1', type: ChannelType.GuildCategory, delete: jest.fn() };
+        const join = { id: 'join-1', type: ChannelType.GuildVoice, send: jest.fn(async () => ({ id: 'interface-1' })), delete: jest.fn() };
+        const temporary = {
+            id: 'temporary-1', type: ChannelType.GuildVoice, members: new Map(),
+            send: jest.fn(async () => ({ id: 'controls-1' })), delete: jest.fn()
+        };
+        const create = jest.fn(async values => {
+            const channel = values.type === ChannelType.GuildCategory
+                ? category
+                : values.name === 'Join to Create' ? join : temporary;
+            channels.set(channel.id, channel);
+            return channel;
+        });
+        const voiceStates = new Map();
+        const owner = {
+            id: 'member-1', user: { id: 'member-1', bot: false, username: 'Member' }, displayName: 'Member',
+            roles: { add: jest.fn(async () => {}), remove: jest.fn(async () => {}) },
+            voice: { channelId: 'join-1', setChannel: jest.fn(async channel => {
+                owner.voice.channelId = channel.id; owner.voice.channel = channel;
+                voiceStates.set(owner.id, { channelId: channel.id }); channel.members.set(owner.id, owner);
+            }) }
+        };
+        voiceStates.set(owner.id, { channelId: 'join-1' });
+        const guild = {
+            id: 'guild-1', name: 'Guild',
+            members: { me: { id: 'bot-1', permissions: { has: () => true } } },
+            roles: { everyone: { id: 'guild-1' } }, voiceStates: { cache: voiceStates },
+            channels: { cache: channels, create, fetch: jest.fn(async id => channels.get(id) || null) }
+        };
+        const client = { guilds: { fetch: jest.fn(async () => guild) } };
+        const { VoiceMasterService } = require('../src/services/voiceMasterService');
+        const service = new VoiceMasterService({ client, sqlite: database.sqlite, delay: async () => {} });
+        await service.execute(adminInteraction(guild, 'setup'));
+        await service.handleVoiceState({ channelId: null }, { member: owner, guild, channelId: 'join-1', channel: join, client });
+
+        temporary.type = ChannelType.GuildText;
+        temporary.members.clear();
+        const ambiguous = await new VoiceMasterService({ client, sqlite: database.sqlite }).reconcile();
+        channels.delete(temporary.id);
+        const missing = await new VoiceMasterService({ client, sqlite: database.sqlite }).reconcile();
+
+        expect(ambiguous.ambiguous).toBe(1);
+        expect(missing.lost).toBe(1);
+        expect(temporary.delete).not.toHaveBeenCalled();
+    });
 });

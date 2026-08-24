@@ -240,7 +240,8 @@ class VoiceMasterService {
             config.temporary_enabled, config.join_role_id
             FROM voice_master_sources source
             JOIN voice_master_configs config ON config.guild_id = source.guild_id
-            WHERE source.guild_id = ? AND source.channel_id = ? AND config.state = 'active'`)
+            WHERE source.guild_id = ? AND source.channel_id = ?
+            AND source.state = 'active' AND config.state = 'active'`)
             .get(guildId, channelId) || null;
     }
 
@@ -725,6 +726,128 @@ class VoiceMasterService {
             return interaction.editReply({ embeds: [embeds.success('VoiceMaster Defaults Updated', `Updated default ${action}.`)] });
         } catch (error) {
             return interaction.editReply({ embeds: [embeds.error('VoiceMaster Configuration Failed', error.message)] });
+        }
+    }
+
+    async reconcile() {
+        const result = { active: 0, deleted: 0, lost: 0, ambiguous: 0, failures: [] };
+        const sources = this.sqlite.prepare("SELECT * FROM voice_master_sources WHERE state = 'active'").all();
+        for (const source of sources) {
+            let guild;
+            try {
+                guild = await this.client.guilds.fetch(source.guild_id);
+                const channel = guild.channels.cache.get(source.channel_id)
+                    || await guild.channels.fetch(source.channel_id).catch(error => {
+                        if (error.code === 10003) return null;
+                        throw error;
+                    });
+                if (!channel) {
+                    this.markSourceLost(source);
+                    result.lost++;
+                } else if (channel.type !== ChannelType.GuildVoice) {
+                    result.ambiguous++;
+                }
+            } catch (error) {
+                result.failures.push({ guildId: source.guild_id, channelId: source.channel_id, error: error.message });
+            }
+        }
+
+        const pods = this.sqlite.prepare(`SELECT * FROM bytepods
+            WHERE source_channel_id IS NOT NULL AND bot_owned = 1 AND state IN ('active','deleting')`).all();
+        for (const pod of pods) {
+            try {
+                const guild = await this.client.guilds.fetch(pod.guild_id);
+                const channel = guild.channels.cache.get(pod.channel_id)
+                    || await guild.channels.fetch(pod.channel_id).catch(error => {
+                        if (error.code === 10003) return null;
+                        throw error;
+                    });
+                if (!channel) {
+                    this.sqlite.prepare("UPDATE bytepods SET state = 'lost', cleanup_after = NULL WHERE guild_id = ? AND channel_id = ?")
+                        .run(pod.guild_id, pod.channel_id);
+                    this.sqlite.prepare(`UPDATE voice_master_creations SET state = 'failed',
+                        error = 'Owned channel is missing.', updated_at = ? WHERE guild_id = ? AND channel_id = ?`)
+                        .run(this.now(), pod.guild_id, pod.channel_id);
+                    result.lost++;
+                } else if (channel.type !== ChannelType.GuildVoice || (channel.guildId && channel.guildId !== pod.guild_id)) {
+                    result.ambiguous++;
+                } else if (channel.members.size === 0) {
+                    const won = this.sqlite.prepare(`UPDATE bytepods SET state = 'deleting', generation = generation + 1
+                        WHERE guild_id = ? AND channel_id = ? AND state IN ('active','deleting') AND bot_owned = 1`)
+                        .run(pod.guild_id, pod.channel_id);
+                    if (won.changes) {
+                        try {
+                            await channel.delete('VoiceMaster restart cleanup');
+                            this.clearOwnedChannel(pod.guild_id, pod.channel_id);
+                            result.deleted++;
+                        } catch (error) {
+                            if (error.code === 10003) {
+                                this.clearOwnedChannel(pod.guild_id, pod.channel_id);
+                                result.deleted++;
+                            } else {
+                                this.sqlite.prepare("UPDATE bytepods SET state = 'active', cleanup_after = ? WHERE guild_id = ? AND channel_id = ?")
+                                    .run(this.now() + 5000, pod.guild_id, pod.channel_id);
+                                throw error;
+                            }
+                        }
+                    }
+                } else {
+                    result.active++;
+                }
+            } catch (error) {
+                result.failures.push({ guildId: pod.guild_id, channelId: pod.channel_id, error: error.message });
+            }
+        }
+        this.sqlite.prepare(`UPDATE voice_master_creations SET state = 'failed',
+            error = 'Creation timed out during restart.', updated_at = ?
+            WHERE state = 'pending' AND updated_at < ?`)
+            .run(this.now(), this.now() - 300000);
+        return result;
+    }
+
+    markSourceLost(source) {
+        this.sqlite.prepare("UPDATE voice_master_sources SET state = 'lost' WHERE guild_id = ? AND channel_id = ?")
+            .run(source.guild_id, source.channel_id);
+        if (source.is_primary) {
+            this.sqlite.prepare("UPDATE voice_master_configs SET state = 'failed', updated_at = ? WHERE guild_id = ?")
+                .run(this.now(), source.guild_id);
+        }
+    }
+
+    handleChannelDelete(channel) {
+        const source = this.sqlite.prepare('SELECT * FROM voice_master_sources WHERE guild_id = ? AND channel_id = ?')
+            .get(channel.guildId, channel.id);
+        if (source) this.markSourceLost(source);
+        const pod = this.sqlite.prepare('SELECT * FROM bytepods WHERE guild_id = ? AND channel_id = ? AND bot_owned = 1')
+            .get(channel.guildId, channel.id);
+        if (pod) {
+            this.sqlite.prepare("UPDATE bytepods SET state = 'lost', cleanup_after = NULL WHERE guild_id = ? AND channel_id = ?")
+                .run(channel.guildId, channel.id);
+        }
+    }
+
+    purgeGuild(guildId) {
+        this.sqlite.transaction(() => {
+            this.sqlite.prepare('DELETE FROM voice_master_access WHERE guild_id = ?').run(guildId);
+            this.sqlite.prepare('DELETE FROM voice_master_creations WHERE guild_id = ?').run(guildId);
+            this.sqlite.prepare('DELETE FROM bytepods WHERE guild_id = ? AND source_channel_id IS NOT NULL').run(guildId);
+            this.sqlite.prepare('DELETE FROM voice_master_sources WHERE guild_id = ?').run(guildId);
+            this.sqlite.prepare('DELETE FROM voice_master_configs WHERE guild_id = ?').run(guildId);
+        })();
+    }
+
+    async autocomplete(interaction) {
+        try {
+            const focused = interaction.options.getFocused();
+            const regions = await interaction.guild.fetchVoiceRegions();
+            const choices = [{ name: 'Automatic', value: 'auto' }, ...[...regions.values()]
+                .filter(region => !region.deprecated)
+                .map(region => ({ name: region.name || region.id, value: region.id }))]
+                .filter(choice => choice.name.toLowerCase().includes(String(focused || '').toLowerCase()))
+                .slice(0, 25);
+            return interaction.respond(choices);
+        } catch {
+            return interaction.respond([]);
         }
     }
 }

@@ -22,9 +22,11 @@ CREATE TABLE `voice_master_sources` (
     `guild_id` text NOT NULL,
     `category_id` text,
     `interface_message_id` text,
+    `state` text DEFAULT 'active' NOT NULL,
     `is_primary` integer DEFAULT 0 NOT NULL,
     `owned` integer DEFAULT 0 NOT NULL,
-    `created_at` integer NOT NULL
+    `created_at` integer NOT NULL,
+    CONSTRAINT `voice_master_sources_state_check` CHECK (`state` IN ('active','lost'))
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `voice_master_sources_primary_unique` ON `voice_master_sources` (`guild_id`) WHERE `is_primary` = 1;

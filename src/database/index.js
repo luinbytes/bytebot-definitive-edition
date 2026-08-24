@@ -485,6 +485,7 @@ const expectedSchema = {
         guild_id: 'TEXT NOT NULL',
         category_id: 'TEXT',
         interface_message_id: 'TEXT',
+        state: "TEXT DEFAULT 'active' NOT NULL",
         is_primary: 'INTEGER DEFAULT 0 NOT NULL',
         owned: 'INTEGER DEFAULT 0 NOT NULL',
         created_at: 'INTEGER NOT NULL'

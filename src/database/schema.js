@@ -46,10 +46,12 @@ const voiceMasterSources = sqliteTable('voice_master_sources', {
     guildId: text('guild_id').notNull(),
     categoryId: text('category_id'),
     interfaceMessageId: text('interface_message_id'),
+    state: text('state').default('active').notNull(),
     isPrimary: integer('is_primary', { mode: 'boolean' }).default(false).notNull(),
     owned: integer('owned', { mode: 'boolean' }).default(false).notNull(),
     createdAt: integer('created_at').notNull(),
 }, table => ({
+    stateCheck: check('voice_master_sources_state_check', sql`${table.state} IN ('active','lost')`),
     primaryUnique: uniqueIndex('voice_master_sources_primary_unique').on(table.guildId).where(sql`${table.isPrimary} = 1`),
     guildIdx: index('voice_master_sources_guild_idx').on(table.guildId, table.channelId),
 }));
