@@ -329,8 +329,9 @@ refunded exactly once by a conditional status transition to `refunded`.
 
 `economy_gangs` stores `(id, guild_id, name, owner_id, banner_url, created_at,
 updated_at)`, with a case-insensitive unique `(guild_id, name)` index.
-`economy_gang_members` stores `(gang_id, user_id, role, joined_at)` with a
-unique membership index per guild. `economy_gang_invites` stores an invite ID,
+`economy_gang_members` stores `(guild_id, gang_id, user_id, role, joined_at)`
+with a unique `(guild_id, user_id)` membership index. `economy_gang_invites`
+stores an invite ID,
 gang/guild/inviter/invitee IDs, status, nonce, created/expiry/acted timestamps,
 and a unique pending invite key. The transaction that accepts an invite checks
 expiry, actor, gang capacity, and existing membership before writing both the
@@ -444,7 +445,11 @@ All twelve games use the same accounting contract:
    receives the 1.5x allowance once. All arithmetic floors toward zero.
 4. Append one `game_settlement` ledger row for a positive credit or a
    `game_loss` terminal row with no credit. `net = credit - bet` is shown to
-   the player. No result can make wallet or bank negative.
+   the player. The bet row records `supply_delta = -bet` and updates lifetime
+   destroyed totals; a positive settlement records `supply_delta = credit`
+   and updates lifetime minted totals. A push or refund therefore changes
+   lifetime flow totals but has net-zero circulation. No result can make
+   wallet or bank negative.
 
 Production outcomes use `crypto.randomInt` (or the existing injected random
 source in tests). The command root keeps its existing two-second cooldown.
@@ -487,7 +492,9 @@ described by the shared contract.
 
 - On start, generate a uniform 5x5 board with exactly three bomb cells, debit
   the bet, and reveal no cells. The session stores the board, revealed safe
-  cells, and nonce; the player sees buttons for unrevealed cells only.
+  cells, and nonce. One string-select menu lists the 25 cells; after a safe
+  reveal it lists only unrevealed cells and a separate cash-out button is
+  shown. This stays within Discord's component and 25-option limits.
 - A safe-cell click adds that cell to `revealed` and leaves the session active.
   After `n` safe cells, the cash-out base return is
   `1 + floor(n / 2)` times the bet, capped at `12x`; cash-out is offered after
@@ -609,8 +616,10 @@ retry cannot charge or credit twice.
 ### Leaderboard page behavior
 
 `/economy leaderboard` returns the first 25 guild accounts ordered by total
-`wallet + bank` descending, then Discord user ID ascending. It excludes bots,
-does not create accounts, and never reads a global scope. If more than 25 rows
+`wallet + bank` descending, then Discord user ID ascending. Bot accounts cannot
+be created through ByteBot's command boundaries, so the query does not perform
+network lookups or silently discard durable rows. It does not create accounts
+and never reads a global scope. If more than 25 rows
 exist, show a `next` button; subsequent pages use a server-generated page
 token containing guild, requester, offset, and a ten-minute expiry. Only the
 requester may use those buttons. `previous` and `next` use offsets of 25,
