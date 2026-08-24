@@ -90,4 +90,25 @@ describe('LevelAnalyticsService', () => {
             SELECT message_count FROM server_daily_metrics WHERE guild_id = 'guild1'
         `).get().message_count).toBe(101);
     });
+
+    test('reaction placement transitions count add, remove, and re-add once each', () => {
+        const reaction = {
+            message: { id: 'message1', guild: { id: 'guild1' } },
+            emoji: { id: null, name: '👍' }
+        };
+        const user = { id: 'user1', bot: false };
+
+        expect(service.recordReactionChange(reaction, user, true)).toEqual({ accepted: true, counted: true });
+        expect(service.recordReactionChange(reaction, user, true)).toEqual({ accepted: false, counted: false });
+        expect(service.recordReactionChange(reaction, user, false)).toEqual({ accepted: true, counted: false });
+        expect(service.recordReactionChange(reaction, user, false)).toEqual({ accepted: false, counted: false });
+        expect(service.recordReactionChange(reaction, user, true)).toEqual({ accepted: true, counted: true });
+
+        expect(database.sqlite.prepare(`
+            SELECT reactions_given FROM activity_logs WHERE guild_id = 'guild1' AND user_id = 'user1'
+        `).get().reactions_given).toBe(2);
+        expect(database.sqlite.prepare(`
+            SELECT reaction_count FROM server_daily_metrics WHERE guild_id = 'guild1'
+        `).get().reaction_count).toBe(2);
+    });
 });

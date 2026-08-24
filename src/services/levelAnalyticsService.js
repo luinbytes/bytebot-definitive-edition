@@ -120,6 +120,52 @@ class LevelAnalyticsService {
             };
         })();
     }
+
+    recordReactionChange(reaction, user, present) {
+        const guildId = reaction?.message?.guild?.id;
+        const messageId = reaction?.message?.id;
+        const emoji = reaction?.emoji?.id || reaction?.emoji?.name;
+        if (!guildId || !messageId || !emoji || !user?.id || user.bot) {
+            return { accepted: false, counted: false };
+        }
+
+        const now = this.now();
+        const day = new Date(now).toISOString().slice(0, 10);
+        return this.sqlite.transaction(() => {
+            if (!present) {
+                const removed = this.sqlite.prepare(`
+                    DELETE FROM reaction_placements
+                    WHERE guild_id = ? AND message_id = ? AND user_id = ? AND emoji = ?
+                `).run(guildId, messageId, user.id, emoji);
+                return { accepted: Boolean(removed.changes), counted: false };
+            }
+
+            const inserted = this.sqlite.prepare(`
+                INSERT OR IGNORE INTO reaction_placements
+                    (guild_id, message_id, user_id, emoji, added_at)
+                VALUES (?, ?, ?, ?, ?)
+            `).run(guildId, messageId, user.id, emoji, now);
+            if (!inserted.changes) return { accepted: false, counted: false };
+
+            this.sqlite.prepare(`
+                INSERT INTO activity_logs
+                    (user_id, guild_id, activity_date, reactions_given, updated_at)
+                VALUES (?, ?, ?, 1, ?)
+                ON CONFLICT(user_id, guild_id, activity_date) DO UPDATE SET
+                    reactions_given = reactions_given + 1,
+                    updated_at = excluded.updated_at
+            `).run(user.id, guildId, day, now);
+            this.sqlite.prepare(`
+                INSERT INTO server_daily_metrics
+                    (guild_id, activity_date, reaction_count, updated_at)
+                VALUES (?, ?, 1, ?)
+                ON CONFLICT(guild_id, activity_date) DO UPDATE SET
+                    reaction_count = reaction_count + 1,
+                    updated_at = excluded.updated_at
+            `).run(guildId, day, now);
+            return { accepted: true, counted: true };
+        })();
+    }
 }
 
 module.exports = LevelAnalyticsService;
