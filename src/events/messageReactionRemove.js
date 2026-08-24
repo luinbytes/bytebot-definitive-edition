@@ -37,6 +37,9 @@ module.exports = {
             if (client.starboardService) {
                 await client.starboardService.handleReactionRemove(reaction, user);
             }
+            if (client.roleAutomationService) {
+                await client.roleAutomationService.handleReaction(reaction, user, false);
+            }
 
             // Check suggestion votes
             if (reaction.emoji.name === '👍' || reaction.emoji.name === '👎') {

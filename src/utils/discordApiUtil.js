@@ -222,6 +222,9 @@ class RoleManager {
             if (!roleObject) {
                 return { success: false, error: 'Role not found' };
             }
+            if (roleObject.managed || roleObject.id === member.guild.id) {
+                return { success: false, error: `Cannot assign managed role ${roleObject.name}` };
+            }
 
             // Check if member already has role
             if (member.roles.cache.has(roleObject.id)) {

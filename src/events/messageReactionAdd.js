@@ -50,6 +50,9 @@ module.exports = {
             if (client.starboardService) {
                 await client.starboardService.handleReactionAdd(reaction, user);
             }
+            if (client.roleAutomationService) {
+                await client.roleAutomationService.handleReaction(reaction, user, true);
+            }
 
             // Check suggestion votes
             if (reaction.emoji.name === '👍' || reaction.emoji.name === '👎') {

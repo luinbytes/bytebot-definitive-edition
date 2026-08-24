@@ -306,6 +306,8 @@ module.exports = {
         try {
             const AutomationService = require('../services/automationService');
             client.automationService = new AutomationService(client);
+            const RoleAutomationService = require('../services/roleAutomationService');
+            client.roleAutomationService = new RoleAutomationService(client, client.automationService);
             await client.automationService.start();
             logger.success('Automation service initialized');
         } catch (e) {

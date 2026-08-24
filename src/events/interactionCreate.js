@@ -24,6 +24,16 @@ module.exports = {
             return;
         }
         processedInteractions.add(interaction.id);
+        if (interaction.isButton() && interaction.customId.startsWith('rolebtn:')) {
+            if (!client.roleAutomationService) return interaction.reply({ content: 'Role buttons are temporarily unavailable.', flags: [MessageFlags.Ephemeral] });
+            try {
+                await client.roleAutomationService.handleButton(interaction);
+            } catch (error) {
+                logger.errorContext('Role Button Error', error, { customId: interaction.customId, userId: interaction.user?.id, guildId: interaction.guildId });
+                if (!interaction.replied && !interaction.deferred) await interaction.reply({ content: 'That role could not be updated.', flags: [MessageFlags.Ephemeral] }).catch(() => null);
+            }
+            return;
+        }
         // Handle Autocomplete interactions
         if (interaction.isAutocomplete()) {
             const command = client.commands.get(interaction.commandName);

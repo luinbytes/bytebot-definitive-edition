@@ -22,7 +22,7 @@ Source: [Greed commands](https://greed.best/commands), researched 2026-08-23. Th
 | Live category | Advertised count | ByteBot issues | Status |
 | --- | ---: | --- | --- |
 | Information | 86 | #51, #52, #60 | `partial` |
-| Utility | 80 | #35, #42, #46, #51, #52, #53, #55, #56, #58, #60, #62 | `partial` |
+| Utility | 80 | #35, #42, #43, #46, #51, #52, #53, #55, #56, #58, #60, #62 | `partial` |
 | Moderation | 80 | #36, #37, #38 | `partial` |
 | Fun | 55 | #35, #54, #56 | `partial` |
 | Economy | 38 | #48, #49 | `tracked` |
@@ -31,7 +31,7 @@ Source: [Greed commands](https://greed.best/commands), researched 2026-08-23. Th
 | LastFM | 65 | #57 | `tracked` |
 | Logs | 5 | #37, #39, #40, #50 | `partial` |
 | Voice | 29 | #58, #59 | `partial` |
-| Auto | 45 | #42, #43 | `partial` |
+| Auto | 45 | #42, #43 | `complete` — all mapped public automation and self-service role surfaces are implemented |
 | Server | 164 | #41, #43, #44, #45, #46, #47, #50 | `partial` |
 | Settings | 47 | #36, #37, #41, #43, #54, #57, #58 | `partial` |
 | Levels | 3 | #50 | `partial` |
@@ -48,7 +48,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | Registry directory | English JSON files | ByteBot issues | Status |
 | --- | ---: | --- | --- |
 | `auto` | 55 | #42 | `complete` — responders, reactions, member roles, tracking, vanity, and join notification families are reconciled |
-| `boosters` | 3 | #43 | `tracked` |
+| `boosters` | 3 | #43 | `complete` — current/lost booster views and the full custom booster-role lifecycle are reconciled |
 | `developer` | 4 | #64 | `evidence-gap` — absent from the live public category list and may be internal-only |
 | `economy` | 50 | #48, #49 | `tracked` |
 | `fun` | 71 | #35, #54, #56 | `partial` |
@@ -65,7 +65,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | `settings` | 42 | #36, #37, #41, #43, #54, #57, #58 | `partial` |
 | `snipe` | 5 | #54 | `tracked` |
 | `socials` | 11 | #60, #61 | `tracked` |
-| `utility` | 123 | #35, #42, #46, #51, #52, #53, #55, #58, #60, #62 | `partial` |
+| `utility` | 123 | #35, #42, #43, #46, #51, #52, #53, #55, #58, #60, #62 | `partial` |
 | `voice` | 33 | #59 | `partial` |
 | **Total** | **912** | #35–#64 | Mixed |
 
@@ -89,6 +89,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | AntiRaid join/account/avatar/username/bot/mention protection, reversible lockdown and cleanup, 15 AutoMod filters, keywords/domains/allowlists, isolated regex, strikes, exemptions, punishments, and owned Discord migration | #40 | Completes live and pinned Security. Logs remains `partial` until #50; current public sources expose no local NSFW classifier contract, so Discord's owned sexual-content preset is the recorded provider boundary. | `tests/securityAutomation.test.js`, `tests/commandHubs.test.js`, and `tests/databaseMigrations.test.js` |
 | Welcome, goodbye, boost, and Discord-native system messages; validated variables and embed scripts; tests, formats, auto-delete, exact public aliases, and legacy welcome migration | #41 | Advances live Server/Settings and pinned `server`/`settings`; both remain `partial` because other mapped issues are still open. | `tests/lifecycleMessaging.test.js`, `tests/lifecycleEvents.test.js`, `tests/commandHubs.test.js`, and `tests/databaseMigrations.test.js` |
 | Autoresponders, autoreactions, member/bot autoroles, timers, bump reminders, sticky/revive messages, username/vanity tracking, counters, vanity rewards, and join notifications | #42 | Completes pinned `auto` and advances live Auto/Utility plus pinned `utility`; those broader rows remain `partial` where other mapped issues remain. | `tests/automationPlatform.test.js`, `tests/autoResponder.test.js`, `tests/events.test.js`, and `tests/databaseMigrations.test.js` |
+| Reaction roles, persistent role buttons, temporary roles, current/lost booster views, and custom booster roles with edits, filters, sharing, synchronization, and loss cleanup | #43 | Completes live Auto and pinned `boosters`; advances live Server/Settings/Utility and pinned `server`/`settings`/`utility`. | `tests/roleAutomation.test.js`, `tests/automationPlatform.test.js`, and `tests/events.test.js` |
 
 ## Update rule
 
