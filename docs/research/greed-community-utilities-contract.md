@@ -35,7 +35,7 @@ The established hubs remain the discoverable categories. This avoids duplicate c
 | `/server confessions category` | Add, remove, or list a category-to-channel route, capped at 24 plus the default General route to fit Discord's 25-choice limit. Requires Manage Server. |
 | `/server confessions blacklist` | Add, remove, list, or clear case-insensitive blocked phrases. Requires Manage Server. |
 | `/server confessions emojis` | Set, reset, or view up/down reaction emoji. Setting both to `none` disables reactions. Requires Manage Server. |
-| `/server confessions mute`, `unmute`, `report` | Resolve an author by confession number without public disclosure. `unmute all` clears all author mutes. Reports reveal the author only in an ephemeral moderator response and record the supplied reason. Requires Manage Messages. |
+| `/server confessions mute`, `unmute`, `report` | Resolve an author by confession number without public disclosure. `unmute all` clears all author mutes. Reports reveal the author only in an ephemeral moderator response and record the supplied reason. Requires Manage Messages in the target confession channel; `unmute all` requires it in every configured confession channel. |
 | `/fun poll create` | Required question, comma-separated options, and duration; publishes a 2-10 option, 10-second to 7-day single-choice poll. |
 | `/fun poll quick` | Required question; publishes a yes/no poll with no scheduled result. |
 | `/fun poll end` | Creator or a member with Manage Messages ends an active poll by message ID and publishes durable results. |

@@ -24,7 +24,7 @@ Source: [Greed commands](https://greed.best/commands), researched 2026-08-23. Th
 | Information | 86 | #51, #52, #60 | `partial` |
 | Utility | 80 | #35, #42, #43, #46, #51, #52, #53, #55, #56, #58, #60, #62 | `partial` |
 | Moderation | 80 | #36, #37, #38 | `partial` |
-| Fun | 55 | #35, #54, #56 | `partial` |
+| Fun | 55 | #35, #53, #54, #56 | `partial` |
 | Economy | 38 | #48, #49 | `partial` — core accounts, ledger, earnings, banking, jobs, shops, configuration, and administration are implemented; #49 owns games, gangs, laboratories, crime/robbery, and rankings |
 | Roleplay | 3 | #54 | `tracked` |
 | Security | 82 | #36, #39, #40 | `complete` — all mapped public protection surfaces are implemented |
@@ -51,7 +51,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | `boosters` | 3 | #43 | `complete` — current/lost booster views and the full custom booster-role lifecycle are reconciled |
 | `developer` | 4 | #64 | `evidence-gap` — absent from the live public category list and may be internal-only |
 | `economy` | 50 | #48, #49 | `complete` — accounts, banking, earnings, games, crime/robbery, gangs, laboratories, rankings, shops, and administration are reconciled; unpublished algorithms remain visibly ByteBot-owned |
-| `fun` | 71 | #35, #54, #56 | `partial` |
+| `fun` | 71 | #35, #53, #54, #56 | `partial` |
 | `information` | 48 | #51 | `partial` |
 | `lastfm` | 22 | #57 | `tracked` |
 | `levels` | 8 | #50 | `partial` |
@@ -96,6 +96,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | Versioned guild backups with previewed merge/destructive restore, per-server bot profiles and presets, opt-in ByteBot discovery, hourly bumps, and 1–1095 day real-row server cards | #47 | Advances live Server/Information and pinned `server`/`information`; exact Greed discovery/card commands and font/effect values remain an explicit evidence gap. | `tests/guildBackupService.test.js`, `tests/serverPresentation.test.js`, `tests/statsCommand.test.js`, `tests/commandHubs.test.js`, `tests/databaseMigrations.test.js`, and `tests/schema.test.js` |
 | Guild/global accounts, wallet/bank, exact ledger and circulation, 1.5x daily/work earnings, anti-abuse guards, jobs, role shops, configuration, grants/removals, and confirmed reset/destroy/disable | #48 | Advances live and pinned Economy to `partial`; #49 owns every remaining game, lab, gang, crime/robbery, ladder, and leaderboard surface. | `tests/economyService.test.js`, `tests/economyCommand.test.js`, `tests/helpParity.test.js`, `tests/databaseMigrations.test.js`, and `tests/schema.test.js` |
 | Twelve wager games with durable interactive sessions, crime/robbery, race-safe gangs, passive-income laboratories, and committed guild rankings | #49 | Completes all 50 pinned Economy files. Public names, bounds, and errors match first-party evidence; unpublished odds/progression use the frozen ByteBot-owned rules contract. | `tests/economyProgression.test.js`, `tests/economyCommand.test.js`, `tests/helpParity.test.js`, `tests/interactionAcknowledgement.test.js`, `tests/databaseMigrations.test.js`, and `tests/schema.test.js` |
+| Anonymous confessions with categories, moderation, replies, reactions, reports, and cooldowns; durable polls; exact-target thread/pin/image-only controls; quote images; choose and random-member utilities | #53 | Advances live Fun/Utility and pinned `fun`/`utility`; those rows remain `partial` while their other mapped issues are open. | `tests/communityUtilities.test.js`, `tests/communityInteractionRouting.test.js`, `tests/commandHubs.test.js`, `tests/databaseMigrations.test.js`, and `tests/schema.test.js` |
 
 ## Update rule
 
