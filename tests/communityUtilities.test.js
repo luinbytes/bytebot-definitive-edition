@@ -89,6 +89,24 @@ describe('community utilities', () => {
         expect(service.confessionConfig('guild1').next_number).toBe(1);
     });
 
+    test('keeps confession attribution when a published message cannot be deleted', async () => {
+        service.setConfessionConfig('guild1', 'channel1');
+        const message = { id: 'message1', delete: jest.fn().mockRejectedValue(new Error('missing permission')) };
+        const interaction = {
+            guildId: 'guild1', user: { id: 'author1' }, fields: { getTextInputValue: () => 'A private confession' },
+            guild: { channels: { fetch: jest.fn().mockResolvedValue({ isTextBased: () => true, send: jest.fn().mockResolvedValue(message) }) } },
+            deferReply: jest.fn().mockResolvedValue({})
+        };
+        const update = database.sqlite.prepare("UPDATE confessions SET message_id = ?, status = 'published' WHERE id = ?");
+        const run = update.run.bind(update);
+        jest.spyOn(update, 'run').mockImplementationOnce(() => { throw new Error('database busy'); }).mockImplementation(run);
+        jest.spyOn(database.sqlite, 'prepare').mockImplementation(sql => sql.startsWith('UPDATE confessions SET message_id') ? update : database.sqlite.constructor.prototype.prepare.call(database.sqlite, sql));
+
+        await expect(service.submitConfession(interaction, 0)).rejects.toThrow('database busy');
+        expect(database.sqlite.prepare('SELECT author_id, message_id, status FROM confessions').get())
+            .toEqual({ author_id: 'author1', message_id: 'message1', status: 'published' });
+    });
+
     test('serializes concurrent confession publication without numbering gaps', async () => {
         service.setConfessionConfig('guild1', 'channel1');
         const message = { id: 'message2', react: jest.fn().mockResolvedValue({}) };
@@ -163,6 +181,37 @@ describe('community utilities', () => {
         expect(interaction.channel.send.mock.calls[0][0].embeds[0].data.description).toContain(question);
         expect(interaction.channel.send.mock.calls[0][0].components.flatMap(component => component.components)
             .every(button => button.data.disabled === false)).toBe(true);
+    });
+
+    test('keeps poll controls mapped when a published message cannot be deleted', async () => {
+        const message = { id: 'message1', delete: jest.fn().mockRejectedValue(new Error('missing permission')) };
+        const interaction = {
+            guildId: 'guild1', channelId: 'channel1', user: { id: 'creator' },
+            channel: { send: jest.fn().mockResolvedValue(message) }, deferReply: jest.fn().mockResolvedValue({})
+        };
+        const update = database.sqlite.prepare("UPDATE community_polls SET message_id = ?, status = 'active' WHERE id = ?");
+        const run = update.run.bind(update);
+        jest.spyOn(update, 'run').mockImplementationOnce(() => { throw new Error('database busy'); }).mockImplementation(run);
+        jest.spyOn(database.sqlite, 'prepare').mockImplementation(sql => sql.startsWith('UPDATE community_polls SET message_id') ? update : database.sqlite.constructor.prototype.prepare.call(database.sqlite, sql));
+
+        await expect(service.createPoll(interaction, 'Question?', ['Yes', 'No'], null)).rejects.toThrow('database busy');
+        expect(database.sqlite.prepare('SELECT message_id, status FROM community_polls').get())
+            .toEqual({ message_id: 'message1', status: 'active' });
+    });
+
+    test('expires interrupted pending publications on startup', async () => {
+        service.setConfessionConfig('guild1', 'channel1');
+        database.sqlite.prepare(`INSERT INTO confessions (guild_id, number, channel_id, author_id, content, created_at)
+            VALUES ('guild1',1,'channel1','author1','private',1)`).run();
+        database.sqlite.prepare("UPDATE confession_configs SET next_number = 2 WHERE guild_id = 'guild1'").run();
+        database.sqlite.prepare(`INSERT INTO community_polls (guild_id, channel_id, creator_id, question, options_json, created_at)
+            VALUES ('guild1','channel1','creator','Question?','[\"Yes\",\"No\"]',1)`).run();
+
+        await service.reconcile();
+
+        expect(database.sqlite.prepare("SELECT COUNT(*) count FROM confessions WHERE status = 'pending'").get().count).toBe(0);
+        expect(database.sqlite.prepare("SELECT COUNT(*) count FROM community_polls WHERE status = 'pending'").get().count).toBe(0);
+        expect(service.confessionConfig('guild1').next_number).toBe(1);
     });
 
     test('does not accept votes or render controls after a poll starts ending', async () => {

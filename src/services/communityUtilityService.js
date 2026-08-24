@@ -100,7 +100,14 @@ class CommunityUtilityService {
     }
 
     async reconcile() {
-        this.sqlite.prepare("UPDATE community_polls SET status = 'active' WHERE status = 'ending'").run();
+        this.sqlite.transaction(() => {
+            this.sqlite.prepare("DELETE FROM community_polls WHERE status = 'pending'").run();
+            this.sqlite.prepare("DELETE FROM confessions WHERE status = 'pending'").run();
+            this.sqlite.prepare(`UPDATE confession_configs SET next_number = COALESCE(
+                (SELECT MAX(number) + 1 FROM confessions WHERE confessions.guild_id = confession_configs.guild_id), 1
+            ), updated_at = ?`).run(this.now());
+            this.sqlite.prepare("UPDATE community_polls SET status = 'active' WHERE status = 'ending'").run();
+        }).immediate();
         await this.runDuePolls();
     }
 
@@ -288,7 +295,11 @@ class CommunityUtilityService {
             this.sqlite.prepare("UPDATE confessions SET message_id = ?, status = 'published' WHERE id = ?").run(message.id, row.id);
             for (const emoji of [config.up_emoji, config.down_emoji]) if (emoji !== 'none') await message.react(emoji).catch(() => null);
         } catch (error) {
-            if (message) await message.delete().catch(() => null);
+            const removed = !message || await message.delete().then(() => true, () => false);
+            if (!removed) {
+                this.sqlite.prepare("UPDATE confessions SET message_id = ?, status = 'published' WHERE id = ?").run(message.id, row.id);
+                throw error;
+            }
             this.sqlite.transaction(() => {
                 this.sqlite.prepare('DELETE FROM confessions WHERE id = ?').run(row.id);
                 this.sqlite.prepare('UPDATE confession_configs SET next_number = next_number - 1 WHERE guild_id = ? AND next_number = ?')
@@ -384,7 +395,11 @@ class CommunityUtilityService {
             message = await interaction.channel.send(this.pollPayload({ ...poll, status: 'active' }));
             this.sqlite.prepare("UPDATE community_polls SET message_id = ?, status = 'active' WHERE id = ?").run(message.id, poll.id);
         } catch (error) {
-            if (message) await message.delete().catch(() => null);
+            const removed = !message || await message.delete().then(() => true, () => false);
+            if (!removed) {
+                this.sqlite.prepare("UPDATE community_polls SET message_id = ?, status = 'active' WHERE id = ?").run(message.id, poll.id);
+                throw error;
+            }
             this.sqlite.prepare('DELETE FROM community_polls WHERE id = ?').run(poll.id);
             throw error;
         }
