@@ -55,7 +55,8 @@ the media layer does not acquire channel permissions or fetch arbitrary IDs.
   the limit is rejected before download. A consumer that cannot determine an
   audio/video duration must not pass it to a processor requiring that bound.
 - Supported image signatures: PNG, JPEG, GIF87a/GIF89a, and WebP. Declared MIME,
-  allowed format, and detected bytes must agree.
+  allowed format, and detected bytes must agree. Complete decoder validity is
+  processor-specific; the processor must still fail closed on malformed data.
 - Remote sources must be credential-free HTTP(S), resolve only to public IP
   addresses, stay pinned to a validated address for the request, complete in 10
   seconds, return a 2xx response, and must not redirect.
@@ -65,7 +66,10 @@ the media layer does not acquire channel permissions or fetch arbitrary IDs.
   At most four active/queued jobs are retained; excess work fails immediately.
   A configured value may lower the slot count to disable processing but cannot
   exceed one in the 1 vCPU/1 GB deployment profile. Each processor receives a
-  cancellation signal and has a 30-second default deadline.
+  cancellation signal and has a 30-second default deadline. A processor must
+  honor cancellation. A timeout is worker-fatal: ByteBot rejects the bounded
+  backlog and all later work until restart rather than starting a second task
+  beside a processor that did not stop.
 - Temporary processing uses a fresh operating-system temp directory and removes
   it in `finally`. Callers receive the validated buffer and metadata; commands
   never pass an untrusted path or filename to a processor.

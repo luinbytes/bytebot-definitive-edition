@@ -44,6 +44,9 @@ describe('media service', () => {
         await expect(service.image('http://127.0.0.1/image.png')).rejects.toThrow('public address');
         await expect(service.image('http://[::ffff:127.0.0.1]/image.png')).rejects.toThrow('public address');
         await expect(service.image('http://[0:0:0:0:0:0:0:1]/image.png')).rejects.toThrow('public address');
+        await expect(service.image('http://192.0.0.1/image.png')).rejects.toThrow('public address');
+        await expect(service.image('http://[2001:2::1]/image.png')).rejects.toThrow('public address');
+        await expect(service.image('http://[2001:10::1]/image.png')).rejects.toThrow('public address');
 
         fetch.mockResolvedValueOnce({
             statusCode: 200,
@@ -132,16 +135,44 @@ describe('media service', () => {
         expect(fs.existsSync(secondDirectory)).toBe(false);
     });
 
+    test('processImage applies the queue and passes validated media, workspace, and signal', async () => {
+        const { MediaService } = require('../src/services/mediaService');
+        const service = new MediaService({
+            lookup: async () => [{ address: '93.184.216.34', family: 4 }],
+            fetch: async () => ({
+                statusCode: 200,
+                headers: { 'content-type': 'image/png', 'content-length': String(VALID_PNG.length) },
+                async *[Symbol.asyncIterator]() { yield VALID_PNG; }
+            })
+        });
+        let workspace;
+        await expect(service.processImage('https://example.com/image.png', (image, directory, signal) => {
+            workspace = directory;
+            expect(image).toMatchObject({ format: 'png', width: 1, height: 1 });
+            expect(fs.existsSync(directory)).toBe(true);
+            expect(signal.aborted).toBe(false);
+            return 'processed';
+        })).resolves.toBe('processed');
+        expect(fs.existsSync(workspace)).toBe(false);
+    });
+
     test('rejects excess queued work and aborts a timed-out processor', async () => {
         const { ProcessingQueue } = require('../src/services/mediaService');
-        const queue = new ProcessingQueue(1, { maxPending: 1, timeoutMs: 1000 });
+        const queue = new ProcessingQueue(1, { maxPending: 2, timeoutMs: 1000 });
         let observedSignal;
         const blocked = queue.run((_directory, signal) => {
             observedSignal = signal;
-            return new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+            return new Promise(resolve => setTimeout(resolve, 1100));
         });
+        const queuedTask = jest.fn();
+        const queued = queue.run(queuedTask);
         await expect(queue.run(() => {})).rejects.toThrow('full');
-        await expect(blocked).rejects.toThrow('timed out');
+        const [blockedResult, queuedResult] = await Promise.allSettled([blocked, queued]);
+        expect(blockedResult.reason.message).toContain('restart ByteBot');
+        expect(queuedResult.reason.message).toContain('restart ByteBot');
+        await expect(queue.run(() => {})).rejects.toThrow('restart ByteBot');
+        expect(queuedTask).not.toHaveBeenCalled();
         expect(observedSignal.aborted).toBe(true);
+        await new Promise(resolve => setTimeout(resolve, 150));
     });
 });

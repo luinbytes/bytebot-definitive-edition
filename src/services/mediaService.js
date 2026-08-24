@@ -25,8 +25,7 @@ function privateAddress(address) {
             || (a === 100 && b >= 64 && b <= 127)
             || (a === 169 && b === 254)
             || (a === 172 && b >= 16 && b <= 31)
-            || (a === 192 && b === 168)
-            || (a === 192 && b === 0 && (c === 0 || c === 2))
+            || (a === 192 && (b === 0 || b === 168 || (b === 88 && c === 99)))
             || (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100)))
             || (a === 203 && b === 0 && c === 113);
     }
@@ -45,8 +44,15 @@ function privateAddress(address) {
         || (words.slice(0, 7).every(word => word === 0) && words[7] === 1)
         || (words[0] & 0xFE00) === 0xFC00
         || (words[0] & 0xFFC0) === 0xFE80
+        || (words[0] & 0xFFC0) === 0xFEC0
         || (words[0] & 0xFF00) === 0xFF00
-        || (words[0] === 0x2001 && words[1] === 0x0DB8);
+        || (words[0] === 0x0064 && words[1] === 0xFF9B && words[2] === 1)
+        || (words[0] === 0x0100 && words.slice(1, 4).every(word => word === 0))
+        || (words[0] === 0x2001 && words[1] === 2 && words[2] === 0)
+        || (words[0] === 0x2001 && (words[1] & 0xFFF0) === 0x0010)
+        || (words[0] === 0x2001 && words[1] === 0x0DB8)
+        || words[0] === 0x2002
+        || (words[0] === 0x3FFF && (words[1] & 0xF000) === 0);
 }
 
 function pinnedFetch(url, { address, family, signal }) {
@@ -292,11 +298,14 @@ class ProcessingQueue {
         this.maxPending = maxPending;
         this.timeoutMs = timeoutMs;
         this.pending = 0;
+        this.failed = null;
+        this.waiting = new Set();
         this.tail = Promise.resolve();
     }
 
     run(task) {
         if (!this.enabled) return Promise.reject(new Error('Media processing is disabled.'));
+        if (this.failed) return Promise.reject(this.failed);
         if (this.pending >= this.maxPending) return Promise.reject(new Error('Media processing queue is full.'));
         this.pending++;
         let resolveResult;
@@ -306,15 +315,21 @@ class ProcessingQueue {
             resolveResult = resolve;
             rejectResult = reject;
         });
+        const fail = error => {
+            if (!settled) {
+                settled = true;
+                rejectResult(error);
+            }
+        };
+        this.waiting.add(fail);
         const completion = this.tail.then(async () => {
+            if (this.failed) return fail(this.failed);
             const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'bytebot-media-'));
             const controller = new AbortController();
             const timeout = setTimeout(() => {
                 controller.abort();
-                if (!settled) {
-                    settled = true;
-                    rejectResult(new Error('Media processing timed out.'));
-                }
+                this.failed = new Error('Media worker is unavailable after a processing timeout; restart ByteBot.');
+                for (const reject of this.waiting) reject(this.failed);
             }, this.timeoutMs);
             timeout.unref?.();
             let value;
@@ -333,11 +348,11 @@ class ProcessingQueue {
                 else resolveResult(value);
             }
         }).catch(error => {
-            if (!settled) {
-                settled = true;
-                rejectResult(error);
-            }
-        }).finally(() => { this.pending--; });
+            fail(error);
+        }).finally(() => {
+            this.waiting.delete(fail);
+            this.pending--;
+        });
         this.tail = completion.catch(() => {});
         return result;
     }
