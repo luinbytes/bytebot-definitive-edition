@@ -103,6 +103,29 @@ function renderNow(account, track) {
     })[key]).slice(0, 4000);
 }
 
+function reaction(value, client) {
+    value = String(value || '').trim();
+    const custom = /^<a?:[A-Za-z0-9_]{2,32}:(\d{17,20})>$/.exec(value);
+    if (custom) {
+        if (!client.emojis?.cache?.has(custom[1])) throw new Error(`ByteBot cannot access the custom emoji ${value}.`);
+        return value;
+    }
+    if (value.length > 32 || /\s|[A-Za-z0-9]/.test(value)
+        || !/[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Presentation}]/u.test(value)) {
+        throw new Error(`Invalid reaction emoji: ${value || '(empty)'}.`);
+    }
+    return value;
+}
+
+async function addReactions(message, account) {
+    if (!message?.react || !account.reactions) return;
+    let reactions;
+    try { reactions = JSON.parse(account.reactions); } catch { return; }
+    for (const value of [reactions.up, reactions.down].filter(Boolean)) {
+        try { await message.react(value); } catch { /* reactions are presentation-only */ }
+    }
+}
+
 async function defer(interaction, privateReply) {
     if (!interaction.deferred && !interaction.replied) {
         await interaction.deferReply({ flags: privateReply ? [MessageFlags.Ephemeral] : [] });
@@ -129,7 +152,9 @@ module.exports = {
             if (!track) throw new Error('No recent Last.fm track found.');
             const card = embed(track.nowPlaying ? 'Now playing' : 'Last played', renderNow(selected.account, track));
             if (track.image) card.setThumbnail(track.image);
-            return interaction.editReply({ embeds: [card], allowedMentions: { parse: [] } });
+            const message = await interaction.editReply({ embeds: [card], allowedMentions: { parse: [] } });
+            await addReactions(message, selected.account);
+            return message;
         }
 
         if (group === 'account') {
@@ -217,7 +242,10 @@ module.exports = {
             return interaction.editReply({ content: 'Copied that member\'s Last.fm presentation.' });
         }
         if (action === 'reactions') {
-            const value = JSON.stringify({ up: interaction.options.getString('up'), down: interaction.options.getString('down') });
+            const value = JSON.stringify({
+                up: reaction(interaction.options.getString('up'), client),
+                down: reaction(interaction.options.getString('down'), client)
+            });
             service.setCustomization(interaction.user.id, 'reactions', value);
             return interaction.editReply({ content: 'Updated your Last.fm reactions.' });
         }

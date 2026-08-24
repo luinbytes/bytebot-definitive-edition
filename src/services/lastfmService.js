@@ -5,7 +5,7 @@ const { MediaService } = require('./mediaService');
 const API_URL = 'https://ws.audioscrobbler.com/2.0/';
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const METHODS = new Set([
-    'album.getInfo', 'artist.getInfo', 'auth.getSession', 'library.getArtists',
+    'album.getInfo', 'artist.getInfo', 'library.getArtists',
     'user.getInfo', 'user.getRecentTracks', 'user.getTopAlbums',
     'user.getTopArtists', 'user.getTopTracks'
 ]);
@@ -66,6 +66,30 @@ function normalizeItem(item, kind) {
     };
 }
 
+async function boundedText(response) {
+    const length = Number(response.headers?.get?.('content-length') || 0);
+    if (!Number.isFinite(length) || length < 0 || length > MAX_RESPONSE_BYTES) throw new Error('Last.fm response is too large.');
+    if (!response.body?.getReader) {
+        const raw = await response.text();
+        if (Buffer.byteLength(raw) > MAX_RESPONSE_BYTES) throw new Error('Last.fm response is too large.');
+        return raw;
+    }
+    const reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.length;
+        if (total > MAX_RESPONSE_BYTES) {
+            await reader.cancel();
+            throw new Error('Last.fm response is too large.');
+        }
+        chunks.push(Buffer.from(value));
+    }
+    return Buffer.concat(chunks, total).toString('utf8');
+}
+
 class LastfmService {
     constructor(options = {}) {
         this.sqlite = options.sqlite;
@@ -91,18 +115,20 @@ class LastfmService {
         if (!options.fresh && cached?.expiresAt > this.now()) return cached.value;
         const response = await this.fetch(`${API_URL}?${query}`, { signal: AbortSignal.timeout(10000) });
         if (!response?.ok) throw new Error('Last.fm request failed.');
-        const length = Number(response.headers?.get?.('content-length') || 0);
-        if (length > MAX_RESPONSE_BYTES) throw new Error('Last.fm response is too large.');
-        const raw = await response.text();
-        if (Buffer.byteLength(raw) > MAX_RESPONSE_BYTES) throw new Error('Last.fm response is too large.');
+        const contentType = response.headers?.get?.('content-type');
+        if (contentType && !/^application\/json\b/i.test(contentType)) throw new Error('Last.fm returned a non-JSON response.');
+        const raw = await boundedText(response);
         let payload;
         try { payload = JSON.parse(raw); } catch { throw new Error('Last.fm returned invalid JSON.'); }
         if (!payload || Array.isArray(payload) || typeof payload !== 'object') throw new Error('Last.fm returned a malformed payload.');
         if (payload.error) throw new Error(`Last.fm: ${String(payload.message || 'request failed').slice(0, 200)}`);
-        const maxAge = /(?:^|,)\s*max-age=(\d+)/i.exec(response.headers?.get?.('cache-control') || '');
+        const cacheControl = response.headers?.get?.('cache-control') || '';
+        const maxAge = /(?:^|,)\s*max-age=(\d+)/i.exec(cacheControl);
         const ttl = Math.min(60000, Math.max(1000, Number(maxAge?.[1] || 60) * 1000));
-        this.cache.set(key, { value: payload, expiresAt: this.now() + ttl });
-        while (this.cache.size > 256) this.cache.delete(this.cache.keys().next().value);
+        if (!/\b(?:no-store|private)\b/i.test(cacheControl) && maxAge?.[1] !== '0') {
+            this.cache.set(key, { value: payload, expiresAt: this.now() + ttl });
+            while (this.cache.size > 256) this.cache.delete(this.cache.keys().next().value);
+        }
         return payload;
     }
 
@@ -326,8 +352,10 @@ class LastfmService {
         const apiSig = crypto.createHash('md5').update(Object.keys(signed).sort().map(key => `${key}${signed[key]}`).join('') + this.sharedSecret).digest('hex');
         const body = new URLSearchParams({ ...signed, api_sig: apiSig, format: 'json' });
         const response = await this.fetch(API_URL, { method: 'POST', body, signal: AbortSignal.timeout(10000) });
-        const raw = await response.text();
-        if (!response.ok || Buffer.byteLength(raw) > MAX_RESPONSE_BYTES) throw new Error('Last.fm OAuth exchange failed.');
+        if (!response.ok) throw new Error('Last.fm OAuth exchange failed.');
+        const contentType = response.headers?.get?.('content-type');
+        if (contentType && !/^application\/json\b/i.test(contentType)) throw new Error('Last.fm OAuth returned a non-JSON response.');
+        const raw = await boundedText(response);
         let payload;
         try { payload = JSON.parse(raw); } catch { throw new Error('Last.fm OAuth returned invalid JSON.'); }
         if (payload.error || !payload.session?.name || !payload.session?.key) throw new Error(`Last.fm: ${payload.message || 'OAuth exchange failed'}`);
@@ -344,7 +372,7 @@ class LastfmService {
         const items = await this.top(kind, username, requestedPeriod, size * size);
         return this.media.queue.run(async (_directory, signal) => {
             const tileSize = Math.floor(2000 / size);
-            const placeholder = await sharp({ create: { width: tileSize, height: tileSize, channels: 3, background: '#181818' } }).png().toBuffer();
+            const placeholder = await sharp({ create: { width: tileSize, height: tileSize, channels: 3, background: '#181818' } }).timeout({ seconds: 29 }).png().toBuffer();
             const tiles = [];
             for (const item of items) {
                 signal.throwIfAborted();
@@ -352,10 +380,11 @@ class LastfmService {
                 if (item.image) {
                     try { input = (await this.media.image(item.image, { maxBytes: 2 * 1024 * 1024, maxPixels: 4 * 1024 * 1024 })).buffer; } catch { /* placeholder */ }
                 }
-                tiles.push(await sharp(input).resize(tileSize, tileSize, { fit: 'cover' }).png().toBuffer());
+                tiles.push(await sharp(input).timeout({ seconds: 29 }).resize(tileSize, tileSize, { fit: 'cover' }).png().toBuffer());
             }
             while (tiles.length < size * size) tiles.push(placeholder);
             const buffer = await sharp({ create: { width: tileSize * size, height: tileSize * size, channels: 3, background: '#181818' } })
+                .timeout({ seconds: 29 })
                 .composite(tiles.map((input, index) => ({ input, left: index % size * tileSize, top: Math.floor(index / size) * tileSize })))
                 .png({ compressionLevel: 9 }).toBuffer();
             if (buffer.length > maxBytes) throw new Error('Last.fm collage exceeds the Discord attachment limit.');

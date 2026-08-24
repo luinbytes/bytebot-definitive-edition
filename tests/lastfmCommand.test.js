@@ -45,4 +45,42 @@ describe('/lastfm command', () => {
         expect(listening.deferReply).toHaveBeenCalledWith({ flags: [] });
         expect(listening.editReply).toHaveBeenCalledWith(expect.objectContaining({ embeds: expect.any(Array) }));
     });
+
+    test('rejects inaccessible custom reaction emoji', async () => {
+        const command = require('../src/commands/lastfm/lastfm');
+        const interaction = {
+            user: { id: 'u1' }, deferred: false,
+            options: {
+                getSubcommandGroup: () => 'customize', getSubcommand: () => 'reactions',
+                getString: name => name === 'up' ? '<:up:123456789012345678>' : '👎'
+            },
+            deferReply: jest.fn(async function () { this.deferred = true; }), editReply: jest.fn()
+        };
+        const service = { requireAccount: () => ({ username: 'alice' }), setCustomization: jest.fn() };
+        await expect(command.execute(interaction, { lastfmService: service, emojis: { cache: new Map() } }))
+            .rejects.toThrow('cannot access');
+        expect(service.setCustomization).not.toHaveBeenCalled();
+    });
+
+    test('denies a collage without Attach Files before provider work', async () => {
+        const { PermissionFlagsBits } = require('discord.js');
+        const interactionCreate = require('../src/events/interactionCreate');
+        const command = require('../src/commands/lastfm/lastfm');
+        const execute = jest.spyOn(command, 'execute');
+        const interaction = {
+            id: 'lastfm-collage-denial', commandName: 'lastfm', guildId: 'g1', channel: {},
+            guild: { id: 'g1', members: { me: { permissionsIn: () => ({ has: permission => permission !== PermissionFlagsBits.AttachFiles }) } } },
+            user: { id: 'u1' }, member: { permissions: { has: () => false }, roles: { cache: new Map() } },
+            options: { getSubcommandGroup: () => 'charts', getSubcommand: () => 'collage' },
+            isAutocomplete: () => false, isButton: () => false, isAnySelectMenu: () => false,
+            isModalSubmit: () => false, isUserContextMenuCommand: () => false,
+            isMessageContextMenuCommand: () => false, isChatInputCommand: () => true,
+            reply: jest.fn(), deferReply: jest.fn()
+        };
+        await interactionCreate.execute(interaction, { commands: new Map([['lastfm', command]]), cooldowns: new Map() });
+        expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Attach Files') }));
+        expect(interaction.deferReply).not.toHaveBeenCalled();
+        expect(execute).not.toHaveBeenCalled();
+        execute.mockRestore();
+    });
 });

@@ -17,6 +17,7 @@ function schema(sqlite) {
 }
 
 function response(body, headers = {}) {
+    headers['content-type'] ??= 'application/json';
     return {
         ok: true,
         headers: { get: name => headers[name.toLowerCase()] || null },
