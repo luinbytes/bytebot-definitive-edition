@@ -159,7 +159,7 @@ Exact nested options:
 | `/economy rob` | `member` required user | “Rob another user” and self/bot/target checks require a target; no other option is evidenced. |
 | `/economy leaderboard` | none | No filter, page, or scope option is evidenced; render a bounded first page with deterministic pagination only if needed. |
 | `/economy gang create` | `name` required string, 1–5 alphanumeric characters | Registry requires at most five alphanumeric characters. |
-| `/economy gang disband`, `leave`, `transfer` | `transfer.member` required user only | Disband/leave have no evidenced option; transfer requires a target member. |
+| `/economy gang disband`, `leave` | none; `/economy gang transfer` has required `member` user | Disband/leave have no evidenced option; transfer requires a target member. |
 | `/economy gang info` | none | Show the invoking member's gang; a name lookup is not added because its option is unproven. |
 | `/economy gang invite`, `promote` | `member` required user | Both registry descriptions operate on a target user. |
 | `/economy gang setbanner` | `url` required string, HTTPS image URL | Registry requires a valid image URL; do not fetch or proxy it. |
