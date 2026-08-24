@@ -277,7 +277,9 @@ describe('Pagination Utility', () => {
             await mockCollector.listeners.collect(mockButtonInteraction);
 
             expect(renderPage).toHaveBeenCalledWith(1); // Should render page 1
-            expect(mockButtonInteraction.update).toHaveBeenCalled();
+            expect(mockButtonInteraction.update).toHaveBeenCalledWith(expect.objectContaining({
+                allowedMentions: { parse: [] }
+            }));
         });
 
         test('should navigate to previous page', async () => {

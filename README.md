@@ -15,6 +15,7 @@ A highly modular, scalable, and future-proof Discord bot boilerplate built with 
 -   **Rich Content Platform**: Saved embeds, Components V2 layouts, custom responses, global tags, durable pagination, managed webhooks, and server theme colors.
 -   **Server Portability and Presentation**: Versioned guild backups, per-server ByteBot profiles, opt-in discovery listings, and range-aware server cards under `/server`.
 -   **Self-hosted Music**: Bounded operator-owned playback, queues, DJ controls, presets, and curated autoplay under `/music`.
+-   **Information and Lookups**: Discord-native profiles, assets, roles, invites, permissions, and observed name history under `/me` and `/server`, plus bounded web tools under `/lookup`.
 
 ## Project Structure
 
@@ -86,6 +87,8 @@ Moderators use `/mod` for member actions, guild-local cases and history, invoke 
 Server owners and administrators use `/server backup`, `/server customize`, `/server discovery`, and `/server stats` for portability and public presentation. See [`docs/features/server-presentation.md`](docs/features/server-presentation.md).
 
 Operators can enable lawful local voice playback with `MUSIC_LIBRARY_PATH`; server managers configure DJ and autoplay policy under `/music settings`. See [`docs/features/music-playback.md`](docs/features/music-playback.md).
+
+Members use `/me`, `/server`, and `/lookup` for the public information and utility family. Weather, definitions, and QR codes use fixed public providers; translation and website screenshots require the optional provider settings documented in [`.env.example`](.env.example). See [`docs/features/information-lookups.md`](docs/features/information-lookups.md).
 
 ### 4. Visual Consistency & Branding
 Always use the `src/utils/embeds.js` utility for bot responses to maintain the "ByteBot Purple" theme.

@@ -13,6 +13,7 @@ const {
 const { addLifecycleGroups, executeLifecycle } = require('../../utils/lifecycleMessageCommand');
 const { addBackupGroup, executeBackup } = require('../../utils/serverBackupCommand');
 const { addPresentationGroups, executeCustomize, executeDiscovery } = require('../../utils/serverPresentationCommand');
+const { executeServerLookup } = require('../../utils/informationCommand');
 
 const MODULE_CHOICES = MODULES.map(value => ({ name: value, value }));
 const PUNISHMENT_CHOICES = PUNISHMENTS.map(value => ({ name: value, value }));
@@ -219,12 +220,27 @@ const serverBuilder = new SlashCommandBuilder()
         .setName('server')
         .setDescription('Server information, setup, and community systems')
         .setDMPermission(false)
-        .addSubcommand(sub => sub.setName('info').setDescription('View server information'))
+        .addSubcommand(sub => sub.setName('info').setDescription('View server information')
+            .addStringOption(opt => opt.setName('server').setDescription('Server ID, invite, or vanity URL').setMaxLength(2048)))
         .addSubcommand(sub => sub
             .setName('stats')
             .setDescription('View server statistics')
             .addBooleanOption(opt => opt.setName('private').setDescription('Show only to you'))
             .addIntegerOption(opt => opt.setName('days').setDescription('Analytics range in days').setMinValue(1).setMaxValue(1095)))
+        .addSubcommandGroup(group => group.setName('role').setDescription('Role information')
+            .addSubcommand(sub => sub.setName('info').setDescription('View role details')
+                .addRoleOption(opt => opt.setName('role').setDescription('Role to view')))
+            .addSubcommand(sub => sub.setName('members').setDescription('List members in a role')
+                .addRoleOption(opt => opt.setName('role').setDescription('Role to view'))))
+        .addSubcommandGroup(group => group.setName('invite').setDescription('Bot and server invite information')
+            .addSubcommand(sub => sub.setName('bot').setDescription('Invite ByteBot to a server'))
+            .addSubcommand(sub => sub.setName('info').setDescription('View Discord invite information')
+                .addStringOption(opt => opt.setName('invite').setDescription('Invite code or URL').setRequired(true).setMaxLength(2048))))
+        .addSubcommandGroup(group => group.setName('asset').setDescription('Server image assets')
+            .addSubcommand(sub => sub.setName('icon').setDescription('View a server icon')
+                .addStringOption(opt => opt.setName('server').setDescription('Server ID, invite, or vanity URL').setMaxLength(2048)))
+            .addSubcommand(sub => sub.setName('banner').setDescription('View a server banner')
+                .addStringOption(opt => opt.setName('server').setDescription('Server ID, invite, or vanity URL').setMaxLength(2048))))
         .addSubcommandGroup(group => group
             .setName('config')
             .setDescription('Server configuration')
@@ -316,6 +332,8 @@ const serverBuilder = new SlashCommandBuilder()
         .addSubcommandGroup(group => group
             .setName('permissions')
             .setDescription('Command access and protected targets')
+            .addSubcommand(sub => sub.setName('view').setDescription('View a member Discord permissions')
+                .addUserOption(opt => opt.setName('user').setDescription('Member to view')))
             .addSubcommand(sub => sub.setName('add').setDescription('Allow a role to use a command').addStringOption(opt => opt.setName('command').setDescription('Command path').setRequired(true).setAutocomplete(true)).addRoleOption(opt => opt.setName('role').setDescription('Allowed role').setRequired(true)))
             .addSubcommand(sub => sub.setName('remove').setDescription('Remove a command role').addStringOption(opt => opt.setName('command').setDescription('Command path').setRequired(true).setAutocomplete(true)).addRoleOption(opt => opt.setName('role').setDescription('Allowed role').setRequired(true)))
             .addSubcommand(sub => sub.setName('list').setDescription('List command role permissions'))
@@ -449,6 +467,11 @@ module.exports = {
     },
 
     async execute(interaction, client) {
+        if (['role', 'invite', 'asset'].includes(interaction.options.getSubcommandGroup(false))
+            || (interaction.options.getSubcommandGroup(false) === 'permissions'
+                && interaction.options.getSubcommand(false) === 'view')) {
+            return executeServerLookup(interaction, client);
+        }
         if (interaction.options.getSubcommandGroup(false) === 'backup') return executeBackup(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'customize') return executeCustomize(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'discovery') return executeDiscovery(interaction);

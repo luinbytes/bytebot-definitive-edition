@@ -79,7 +79,8 @@ async function handlePaginationInteraction({ message, interaction, renderPage, t
 
         await buttonInteraction.update({
             embeds: [newEmbed],
-            components: [newButtons]
+            components: [newButtons],
+            allowedMentions: { parse: [] }
         });
     });
 
@@ -125,8 +126,8 @@ async function sendPaginatedMessage({ interaction, renderPage, totalPages, custo
     const components = totalPages > 1 ? [createPaginationButtons(initialPage, totalPages, customIdPrefix)] : [];
 
     const message = deferred
-        ? await interaction.editReply({ embeds: [firstEmbed], components })
-        : await interaction.reply({ embeds: [firstEmbed], components });
+        ? await interaction.editReply({ embeds: [firstEmbed], components, allowedMentions: { parse: [] } })
+        : await interaction.reply({ embeds: [firstEmbed], components, allowedMentions: { parse: [] } });
 
     // Set up collector if multiple pages
     if (totalPages > 1) {
