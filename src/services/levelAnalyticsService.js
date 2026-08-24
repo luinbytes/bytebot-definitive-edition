@@ -11,8 +11,9 @@ function roleIds(member) {
 }
 
 class LevelAnalyticsService {
-    constructor({ sqlite, now = Date.now }) {
+    constructor({ sqlite, client = null, now = Date.now }) {
         this.sqlite = sqlite;
+        this.client = client;
         this.now = now;
     }
 
@@ -444,6 +445,33 @@ class LevelAnalyticsService {
         return Boolean(add.length || remove.length);
     }
 
+    async announceLevel(message, result) {
+        if (!result?.accepted || result.level <= result.previousLevel) return false;
+        const config = this.sqlite.prepare(`SELECT * FROM level_configs WHERE guild_id = ?`).get(message.guild.id);
+        if (!config?.message_enabled || !config.award_channel_id || !config.award_message
+            || !this.client?.richContentService) return false;
+        const row = this.memberRow(message.guild.id, message.author.id);
+        const payload = this.client.richContentService.renderLevel(config.award_message, {
+            guild: message.guild, member: message.member, user: message.author,
+            level: {
+                current: row.level,
+                next: Math.min(MAX_LEVEL, row.level + 1),
+                rank: this.memberRank(message.guild.id, row),
+                xp: row.xp,
+                nextXp: row.level >= MAX_LEVEL ? row.xp : 100 * (row.level + 1) ** 2
+            }
+        });
+        if (config.dm_enabled) {
+            await message.member.send(payload);
+            return true;
+        }
+        const channel = message.guild.channels.cache.get(config.award_channel_id)
+            || await message.guild.channels.fetch(config.award_channel_id).catch(() => null);
+        if (!channel?.send) throw new Error('The configured level-up channel is unavailable.');
+        await channel.send(payload);
+        return true;
+    }
+
     async execute(interaction) {
         const group = interaction.options.getSubcommandGroup(false);
         const action = interaction.options.getSubcommand();
@@ -688,6 +716,45 @@ class LevelAnalyticsService {
             const mention = action === 'role' ? `<@&${target.id}>` : `<#${target.id}>`;
             return interaction.reply({
                 content: `${mention} is ${existing ? 'no longer' : 'now'} ignored for XP.`,
+                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+            });
+        }
+        if (group === 'message') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                throw new Error('You need Manage Server to configure level-up messages.');
+            }
+            const config = this.sqlite.prepare(`SELECT * FROM level_configs WHERE guild_id = ?`).get(interaction.guildId);
+            if (action === 'view') {
+                const content = !config?.message_enabled
+                    ? 'Level up messages are currently **disabled** for this server.'
+                    : `Current level up message:\n>>> ${config.award_message}`;
+                return interaction.reply({ content, flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] } });
+            }
+            if (action === 'disable') {
+                this.sqlite.prepare(`INSERT OR IGNORE INTO level_configs (guild_id, updated_at) VALUES (?, ?)`)
+                    .run(interaction.guildId, this.now());
+                this.sqlite.prepare(`UPDATE level_configs SET message_enabled = 0, updated_at = ? WHERE guild_id = ?`)
+                    .run(this.now(), interaction.guildId);
+                return interaction.reply({
+                    content: 'Level up messages are currently **disabled** for this server.',
+                    flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+                });
+            }
+            const script = interaction.options.getString('script', true);
+            if ([...script].length > 2000) throw new Error('Message must be 2000 characters or less.');
+            if (!this.client?.richContentService) throw new Error('Rich content service is unavailable.');
+            this.client.richContentService.renderLevel(script, {
+                guild: interaction.guild, member: interaction.member, user: interaction.user,
+                level: { current: 1, next: 2, rank: 1, xp: 100, nextXp: 400 }
+            });
+            this.sqlite.prepare(`
+                INSERT INTO level_configs (guild_id, award_message, message_enabled, updated_at)
+                VALUES (?, ?, 1, ?)
+                ON CONFLICT(guild_id) DO UPDATE SET award_message = excluded.award_message,
+                    message_enabled = 1, updated_at = excluded.updated_at
+            `).run(interaction.guildId, script, this.now());
+            return interaction.reply({
+                content: 'Custom level up message has been set.',
                 flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
             });
         }

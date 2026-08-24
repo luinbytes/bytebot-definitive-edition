@@ -159,7 +159,7 @@ module.exports = {
         try {
             const LevelAnalyticsService = require('../services/levelAnalyticsService');
             const { sqlite } = require('../database');
-            client.levelAnalyticsService = new LevelAnalyticsService({ sqlite });
+            client.levelAnalyticsService = new LevelAnalyticsService({ sqlite, client });
             const recovery = await client.levelAnalyticsService.reconcileStartup(client);
             recovery.failures.forEach(failure => logger.error(
                 `Level analytics baseline failed for ${failure.guildId}: ${failure.error}`

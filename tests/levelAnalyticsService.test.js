@@ -381,4 +381,39 @@ describe('LevelAnalyticsService', () => {
         await service.reconcileMemberRoles(member);
         expect(add).toHaveBeenCalledWith(['reward1'], 'Level reward reconciliation');
     });
+
+    test('configured level-up scripts are validated and delivered only on a level increase', async () => {
+        const payload = { content: '<@user1> reached 1', allowedMentions: { parse: [] } };
+        const send = jest.fn();
+        service.client = { richContentService: { renderLevel: jest.fn(() => payload) } };
+        const interaction = {
+            guildId: 'guild1', guild: { id: 'guild1' }, user: { id: 'admin1' },
+            member: { permissions: { has: permission => permission === PermissionFlagsBits.ManageGuild } },
+            options: {
+                getSubcommandGroup: () => 'message', getSubcommand: () => 'set',
+                getString: () => '{content: {user} reached {level}}'
+            },
+            reply: jest.fn()
+        };
+        await service.execute(interaction);
+        database.sqlite.prepare(`UPDATE level_configs SET award_channel_id = 'awards' WHERE guild_id = 'guild1'`).run();
+        database.sqlite.prepare(`
+            INSERT INTO member_levels
+                (guild_id, user_id, xp, level, text_xp, voice_xp, manual_adjustment,
+                 level_floor, message_count, voice_seconds, updated_at)
+            VALUES ('guild1', 'user1', 100, 1, 100, 0, 0, 0, 5, 0, 1)
+        `).run();
+        const message = {
+            author: { id: 'user1' }, member: { id: 'user1' },
+            guild: {
+                id: 'guild1', channels: {
+                    cache: new Map([['awards', { send }]]), fetch: jest.fn()
+                }
+            }
+        };
+        await service.announceLevel(message, { accepted: true, previousLevel: 0, level: 1 });
+        await service.announceLevel(message, { accepted: true, previousLevel: 1, level: 1 });
+        expect(send).toHaveBeenCalledTimes(1);
+        expect(send).toHaveBeenCalledWith(payload);
+    });
 });

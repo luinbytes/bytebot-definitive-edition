@@ -78,6 +78,7 @@ module.exports = {
                 if (levelActivity.roleReconcile) {
                     await client.levelAnalyticsService.reconcileMemberRoles(message.member);
                 }
+                await client.levelAnalyticsService.announceLevel(message, levelActivity);
             } catch (error) {
                 levelTrackingFailed = true;
                 logger.error('Level analytics tracking error:', error);
