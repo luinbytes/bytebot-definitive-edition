@@ -1146,6 +1146,36 @@ const guildBackups = sqliteTable('guild_backups', {
     ownerIdx: index('guild_backups_owner_idx').on(table.guildId, table.creatorId, table.createdAt)
 }));
 
+const customizationPresets = sqliteTable('customization_presets', {
+    id: text('id').primaryKey(),
+    guildId: text('guild_id').notNull(),
+    name: text('name').notNull(),
+    nickname: text('nickname'),
+    avatarUrl: text('avatar_url'),
+    bannerUrl: text('banner_url'),
+    bio: text('bio'),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    nameUnique: unique('customization_presets_name_unique').on(table.guildId, table.name),
+    guildIdx: index('customization_presets_guild_idx').on(table.guildId, table.createdAt)
+}));
+
+const serverListings = sqliteTable('server_listings', {
+    guildId: text('guild_id').primaryKey(),
+    name: text('name').notNull(),
+    iconUrl: text('icon_url'),
+    description: text('description'),
+    memberCount: integer('member_count').notNull(),
+    inviteUrl: text('invite_url').notNull(),
+    tags: text('tags').default('[]').notNull(),
+    bannerUrl: text('banner_url'),
+    bumpedAt: integer('bumped_at').notNull(),
+    updatedBy: text('updated_by').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({ bumpedIdx: index('server_listings_bumped_idx').on(table.bumpedAt) }));
+
 module.exports = {
     guilds,
     lifecycleMessages,
@@ -1238,5 +1268,7 @@ module.exports = {
     giveawayEntries,
     giveawayRounds,
     giveawayActions,
-    guildBackups
+    guildBackups,
+    customizationPresets,
+    serverListings
 };

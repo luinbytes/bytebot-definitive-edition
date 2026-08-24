@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, ChannelType, MessageFlags } = require('discord.js');
 const { db } = require('../../database');
 const { activityLogs, moderationCases, bytepods, bytepodVoiceStats } = require('../../database/schema');
-const { eq, sql, desc } = require('drizzle-orm');
+const { and, desc, eq, gte, sql } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
 
@@ -31,7 +31,12 @@ module.exports = {
                     option
                         .setName('private')
                         .setDescription('Make response visible only to you')
-                        .setRequired(false))),
+                        .setRequired(false))
+                .addIntegerOption(option => option
+                    .setName('days')
+                    .setDescription('Analytics range in days')
+                    .setMinValue(1)
+                    .setMaxValue(1095))),
 
     async execute(interaction) {
         const subcommand = interaction.options.getSubcommand();
@@ -48,6 +53,8 @@ module.exports = {
             });
 
             const guild = interaction.guild;
+            const days = interaction.options.getInteger('days') || 60;
+            const since = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
 
             // --- Gather Discord Data ---
             const totalMembers = guild.memberCount;
@@ -72,6 +79,15 @@ module.exports = {
 
             const totalCommands = commandStats?.totalCommands || 0;
             const uniqueUsers = commandStats?.uniqueUsers || 0;
+            const rangeStats = await db.select({
+                messages: sql`COALESCE(SUM(${activityLogs.messageCount}), 0)`,
+                reactions: sql`COALESCE(SUM(${activityLogs.reactionsGiven}), 0)`,
+                voiceMinutes: sql`COALESCE(SUM(${activityLogs.voiceMinutes}), 0)`,
+                commands: sql`COALESCE(SUM(${activityLogs.commandsRun}), 0)`
+            }).from(activityLogs).where(and(
+                eq(activityLogs.guildId, guild.id),
+                gte(activityLogs.activityDate, since)
+            )).get();
 
             // Moderation actions count
             const modStats = await db.select({
@@ -129,6 +145,8 @@ module.exports = {
                     { name: 'Commands Run', value: `${totalCommands.toLocaleString()} (${uniqueUsers} users)`, inline: true },
                     { name: 'Mod Actions', value: `${totalModActions}`, inline: true },
                     { name: 'Active BytePods', value: `${activePodCount}`, inline: true },
+
+                    { name: `Last ${days} Days`, value: `${Number(rangeStats?.messages || 0).toLocaleString()} messages · ${Number(rangeStats?.reactions || 0).toLocaleString()} reactions · ${Number(rangeStats?.voiceMinutes || 0).toLocaleString()} voice minutes · ${Number(rangeStats?.commands || 0).toLocaleString()} commands`, inline: false },
 
                     // Row 5: Voice Leaderboard
                     { name: 'Top Voice Users', value: topVoiceText, inline: false }

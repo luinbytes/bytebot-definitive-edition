@@ -12,6 +12,7 @@ const {
 } = require('../../utils/securityAutomationCommand');
 const { addLifecycleGroups, executeLifecycle } = require('../../utils/lifecycleMessageCommand');
 const { addBackupGroup, executeBackup } = require('../../utils/serverBackupCommand');
+const { addPresentationGroups, executeCustomize, executeDiscovery } = require('../../utils/serverPresentationCommand');
 
 const MODULE_CHOICES = MODULES.map(value => ({ name: value, value }));
 const PUNISHMENT_CHOICES = PUNISHMENTS.map(value => ({ name: value, value }));
@@ -222,7 +223,8 @@ const serverBuilder = new SlashCommandBuilder()
         .addSubcommand(sub => sub
             .setName('stats')
             .setDescription('View server statistics')
-            .addBooleanOption(opt => opt.setName('private').setDescription('Show only to you')))
+            .addBooleanOption(opt => opt.setName('private').setDescription('Show only to you'))
+            .addIntegerOption(opt => opt.setName('days').setDescription('Analytics range in days').setMinValue(1).setMaxValue(1095)))
         .addSubcommandGroup(group => group
             .setName('config')
             .setDescription('Server configuration')
@@ -427,6 +429,7 @@ addAntiraidGroup(serverBuilder);
 addAutomodGroup(serverBuilder);
 addLifecycleGroups(serverBuilder);
 addBackupGroup(serverBuilder);
+addPresentationGroups(serverBuilder);
 
 module.exports = {
     data: serverBuilder,
@@ -447,6 +450,8 @@ module.exports = {
 
     async execute(interaction, client) {
         if (interaction.options.getSubcommandGroup(false) === 'backup') return executeBackup(interaction);
+        if (interaction.options.getSubcommandGroup(false) === 'customize') return executeCustomize(interaction);
+        if (interaction.options.getSubcommandGroup(false) === 'discovery') return executeDiscovery(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'security') return executeSecurity(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'antiraid') return executeAntiraid(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'automod') return executeAutomod(interaction);

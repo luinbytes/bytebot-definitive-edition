@@ -70,6 +70,8 @@ describe('Intent command hubs', () => {
             'suggestion',
             'birthday',
             'backup',
+            'customize',
+            'discovery',
             'permissions',
             'achievement',
             'streak',
@@ -92,6 +94,15 @@ describe('Intent command hubs', () => {
         ]);
         expect(optionNames(findOption(command, 'backup').options.find(option => option.name === 'restore').options)).toEqual([
             'backup_id', 'mode', 'roles', 'channels', 'emojis', 'stickers', 'bytebot', 'confirm'
+        ]);
+        expect(optionNames(findOption(command, 'customize').options)).toEqual([
+            'name', 'avatar', 'banner', 'bio', 'reset', 'preset'
+        ]);
+        expect(optionNames(findOption(command, 'customize').options.find(option => option.name === 'preset').options)).toEqual([
+            'action', 'name_or_id', 'confirm'
+        ]);
+        expect(optionNames(findOption(command, 'discovery').options)).toEqual([
+            'publish', 'list', 'view', 'bump', 'remove'
         ]);
         expect(optionNames(findOption(command, 'permissions').options)).toEqual([
             'add',

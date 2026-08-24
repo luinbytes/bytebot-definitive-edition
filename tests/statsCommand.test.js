@@ -33,7 +33,10 @@ describe('/stats server', () => {
                 user_id TEXT NOT NULL,
                 guild_id TEXT NOT NULL,
                 activity_date TEXT NOT NULL,
+                message_count INTEGER DEFAULT 0 NOT NULL,
+                voice_minutes INTEGER DEFAULT 0 NOT NULL,
                 commands_run INTEGER DEFAULT 0 NOT NULL
+                ,reactions_given INTEGER DEFAULT 0 NOT NULL
             );
             CREATE TABLE moderation_cases (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,10 +65,12 @@ describe('/stats server', () => {
             INSERT INTO users (id, guild_id, commands_run) VALUES
                 ('user-1', 'guild-a', 9),
                 ('user-2', 'guild-b', 4);
-            INSERT INTO activity_logs (user_id, guild_id, activity_date, commands_run) VALUES
-                ('user-1', 'guild-a', '2026-07-30', 2),
-                ('user-2', 'guild-a', '2026-07-30', 1),
-                ('user-1', 'guild-b', '2026-07-30', 7);
+            INSERT INTO activity_logs
+                (user_id, guild_id, activity_date, message_count, voice_minutes, commands_run, reactions_given)
+            VALUES
+                ('user-1', 'guild-a', '2026-07-30', 12, 5, 2, 4),
+                ('user-2', 'guild-a', '2026-07-30', 8, 3, 1, 2),
+                ('user-1', 'guild-b', '2026-07-30', 99, 90, 7, 50);
         `);
         mockDb = drizzle(sqlite);
     });
@@ -81,7 +86,8 @@ describe('/stats server', () => {
         const interaction = {
             options: {
                 getSubcommand: () => 'server',
-                getBoolean: () => null
+                getBoolean: () => null,
+                getInteger: () => 60
             },
             guild: {
                 id: 'guild-a',
@@ -107,5 +113,7 @@ describe('/stats server', () => {
         const embed = editReply.mock.calls[0][0].embeds[0];
         const commandsField = embed.data.fields.find(field => field.name === 'Commands Run');
         expect(commandsField.value).toBe('3 (2 users)');
+        expect(embed.data.fields.find(field => field.name === 'Last 60 Days').value)
+            .toBe('20 messages · 6 reactions · 8 voice minutes · 3 commands');
     });
 });
