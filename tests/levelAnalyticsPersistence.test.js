@@ -60,4 +60,21 @@ describe('level and analytics persistence', () => {
             level_floor: 17
         });
     });
+
+    test('fresh storage exposes the approved level, analytics, and logging state', async () => {
+        database = require('../src/database');
+        await database.runMigrations();
+
+        const tables = database.sqlite.prepare(`
+            SELECT name FROM sqlite_master WHERE type = 'table'
+        `).all().map(row => row.name);
+
+        expect(tables).toEqual(expect.arrayContaining([
+            'level_configs', 'level_role_rewards', 'level_ignores', 'level_boosts',
+            'level_live_boards', 'level_rank_cards', 'server_daily_metrics',
+            'analytics_events', 'reaction_placements', 'level_voice_sessions',
+            'member_presence', 'event_log_channels', 'event_log_ignores',
+            'event_log_outbox'
+        ]));
+    });
 });
