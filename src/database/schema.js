@@ -1138,9 +1138,21 @@ const levelLiveBoards = sqliteTable('level_live_boards', {
     channelId: text('channel_id').notNull(),
     metric: text('metric').notNull(),
     messageId: text('message_id'),
+    createToken: text('create_token'),
     revision: integer('revision').default(0).notNull(),
     updatedAt: integer('updated_at').notNull()
 }, table => ({ pk: primaryKey({ columns: [table.guildId, table.channelId, table.metric] }) }));
+
+const levelRoleJobs = sqliteTable('level_role_jobs', {
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    attempts: integer('attempts').default(0).notNull(),
+    nextAttemptAt: integer('next_attempt_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.userId] }),
+    dueIdx: index('level_role_jobs_due_idx').on(table.nextAttemptAt)
+}));
 
 const levelRankCards = sqliteTable('level_rank_cards', {
     userId: text('user_id').primaryKey(),
@@ -1672,6 +1684,7 @@ module.exports = {
     levelIgnores,
     levelBoosts,
     levelLiveBoards,
+    levelRoleJobs,
     levelRankCards,
     serverDailyMetrics,
     analyticsEvents,

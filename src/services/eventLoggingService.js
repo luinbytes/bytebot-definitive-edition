@@ -18,7 +18,7 @@ class EventLoggingService {
         this.now = now;
         this.pending = new Map();
         this.confirmations = new Map();
-        this.sqlite.prepare(`UPDATE event_log_outbox SET status = 'pending' WHERE status = 'sending'`).run();
+        this.sqlite.prepare(`UPDATE event_log_outbox SET status = 'sent' WHERE status = 'sending'`).run();
     }
 
     module(value) {
@@ -115,8 +115,13 @@ class EventLoggingService {
                     }
                 }
                 const token = crypto.randomBytes(8).toString('hex');
+                const plan = this.sqlite.prepare(`
+                    SELECT module, channel_id FROM event_log_channels
+                    WHERE guild_id = ? ORDER BY module, channel_id
+                `).all(interaction.guildId);
                 this.confirmations.set(token, {
-                    guildId: interaction.guildId, actorId: interaction.user.id, expiresAt: this.now() + 10 * 60 * 1000
+                    guildId: interaction.guildId, actorId: interaction.user.id,
+                    plan, expiresAt: this.now() + 10 * 60 * 1000
                 });
                 return interaction.reply({
                     content: 'Remove all event log destinations from this server?',
@@ -185,7 +190,12 @@ class EventLoggingService {
             }
             await this.assertRbac(interaction, 'remove');
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) throw new Error('You need Manage Server.');
-            if (decision === 'confirm') this.sqlite.prepare(`DELETE FROM event_log_channels WHERE guild_id = ?`).run(interaction.guildId);
+            if (decision === 'confirm') this.sqlite.transaction(() => {
+                const remove = this.sqlite.prepare(`
+                    DELETE FROM event_log_channels WHERE guild_id = ? AND module = ? AND channel_id = ?
+                `);
+                for (const row of confirmation.plan) remove.run(interaction.guildId, row.module, row.channel_id);
+            })();
             return interaction.update({ content: decision === 'confirm' ? 'Removed all event log destinations.' : 'Removal cancelled.', components: [], allowedMentions: { parse: [] } });
         }
         const [, action, field, actorId] = interaction.customId.split(':');
@@ -251,7 +261,8 @@ class EventLoggingService {
         `).all(this.now(), limit);
         for (const row of rows) {
             const claimed = this.sqlite.prepare(`
-                UPDATE event_log_outbox SET status = 'sending' WHERE id = ? AND status = 'pending'
+                UPDATE event_log_outbox SET status = 'sending', attempts = attempts + 1
+                WHERE id = ? AND status = 'pending'
             `).run(row.id);
             if (!claimed.changes) continue;
             try {
@@ -260,11 +271,14 @@ class EventLoggingService {
                     || await guild?.channels.fetch(row.channel_id).catch(() => null);
                 if (!channel?.send) throw new Error('channel unavailable');
                 const payload = JSON.parse(row.payload);
+                const nonce = crypto.createHash('sha256')
+                    .update(`${row.guild_id}:${row.event_key}:${row.channel_id}`)
+                    .digest('hex').slice(0, 24);
                 await channel.send({
                     embeds: [new EmbedBuilder().setColor(payload.color).setTitle(payload.title).setDescription(payload.description).setTimestamp()],
-                    allowedMentions: { parse: [] }
+                    allowedMentions: { parse: [] }, nonce, enforceNonce: true
                 });
-                this.sqlite.prepare(`UPDATE event_log_outbox SET status = 'sent', attempts = attempts + 1 WHERE id = ?`).run(row.id);
+                this.sqlite.prepare(`UPDATE event_log_outbox SET status = 'sent' WHERE id = ?`).run(row.id);
             } catch {
                 const attempts = row.attempts + 1;
                 this.sqlite.prepare(`UPDATE event_log_outbox SET attempts = ?, status = ?, next_attempt_at = ? WHERE id = ?`)

@@ -142,6 +142,7 @@ class LevelAnalyticsService {
                     updated_at = ?
                 WHERE guild_id = ? AND user_id = ?
             `).run(xp, level, textXp, xpAwarded, now, now, guildId, userId);
+            if (level !== current.level) this.enqueueRoleReconcile(guildId, userId, now);
 
             return {
                 accepted: true,
@@ -417,7 +418,10 @@ class LevelAnalyticsService {
                                 voice_seconds = voice_seconds + ?, updated_at = ?
                             WHERE guild_id = ? AND user_id = ?
                         `).run(xp, level, voiceXp, seconds, now, guild.id, session.user_id);
-                        if (level !== member.level) roleReconcileUserIds.push(session.user_id);
+                        if (level !== member.level) {
+                            roleReconcileUserIds.push(session.user_id);
+                            this.enqueueRoleReconcile(guild.id, session.user_id, now);
+                        }
                     }
                 }
 
@@ -540,6 +544,10 @@ class LevelAnalyticsService {
         };
     }
 
+    liveBoardToken(guildId, channelId, metric) {
+        return crypto.createHash('sha256').update(`${guildId}:${channelId}:${metric}`).digest('hex').slice(0, 24);
+    }
+
     async refreshLiveBoards() {
         if (!this.client) return { updated: 0, failures: [] };
         let updated = 0;
@@ -551,11 +559,16 @@ class LevelAnalyticsService {
                     || await guild?.channels.fetch(board.channel_id).catch(() => null);
                 if (!channel?.send || !channel.messages?.fetch) throw new Error('channel unavailable');
                 const payload = this.liveBoardPayload(board.guild_id, board.metric);
+                const token = board.create_token || this.liveBoardToken(board.guild_id, board.channel_id, board.metric);
+                if (!board.create_token) this.sqlite.prepare(`
+                    UPDATE level_live_boards SET create_token = ?
+                    WHERE guild_id = ? AND channel_id = ? AND metric = ? AND create_token IS NULL
+                `).run(token, board.guild_id, board.channel_id, board.metric);
                 let message = board.message_id
                     ? await channel.messages.fetch(board.message_id).catch(() => null)
                     : null;
                 if (message) await message.edit(payload);
-                else message = await channel.send(payload);
+                else message = await channel.send({ ...payload, nonce: token, enforceNonce: true });
                 this.sqlite.prepare(`
                     UPDATE level_live_boards SET message_id = ?, revision = revision + 1, updated_at = ?
                     WHERE guild_id = ? AND channel_id = ? AND metric = ?
@@ -584,10 +597,48 @@ class LevelAnalyticsService {
         }))();
     }
 
+    enqueueRoleReconcile(guildId, userId, now = this.now()) {
+        this.sqlite.prepare(`
+            INSERT INTO level_role_jobs (guild_id, user_id, attempts, next_attempt_at, updated_at)
+            VALUES (?, ?, 0, ?, ?)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                attempts = 0, next_attempt_at = excluded.next_attempt_at, updated_at = excluded.updated_at
+        `).run(guildId, userId, now, now);
+    }
+
+    async processRoleJobs(limit = 50) {
+        if (!this.client) return { processed: 0, failures: [] };
+        const rows = this.sqlite.prepare(`
+            SELECT * FROM level_role_jobs WHERE next_attempt_at <= ?
+            ORDER BY next_attempt_at, guild_id, user_id LIMIT ?
+        `).all(this.now(), limit);
+        const failures = [];
+        for (const row of rows) {
+            try {
+                const guild = this.client.guilds.cache.get(row.guild_id);
+                if (!guild) throw new Error('guild unavailable');
+                const member = guild.members.cache.get(row.user_id)
+                    || await guild.members.fetch(row.user_id).catch(() => null);
+                if (member) await this.reconcileMemberRoles(member);
+                this.sqlite.prepare(`DELETE FROM level_role_jobs WHERE guild_id = ? AND user_id = ?`)
+                    .run(row.guild_id, row.user_id);
+            } catch (error) {
+                const attempts = row.attempts + 1;
+                const retryAt = this.now() + Math.min(3_600_000, 1000 * 2 ** Math.min(attempts, 12));
+                this.sqlite.prepare(`
+                    UPDATE level_role_jobs SET attempts = ?, next_attempt_at = ?, updated_at = ?
+                    WHERE guild_id = ? AND user_id = ?
+                `).run(attempts, retryAt, this.now(), row.guild_id, row.user_id);
+                failures.push({ guildId: row.guild_id, userId: row.user_id, error: error.message });
+            }
+        }
+        return { processed: rows.length - failures.length, failures };
+    }
+
     async reconcileMemberRoles(member) {
         if (!member || member.user?.bot) return false;
         const bot = member.guild.members.me;
-        if (!bot?.permissions.has(PermissionFlagsBits.ManageRoles)) return false;
+        if (!bot?.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('Manage Roles is unavailable');
         const config = this.sqlite.prepare(`SELECT stack_roles FROM level_configs WHERE guild_id = ?`).get(member.guild.id);
         const rewards = this.sqlite.prepare(`
             SELECT level, role_id FROM level_role_rewards WHERE guild_id = ? ORDER BY level
@@ -718,9 +769,13 @@ class LevelAnalyticsService {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) throw new Error('You need Manage Server to reset XP.');
             this.sqlite.transaction(() => {
                 if (confirmation.scope === 'all') {
+                    const users = this.sqlite.prepare(`SELECT user_id FROM member_levels WHERE guild_id = ?`)
+                        .all(interaction.guildId);
+                    for (const { user_id } of users) this.enqueueRoleReconcile(interaction.guildId, user_id);
                     this.sqlite.prepare(`DELETE FROM member_levels WHERE guild_id = ?`).run(interaction.guildId);
                     this.sqlite.prepare(`DELETE FROM level_voice_sessions WHERE guild_id = ?`).run(interaction.guildId);
                 } else {
+                    this.enqueueRoleReconcile(interaction.guildId, confirmation.userId);
                     this.sqlite.prepare(`DELETE FROM member_levels WHERE guild_id = ? AND user_id = ?`)
                         .run(interaction.guildId, confirmation.userId);
                     this.sqlite.prepare(`DELETE FROM level_voice_sessions WHERE guild_id = ? AND user_id = ?`)
@@ -1061,14 +1116,21 @@ class LevelAnalyticsService {
                 throw new Error('I need View Channel, Send Messages, and Embed Links there.');
             }
             const payload = this.liveBoardPayload(interaction.guildId, action);
+            const token = this.liveBoardToken(interaction.guildId, channel.id, action);
+            this.sqlite.prepare(`
+                INSERT OR IGNORE INTO level_live_boards
+                    (guild_id, channel_id, metric, create_token, revision, updated_at)
+                VALUES (?, ?, ?, ?, 0, ?)
+            `).run(interaction.guildId, channel.id, action, token, this.now());
             const existing = this.sqlite.prepare(`
-                SELECT message_id FROM level_live_boards WHERE guild_id = ? AND channel_id = ? AND metric = ?
+                SELECT message_id, create_token FROM level_live_boards
+                WHERE guild_id = ? AND channel_id = ? AND metric = ?
             `).get(interaction.guildId, channel.id, action);
             let message = existing?.message_id
                 ? await channel.messages.fetch(existing.message_id).catch(() => null)
                 : null;
             if (message) await message.edit(payload);
-            else message = await channel.send(payload);
+            else message = await channel.send({ ...payload, nonce: existing.create_token || token, enforceNonce: true });
             this.sqlite.prepare(`
                 INSERT INTO level_live_boards (guild_id, channel_id, metric, message_id, revision, updated_at)
                 VALUES (?, ?, ?, ?, 1, ?)
@@ -1294,6 +1356,7 @@ class LevelAnalyticsService {
             if (action === 'all') return this.beginReset(interaction, 'all');
             const user = interaction.options.getUser('member', true);
             this.sqlite.transaction(() => {
+                this.enqueueRoleReconcile(interaction.guildId, user.id);
                 this.sqlite.prepare(`DELETE FROM member_levels WHERE guild_id = ? AND user_id = ?`)
                     .run(interaction.guildId, user.id);
                 this.sqlite.prepare(`DELETE FROM level_voice_sessions WHERE guild_id = ? AND user_id = ?`)
@@ -1350,11 +1413,14 @@ class LevelAnalyticsService {
             if (total == null) throw new Error('Unknown XP management action.');
             const manual = total - current.text_xp - current.voice_xp;
             const level = Math.max(floor, levelForXp(total));
-            this.sqlite.prepare(`
-                UPDATE member_levels SET xp = ?, level = ?, manual_adjustment = ?,
-                    level_floor = ?, updated_at = ?
-                WHERE guild_id = ? AND user_id = ?
-            `).run(total, level, manual, floor, now, interaction.guildId, user.id);
+            this.sqlite.transaction(() => {
+                this.sqlite.prepare(`
+                    UPDATE member_levels SET xp = ?, level = ?, manual_adjustment = ?,
+                        level_floor = ?, updated_at = ?
+                    WHERE guild_id = ? AND user_id = ?
+                `).run(total, level, manual, floor, now, interaction.guildId, user.id);
+                this.enqueueRoleReconcile(interaction.guildId, user.id, now);
+            })();
             const member = interaction.guild?.members?.fetch
                 ? await interaction.guild.members.fetch(user.id).catch(() => null)
                 : null;

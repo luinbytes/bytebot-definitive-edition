@@ -50,6 +50,9 @@ function eventKey(name, args) {
         return `${name}:${crypto.createHash('sha256').update(JSON.stringify(sounds)).digest('hex').slice(0, 24)}`;
     }
     const current = args[1]?.id ? args[1] : args[0];
+    if (name === Events.GuildMemberAdd || name === Events.GuildMemberRemove) {
+        return `${name}:${current?.id}:${current?.joinedTimestamp || current?.joinedAt?.getTime?.() || 'unknown'}`;
+    }
     const stable = name === Events.GuildAuditLogEntryCreate ? args[0]?.id
         : name === Events.AutoModerationActionExecution ? args[0]?.id
             : name === Events.MessageUpdate ? `${args[1]?.id}:${args[1]?.editedTimestamp}`

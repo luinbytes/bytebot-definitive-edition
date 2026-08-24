@@ -70,9 +70,10 @@ describe('EventLoggingService', () => {
         expect(database.sqlite.prepare(`SELECT 1 FROM event_log_outbox WHERE event_key = 'message:ignored'`).get()).toBeUndefined();
     });
 
-    test('remove-all confirmation is actor-bound and one-use', async () => {
+    test('remove-all confirmation is actor-bound, one-use, and bound to its exact plan', async () => {
         const channel = { id: 'channel1', send: jest.fn() };
-        const server = guild([channel]);
+        const addedLater = { id: 'channel2', send: jest.fn() };
+        const server = guild([channel, addedLater]);
         service.add(server, channel, 'messages');
         const permissions = { has: permission => permission === PermissionFlagsBits.ManageGuild };
         const reply = jest.fn();
@@ -81,9 +82,11 @@ describe('EventLoggingService', () => {
             options: { getSubcommand: () => 'remove', getChannel: () => null, getString: () => null }
         });
         const customId = reply.mock.calls[0][0].components[0].components[0].data.custom_id;
+        service.add(server, addedLater, 'members');
         const component = { customId, guildId: 'guild1', user: { id: 'admin1' }, member: { permissions }, update: jest.fn() };
         await service.handleInteraction(component);
-        expect(database.sqlite.prepare(`SELECT 1 FROM event_log_channels`).get()).toBeUndefined();
+        expect(database.sqlite.prepare(`SELECT module, channel_id FROM event_log_channels`).all())
+            .toEqual([{ module: 'members', channel_id: 'channel2' }]);
         await expect(service.handleInteraction(component)).rejects.toThrow('expired');
     });
 
@@ -103,6 +106,32 @@ describe('EventLoggingService', () => {
         message.author.bot = true;
         await adapter.execute(Events.MessageDelete, message, client);
         expect(log).toHaveBeenCalledTimes(1);
+    });
+
+    test('membership event keys distinguish later rejoin cycles', async () => {
+        const adapter = require('../src/events/eventLogging');
+        const log = jest.fn();
+        const guild = { id: 'guild1' };
+        const client = { eventLoggingService: { log }, guilds: { cache: new Map() } };
+        await adapter.execute(Events.GuildMemberAdd, { id: 'user1', joinedTimestamp: 100, guild, user: { bot: false } }, client);
+        await adapter.execute(Events.GuildMemberRemove, { id: 'user1', joinedTimestamp: 100, guild, user: { bot: false } }, client);
+        await adapter.execute(Events.GuildMemberAdd, { id: 'user1', joinedTimestamp: 200, guild, user: { bot: false } }, client);
+
+        expect(log.mock.calls.map(call => call[2])).toEqual([
+            'guildMemberAdd:user1:100', 'guildMemberRemove:user1:100', 'guildMemberAdd:user1:200'
+        ]);
+    });
+
+    test('startup never retries an ambiguously claimed delivery', () => {
+        database.sqlite.prepare(`
+            INSERT INTO event_log_outbox
+                (guild_id, event_key, channel_id, module, payload, attempts, next_attempt_at, status, created_at)
+            VALUES ('guild1', 'event1', 'channel1', 'messages', '{}', 1, 1, 'sending', 1)
+        `).run();
+        const EventLoggingService = require('../src/services/eventLoggingService');
+        new EventLoggingService({ sqlite: database.sqlite, client: service.client, now: () => now });
+        expect(database.sqlite.prepare(`SELECT status FROM event_log_outbox WHERE event_key = 'event1'`).get())
+            .toEqual({ status: 'sent' });
     });
 
     test('failed deliveries stop after three exponential retry attempts', async () => {

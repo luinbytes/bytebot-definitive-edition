@@ -981,6 +981,7 @@ const expectedSchema = {
         channel_id: 'TEXT NOT NULL',
         metric: 'TEXT NOT NULL',
         message_id: 'TEXT',
+        create_token: 'TEXT',
         revision: 'INTEGER DEFAULT 0 NOT NULL',
         updated_at: 'INTEGER NOT NULL'
     },
@@ -1028,6 +1029,13 @@ const expectedSchema = {
         awarded_xp: 'INTEGER DEFAULT 0 NOT NULL',
         eligible_seconds: 'INTEGER DEFAULT 0 NOT NULL',
         xp_seconds_consumed: 'INTEGER DEFAULT 0 NOT NULL'
+    },
+    level_role_jobs: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        attempts: 'INTEGER DEFAULT 0 NOT NULL',
+        next_attempt_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
     },
     member_presence: {
         guild_id: 'TEXT NOT NULL',
@@ -1369,6 +1377,7 @@ const compatibilityUniqueKeys = {
     analytics_events: ['guild_id', 'event_type', 'event_id'],
     reaction_placements: ['guild_id', 'message_id', 'user_id', 'emoji'],
     level_voice_sessions: ['guild_id', 'user_id'],
+    level_role_jobs: ['guild_id', 'user_id'],
     member_presence: ['guild_id', 'user_id'],
     event_log_channels: ['guild_id', 'module', 'channel_id'],
     event_log_ignores: ['guild_id', 'target_type', 'target_id'],

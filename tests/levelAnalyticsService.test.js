@@ -414,6 +414,44 @@ describe('LevelAnalyticsService', () => {
         expect(add).toHaveBeenCalledWith(['reward1'], 'Level reward reconciliation');
     });
 
+    test('role reconciliation survives a Discord failure and service restart', async () => {
+        database.sqlite.prepare(`INSERT INTO level_configs (guild_id, updated_at) VALUES ('guild1', 1)`).run();
+        database.sqlite.prepare(`
+            INSERT INTO level_role_rewards (guild_id, level, role_id, created_at)
+            VALUES ('guild1', 1, 'reward1', 1)
+        `).run();
+        database.sqlite.prepare(`
+            INSERT INTO member_levels
+                (guild_id, user_id, xp, level, text_xp, voice_xp, manual_adjustment,
+                 level_floor, message_count, voice_seconds, updated_at)
+            VALUES ('guild1', 'user1', 100, 1, 100, 0, 0, 0, 0, 0, 1)
+        `).run();
+        const add = jest.fn().mockRejectedValueOnce(new Error('Discord unavailable')).mockResolvedValue(undefined);
+        const highest = { comparePositionTo: () => 1 };
+        const member = {
+            id: 'user1', user: { bot: false },
+            roles: { cache: new Map(), add, remove: jest.fn() }
+        };
+        const guild = {
+            id: 'guild1', roles: { cache: new Map([['reward1', { id: 'reward1', managed: false }]]) },
+            members: {
+                me: { permissions: { has: () => true }, roles: { highest } },
+                cache: new Map([['user1', member]]), fetch: jest.fn()
+            }
+        };
+        member.guild = guild;
+        service.client = { guilds: { cache: new Map([['guild1', guild]]) } };
+        service.enqueueRoleReconcile('guild1', 'user1');
+
+        expect((await service.processRoleJobs()).failures).toHaveLength(1);
+        now += 3000;
+        const LevelAnalyticsService = require('../src/services/levelAnalyticsService');
+        service = new LevelAnalyticsService({ sqlite: database.sqlite, client: service.client, now: () => now });
+        expect((await service.processRoleJobs()).processed).toBe(1);
+        expect(add).toHaveBeenCalledTimes(2);
+        expect(database.sqlite.prepare(`SELECT 1 FROM level_role_jobs`).get()).toBeUndefined();
+    });
+
     test('configured level-up scripts are validated and delivered only on a level increase', async () => {
         const payload = { content: '<@user1> reached 1', allowedMentions: { parse: [] } };
         const send = jest.fn();
@@ -532,6 +570,8 @@ describe('LevelAnalyticsService', () => {
         await service.refreshLiveBoards();
 
         expect(send).toHaveBeenCalledTimes(2);
+        expect(send.mock.calls[0][0]).toEqual(expect.objectContaining({ enforceNonce: true, nonce: expect.any(String) }));
+        expect(send.mock.calls[1][0].nonce).toBe(send.mock.calls[0][0].nonce);
         expect(database.sqlite.prepare(`SELECT message_id, revision FROM level_live_boards WHERE guild_id = 'guild1'`).get())
             .toEqual({ message_id: 'board2', revision: 2 });
     });

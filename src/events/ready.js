@@ -174,6 +174,10 @@ module.exports = {
                 )))
                 .catch(error => logger.error(`Live level board refresh failed: ${error.message}`)), 5 * 60 * 1000);
             liveBoardTimer.unref?.();
+            await client.levelAnalyticsService.processRoleJobs();
+            const roleJobTimer = setInterval(() => client.levelAnalyticsService.processRoleJobs()
+                .catch(error => logger.error(`Level role reconciliation retry failed: ${error.message}`)), 30 * 1000);
+            roleJobTimer.unref?.();
             const prune = () => {
                 const removed = client.levelAnalyticsService.pruneAnalytics();
                 if (removed.daily || removed.activity || removed.dedupe) logger.info(
