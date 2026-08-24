@@ -156,7 +156,8 @@ describe('VoiceMaster lifecycle', () => {
         };
         const temporary = {
             id: 'temporary-1', type: ChannelType.GuildVoice, members: new Map(),
-            send: jest.fn(async () => ({ id: 'controls-1' })), delete: jest.fn(async () => {})
+            send: jest.fn(async () => ({ id: 'controls-1' })),
+            delete: jest.fn().mockRejectedValueOnce(new Error('Discord unavailable')).mockResolvedValueOnce(undefined)
         };
         const create = jest.fn(async values => {
             if (values.type === ChannelType.GuildCategory) return category;
@@ -179,7 +180,9 @@ describe('VoiceMaster lifecycle', () => {
             channels: { cache: channels, create, fetch: jest.fn(async id => channels.get(id) || null) }
         };
         const { VoiceMasterService } = require('../src/services/voiceMasterService');
-        const service = new VoiceMasterService({ sqlite: database.sqlite });
+        const service = new VoiceMasterService({
+            client: { guilds: { fetch: jest.fn(async () => guild) } }, sqlite: database.sqlite
+        });
         await service.execute(interaction(guild, 'setup'));
 
         const creating = service.handleVoiceState({ channelId: null }, { guild, member, channelId: join.id });
@@ -189,6 +192,11 @@ describe('VoiceMaster lifecycle', () => {
         await creating;
 
         expect(temporary.delete).toHaveBeenCalledTimes(1);
+        expect(database.sqlite.prepare('SELECT state, channel_id FROM voice_master_creations').get())
+            .toEqual({ state: 'deleting', channel_id: temporary.id });
+        await service.retryScheduledCleanup();
+
+        expect(temporary.delete).toHaveBeenCalledTimes(2);
         expect(member.voice.setChannel).not.toHaveBeenCalled();
         expect(database.sqlite.prepare('SELECT COUNT(*) count FROM bytepods WHERE source_channel_id IS NOT NULL').get().count).toBe(0);
     });

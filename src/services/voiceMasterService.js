@@ -369,7 +369,7 @@ class VoiceMasterService {
                     .run(generation, this.now(), interaction.guildId, config.generation);
                 if (!reserved.changes) throw new Error('VoiceMaster configuration changed before reset.');
             }
-            this.sqlite.prepare(`UPDATE voice_master_creations SET state = 'failed', channel_id = NULL,
+            this.sqlite.prepare(`UPDATE voice_master_creations SET state = 'deleting',
                 error = 'VoiceMaster was reset during creation.', updated_at = ?
                 WHERE guild_id = ? AND state = 'pending'`).run(this.now(), interaction.guildId);
             const primary = this.sqlite.prepare(`SELECT * FROM voice_master_sources
@@ -578,10 +578,10 @@ class VoiceMasterService {
             this.sqlite.prepare('DELETE FROM bytepods WHERE guild_id = ? AND channel_id = ? AND source_channel_id IS NOT NULL')
                 .run(guild.id, channel?.id || '');
             if (deletionConfirmed) this.failCreation(reservation.creation, error.message);
-            else this.sqlite.prepare(`UPDATE voice_master_creations SET state = 'deleting',
+            else this.sqlite.prepare(`UPDATE voice_master_creations SET state = 'deleting', channel_id = ?,
                     error = ?, updated_at = ? WHERE guild_id = ? AND source_channel_id = ?
-                    AND member_id = ? AND generation = ? AND state = 'pending'`)
-                .run(`Cleanup pending: ${error.message}`.slice(0, 500), this.now(), guild.id,
+                    AND member_id = ? AND generation = ? AND state IN ('pending','deleting')`)
+                .run(channel.id, `Cleanup pending: ${error.message}`.slice(0, 500), this.now(), guild.id,
                     source.channel_id, member.id, reservation.creation.generation);
             logger.warn(`VoiceMaster creation failed in ${guild.id}: ${error.message}`);
             return true;
