@@ -4,6 +4,12 @@ const net = require('net');
 const { privateAddress } = require('./serverPresentationService');
 const { UserFacingError } = require('../utils/errorHandlerUtil');
 
+function providerError(message, kind) {
+    const error = new UserFacingError(message);
+    error.providerKind = kind;
+    return error;
+}
+
 function httpsUrl(value, hosts) {
     try {
         const url = new URL(value);
@@ -144,18 +150,23 @@ class InformationLookupService {
                 redirect: 'error',
                 signal: request.signal || AbortSignal.timeout(10000)
             });
-        } catch { throw new UserFacingError(errors.failed || 'Lookup provider request failed.'); }
+        } catch { throw providerError(errors.failed || 'Lookup provider request failed.', 'failed'); }
         if (!response.ok) {
             const remaining = response.headers.get('x-ratelimit-remaining');
             const exhausted = response.status === 429
                 || (response.status === 403 && (remaining === '0' || response.headers.has('retry-after')));
             if (exhausted) {
-                throw new UserFacingError(`${errors.rateLimited || 'Lookup provider rate limit reached.'}${this.retryHint(response)}`);
+                throw providerError(
+                    `${errors.rateLimited || 'Lookup provider rate limit reached.'}${this.retryHint(response)}`,
+                    'rate-limited'
+                );
             }
-            if (response.status === 404 && errors.notFound) throw new UserFacingError(errors.notFound);
-            if (response.status === 400 && errors.badRequest) throw new UserFacingError(errors.badRequest);
-            if ([401, 403].includes(response.status) && errors.inaccessible) throw new UserFacingError(errors.inaccessible);
-            throw new UserFacingError(errors.failed || 'Lookup provider request failed.');
+            if (response.status === 404 && errors.notFound) throw providerError(errors.notFound, 'not-found');
+            if (response.status === 400 && errors.badRequest) throw providerError(errors.badRequest, 'inaccessible');
+            if ([401, 403].includes(response.status) && errors.inaccessible) {
+                throw providerError(errors.inaccessible, 'inaccessible');
+            }
+            throw providerError(errors.failed || 'Lookup provider request failed.', 'failed');
         }
         const type = response.headers.get('content-type') || '';
         if (!type.toLowerCase().includes('application/json')) {
@@ -416,7 +427,10 @@ class InformationLookupService {
             }),
             this.robloxJson(new URL(`https://accountinformation.roblox.com/v1/users/${id}/roblox-badges`)),
             this.robloxJson(new URL(`https://users.roblox.com/v1/users/${id}/username-history?limit=10&sortOrder=Desc`))
-                .catch(() => null),
+                .catch(error => {
+                    if (['not-found', 'inaccessible'].includes(error.providerKind)) return null;
+                    throw error;
+                }),
             this.robloxJson(new URL(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${id}&size=420x420&format=Png&isCircular=false`))
         ]);
         const counts = [followers?.count, following?.count, friends?.count];

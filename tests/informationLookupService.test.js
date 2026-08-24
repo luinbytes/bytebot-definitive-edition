@@ -315,11 +315,13 @@ test('Roblox lookups distinguish not found, inaccessible, rate-limited, and malf
 });
 
 test('Roblox profile reports name-history failure without discarding the profile', async () => {
-    const response = value => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
-    const fetch = jest.fn(async input => {
+    const response = (value, status = 200) => new Response(JSON.stringify(value), {
+        status, headers: { 'content-type': 'application/json' }
+    });
+    const profileFetch = historyStatus => jest.fn(async input => {
         const url = new URL(input);
         const route = `${url.hostname}${url.pathname}`;
-        if (route.endsWith('/username-history')) throw new Error('history unavailable');
+        if (route.endsWith('/username-history')) return response({}, historyStatus);
         const payloads = {
             'users.roblox.com/v1/usernames/users': { data: [{ id: 156, name: 'builderman', displayName: 'builderman' }] },
             'users.roblox.com/v1/users/156': { id: 156, description: '', created: '2006-02-27T21:06:40Z', isBanned: false, hasVerifiedBadge: true },
@@ -333,8 +335,10 @@ test('Roblox profile reports name-history failure without discarding the profile
         return response(payloads[route]);
     });
 
-    await expect(new InformationLookupService({ fetch }).robloxProfile('Builderman'))
+    await expect(new InformationLookupService({ fetch: profileFetch(404) }).robloxProfile('Builderman'))
         .resolves.toMatchObject({ nameHistory: null, username: 'builderman' });
+    await expect(new InformationLookupService({ fetch: profileFetch(429) }).robloxProfile('Builderman'))
+        .rejects.toThrow('Roblox rate limit reached.');
 });
 
 test('name history records only observed former names in the existing automation store', () => {
