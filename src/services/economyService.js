@@ -1553,6 +1553,10 @@ class EconomyService {
         }
         const pageToken = token || this.randomBytes(12).toString('hex').slice(0, 24);
         this.pageTokens.set(pageToken, { guildId, userId, expiresAt: this.now() + GAME_SESSION_TTL });
+        const timer = this.setTimeout(() => {
+            if (this.pageTokens.get(pageToken)?.expiresAt <= this.now()) this.pageTokens.delete(pageToken);
+        }, GAME_SESSION_TTL);
+        timer.unref?.();
         return {
             content,
             components: [new ActionRowBuilder().addComponents(

@@ -680,7 +680,8 @@ earnings are not circulation and never appear in the ledger.
   `buy|upgrade|ampoules|collect`, monetary input/result fields are
   non-negative, exact result JSON is required, and the Discord interaction ID
   is the primary key.
-- Foreign keys cascade gang members/invites with a disbanded gang. A lab
+- Foreign keys cascade gang members with a disbanded gang and set the durable
+  terminal invite history's gang reference to null. A lab
   operation's nullable lab reference becomes null when its lab is removed;
   its guild/user/interaction key and result snapshot remain durable for replay.
   Service transactions still re-check all ownership, capacity, balance,

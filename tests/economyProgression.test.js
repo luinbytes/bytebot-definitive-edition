@@ -8,6 +8,7 @@ describe('economy games and progression', () => {
     let service;
     let now;
     let draws;
+    let timers;
 
     beforeEach(async () => {
         jest.resetModules();
@@ -18,6 +19,7 @@ describe('economy games and progression', () => {
         const { EconomyService } = require('../src/services/economyService');
         now = Date.UTC(2026, 0, 1, 12);
         draws = [];
+        timers = [];
         let id = 0;
         service = new EconomyService({
             sqlite: database.sqlite,
@@ -25,7 +27,10 @@ describe('economy games and progression', () => {
             randomUUID: () => `id-${++id}`,
             randomInt: (minimum) => draws.length ? draws.shift() : minimum,
             randomBytes: () => Buffer.from('progression'),
-            setTimeout: () => ({ unref() {} })
+            setTimeout: (callback, delay) => {
+                timers.push({ callback, delay });
+                return { unref() {} };
+            }
         });
         service.enable('guild1', 'admin1');
         service.configure('guild1', 'admin1', { startingBalance: 20000 });
@@ -199,6 +204,9 @@ describe('economy games and progression', () => {
         expect(service.pageTokens.has(oldToken)).toBe(false);
         service.leaderboardView('guild1', 'user1');
         expect(service.pageTokens.size).toBe(1);
+        now += 600001;
+        timers.at(-1).callback();
+        expect(service.pageTokens.size).toBe(0);
     });
 
     test('refunds active games and pauses laboratories while the economy is disabled', () => {
