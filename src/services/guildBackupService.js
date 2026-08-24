@@ -48,7 +48,9 @@ const BYTEBOT_TABLES = [
     { name: 'giveaway_configs', keys: ['guild_id'] },
     { name: 'giveaway_presets', keys: ['guild_id', 'name'] },
     { name: 'giveaway_blacklist', keys: ['guild_id', 'role_id'] },
-    { name: 'giveaway_role_limits', keys: ['guild_id', 'role_id'] }
+    { name: 'giveaway_role_limits', keys: ['guild_id', 'role_id'] },
+    { name: 'customization_presets', keys: ['guild_id', 'name'] },
+    { name: 'server_listings', keys: ['guild_id'] }
 ];
 const BYTEBOT_TABLE_NAMES = new Set(BYTEBOT_TABLES.map(table => table.name));
 
@@ -90,7 +92,8 @@ function serializeOverwrites(channel) {
 function serializeChannels(guild) {
     return [...guild.channels.cache.values()]
         .filter(channel => RESTORABLE_CHANNEL_TYPES.has(channel.type))
-        .sort((left, right) => left.position - right.position || left.id.localeCompare(right.id))
+        .sort((left, right) => Number(right.type === 4) - Number(left.type === 4)
+            || left.position - right.position || left.id.localeCompare(right.id))
         .map(channel => ({
             sourceId: channel.id,
             type: channel.type,
@@ -186,24 +189,25 @@ class GuildBackupService {
         const cleanDescription = description == null ? null : String(description).trim();
         if (!cleanName || cleanName.length > 100) throw new Error('Backup names must be 1-100 characters.');
         if (cleanDescription?.length > 500) throw new Error('Backup descriptions cannot exceed 500 characters.');
-        const count = this.sqlite.prepare('SELECT COUNT(*) count FROM guild_backups WHERE guild_id = ? AND creator_id = ?')
-            .get(guild.id, creatorId).count;
-        if (count >= MAX_BACKUPS) throw new Error('You can keep at most five backups for this server.');
-
-        const payloadText = JSON.stringify({
-            roles: serializeRoles(guild),
-            channels: serializeChannels(guild),
-            emojis: serializeEmojis(guild),
-            stickers: serializeStickers(guild),
-            bytebot: serializeBytebot(this.sqlite, guild.id)
-        });
-        const now = this.now();
-        const id = this.randomUUID();
-        this.sqlite.prepare(`INSERT INTO guild_backups
-            (id, guild_id, creator_id, name, description, schema_version, payload, digest, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-            .run(id, guild.id, creatorId, cleanName, cleanDescription, SCHEMA_VERSION, payloadText, digest(payloadText), now, now);
-        return this.view(guild.id, creatorId, id);
+        return this.sqlite.transaction(() => {
+            const count = this.sqlite.prepare('SELECT COUNT(*) count FROM guild_backups WHERE guild_id = ? AND creator_id = ?')
+                .get(guild.id, creatorId).count;
+            if (count >= MAX_BACKUPS) throw new Error('You can keep at most five backups for this server.');
+            const payloadText = JSON.stringify({
+                roles: serializeRoles(guild),
+                channels: serializeChannels(guild),
+                emojis: serializeEmojis(guild),
+                stickers: serializeStickers(guild),
+                bytebot: serializeBytebot(this.sqlite, guild.id)
+            });
+            const now = this.now();
+            const id = this.randomUUID();
+            this.sqlite.prepare(`INSERT INTO guild_backups
+                (id, guild_id, creator_id, name, description, schema_version, payload, digest, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                .run(id, guild.id, creatorId, cleanName, cleanDescription, SCHEMA_VERSION, payloadText, digest(payloadText), now, now);
+            return this.view(guild.id, creatorId, id);
+        }).immediate();
     }
 
     list(guildId, creatorId) {
@@ -253,7 +257,7 @@ class GuildBackupService {
         return { backupId: backup.id, mode, sections: selected, create: counts, remove };
     }
 
-    requirePermissions(guild, sections) {
+    requirePermissions(guild, sections, mode, backup) {
         const required = [
             ['roles', PermissionFlagsBits.ManageRoles, 'Manage Roles'],
             ['channels', PermissionFlagsBits.ManageChannels, 'Manage Channels'],
@@ -265,13 +269,39 @@ class GuildBackupService {
                 throw new Error(`I need ${name} to restore ${section}.`);
             }
         }
+        if (mode === 'destructive' && sections.includes('roles')) {
+            const blocked = [...guild.roles.cache.values()].find(role => role.id !== guild.id && !role.managed && role.editable === false);
+            if (blocked) throw new Error(`Role ${blocked.name} is above ByteBot and cannot be removed.`);
+        }
+        if (mode === 'destructive' && sections.includes('channels')) {
+            const blocked = [...guild.channels.cache.values()].find(channel =>
+                RESTORABLE_CHANNEL_TYPES.has(channel.type) && channel.deletable === false);
+            if (blocked) throw new Error(`Channel ${blocked.name} cannot be removed by ByteBot.`);
+        }
+        if (sections.includes('roles')) {
+            const denied = this.sqlite.prepare('SELECT permission FROM denied_role_permissions WHERE guild_id = ?').all(guild.id);
+            for (const role of backup.payload.roles) {
+                const permissions = BigInt(role.permissions);
+                if (!guild.members.me.permissions.has(permissions)) {
+                    throw new Error(`ByteBot cannot recreate all permissions on role ${role.name}.`);
+                }
+                const blocked = denied.find(({ permission }) => {
+                    const flag = PermissionFlagsBits[permission];
+                    return flag !== undefined && (permissions & flag) === flag;
+                });
+                if (blocked) throw new Error(`Role ${role.name} carries the blocked permission ${blocked.permission}.`);
+                if (guild.members.me.roles?.highest && role.position >= guild.members.me.roles.highest.position) {
+                    throw new Error(`Role ${role.name} is above ByteBot's highest role.`);
+                }
+            }
+        }
     }
 
     async restore({ guild, creatorId, id, mode = 'merge', sections = SECTIONS, confirmed = false }) {
         if (!confirmed) throw new Error('Restore requires explicit confirmation.');
         const plan = this.preview({ guild, creatorId, id, mode, sections });
-        this.requirePermissions(guild, plan.sections);
         const backup = this.view(guild.id, creatorId, id);
+        this.requirePermissions(guild, plan.sections, mode, backup);
         const created = Object.fromEntries(SECTIONS.map(section => [section, 0]));
         const removed = Object.fromEntries(SECTIONS.map(section => [section, 0]));
         const failures = [];
@@ -340,6 +370,9 @@ class GuildBackupService {
                         permissionOverwrites,
                         reason: `ByteBot backup ${backup.id}`
                     };
+                    if (channel.parentSourceId && !options.parent) {
+                        throw new Error(`Parent category ${channel.parentSourceId} was not restored.`);
+                    }
                     if (channel.type !== 4) {
                         options.nsfw = channel.nsfw;
                         options.rateLimitPerUser = channel.slowmode;
@@ -406,6 +439,7 @@ class GuildBackupService {
                 }
                 return value;
             };
+            let restoredRows = 0;
             const restoreConfig = this.sqlite.transaction(() => {
                 for (const table of BYTEBOT_TABLES) {
                     const guildColumn = table.guild || 'guild_id';
@@ -425,11 +459,16 @@ class GuildBackupService {
                         this.sqlite.prepare(`INSERT INTO ${sqlIdentifier(table.name)}
                             (${columns.map(sqlIdentifier).join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`)
                             .run(...columns.map(column => row[column]));
-                        created.bytebot++;
+                        restoredRows++;
                     }
                 }
             });
-            restoreConfig.immediate();
+            try {
+                restoreConfig.immediate();
+                created.bytebot += restoredRows;
+            } catch (error) {
+                failures.push({ section: 'bytebot', name: 'configuration', error: error.message });
+            }
         }
 
         return { backupId: backup.id, mode, created, removed, failures };

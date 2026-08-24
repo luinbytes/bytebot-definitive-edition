@@ -53,6 +53,7 @@ describe('server presentation', () => {
             nick: null, avatar: null, banner: null, bio: null,
             reason: 'Reset ByteBot server customization'
         });
+        await expect(service.image('http://[::ffff:127.0.0.1]/avatar.png')).rejects.toThrow('public address');
     });
 
     test('creates, previews, applies, lists, and removes guild-scoped profile presets', async () => {
@@ -83,16 +84,16 @@ describe('server presentation', () => {
         expect(service.listPresets('guild1')).toEqual([]);
     });
 
-    test('publishes only allowlisted guild data and enforces the one-hour bump cadence', () => {
+    test('publishes only allowlisted guild data and enforces the one-hour bump cadence', async () => {
         const guild = {
             id: 'guild1', name: 'Community', description: 'A friendly server', memberCount: 42,
             iconURL: jest.fn(() => 'https://cdn.discordapp.com/icon.png')
         };
 
-        expect(service.publish(guild, {
+        await expect(service.publish(guild, {
             invite: 'https://discord.gg/community', inviteGuildId: 'guild1', tags: ['games', 'social'],
             banner: 'https://cdn.discordapp.com/banner.png', ownerId: 'must-not-leak'
-        }, 'admin1')).toEqual(expect.objectContaining({
+        }, 'admin1')).resolves.toEqual(expect.objectContaining({
             guildId: 'guild1', name: 'Community', description: 'A friendly server', memberCount: 42,
             invite: 'https://discord.gg/community', tags: ['games', 'social'], bumpedAt: 1000
         }));
@@ -102,8 +103,8 @@ describe('server presentation', () => {
         expect(service.bump('guild1', 'admin1').bumpedAt).toBe(3601000);
         expect(service.removeListing('guild1')).toBe(true);
         expect(service.listListings()).toEqual([]);
-        expect(() => service.publish(guild, {
+        await expect(service.publish(guild, {
             invite: 'https://discord.gg/other', inviteGuildId: 'guild2', tags: []
-        }, 'admin1')).toThrow('this server');
+        }, 'admin1')).rejects.toThrow('this server');
     });
 });

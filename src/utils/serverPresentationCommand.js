@@ -127,8 +127,7 @@ async function executeDiscovery(interaction) {
             const inviteUrl = interaction.options.getString('invite', true);
             const invite = await interaction.client.fetchInvite(inviteUrl);
             const banner = interaction.options.getAttachment('banner');
-            if (banner) await service.image(banner);
-            const listing = service.publish(interaction.guild, {
+            const listing = await service.publish(interaction.guild, {
                 invite: inviteUrl,
                 inviteGuildId: invite.guild?.id,
                 description: interaction.options.getString('description'),

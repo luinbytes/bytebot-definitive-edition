@@ -207,6 +207,8 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/reactionrole add` • `/buttonrole add` • `/temprole add` • `/boosterrole create`\n' +
                     '`/ticket setup` • `/ticket panel manage` • `/ticket settings view`\n' +
                     '`/giveaway start` • `/giveaway edit prize` • `/counter add`\n' +
+                    '`/server backup create` • `/server customize preset` • `/server discovery publish`\n' +
+                    '`/server stats days:60`\n' +
                     '`/mod user warn` • `/mod case view` • `/mod config setup`\n' +
                     '`/mod template set` • `/game warthunder stats`\n' +
                     '`/fun uwuify` • `/fun uwulock add`',

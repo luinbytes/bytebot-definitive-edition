@@ -1,6 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 
 describe('guild backups', () => {
     let tempDir;
@@ -201,6 +202,35 @@ describe('guild backups', () => {
         expect(oldSticker.delete).toHaveBeenCalled();
     });
 
+    test('rejects an unmanageable destructive target before deleting anything', async () => {
+        const source = {
+            id: 'guild1', roles: { cache: new Map() }, channels: { cache: new Map() },
+            emojis: { cache: new Map() }, stickers: { cache: new Map() }
+        };
+        service.create({ guild: source, creatorId: 'admin1', name: 'Empty' });
+        const deleteRole = jest.fn();
+        const deleteChannel = jest.fn();
+        const guild = {
+            id: 'guild1', members: { me: { permissions: { has: () => true } } },
+            roles: { everyone: { id: 'guild1' }, cache: new Map([
+                ['protected', { id: 'protected', name: 'Protected', managed: false, editable: false, position: 1,
+                    permissions: { bitfield: 0n }, delete: deleteRole }]
+            ]), create: jest.fn() },
+            channels: { cache: new Map([
+                ['channel1', { id: 'channel1', name: 'general', type: 0, position: 0, parentId: null,
+                    permissionOverwrites: { cache: new Map() }, delete: deleteChannel }]
+            ]), create: jest.fn() },
+            emojis: { cache: new Map(), create: jest.fn() }, stickers: { cache: new Map(), create: jest.fn() }
+        };
+
+        await expect(service.restore({
+            guild, creatorId: 'admin1', id: 'backup-1', mode: 'destructive',
+            sections: ['roles', 'channels'], confirmed: true
+        })).rejects.toThrow('Protected');
+        expect(deleteRole).not.toHaveBeenCalled();
+        expect(deleteChannel).not.toHaveBeenCalled();
+    });
+
     test('restores allowlisted ByteBot configuration without touching moderation evidence', async () => {
         database.sqlite.prepare(`INSERT INTO lifecycle_messages
             (guild_id, type, channel_id, template, enabled, format, updated_at)
@@ -227,5 +257,29 @@ describe('guild backups', () => {
         expect(database.sqlite.prepare("SELECT reason FROM moderation_logs WHERE guild_id = 'guild1'").get().reason)
             .toBe('Keep this');
         expect(service.view('guild1', 'admin1', 'backup-1').payload.bytebot.moderation_logs).toBeUndefined();
+    });
+
+    test('rejects corrupted or unknown payloads and enforces five backups per creator', () => {
+        let nextId = 0;
+        const { GuildBackupService } = require('../src/services/guildBackupService');
+        service = new GuildBackupService({
+            sqlite: database.sqlite, now: () => 1000, randomUUID: () => `backup-${++nextId}`, sleep: async () => {}
+        });
+        const guild = {
+            id: 'guild1', roles: { cache: new Map() }, channels: { cache: new Map() },
+            emojis: { cache: new Map() }, stickers: { cache: new Map() }
+        };
+        for (let index = 1; index <= 5; index++) service.create({ guild, creatorId: 'admin1', name: `Backup ${index}` });
+        expect(() => service.create({ guild, creatorId: 'admin1', name: 'Backup 6' })).toThrow('five backups');
+
+        database.sqlite.prepare("UPDATE guild_backups SET payload = '{}' WHERE id = 'backup-1'").run();
+        expect(() => service.view('guild1', 'admin1', 'backup-1')).toThrow('integrity');
+        const row = database.sqlite.prepare("SELECT payload FROM guild_backups WHERE id = 'backup-2'").get();
+        const payload = JSON.parse(row.payload);
+        payload.bytebot.unknown_table = [];
+        const serialized = JSON.stringify(payload);
+        const digest = crypto.createHash('sha256').update(serialized).digest('hex');
+        database.sqlite.prepare("UPDATE guild_backups SET payload = ?, digest = ? WHERE id = 'backup-2'").run(serialized, digest);
+        expect(() => service.view('guild1', 'admin1', 'backup-2')).toThrow('invalid');
     });
 });

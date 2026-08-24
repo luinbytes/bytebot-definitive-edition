@@ -32,7 +32,8 @@ function addBackupGroup(builder) {
 }
 
 async function respond(interaction, content) {
-    const payload = { content, flags: [MessageFlags.Ephemeral] };
+    const payload = { content, allowedMentions: { parse: [] } };
+    if (!interaction.deferred) payload.flags = [MessageFlags.Ephemeral];
     return interaction.deferred || interaction.replied ? interaction.editReply(payload) : interaction.reply(payload);
 }
 
