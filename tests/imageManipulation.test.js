@@ -1,26 +1,38 @@
-const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlS4AAAAASUVORK5CYII=', 'base64');
+const sharp = require('sharp');
+let PNG;
+
+beforeAll(async () => {
+    PNG = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#ff0000' } }).png().toBuffer();
+});
 
 function media() {
     return {
         processImage: jest.fn((input, processor) => processor({
-            buffer: PNG, format: 'png', contentType: 'image/png', width: 1, height: 1
+            buffer: PNG, format: 'png', contentType: 'image/png', width: 2, height: 2
         }, '/tmp', new AbortController().signal))
     };
 }
 
 describe('image manipulation service', () => {
     test('runs transforms and named effects through the shared media queue', async () => {
-        const { ImageManipulationService } = require('../src/services/imageManipulationService');
+        const { EFFECTS, ImageManipulationService } = require('../src/services/imageManipulationService');
         const shared = media();
         const service = new ImageManipulationService({ media: shared });
 
         const resized = await service.transform('source', 'resize', { width: 64, height: 64 }, 1024 * 1024);
-        const inverted = await service.effect('source', 'invert', 1024 * 1024);
+        const outputs = [];
+        for (const effect of EFFECTS) outputs.push(await service.effect('source', effect, 1024 * 1024));
+        for (const format of ['png', 'jpeg', 'webp', 'gif']) {
+            outputs.push(await service.transform('source', 'convert', { format }, 1024 * 1024));
+        }
+        outputs.push(await service.transform('source', 'rotate', { angle: 45 }, 1024 * 1024));
+        outputs.push(await service.transform('source', 'compress', { quality: 60 }, 1024 * 1024));
 
-        expect(shared.processImage).toHaveBeenCalledTimes(2);
-        expect(resized).toMatchObject({ format: 'png', contentType: 'image/png', width: 1, height: 1 });
+        expect(shared.processImage).toHaveBeenCalledTimes(23);
+        expect(resized).toMatchObject({ format: 'png', contentType: 'image/png', width: 2, height: 2 });
         expect(resized.buffer.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
-        expect(inverted).toMatchObject({ format: 'png', contentType: 'image/png' });
+        expect(outputs.every(output => output.buffer.length <= 1024 * 1024)).toBe(true);
+        expect(outputs.map(output => output.format)).toEqual(expect.arrayContaining(['png', 'jpeg', 'webp', 'gif']));
         expect(resized.buffer.length).toBeLessThanOrEqual(1024 * 1024);
     });
 
@@ -74,6 +86,12 @@ describe('/image command', () => {
             'normalize', 'pixelate', 'saturate', 'sepia', 'sharpen', 'shear',
             'stretch', 'threshold', 'tint'
         ]);
+        for (const group of command.options) {
+            for (const subcommand of group.options) {
+                const firstOptional = subcommand.options.findIndex(option => !option.required);
+                if (firstOptional >= 0) expect(subcommand.options.slice(firstOptional).every(option => !option.required)).toBe(true);
+            }
+        }
     });
 
     test('uses Discord-native sources and the interaction upload ceiling', async () => {
