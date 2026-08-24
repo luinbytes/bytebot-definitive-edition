@@ -124,8 +124,9 @@ is an operator-owned local library:
 - A manifest supplies stable track IDs, title, author, duration, and relative
   file path; query search is a bounded case-insensitive title/author/ID match.
 - Only files under the resolved library root are playable. Symlink escapes,
-  missing files, unsupported codecs, and manifest/file metadata mismatches fail
-  closed.
+  missing files, unsupported codecs, duration mismatches, and post-load
+  path/size changes fail closed. FFprobe checks immediately before queue
+  insertion and playback; FFmpeg hard-stops output at the declared duration.
 - A track may declare one canonical HTTPS URL as an exact lookup alias while
   its playable bytes remain a local file. ByteBot performs no network request
   for that alias. Unknown URLs return `noResults`; no arbitrary remote fetch,

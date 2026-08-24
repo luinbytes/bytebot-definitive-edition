@@ -3,9 +3,14 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const Database = require('better-sqlite3');
+const { drizzle } = require('drizzle-orm/better-sqlite3');
 const { PermissionFlagsBits } = require('discord.js');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
+const schema = require('../src/database/schema');
+
+const testProbe = async track => ({ codec: 'mp3', durationSeconds: track.durationSeconds });
+const testDb = sqlite => drizzle(sqlite, { schema });
 
 function fakeVoice() {
     const player = new EventEmitter();
@@ -35,7 +40,10 @@ function fakeSpawn() {
     const child = new EventEmitter();
     child.stdout = new PassThrough();
     child.stderr = new PassThrough();
-    child.kill = jest.fn();
+    child.kill = jest.fn(() => {
+        child.exitCode = 0;
+        process.nextTick(() => child.emit('close', 0));
+    });
     process.nextTick(() => child.emit('spawn'));
     return child;
 }
@@ -64,9 +72,11 @@ describe('music playback', () => {
     afterEach(() => fs.rmSync(libraryRoot, { recursive: true, force: true }));
 
     test('registers the frozen music hub and public bounds', () => {
-        const command = require('../src/commands/music/music').data.toJSON();
+        const musicCommand = require('../src/commands/music/music');
+        const command = musicCommand.data.toJSON();
 
         expect(command).toMatchObject({ name: 'music', dm_permission: false });
+        expect(musicCommand.longRunning).toBe(true);
         expect(command.options.map(item => item.name)).toEqual([
             'play', 'queue', 'pause', 'resume', 'skip', 'stop', 'volume', 'preset', 'settings'
         ]);
@@ -79,6 +89,15 @@ describe('music playback', () => {
             'piano', 'metal', 'flat', 'karaoke', 'nightcore'
         ]);
         expect(option(command, 'settings').options.map(item => item.name)).toEqual(['dj', 'autoplay']);
+    });
+
+    test('edits the deferred response when music is unavailable', async () => {
+        const command = require('../src/commands/music/music');
+        const interaction = { deferred: true, editReply: jest.fn() };
+
+        await command.execute(interaction, {});
+
+        expect(interaction.editReply).toHaveBeenCalledWith(expect.objectContaining({ allowedMentions: { parse: [] } }));
     });
 
     test('resolves bounded local tracks, exact URL aliases, playlists, and related tracks', () => {
@@ -120,6 +139,59 @@ describe('music playback', () => {
         fs.rmSync(outside);
     });
 
+    test('rejects unsupported or overlong audio metadata', async () => {
+        const { MusicLibrary, MusicService } = require('../src/services/musicService');
+        const sqlite = new Database(':memory:');
+        const library = new MusicLibrary(libraryRoot);
+        const track = library.resolve('one').tracks[0];
+        const service = new MusicService({
+            library, db: testDb(sqlite), probe: async () => ({ codec: 'mp3', durationSeconds: 601 })
+        });
+
+        await expect(service.validateTrack(track)).rejects.toThrow('600 seconds');
+        sqlite.close();
+    });
+
+    test('cancels an in-flight voice join when the guild is removed', async () => {
+        const { MusicLibrary, MusicService } = require('../src/services/musicService');
+        const sqlite = new Database(':memory:');
+        const voice = fakeVoice();
+        let ready;
+        voice.adapter.entersState = jest.fn(() => new Promise(resolve => { ready = resolve; }));
+        const channel = {
+            id: 'voice1', type: ChannelType.GuildVoice, userLimit: 0, members: new Map(),
+            permissionsFor: () => ({ has: () => true })
+        };
+        const guild = { id: 'guild1', voiceAdapterCreator: {}, members: { me: { id: 'bot1' } } };
+        const service = new MusicService({
+            library: new MusicLibrary(libraryRoot), db: testDb(sqlite), voice: voice.adapter, probe: testProbe
+        });
+
+        const joining = service.createPlayer(guild, channel);
+        await service.purgeGuild(guild.id);
+        ready(voice.connection);
+
+        await expect(joining).rejects.toThrow('cancelled');
+        expect(voice.connection.destroy).toHaveBeenCalled();
+        expect(service.players.has(guild.id)).toBe(false);
+        sqlite.close();
+    });
+
+    test('bounds shutdown even when an operation never settles', async () => {
+        const { MusicLibrary, MusicService } = require('../src/services/musicService');
+        const sqlite = new Database(':memory:');
+        const service = new MusicService({ library: new MusicLibrary(libraryRoot), db: testDb(sqlite), probe: testProbe });
+        service.operations.set('guild1', new Promise(() => {}));
+        jest.useFakeTimers();
+
+        const cleanup = service.cleanup();
+        await jest.advanceTimersByTimeAsync(5000);
+        await cleanup;
+
+        jest.useRealTimers();
+        sqlite.close();
+    });
+
     test('persists DJ and universal autoplay settings only for Manage Server members', async () => {
         const { MusicLibrary, MusicService } = require('../src/services/musicService');
         const sqlite = new Database(':memory:');
@@ -128,7 +200,7 @@ describe('music playback', () => {
             dj_role_id TEXT,
             autoplay INTEGER NOT NULL DEFAULT 0
         )`);
-        const service = new MusicService({ library: new MusicLibrary(libraryRoot), sqlite });
+        const service = new MusicService({ library: new MusicLibrary(libraryRoot), db: testDb(sqlite), probe: testProbe });
         const reply = jest.fn();
         const interaction = {
             guild: { id: 'guild1', roles: { cache: new Map([['dj1', { id: 'dj1' }]]) } },
@@ -172,9 +244,10 @@ describe('music playback', () => {
             guild, user: { id: 'user1' }, member: { voice: { channel, channelId: channel.id }, roles: { cache: new Map() }, permissions: { has: () => false } },
             channelId: 'text1', options: {
                 getSubcommandGroup: () => null, getSubcommand: () => 'play', getString: () => query
-            }, reply: jest.fn()
+            }, deferred: false, replied: false, reply: jest.fn(), editReply: jest.fn(),
+            deferReply: jest.fn(function deferReply() { this.deferred = true; })
         });
-        const service = new MusicService({ library: new MusicLibrary(libraryRoot), sqlite, voice: voice.adapter, spawn });
+        const service = new MusicService({ library: new MusicLibrary(libraryRoot), db: testDb(sqlite), voice: voice.adapter, spawn, probe: testProbe });
         const first = interaction('one');
         const second = interaction('two');
         const oversized = interaction('x'.repeat(201));
@@ -191,9 +264,12 @@ describe('music playback', () => {
 
         expect(voice.adapter.joinVoiceChannel).toHaveBeenCalledTimes(1);
         expect(spawn).toHaveBeenCalledTimes(1);
+        expect(spawn.mock.calls[0][1]).toEqual(expect.arrayContaining(['-t', '120']));
         expect(voice.player.play).toHaveBeenCalledTimes(1);
-        expect(first.reply.mock.calls[0][0].embeds[0].data.description).toContain('First Song');
-        expect(second.reply.mock.calls[0][0].embeds[0].data.description).toContain('position 1');
+        expect(first.deferReply).toHaveBeenCalledTimes(1);
+        expect(second.deferReply).toHaveBeenCalledTimes(1);
+        expect(first.editReply.mock.calls[0][0].embeds[0].data.description).toContain('First Song');
+        expect(second.editReply.mock.calls[0][0].embeds[0].data.description).toContain('position 1');
         expect(oversized.reply.mock.calls[0][0].embeds[0].data.description).toContain('200');
         expect(stage.reply.mock.calls[0][0].embeds[0].data.description).toContain('standard server voice');
         expect(full.reply.mock.calls[0][0].embeds[0].data.description).toContain('25');
@@ -221,7 +297,7 @@ describe('music playback', () => {
             }, reply: jest.fn()
         });
         channel.members.set('user1', interaction('play').member);
-        const service = new MusicService({ library: new MusicLibrary(libraryRoot), sqlite, voice: voice.adapter, spawn });
+        const service = new MusicService({ library: new MusicLibrary(libraryRoot), db: testDb(sqlite), voice: voice.adapter, spawn, probe: testProbe });
         await service.execute(interaction('play', 'one'));
         await service.execute(interaction('play', 'two'));
 
@@ -265,7 +341,7 @@ describe('music playback', () => {
             reply: jest.fn()
         });
         const spawn = jest.fn(fakeSpawn);
-        const service = new MusicService({ library: new MusicLibrary(libraryRoot), sqlite, voice: voice.adapter, spawn });
+        const service = new MusicService({ library: new MusicLibrary(libraryRoot), db: testDb(sqlite), voice: voice.adapter, spawn, probe: testProbe });
         await service.execute(interaction('play', 'one'));
 
         voice.player.emit('idle');
@@ -292,7 +368,7 @@ describe('music playback', () => {
             guild, user: { id: 'user1' }, member, channelId: 'text1',
             options: { getSubcommandGroup: () => null, getSubcommand: () => 'play', getString: () => 'two' }, reply: jest.fn()
         };
-        const service = new MusicService({ library: new MusicLibrary(libraryRoot), sqlite, voice: voice.adapter, spawn: fakeSpawn });
+        const service = new MusicService({ library: new MusicLibrary(libraryRoot), db: testDb(sqlite), voice: voice.adapter, spawn: fakeSpawn, probe: testProbe });
         await service.execute(play);
         voice.player.emit('idle');
         await new Promise(resolve => setImmediate(resolve));
@@ -335,7 +411,7 @@ describe('music playback', () => {
                 getSubcommandGroup: () => null, getSubcommand: () => 'play', getString: () => 'one'
             }, reply: jest.fn() };
         };
-        const service = new MusicService({ library: new MusicLibrary(libraryRoot), sqlite, voice: adapter, spawn: fakeSpawn });
+        const service = new MusicService({ library: new MusicLibrary(libraryRoot), db: testDb(sqlite), voice: adapter, spawn: fakeSpawn, probe: testProbe });
 
         await service.execute(makeInteraction('guild1'));
         await service.execute(makeInteraction('guild2'));

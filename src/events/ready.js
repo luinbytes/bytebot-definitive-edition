@@ -342,10 +342,10 @@ module.exports = {
         if (process.env.MUSIC_LIBRARY_PATH) {
             try {
                 const { MusicLibrary, MusicService } = require('../services/musicService');
-                const { sqlite } = require('../database');
+                const { db } = require('../database');
                 MusicService.checkRuntime();
                 client.musicService = new MusicService({
-                    library: new MusicLibrary(process.env.MUSIC_LIBRARY_PATH), sqlite
+                    library: new MusicLibrary(process.env.MUSIC_LIBRARY_PATH), db
                 });
                 logger.success('Music service initialized');
             } catch (e) {

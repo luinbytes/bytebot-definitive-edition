@@ -59,13 +59,15 @@ without one, playback ends. The manifest is capped at 1 MiB, 500 tracks, and
 100 playlists. Tracks are capped at 10 minutes and 64 MiB; playlists, related
 lists, and each guild queue are capped at 25 entries. Resolved files must stay
 inside the library root and use AAC, FLAC, M4A, MP3, Ogg/Opus, WAV, or WebM.
+FFprobe verifies the codec and duration before queue insertion and again before
+playback. FFmpeg hard-stops each stream at its declared duration.
 
 ## Runtime
 
 Music requires Node 22.12 or newer, `@discordjs/voice`, `opusscript`, Discord
-UDP reachability, and FFmpeg. The Docker image installs FFmpeg. A native host
-may set `FFMPEG_PATH` when the executable is not named `ffmpeg`. Startup checks
-the dependencies and FFmpeg within five seconds; a failure leaves music
+UDP reachability, FFmpeg, and FFprobe. The Docker image installs both. A native
+host may set `FFMPEG_PATH` or `FFPROBE_PATH` when either executable uses a
+nonstandard name. Startup checks the dependencies and executables within five seconds; a failure leaves music
 disabled while the rest of ByteBot starts. One FFmpeg process may run per
 active guild. Stop, disconnect, guild removal, and process shutdown destroy the
 player, connection, timer, and child process. An idle player disconnects five

@@ -1,10 +1,6 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const embeds = require('../../utils/embeds');
-
-const PRESETS = [
-    'soft', '8d', 'chipmunk', 'boost', 'vaporwave', 'vibrato',
-    'piano', 'metal', 'flat', 'karaoke', 'nightcore'
-];
+const { PRESET_NAMES } = require('../../services/musicService');
 
 const data = new SlashCommandBuilder()
     .setName('music')
@@ -21,7 +17,7 @@ const data = new SlashCommandBuilder()
         .addIntegerOption(option => option.setName('volume').setDescription('Volume percent').setMinValue(0).setMaxValue(200)))
     .addSubcommand(subcommand => subcommand.setName('preset').setDescription('Toggle an audio preset')
         .addStringOption(option => option.setName('name').setDescription('Audio preset').setRequired(true)
-            .addChoices(...PRESETS.map(name => ({ name, value: name })))))
+            .addChoices(...PRESET_NAMES.map(name => ({ name, value: name })))))
     .addSubcommandGroup(group => group.setName('settings').setDescription('Configure server music')
         .addSubcommand(subcommand => subcommand.setName('dj').setDescription('Set the DJ role')
             .addRoleOption(option => option.setName('role').setDescription('DJ role').setRequired(true)))
@@ -35,12 +31,18 @@ const data = new SlashCommandBuilder()
 module.exports = {
     data,
     cooldown: 1,
+    longRunning: true,
     async execute(interaction, client) {
         if (client.musicService) return client.musicService.execute(interaction);
-        return interaction.reply({
+        const payload = {
             embeds: [embeds.error('Music Unavailable', 'The music service is not initialized.')],
             flags: [MessageFlags.Ephemeral],
             allowedMentions: { parse: [] }
-        });
+        };
+        if (interaction.deferred) {
+            delete payload.flags;
+            return interaction.editReply(payload);
+        }
+        return interaction.reply(payload);
     }
 };

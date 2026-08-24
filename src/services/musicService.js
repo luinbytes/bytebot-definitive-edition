@@ -2,6 +2,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn: spawnProcess, spawnSync } = require('node:child_process');
 const { ChannelType, MessageFlags, PermissionFlagsBits } = require('discord.js');
+const { eq } = require('drizzle-orm');
+const { musicConfig } = require('../database/schema');
 const embeds = require('../utils/embeds');
 const logger = require('../utils/logger');
 
@@ -24,6 +26,55 @@ const PRESET_FILTERS = {
     karaoke: 'pan=stereo|c0=c0-c1|c1=c1-c0',
     nightcore: 'asetrate=48000*1.25,aresample=48000'
 };
+const PRESET_NAMES = Object.freeze(Object.keys(PRESET_FILTERS));
+const AUDIO_CODECS = new Set(['aac', 'alac', 'flac', 'mp3', 'opus', 'vorbis']);
+
+function probeAudio(file, ffprobe = process.env.FFPROBE_PATH || 'ffprobe') {
+    return new Promise((resolve, reject) => {
+        const child = spawnProcess(ffprobe, [
+            '-v', 'error', '-select_streams', 'a:0',
+            '-show_entries', 'stream=codec_name:format=duration', '-of', 'json', file
+        ], { stdio: ['ignore', 'pipe', 'ignore'] });
+        let output = '';
+        const timer = setTimeout(() => {
+            child.kill('SIGKILL');
+            reject(new Error('Audio validation exceeded five seconds.'));
+        }, 5000);
+        timer.unref?.();
+        child.stdout.setEncoding('utf8');
+        child.stdout.on('data', chunk => {
+            output += chunk;
+            if (output.length > 64 * 1024) {
+                child.kill('SIGKILL');
+                reject(new Error('Audio validation output exceeded 64 KiB.'));
+            }
+        });
+        child.once('error', error => {
+            clearTimeout(timer);
+            reject(new Error(`FFprobe could not start: ${error.message}`));
+        });
+        child.once('close', code => {
+            clearTimeout(timer);
+            if (code !== 0) return reject(new Error('The configured file is not readable audio.'));
+            try {
+                const result = JSON.parse(output);
+                resolve({ codec: result.streams?.[0]?.codec_name, durationSeconds: Number(result.format?.duration) });
+            } catch {
+                reject(new Error('FFprobe returned invalid audio metadata.'));
+            }
+        });
+    });
+}
+
+async function stopProcess(child) {
+    if (!child || child.exitCode != null) return;
+    await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('FFmpeg did not stop within one second.')), 1000);
+        timer.unref?.();
+        child.once('close', () => { clearTimeout(timer); resolve(); });
+        child.kill('SIGKILL');
+    });
+}
 
 function boundedString(value, label, max = 200) {
     if (typeof value !== 'string' || !value.trim() || value.length > max) {
@@ -151,40 +202,70 @@ class MusicLibrary {
 }
 
 class MusicService {
-    constructor({ library, sqlite, voice = null, spawn = spawnProcess }) {
+    constructor({ library, db, voice = null, spawn = spawnProcess, probe = (track, file) => probeAudio(file) }) {
         this.library = library;
-        this.sqlite = sqlite;
+        this.db = db;
         this.voice = voice;
         this.spawn = spawn;
+        this.probe = probe;
         this.players = new Map();
+        this.pendingConnections = new Map();
+        this.removedGuilds = new Set();
         this.operations = new Map();
+        this.pendingCounts = new Map();
         this.closing = false;
     }
 
-    static checkRuntime(ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg') {
+    static checkRuntime(ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg', ffprobe = process.env.FFPROBE_PATH || 'ffprobe') {
         require.resolve('@discordjs/voice');
         require.resolve('opusscript');
-        const result = spawnSync(ffmpeg, ['-version'], { stdio: 'ignore', timeout: 5000 });
-        if (result.error || result.status !== 0) {
-            throw new Error('Music requires FFmpeg on PATH (or FFMPEG_PATH) and it must start within five seconds.');
+        for (const [name, executable] of [['FFmpeg', ffmpeg], ['FFprobe', ffprobe]]) {
+            const result = spawnSync(executable, ['-version'], { stdio: 'ignore', timeout: 5000 });
+            if (result.error || result.status !== 0) {
+                throw new Error(`Music requires ${name} on PATH and it must start within five seconds.`);
+            }
         }
     }
 
     reply(interaction, embed, ephemeral = true) {
-        return interaction.reply({
+        const payload = {
             embeds: [embed], flags: ephemeral ? [MessageFlags.Ephemeral] : [], allowedMentions: { parse: [] }
-        });
+        };
+        if (interaction.deferred) {
+            delete payload.flags;
+            return interaction.editReply(payload);
+        }
+        return interaction.reply(payload);
+    }
+
+    async defer(interaction, ephemeral = false) {
+        if (!interaction.deferred && !interaction.replied && interaction.deferReply) {
+            await interaction.deferReply({ flags: ephemeral ? [MessageFlags.Ephemeral] : [] });
+        }
     }
 
     async execute(interaction) {
-        if (this.closing) return this.reply(interaction, embeds.error('Music Unavailable', 'The music service is shutting down.'));
-        const previous = this.operations.get(interaction.guild.id) || Promise.resolve();
-        const operation = previous.catch(() => {}).then(() => this.executeOnce(interaction));
-        this.operations.set(interaction.guild.id, operation);
+        const guildId = interaction.guild.id;
+        if (this.closing || this.removedGuilds.has(guildId)) {
+            return this.reply(interaction, embeds.error('Music Unavailable', 'The music service is shutting down.'));
+        }
+        const pending = this.pendingCounts.get(guildId) || 0;
+        if (pending >= MAX_QUEUE) return this.reply(interaction, embeds.error('Music Busy', 'Too many music requests are already pending.'));
+        this.pendingCounts.set(guildId, pending + 1);
+        let operation;
         try {
+            const previous = this.operations.get(guildId) || Promise.resolve();
+            if (this.operations.has(guildId)) {
+                await this.defer(interaction, interaction.options.getSubcommandGroup(false) === 'settings');
+            }
+            operation = previous.catch(() => {}).then(() => this.executeOnce(interaction));
+            this.operations.set(guildId, operation);
             return await operation;
         } finally {
-            if (this.operations.get(interaction.guild.id) === operation) this.operations.delete(interaction.guild.id);
+            if (operation && this.operations.get(guildId) === operation) this.operations.delete(guildId);
+            const remaining = (this.pendingCounts.get(guildId) || 1) - 1;
+            if (remaining) this.pendingCounts.set(guildId, remaining);
+            else this.pendingCounts.delete(guildId);
         }
     }
 
@@ -211,10 +292,8 @@ class MusicService {
             if (!role || role.guild?.id !== interaction.guild.id || !interaction.guild.roles.cache.has(role.id)) {
                 return this.reply(interaction, embeds.error('Invalid Role', 'Choose a role from this server.'));
             }
-            this.sqlite.prepare(`
-                INSERT INTO music_config (guild_id, dj_role_id, autoplay) VALUES (?, ?, 0)
-                ON CONFLICT(guild_id) DO UPDATE SET dj_role_id = excluded.dj_role_id
-            `).run(interaction.guild.id, role.id);
+            await this.db.insert(musicConfig).values({ guildId: interaction.guild.id, djRoleId: role.id })
+                .onConflictDoUpdate({ target: musicConfig.guildId, set: { djRoleId: role.id } });
             return this.reply(interaction, embeds.success('DJ Role Set', `${role} is now the DJ role.`));
         }
 
@@ -223,10 +302,8 @@ class MusicService {
         if (!enabled && !['off', 'disable', 'false'].includes(state)) {
             return this.reply(interaction, embeds.error('Invalid State', 'Use on, off, enable, disable, true, or false.'));
         }
-        this.sqlite.prepare(`
-            INSERT INTO music_config (guild_id, dj_role_id, autoplay) VALUES (?, NULL, ?)
-            ON CONFLICT(guild_id) DO UPDATE SET autoplay = excluded.autoplay
-        `).run(interaction.guild.id, Number(enabled));
+        await this.db.insert(musicConfig).values({ guildId: interaction.guild.id, autoplay: enabled })
+            .onConflictDoUpdate({ target: musicConfig.guildId, set: { autoplay: enabled } });
         return this.reply(interaction, embeds.success('Autoplay Updated', `Autoplay is now **${enabled ? 'enabled' : 'disabled'}**.`));
     }
 
@@ -240,10 +317,10 @@ class MusicService {
             await this.reply(interaction, embeds.error('Different Voice Channel', 'Join my voice channel to control music.'));
             return null;
         }
-        const config = this.sqlite.prepare('SELECT dj_role_id FROM music_config WHERE guild_id = ?').get(interaction.guild.id);
+        const config = await this.db.select().from(musicConfig).where(eq(musicConfig.guildId, interaction.guild.id)).get();
         const bypass = interaction.guild.ownerId === interaction.user.id
             || interaction.member.permissions.has(PermissionFlagsBits.Administrator);
-        if (config?.dj_role_id && !bypass && !interaction.member.roles.cache.has(config.dj_role_id)) {
+        if (config?.djRoleId && !bypass && !interaction.member.roles.cache.has(config.djRoleId)) {
             await this.reply(interaction, embeds.error('DJ Required', 'You need the configured DJ role to use this control.'));
             return null;
         }
@@ -293,12 +370,14 @@ class MusicService {
         const enabled = state.preset !== name;
         state.preset = enabled ? name : null;
         const track = state.current;
+        await this.defer(interaction);
         state.suppressIdle = true;
         state.player.stop(true);
-        state.process?.kill('SIGKILL');
+        const process = state.process;
         state.process = null;
-        state.current = null;
         try {
+            await stopProcess(process);
+            state.current = null;
             await this.startTrack(state, track);
         } catch (error) {
             this.destroy(interaction.guild.id);
@@ -384,6 +463,13 @@ class MusicService {
         const queuedCount = state?.current ? result.tracks.length : Math.max(0, result.tracks.length - 1);
         if (queuedCount > available) return this.reply(interaction, embeds.error('Queue Full', `The queue can hold at most ${MAX_QUEUE} tracks.`));
 
+        await this.defer(interaction);
+        try {
+            for (const track of result.tracks) await this.validateTrack(track);
+        } catch (error) {
+            return this.reply(interaction, embeds.error('Invalid Track', error.message));
+        }
+
         if (!state) {
             try {
                 state = await this.createPlayer(interaction.guild, channel);
@@ -414,6 +500,7 @@ class MusicService {
     }
 
     async createPlayer(guild, channel) {
+        if (this.closing || this.removedGuilds.has(guild.id)) throw new Error('Music playback was cancelled.');
         const required = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak];
         if (!channel.permissionsFor(guild.members.me).has(required)) {
             throw new Error('I need View Channel, Connect, and Speak in your voice channel.');
@@ -425,11 +512,18 @@ class MusicService {
         const connection = voice.joinVoiceChannel({
             channelId: channel.id, guildId: guild.id, adapterCreator: guild.voiceAdapterCreator
         });
+        this.pendingConnections.set(guild.id, connection);
         try {
             await voice.entersState(connection, voice.VoiceConnectionStatus.Ready, 15000);
         } catch {
             connection.destroy();
             throw new Error('Could not establish a voice connection within 15 seconds.');
+        } finally {
+            if (this.pendingConnections.get(guild.id) === connection) this.pendingConnections.delete(guild.id);
+        }
+        if (this.closing || this.removedGuilds.has(guild.id)) {
+            connection.destroy();
+            throw new Error('Music playback was cancelled.');
         }
         const player = voice.createAudioPlayer({ behaviors: { noSubscriber: voice.NoSubscriberBehavior.Pause } });
         if (!connection.subscribe(player)) {
@@ -471,9 +565,10 @@ class MusicService {
     }
 
     async startTrack(state, track) {
+        if (this.closing || this.removedGuilds.has(state.guild.id)) throw new Error('Music playback was cancelled.');
         const voice = this.voiceAdapter();
-        const file = this.library.validate(track);
-        const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-i', file, '-vn'];
+        const file = await this.validateTrack(track);
+        const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-i', file, '-vn', '-t', String(track.durationSeconds)];
         if (state.preset) args.push('-af', PRESET_FILTERS[state.preset]);
         args.push('-ac', '2', '-ar', '48000', '-f', 's16le', 'pipe:1');
         const child = this.spawn(process.env.FFMPEG_PATH || 'ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -489,9 +584,16 @@ class MusicService {
             throw error;
         }
         child.stderr.resume();
+        if (this.closing || this.removedGuilds.has(state.guild.id)) {
+            await stopProcess(child);
+            throw new Error('Music playback was cancelled.');
+        }
         if (state.idleTimer) clearTimeout(state.idleTimer);
         state.idleTimer = null;
         state.process = child;
+        child.once('close', () => {
+            if (state.process === child) state.process = null;
+        });
         state.current = track;
         if (state.recent.at(-1) !== track.id) state.recent.push(track.id);
         if (state.recent.length > MAX_QUEUE) state.recent.shift();
@@ -510,11 +612,12 @@ class MusicService {
 
     async advanceOnce(state) {
         const finished = state.current;
-        state.process?.kill('SIGKILL');
+        const process = state.process;
         state.process = null;
+        await stopProcess(process);
         state.current = null;
         let next = state.queue.shift();
-        const config = this.sqlite.prepare('SELECT autoplay FROM music_config WHERE guild_id = ?').get(state.guild.id);
+        const config = await this.db.select().from(musicConfig).where(eq(musicConfig.guildId, state.guild.id)).get();
         if (!next && finished && config?.autoplay) {
             next = this.library.related(finished.id).find(track => !state.recent.includes(track.id));
         }
@@ -557,7 +660,23 @@ class MusicService {
         return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
     }
 
+    async validateTrack(track) {
+        const file = this.library.validate(track);
+        const result = await this.probe(track, file);
+        const codec = result?.codec;
+        const actual = result?.durationSeconds;
+        if ((!AUDIO_CODECS.has(codec) && !codec?.startsWith('pcm_')) || !Number.isFinite(actual) || actual <= 0) {
+            throw new Error(`Track ${track.id} is not supported audio.`);
+        }
+        if (actual > 600 || Math.abs(actual - track.durationSeconds) > 2) {
+            throw new Error(`Track ${track.id} duration does not match its manifest or exceeds 600 seconds.`);
+        }
+        return file;
+    }
+
     destroy(guildId) {
+        this.pendingConnections.get(guildId)?.destroy();
+        this.pendingConnections.delete(guildId);
         const state = this.players.get(guildId);
         if (!state) return;
         if (state.idleTimer) clearTimeout(state.idleTimer);
@@ -568,11 +687,27 @@ class MusicService {
         this.players.delete(guildId);
     }
 
+    async purgeGuild(guildId) {
+        this.removedGuilds.add(guildId);
+        this.destroy(guildId);
+        const operation = this.operations.get(guildId);
+        if (operation) await Promise.race([
+            operation.catch(() => {}),
+            new Promise(resolve => { const timer = setTimeout(resolve, 5000); timer.unref?.(); })
+        ]);
+        this.destroy(guildId);
+    }
+
     async cleanup() {
         this.closing = true;
-        await Promise.allSettled([...this.operations.values()]);
+        for (const guildId of [...this.players.keys()]) this.destroy(guildId);
+        for (const guildId of [...this.pendingConnections.keys()]) this.destroy(guildId);
+        await Promise.race([
+            Promise.allSettled([...this.operations.values()]),
+            new Promise(resolve => { const timer = setTimeout(resolve, 5000); timer.unref?.(); })
+        ]);
         for (const guildId of [...this.players.keys()]) this.destroy(guildId);
     }
 }
 
-module.exports = { MAX_QUEUE, MusicLibrary, MusicService };
+module.exports = { MAX_QUEUE, PRESET_NAMES, MusicLibrary, MusicService };
