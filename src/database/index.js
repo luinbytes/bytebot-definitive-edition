@@ -928,6 +928,13 @@ const expectedSchema = {
         user_id: 'TEXT NOT NULL',
         xp: 'INTEGER DEFAULT 0 NOT NULL',
         level: 'INTEGER DEFAULT 0 NOT NULL',
+        text_xp: 'INTEGER DEFAULT 0 NOT NULL',
+        voice_xp: 'INTEGER DEFAULT 0 NOT NULL',
+        manual_adjustment: 'INTEGER DEFAULT 0 NOT NULL',
+        level_floor: 'INTEGER DEFAULT 0 NOT NULL',
+        message_count: 'INTEGER DEFAULT 0 NOT NULL',
+        voice_seconds: 'INTEGER DEFAULT 0 NOT NULL',
+        last_text_xp_at: 'INTEGER',
         updated_at: 'INTEGER NOT NULL'
     },
     giveaways: {

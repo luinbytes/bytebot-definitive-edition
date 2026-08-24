@@ -1071,6 +1071,13 @@ const memberLevels = sqliteTable('member_levels', {
     userId: text('user_id').notNull(),
     xp: integer('xp').default(0).notNull(),
     level: integer('level').default(0).notNull(),
+    textXp: integer('text_xp').default(0).notNull(),
+    voiceXp: integer('voice_xp').default(0).notNull(),
+    manualAdjustment: integer('manual_adjustment').default(0).notNull(),
+    levelFloor: integer('level_floor').default(0).notNull(),
+    messageCount: integer('message_count').default(0).notNull(),
+    voiceSeconds: integer('voice_seconds').default(0).notNull(),
+    lastTextXpAt: integer('last_text_xp_at'),
     updatedAt: integer('updated_at').notNull()
 }, table => ({ pk: primaryKey({ columns: [table.guildId, table.userId] }) }));
 
