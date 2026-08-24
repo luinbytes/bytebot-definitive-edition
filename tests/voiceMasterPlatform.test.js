@@ -229,10 +229,21 @@ describe('VoiceMaster lifecycle', () => {
             permissions: { has: () => false }, roles: { cache: new Map() },
             voice: { channelId: 'temporary-1', channel: temporary }
         };
+        const target = {
+            id: 'target-1', user: { id: 'target-1', bot: false, username: 'Target' },
+            voice: {
+                channelId: 'other-voice', channel: { id: 'other-voice' },
+                setChannel: jest.fn(async channel => { target.voice.channelId = channel.id; target.voice.channel = channel; }),
+                disconnect: jest.fn(async () => { target.voice.channelId = null; target.voice.channel = null; })
+            }
+        };
         voiceStates.set(owner.id, { channelId: 'join-1' });
         const guild = {
             id: 'guild-1', name: 'Guild', maximumBitrate: 96000,
-            members: { me: { id: 'bot-1', permissions: { has: () => true } } },
+            members: {
+                me: { id: 'bot-1', permissions: { has: () => true } },
+                fetch: jest.fn(async id => id === target.id ? target : null)
+            },
             roles: { everyone: { id: 'guild-1' } }, voiceStates: { cache: voiceStates },
             channels: { cache: channels, create, fetch: jest.fn(async id => channels.get(id) || null) },
             fetchVoiceRegions: jest.fn(async () => new Map([['eu-west', { id: 'eu-west', deprecated: false }]]))
@@ -252,6 +263,9 @@ describe('VoiceMaster lifecycle', () => {
         await service.execute(memberInteraction(guild, owner, 'rename', { name: 'Focus Room' }));
         await service.execute(memberInteraction(guild, owner, 'bitrate', { bitrate: 80000 }));
         await service.execute(memberInteraction(guild, owner, 'region', { region: 'eu-west' }));
+        await service.execute(memberInteraction(guild, owner, 'permit', { user: target }));
+        await service.execute(memberInteraction(guild, owner, 'drag', { user: target }));
+        await service.execute(memberInteraction(guild, owner, 'reject', { user: target }));
         await service.execute(memberInteraction(guild, outsider, 'delete'));
 
         expect(overwrites.edit).toHaveBeenCalledWith('guild-1', { Connect: false });
@@ -259,6 +273,10 @@ describe('VoiceMaster lifecycle', () => {
         expect([temporary.userLimit, temporary.name, temporary.bitrate, temporary.rtcRegion]).toEqual([
             12, 'Focus Room', 80000, 'eu-west'
         ]);
+        expect(overwrites.edit).toHaveBeenCalledWith('target-1', { ViewChannel: true, Connect: true });
+        expect(target.voice.setChannel).toHaveBeenCalledWith(temporary);
+        expect(overwrites.edit).toHaveBeenCalledWith('target-1', { Connect: false });
+        expect(target.voice.disconnect).toHaveBeenCalledTimes(1);
         expect(temporary.delete).not.toHaveBeenCalled();
     });
 

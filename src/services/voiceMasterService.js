@@ -377,6 +377,32 @@ class VoiceMasterService {
                 await channel.setStatus(status);
                 break;
             }
+            case 'permit': {
+                const target = await this.targetMember(interaction);
+                if (target.id === interaction.user.id) throw new Error('You already have access to your channel.');
+                this.requireChannelPermissions(interaction.guild, channel, [PermissionFlagsBits.ManageRoles]);
+                await channel.permissionOverwrites.edit(target.id, { ViewChannel: true, Connect: true });
+                this.persistAccess(interaction.guildId, channel.id, target.id, 'permit');
+                break;
+            }
+            case 'drag': {
+                const target = await this.targetMember(interaction);
+                if (!target.voice?.channelId) throw new Error('That user is not in a voice channel.');
+                this.requireChannelPermissions(interaction.guild, channel, [PermissionFlagsBits.MoveMembers]);
+                await target.voice.setChannel(channel);
+                break;
+            }
+            case 'reject': {
+                const target = await this.targetMember(interaction);
+                if (target.id === interaction.user.id) throw new Error('You cannot reject yourself from your channel.');
+                const permissions = [PermissionFlagsBits.ManageRoles];
+                if (target.voice?.channelId === channel.id) permissions.push(PermissionFlagsBits.MoveMembers);
+                this.requireChannelPermissions(interaction.guild, channel, permissions);
+                await channel.permissionOverwrites.edit(target.id, { Connect: false });
+                this.persistAccess(interaction.guildId, channel.id, target.id, 'reject');
+                if (target.voice?.channelId === channel.id) await target.voice.disconnect('Rejected from VoiceMaster channel');
+                break;
+            }
             case 'information':
                 return interaction.editReply({
                     embeds: [embeds.info('VoiceMaster Information', [
@@ -451,6 +477,24 @@ class VoiceMasterService {
             this.sqlite.prepare('DELETE FROM bytepods WHERE guild_id = ? AND channel_id = ? AND bot_owned = 1')
                 .run(guildId, channelId);
         })();
+    }
+
+    async targetMember(interaction) {
+        const selected = interaction.options.getMember('user');
+        if (selected) return selected;
+        const user = interaction.options.getUser('user');
+        if (!user) throw new Error('A user is required.');
+        const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+        if (!member) throw new Error('That user was not found in this server.');
+        return member;
+    }
+
+    persistAccess(guildId, channelId, userId, effect) {
+        this.sqlite.prepare(`INSERT INTO voice_master_access (guild_id, channel_id, user_id, effect, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (guild_id, channel_id, user_id) DO UPDATE SET
+                effect = excluded.effect, updated_at = excluded.updated_at`)
+            .run(guildId, channelId, userId, effect, this.now());
     }
 }
 
