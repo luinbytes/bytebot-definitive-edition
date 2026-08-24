@@ -26,6 +26,8 @@ function privateAddress(address) {
             || (a === 203 && b === 0 && c === 113);
     }
     if (net.isIP(address) !== 6) return false;
+    const dotted = address.slice(address.lastIndexOf(':') + 1);
+    if (net.isIP(dotted) === 4) return privateAddress(dotted);
     const halves = address.toLowerCase().split('::');
     const left = halves[0] ? halves[0].split(':') : [];
     const right = halves[1] ? halves[1].split(':') : [];
@@ -221,14 +223,23 @@ class MediaService {
             signal: AbortSignal.timeout(10000)
         });
         const status = response.status ?? response.statusCode;
-        if (response.ok === false || (status != null && (status < 200 || status >= 300))) throw new Error('Image download failed.');
+        if (response.ok === false || (status != null && (status < 200 || status >= 300))) {
+            response.destroy?.();
+            throw new Error('Image download failed.');
+        }
         const header = name => response.headers.get?.(name) ?? response.headers[name];
         const responseFormat = normalizeType(header('content-type'));
-        if (!responseFormat || !allowedFormats.has(responseFormat)) throw new Error('Images must use an allowed PNG, JPG, GIF, or WebP format.');
+        if (!responseFormat || !allowedFormats.has(responseFormat)) {
+            response.destroy?.();
+            throw new Error('Images must use an allowed PNG, JPG, GIF, or WebP format.');
+        }
         const maxBytes = Number.isFinite(options.maxBytes) && options.maxBytes > 0
             ? Math.min(options.maxBytes, MAX_IMAGE_BYTES) : MAX_IMAGE_BYTES;
         const length = Number(header('content-length') || 0);
-        if (!Number.isFinite(length) || length < 0 || length > maxBytes) throw new Error('Media cannot exceed 8 MB.');
+        if (!Number.isFinite(length) || length < 0 || length > maxBytes) {
+            response.destroy?.();
+            throw new Error('Media cannot exceed 8 MB.');
+        }
         const buffer = await responseBuffer(response, maxBytes);
         const metadata = imageMetadata(buffer);
         if (metadata.format !== responseFormat || (declaredFormat && metadata.format !== declaredFormat)) {

@@ -48,6 +48,7 @@ describe('media service', () => {
 
         await expect(service.image({ url: 'https://example.com/image.png', width: 5000, height: 3 })).rejects.toThrow('dimensions');
         await expect(service.image('http://127.0.0.1/image.png')).rejects.toThrow('public address');
+        await expect(service.image('http://[::ffff:127.0.0.1]/image.png')).rejects.toThrow('public address');
         await expect(service.image('http://[0:0:0:0:0:0:0:1]/image.png')).rejects.toThrow('public address');
 
         fetch.mockResolvedValueOnce({
