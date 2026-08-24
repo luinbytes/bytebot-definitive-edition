@@ -1,8 +1,10 @@
 const crypto = require('crypto');
+const sharp = require('sharp');
 const {
-    ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, EmbedBuilder,
+    ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder,
     MessageFlags, ModalBuilder, PermissionFlagsBits, TextInputBuilder, TextInputStyle
 } = require('discord.js');
+const { ServerPresentationService } = require('./serverPresentationService');
 
 const MAX_LEVEL = 999;
 
@@ -14,11 +16,16 @@ function roleIds(member) {
     return [...(member?.roles?.cache?.keys?.() || [])];
 }
 
+function xml(value) {
+    return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[char]);
+}
+
 class LevelAnalyticsService {
-    constructor({ sqlite, client = null, now = Date.now }) {
+    constructor({ sqlite, client = null, images = null, now = Date.now }) {
         this.sqlite = sqlite;
         this.client = client;
         this.now = now;
+        this.images = images || new ServerPresentationService({ sqlite });
         this.confirmations = new Map();
     }
 
@@ -432,6 +439,46 @@ class LevelAnalyticsService {
         `).get(guildId, row.xp, row.xp, row.user_id).rank;
     }
 
+    async rankCard(user, member, guild) {
+        const row = this.memberRow(guild.id, user.id);
+        const prefs = this.sqlite.prepare(`SELECT * FROM level_rank_cards WHERE user_id = ?`).get(user.id) || {};
+        const accent = /^#[0-9a-f]{6}$/i.test(prefs.accent || '') ? prefs.accent : '#5865F2';
+        const width = prefs.layout === 'compact' ? 760 : 900;
+        const height = prefs.layout === 'compact' ? 220 : 280;
+        const nextXp = row.level >= MAX_LEVEL ? row.xp : 100 * (row.level + 1) ** 2;
+        const previousXp = 100 * row.level ** 2;
+        const progress = nextXp === previousXp ? 1 : Math.max(0, Math.min(1, (row.xp - previousXp) / (nextXp - previousXp)));
+        let image = prefs.background_data
+            ? sharp(prefs.background_data).resize(width, height, { fit: 'cover' })
+            : sharp({ create: { width, height, channels: 4, background: '#17191f' } });
+        const avatarSize = prefs.layout === 'compact' ? 130 : 170;
+        const avatarX = 35;
+        const avatarY = Math.floor((height - avatarSize) / 2);
+        const textX = avatarX + avatarSize + 35;
+        const barWidth = width - textX - 45;
+        const border = Math.max(0, Math.min(20, prefs.avatar_border ?? 4));
+        const overlay = Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+            <rect width="100%" height="100%" fill="#0b0c10" fill-opacity="0.68"/>
+            <circle cx="${avatarX + avatarSize / 2}" cy="${avatarY + avatarSize / 2}" r="${avatarSize / 2 + border / 2}" fill="none" stroke="${accent}" stroke-width="${border}"/>
+            <text x="${textX}" y="70" fill="white" font-size="32" font-family="sans-serif" font-weight="700">${xml(member?.displayName || user.username || user.id)}</text>
+            <text x="${textX}" y="112" fill="${accent}" font-size="24" font-family="sans-serif">Rank #${this.memberRank(guild.id, row)} · Level ${row.level}</text>
+            <text x="${textX}" y="150" fill="#d8dbe2" font-size="20" font-family="sans-serif">${row.xp} / ${nextXp} XP</text>
+            <rect x="${textX}" y="172" width="${barWidth}" height="18" rx="9" fill="#30343d"/>
+            <rect x="${textX}" y="172" width="${Math.round(barWidth * progress)}" height="18" rx="9" fill="${accent}"/>
+            <text x="${textX}" y="${height - 28}" fill="#b8bdc9" font-size="16" font-family="sans-serif">Text ${row.text_xp} XP · Voice ${row.voice_xp} XP</text>
+        </svg>`);
+        const composites = [{ input: overlay }];
+        const avatarUrl = user.displayAvatarURL?.({ extension: 'png', size: 256 });
+        if (avatarUrl) {
+            const avatar = await this.images.image(avatarUrl);
+            const mask = Buffer.from(`<svg width="${avatarSize}" height="${avatarSize}"><circle cx="${avatarSize / 2}" cy="${avatarSize / 2}" r="${avatarSize / 2}" fill="white"/></svg>`);
+            const rounded = await sharp(avatar).resize(avatarSize, avatarSize).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
+            composites.unshift({ input: rounded, left: avatarX, top: avatarY });
+        }
+        const png = await image.composite(composites).png().toBuffer();
+        return { files: [new AttachmentBuilder(png, { name: `rank-${user.id}.png` })], allowedMentions: { parse: [] } };
+    }
+
     async reconcileMemberRoles(member) {
         if (!member || member.user?.bot) return false;
         const config = this.sqlite.prepare(`SELECT stack_roles FROM level_configs WHERE guild_id = ?`).get(member.guild.id);
@@ -646,15 +693,12 @@ class LevelAnalyticsService {
             const privateReply = interaction.options.getBoolean?.('private') ?? false;
             if (action === 'rank') {
                 const user = interaction.options.getUser?.('member') || interaction.user;
-                const row = this.memberRow(interaction.guildId, user.id);
-                const nextXp = row.level >= MAX_LEVEL ? row.xp : 100 * (row.level + 1) ** 2;
-                const embed = new EmbedBuilder().setColor(0x5865f2).setTitle(`${user.username || user.id}'s Level Stats`)
-                    .setDescription(`Rank **#${this.memberRank(interaction.guildId, row)}** · Level **${row.level}**\n${row.xp} / ${nextXp} XP`)
-                    .addFields(
-                        { name: 'Text Stats', value: `XP: \`${row.text_xp}\`\nMessages: \`${row.message_count}\``, inline: true },
-                        { name: 'Voice Stats', value: `XP: \`${row.voice_xp}\`\nTime Spent: \`${Math.floor(row.voice_seconds / 60)} minutes\``, inline: true }
-                    );
-                return interaction.reply({ embeds: [embed], flags: privateReply ? [MessageFlags.Ephemeral] : [], allowedMentions: { parse: [] } });
+                const member = interaction.guild.members.cache.get(user.id)
+                    || await interaction.guild.members.fetch(user.id).catch(() => null);
+                return interaction.reply({
+                    ...await this.rankCard(user, member, interaction.guild),
+                    flags: privateReply ? [MessageFlags.Ephemeral] : []
+                });
             }
             const page = interaction.options.getInteger?.('page') || 1;
             if (action === 'leaderboard') {
@@ -934,6 +978,65 @@ class LevelAnalyticsService {
             return interaction.reply({
                 content: 'Custom level up message has been set.',
                 flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+            });
+        }
+        if (group === 'rankcard') {
+            if (action === 'view') {
+                const user = interaction.options.getUser('member') || interaction.user;
+                const member = interaction.guild.members.cache.get(user.id)
+                    || await interaction.guild.members.fetch(user.id).catch(() => null);
+                return interaction.reply(await this.rankCard(user, member, interaction.guild));
+            }
+            if (action === 'color') {
+                const input = interaction.options.getString('color', true);
+                const accent = input.toLowerCase() === 'reset' ? null : input.toUpperCase();
+                if (accent && !/^#[0-9A-F]{6}$/.test(accent)) throw new Error('Use a six-digit hex color or reset.');
+                this.sqlite.prepare(`
+                    INSERT INTO level_rank_cards (user_id, accent, updated_at) VALUES (?, ?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET accent = excluded.accent, updated_at = excluded.updated_at
+                `).run(interaction.user.id, accent, this.now());
+                return interaction.reply({
+                    content: accent ? `Rank card accent set to **${accent}**.` : 'Rank card accent reset to the ByteBot default.',
+                    flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+                });
+            }
+            const attachment = interaction.options.getAttachment('background');
+            const backgroundUrl = interaction.options.getString('background_url');
+            if (attachment && backgroundUrl) throw new Error('Choose one background source.');
+            const layout = interaction.options.getString('layout');
+            const avatarBorder = interaction.options.getInteger('avatar_border');
+            if (!attachment && !backgroundUrl && layout == null && avatarBorder == null) {
+                throw new Error('Choose at least one rank-card setting.');
+            }
+            let background;
+            let mime;
+            const source = attachment || backgroundUrl;
+            if (source) {
+                const url = new URL(typeof source === 'string' ? source : source.url);
+                if (url.protocol !== 'https:') throw new Error('Rank-card backgrounds must use HTTPS.');
+                if (attachment?.size > 5 * 1024 * 1024) throw new Error('Rank-card backgrounds cannot exceed 5 MiB.');
+                background = await this.images.image(source);
+                if (background.length > 5 * 1024 * 1024) throw new Error('Rank-card backgrounds cannot exceed 5 MiB.');
+                const metadata = await sharp(background).metadata();
+                mime = `image/${metadata.format === 'jpeg' ? 'jpeg' : metadata.format}`;
+            }
+            const current = this.sqlite.prepare(`SELECT * FROM level_rank_cards WHERE user_id = ?`).get(interaction.user.id);
+            this.sqlite.prepare(`
+                INSERT INTO level_rank_cards
+                    (user_id, layout, background_data, background_mime, avatar_border, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    layout = excluded.layout,
+                    background_data = excluded.background_data,
+                    background_mime = excluded.background_mime,
+                    avatar_border = excluded.avatar_border,
+                    updated_at = excluded.updated_at
+            `).run(interaction.user.id, layout || current?.layout || 'classic',
+                background ?? current?.background_data ?? null,
+                mime ?? current?.background_mime ?? null,
+                avatarBorder ?? current?.avatar_border ?? 4, this.now());
+            return interaction.reply({
+                content: 'Rank card style updated.', flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
             });
         }
         if (group === 'reset') {

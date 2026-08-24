@@ -339,13 +339,14 @@ describe('LevelAnalyticsService', () => {
             getUser: () => ({ id: 'user1', username: 'Member' }),
             getBoolean: () => true
         };
-        await service.execute({ guildId: 'guild1', user: { id: 'viewer' }, options, reply });
-        expect(reply.mock.calls[0][0].embeds[0].data.description).toContain('Level **2**');
+        const guild = { id: 'guild1', members: { cache: new Map(), fetch: jest.fn(async () => null) } };
+        await service.execute({ guildId: 'guild1', guild, user: { id: 'viewer' }, options, reply });
+        expect(reply.mock.calls[0][0].files[0].name).toBe('rank-user1.png');
 
         options.getSubcommand = () => 'leaderboard';
         options.getString = () => 'text';
         options.getInteger = () => 1;
-        await service.execute({ guildId: 'guild1', user: { id: 'viewer' }, options, reply });
+        await service.execute({ guildId: 'guild1', guild, user: { id: 'viewer' }, options, reply });
         expect(reply.mock.calls[1][0].content).toContain('**300** text XP');
     });
 
@@ -445,5 +446,29 @@ describe('LevelAnalyticsService', () => {
         await service.handleInteraction(confirmation);
         expect(database.sqlite.prepare(`SELECT 1 FROM member_levels WHERE guild_id = 'guild1'`).get()).toBeUndefined();
         await expect(service.handleInteraction(confirmation)).rejects.toThrow('expired');
+    });
+
+    test('rank-card color and layout are ungated and render a PNG', async () => {
+        const values = { action: 'color', color: '#12abef', layout: null, border: null };
+        const interaction = {
+            guildId: 'guild1', user: { id: 'user1', username: 'Member' },
+            guild: { id: 'guild1', members: { cache: new Map(), fetch: jest.fn(async () => null) } },
+            options: {
+                getSubcommandGroup: () => 'rankcard', getSubcommand: () => values.action,
+                getString: name => name === 'color' ? values.color : name === 'layout' ? values.layout : null,
+                getInteger: () => values.border, getAttachment: () => null, getUser: () => null
+            },
+            reply: jest.fn()
+        };
+        await service.execute(interaction);
+        values.action = 'style'; values.color = null; values.layout = 'compact'; values.border = 9;
+        await service.execute(interaction);
+        values.action = 'view';
+        await service.execute(interaction);
+
+        expect(database.sqlite.prepare(`SELECT accent, layout, avatar_border FROM level_rank_cards WHERE user_id = 'user1'`).get())
+            .toEqual({ accent: '#12ABEF', layout: 'compact', avatar_border: 9 });
+        const metadata = await require('sharp')(interaction.reply.mock.calls[2][0].files[0].attachment).metadata();
+        expect(metadata).toEqual(expect.objectContaining({ format: 'png', width: 760, height: 220 }));
     });
 });
