@@ -126,6 +126,7 @@ module.exports = {
             const { sqlite } = require('../database');
             client.voiceMasterService = new VoiceMasterService({ client, sqlite });
             const recovery = await client.voiceMasterService.reconcile();
+            client.voiceMasterService.startCleanup();
             if (recovery.active || recovery.deleted || recovery.lost || recovery.ambiguous) {
                 logger.info(`VoiceMaster recovery: ${recovery.active} active, ${recovery.deleted} deleted, ${recovery.lost} lost, ${recovery.ambiguous} ambiguous`);
             }

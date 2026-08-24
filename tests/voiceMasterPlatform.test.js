@@ -532,9 +532,10 @@ describe('VoiceMaster lifecycle', () => {
         };
         const guild = { id: 'guild-1', members: { me: { permissions: { has: () => true } } } };
         database.sqlite.prepare(`INSERT INTO bytepods
-            (channel_id, guild_id, owner_id, original_owner_id, source_channel_id, state, generation, bot_owned, created_at)
-            VALUES (?, ?, ?, ?, ?, 'active', 3, 1, ?)`).run(
-            channel.id, guild.id, 'owner-1', 'owner-1', 'join-1', Date.now()
+            (channel_id, guild_id, owner_id, original_owner_id, owner_left_at,
+             source_channel_id, state, generation, bot_owned, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'active', 3, 1, ?)`).run(
+            channel.id, guild.id, 'owner-1', 'owner-1', Date.now(), 'join-1', Date.now()
         );
 
         await service.execute(memberInteraction(guild, claimant, 'claim'));
@@ -553,7 +554,10 @@ describe('VoiceMaster lifecycle', () => {
             send: jest.fn(async () => ({ id: 'interface-1' })),
             delete: jest.fn(async () => channels.delete('join-1'))
         };
-        const secondary = { id: 'secondary-1', type: ChannelType.GuildVoice, delete: jest.fn() };
+        const secondary = {
+            id: 'secondary-1', type: ChannelType.GuildVoice, delete: jest.fn(),
+            send: jest.fn(async () => ({ id: 'secondary-interface-1' }))
+        };
         const secondaryCategory = { id: 'category-2', type: ChannelType.GuildCategory, children: { cache: new Map() } };
         const create = jest.fn(async values => {
             const channel = values.type === ChannelType.GuildCategory ? category : join;
@@ -572,6 +576,8 @@ describe('VoiceMaster lifecycle', () => {
         const service = new VoiceMasterService({ sqlite: database.sqlite });
         await service.execute(adminInteraction(guild, 'setup'));
         await service.execute(adminInteraction(guild, 'add', { channel: secondary }, 'secondary'));
+        expect(database.sqlite.prepare(`SELECT interface_message_id FROM voice_master_sources
+            WHERE channel_id = ?`).get(secondary.id).interface_message_id).toBe('secondary-interface-1');
         await service.execute(adminInteraction(guild, 'category', {
             channel: secondary, category: secondaryCategory
         }, 'secondary'));
@@ -585,6 +591,7 @@ describe('VoiceMaster lifecycle', () => {
         await service.execute(adminInteraction(guild, 'reset'));
 
         expect(secondary.delete).not.toHaveBeenCalled();
+        expect(secondary.send).toHaveBeenCalledTimes(1);
         expect(join.delete).toHaveBeenCalledTimes(1);
         expect(category.delete).toHaveBeenCalledTimes(1);
         expect(fullCategory.embeds[0].data.description).toContain('maximum of 50');
@@ -706,5 +713,85 @@ describe('VoiceMaster lifecycle', () => {
         expect(ambiguous.ambiguous).toBe(1);
         expect(missing.lost).toBe(1);
         expect(temporary.delete).not.toHaveBeenCalled();
+    });
+
+    test('restart recovery removes exact interrupted resources and pending creations', async () => {
+        const category = { id: 'category-1', type: ChannelType.GuildCategory, delete: jest.fn(async () => {}) };
+        const join = { id: 'join-1', type: ChannelType.GuildVoice, delete: jest.fn(async () => {}) };
+        const temporary = { id: 'temporary-1', type: ChannelType.GuildVoice, delete: jest.fn(async () => {}) };
+        const channels = new Map([[category.id, category], [join.id, join], [temporary.id, temporary]]);
+        const guild = {
+            id: 'guild-1',
+            channels: { cache: channels, fetch: jest.fn(async id => channels.get(id) || null) }
+        };
+        database.sqlite.prepare(`INSERT INTO voice_master_configs
+            (guild_id, state, generation, category_id, primary_channel_id, interface_message_id, updated_at)
+            VALUES (?, 'creating', 4, ?, ?, ?, ?)`).run(guild.id, category.id, join.id, 'message-1', Date.now());
+        database.sqlite.prepare(`INSERT INTO voice_master_creations
+            (guild_id, source_channel_id, member_id, channel_id, state, generation, updated_at)
+            VALUES (?, ?, ?, ?, 'pending', 2, ?)`).run(guild.id, join.id, 'member-1', temporary.id, Date.now());
+        const { VoiceMasterService } = require('../src/services/voiceMasterService');
+        const result = await new VoiceMasterService({
+            client: { guilds: { fetch: jest.fn(async () => guild) } }, sqlite: database.sqlite
+        }).reconcile();
+
+        expect(result.failures).toEqual([]);
+        expect(join.delete).toHaveBeenCalledTimes(1);
+        expect(category.delete).toHaveBeenCalledTimes(1);
+        expect(temporary.delete).toHaveBeenCalledTimes(1);
+        expect(database.sqlite.prepare('SELECT COUNT(*) count FROM voice_master_configs').get().count).toBe(0);
+        expect(database.sqlite.prepare('SELECT state, channel_id FROM voice_master_creations').get())
+            .toEqual({ state: 'failed', channel_id: null });
+    });
+
+    test('owner return cancels claims and failed role removals remain retryable', async () => {
+        const { VoiceMasterService } = require('../src/services/voiceMasterService');
+        const service = new VoiceMasterService({ sqlite: database.sqlite });
+        const guild = { id: 'guild-1' };
+        const owner = { id: 'owner-1', roles: { remove: jest.fn(async () => { throw new Error('Discord unavailable'); }) } };
+        database.sqlite.prepare(`INSERT INTO bytepods
+            (channel_id, guild_id, owner_id, original_owner_id, owner_left_at, source_channel_id,
+             state, generation, bot_owned, pending_owner_id, claim_snapshot, created_at)
+            VALUES ('temporary-1', 'guild-1', 'owner-1', 'owner-1', 1, 'join-1',
+                'claiming', 3, 1, 'claimant-1', '{}', 1)`).run();
+        database.sqlite.prepare(`INSERT INTO voice_master_join_roles
+            (guild_id, channel_id, member_id, role_id, updated_at)
+            VALUES ('guild-1', 'temporary-1', 'owner-1', 'join-role', 1)`).run();
+
+        await service.handleOwnerReturn(guild, owner, 'temporary-1');
+        await service.removeJoinRoleAfterExit(guild, owner, 'temporary-1', null);
+
+        expect(database.sqlite.prepare('SELECT state, generation FROM bytepods WHERE channel_id = ?')
+            .get('temporary-1')).toEqual({ state: 'claim_cancelled', generation: 4 });
+        expect(() => service.assertClaim('guild-1', 'temporary-1', {
+            owner_id: 'owner-1', generation: 3
+        }, 'claimant-1')).toThrow('owner returned');
+        expect(database.sqlite.prepare('SELECT role_id FROM voice_master_join_roles WHERE channel_id = ?')
+            .get('temporary-1').role_id).toBe('join-role');
+    });
+
+    test('scheduled cleanup retries one exact empty owned channel', async () => {
+        const channel = {
+            id: 'temporary-1', type: ChannelType.GuildVoice, members: new Map(),
+            delete: jest.fn(async () => {})
+        };
+        const guild = {
+            id: 'guild-1', members: { cache: new Map(), fetch: jest.fn(async () => null) },
+            channels: { cache: new Map([[channel.id, channel]]), fetch: jest.fn(async () => channel) }
+        };
+        database.sqlite.prepare(`INSERT INTO bytepods
+            (channel_id, guild_id, owner_id, original_owner_id, source_channel_id,
+             state, generation, cleanup_after, bot_owned, created_at)
+            VALUES (?, ?, ?, ?, ?, 'active', 2, 1, 1, 1)`)
+            .run(channel.id, guild.id, 'owner-1', 'owner-1', 'join-1');
+        const { VoiceMasterService } = require('../src/services/voiceMasterService');
+        const service = new VoiceMasterService({
+            client: { guilds: { fetch: jest.fn(async () => guild) } }, sqlite: database.sqlite, now: () => 10
+        });
+
+        await service.retryScheduledCleanup();
+
+        expect(channel.delete).toHaveBeenCalledTimes(1);
+        expect(database.sqlite.prepare('SELECT COUNT(*) count FROM bytepods').get().count).toBe(0);
     });
 });
