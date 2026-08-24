@@ -45,6 +45,7 @@ class LevelAnalyticsService {
         this.now = now;
         this.images = images || new ServerPresentationService({ sqlite });
         this.confirmations = new Map();
+        this.processingRoleJobs = false;
     }
 
     response(title, description, extra = {}) {
@@ -687,49 +688,56 @@ class LevelAnalyticsService {
     }
 
     async processRoleJobs(limit = 50) {
-        if (!this.client) return { processed: 0, failures: [] };
-        const rows = this.sqlite.prepare(`
-            SELECT * FROM level_role_jobs WHERE next_attempt_at <= ?
-            ORDER BY next_attempt_at, guild_id, user_id LIMIT ?
-        `).all(this.now(), limit);
-        const failures = [];
-        for (const row of rows) {
-            const token = crypto.randomBytes(12).toString('hex');
-            const claimedAt = this.now();
-            const claimed = this.sqlite.prepare(`
-                UPDATE level_role_jobs SET claim_token = ?, claim_expires_at = ?
-                WHERE guild_id = ? AND user_id = ? AND generation = ?
-                  AND (claim_token IS NULL OR claim_expires_at <= ?)
-            `).run(token, claimedAt + 5 * 60 * 1000, row.guild_id, row.user_id, row.generation, claimedAt);
-            if (!claimed.changes) continue;
-            try {
-                const guild = this.client.guilds.cache.get(row.guild_id);
-                if (!guild) throw new Error('guild unavailable');
-                let member = guild.members.cache.get(row.user_id);
-                if (!member) {
-                    try {
-                        member = await guild.members.fetch(row.user_id);
-                    } catch (error) {
-                        if (error?.code !== 10007) throw error;
+        if (!this.client || this.processingRoleJobs) return { processed: 0, failures: [] };
+        this.processingRoleJobs = true;
+        try {
+            const now = this.now();
+            const rows = this.sqlite.prepare(`
+                SELECT * FROM level_role_jobs
+                WHERE next_attempt_at <= ? AND (claim_token IS NULL OR claim_expires_at <= ?)
+                ORDER BY next_attempt_at, guild_id, user_id LIMIT ?
+            `).all(now, now, limit);
+            const failures = [];
+            for (const row of rows) {
+                const token = crypto.randomBytes(12).toString('hex');
+                const claimedAt = this.now();
+                const claimed = this.sqlite.prepare(`
+                    UPDATE level_role_jobs SET claim_token = ?, claim_expires_at = ?
+                    WHERE guild_id = ? AND user_id = ? AND generation = ?
+                      AND (claim_token IS NULL OR claim_expires_at <= ?)
+                `).run(token, claimedAt + 5 * 60 * 1000, row.guild_id, row.user_id, row.generation, claimedAt);
+                if (!claimed.changes) continue;
+                try {
+                    const guild = this.client.guilds.cache.get(row.guild_id);
+                    if (!guild) throw new Error('guild unavailable');
+                    let member = guild.members.cache.get(row.user_id);
+                    if (!member) {
+                        try {
+                            member = await guild.members.fetch(row.user_id);
+                        } catch (error) {
+                            if (error?.code !== 10007) throw error;
+                        }
                     }
+                    if (member) await this.reconcileMemberRoles(member);
+                    this.sqlite.prepare(`
+                        DELETE FROM level_role_jobs
+                        WHERE guild_id = ? AND user_id = ? AND generation = ? AND claim_token = ?
+                    `).run(row.guild_id, row.user_id, row.generation, token);
+                } catch (error) {
+                    const attempts = row.attempts + 1;
+                    const retryAt = this.now() + Math.min(3_600_000, 1000 * 2 ** Math.min(attempts, 12));
+                    this.sqlite.prepare(`
+                        UPDATE level_role_jobs SET attempts = ?, next_attempt_at = ?, updated_at = ?,
+                            claim_token = NULL, claim_expires_at = NULL
+                        WHERE guild_id = ? AND user_id = ? AND generation = ? AND claim_token = ?
+                    `).run(attempts, retryAt, this.now(), row.guild_id, row.user_id, row.generation, token);
+                    failures.push({ guildId: row.guild_id, userId: row.user_id, error: error.message });
                 }
-                if (member) await this.reconcileMemberRoles(member);
-                this.sqlite.prepare(`
-                    DELETE FROM level_role_jobs
-                    WHERE guild_id = ? AND user_id = ? AND generation = ? AND claim_token = ?
-                `).run(row.guild_id, row.user_id, row.generation, token);
-            } catch (error) {
-                const attempts = row.attempts + 1;
-                const retryAt = this.now() + Math.min(3_600_000, 1000 * 2 ** Math.min(attempts, 12));
-                this.sqlite.prepare(`
-                    UPDATE level_role_jobs SET attempts = ?, next_attempt_at = ?, updated_at = ?,
-                        claim_token = NULL, claim_expires_at = NULL
-                    WHERE guild_id = ? AND user_id = ? AND generation = ? AND claim_token = ?
-                `).run(attempts, retryAt, this.now(), row.guild_id, row.user_id, row.generation, token);
-                failures.push({ guildId: row.guild_id, userId: row.user_id, error: error.message });
             }
+            return { processed: rows.length - failures.length, failures };
+        } finally {
+            this.processingRoleJobs = false;
         }
-        return { processed: rows.length - failures.length, failures };
     }
 
     async reconcileMemberRoles(member) {

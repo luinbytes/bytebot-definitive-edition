@@ -498,6 +498,9 @@ describe('LevelAnalyticsService', () => {
 
         const processing = service.processRoleJobs();
         await Promise.resolve();
+        now += 5 * 60 * 1000 + 1;
+        expect(await service.processRoleJobs()).toEqual({ processed: 0, failures: [] });
+        expect(add).toHaveBeenCalledTimes(1);
         service.enqueueRoleReconcile('guild1', 'user1');
         finishAdd();
         await processing;
