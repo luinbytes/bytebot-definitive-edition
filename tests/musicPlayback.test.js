@@ -174,6 +174,8 @@ describe('music playback', () => {
         await expect(joining).rejects.toThrow('cancelled');
         expect(voice.connection.destroy).toHaveBeenCalled();
         expect(service.players.has(guild.id)).toBe(false);
+        service.reactivateGuild(guild.id);
+        expect(service.removedGuilds.has(guild.id)).toBe(false);
         sqlite.close();
     });
 
@@ -258,9 +260,9 @@ describe('music playback', () => {
         const stage = interaction('one');
         await service.execute(stage);
         channel.type = ChannelType.GuildVoice;
-        for (let index = 0; index < 24; index++) await service.execute(interaction('two'));
-        const full = interaction('two');
-        await service.execute(full);
+        for (let index = 0; index < 22; index++) await service.execute(interaction('two'));
+        const finalRequests = [interaction('two'), interaction('two'), interaction('two')];
+        await Promise.all(finalRequests.map(request => service.execute(request)));
 
         expect(voice.adapter.joinVoiceChannel).toHaveBeenCalledTimes(1);
         expect(spawn).toHaveBeenCalledTimes(1);
@@ -272,7 +274,9 @@ describe('music playback', () => {
         expect(second.editReply.mock.calls[0][0].embeds[0].data.description).toContain('position 1');
         expect(oversized.reply.mock.calls[0][0].embeds[0].data.description).toContain('200');
         expect(stage.reply.mock.calls[0][0].embeds[0].data.description).toContain('standard server voice');
-        expect(full.reply.mock.calls[0][0].embeds[0].data.description).toContain('25');
+        expect(service.players.get('guild1').queue).toHaveLength(25);
+        expect(finalRequests.some(request => request.editReply.mock.calls
+            .some(call => call[0].embeds[0].data.description.includes('25')))).toBe(true);
         await service.cleanup();
         sqlite.close();
     });

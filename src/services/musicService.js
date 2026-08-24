@@ -255,10 +255,10 @@ class MusicService {
         let operation;
         try {
             const previous = this.operations.get(guildId) || Promise.resolve();
-            if (this.operations.has(guildId)) {
-                await this.defer(interaction, interaction.options.getSubcommandGroup(false) === 'settings');
-            }
-            operation = previous.catch(() => {}).then(() => this.executeOnce(interaction));
+            const deferred = this.operations.has(guildId)
+                ? this.defer(interaction, interaction.options.getSubcommandGroup(false) === 'settings')
+                : Promise.resolve();
+            operation = previous.catch(() => {}).then(() => deferred).then(() => this.executeOnce(interaction));
             this.operations.set(guildId, operation);
             return await operation;
         } finally {
@@ -696,6 +696,10 @@ class MusicService {
             new Promise(resolve => { const timer = setTimeout(resolve, 5000); timer.unref?.(); })
         ]);
         this.destroy(guildId);
+    }
+
+    reactivateGuild(guildId) {
+        this.removedGuilds.delete(guildId);
     }
 
     async cleanup() {
