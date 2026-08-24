@@ -494,6 +494,57 @@ describe('VoiceMaster lifecycle', () => {
         expect(temporary.name).toBe('Claimed Room');
     });
 
+    test('failed access and claim mutations restore durable state and exact overwrites', async () => {
+        const { VoiceMasterService } = require('../src/services/voiceMasterService');
+        const service = new VoiceMasterService({ sqlite: database.sqlite });
+        const deleteOverwrite = jest.fn(async () => {});
+        const accessChannel = {
+            id: 'access-1', permissionOverwrites: {
+                cache: new Map(), delete: deleteOverwrite,
+                edit: jest.fn(async () => { throw new Error('Discord denied access edit'); })
+            }
+        };
+        await expect(service.updateAccess(accessChannel, 'guild-1', 'target-1', 'permit', {
+            ViewChannel: true, Connect: true
+        })).rejects.toThrow('Discord denied access edit');
+        expect(deleteOverwrite).toHaveBeenCalledWith('target-1');
+        expect(database.sqlite.prepare('SELECT COUNT(*) count FROM voice_master_access').get().count).toBe(0);
+
+        const none = { has: () => false };
+        const previous = {
+            id: 'owner-1', allow: { has: bit => bit === PermissionFlagsBits.ManageChannels }, deny: none
+        };
+        const restoreOld = jest.fn(async () => {});
+        const removeNew = jest.fn(async () => {});
+        const edit = jest.fn()
+            .mockResolvedValueOnce(undefined)
+            .mockRejectedValueOnce(new Error('Discord denied new owner'))
+            .mockImplementationOnce(restoreOld);
+        const channel = {
+            id: 'temporary-1', type: ChannelType.GuildVoice,
+            members: new Map([['claimant-1', {}]]),
+            permissionOverwrites: { cache: new Map([['owner-1', previous]]), edit, delete: removeNew },
+            permissionsFor: () => ({ has: () => true })
+        };
+        const claimant = {
+            id: 'claimant-1', user: { id: 'claimant-1' },
+            voice: { channelId: channel.id, channel }
+        };
+        const guild = { id: 'guild-1', members: { me: { permissions: { has: () => true } } } };
+        database.sqlite.prepare(`INSERT INTO bytepods
+            (channel_id, guild_id, owner_id, original_owner_id, source_channel_id, state, generation, bot_owned, created_at)
+            VALUES (?, ?, ?, ?, ?, 'active', 3, 1, ?)`).run(
+            channel.id, guild.id, 'owner-1', 'owner-1', 'join-1', Date.now()
+        );
+
+        await service.execute(memberInteraction(guild, claimant, 'claim'));
+
+        expect(database.sqlite.prepare('SELECT owner_id, state, pending_owner_id FROM bytepods WHERE channel_id = ?')
+            .get(channel.id)).toEqual({ owner_id: 'owner-1', state: 'active', pending_owner_id: null });
+        expect(restoreOld).toHaveBeenCalled();
+        expect(removeNew).toHaveBeenCalledWith('claimant-1');
+    });
+
     test('secondary channels stay user-owned while reset removes only setup resources', async () => {
         const channels = new Map();
         const category = { id: 'category-1', type: ChannelType.GuildCategory, delete: jest.fn(async () => channels.delete('category-1')) };
@@ -503,7 +554,7 @@ describe('VoiceMaster lifecycle', () => {
             delete: jest.fn(async () => channels.delete('join-1'))
         };
         const secondary = { id: 'secondary-1', type: ChannelType.GuildVoice, delete: jest.fn() };
-        const secondaryCategory = { id: 'category-2', type: ChannelType.GuildCategory };
+        const secondaryCategory = { id: 'category-2', type: ChannelType.GuildCategory, children: { cache: new Map() } };
         const create = jest.fn(async values => {
             const channel = values.type === ChannelType.GuildCategory ? category : join;
             channels.set(channel.id, channel);
@@ -524,6 +575,10 @@ describe('VoiceMaster lifecycle', () => {
         await service.execute(adminInteraction(guild, 'category', {
             channel: secondary, category: secondaryCategory
         }, 'secondary'));
+        secondaryCategory.children.cache = new Map(Array.from({ length: 50 }, (_, index) => [`voice-${index}`, {}]));
+        const fullCategory = await service.execute(adminInteraction(guild, 'category', {
+            channel: secondary, category: secondaryCategory
+        }, 'secondary'));
         await service.execute(adminInteraction(guild, 'list', {}, 'secondary'));
         await service.execute(adminInteraction(guild, 'remove', { channel: secondary }, 'secondary'));
         await service.execute(adminInteraction(guild, 'reset'));
@@ -532,6 +587,7 @@ describe('VoiceMaster lifecycle', () => {
         expect(secondary.delete).not.toHaveBeenCalled();
         expect(join.delete).toHaveBeenCalledTimes(1);
         expect(category.delete).toHaveBeenCalledTimes(1);
+        expect(fullCategory.embeds[0].data.description).toContain('maximum of 50');
     });
 
     test('default settings and temporary mode drive the next created channel', async () => {
