@@ -167,7 +167,7 @@ Only state that must survive restart is stored in SQLite:
 Transient snipe entries and active games remain bounded in memory. A single
 service-owned interval physically evicts expired snipe payloads every minute;
 game timers enforce the published session deadlines. New tables use existing
-migrations, database logging, guild scoping where applicable, and guild-delete
+migrations, parameterized statements, guild scoping where applicable, and guild-delete
 cleanup. No new dependency, worker, external scheduler, cache, secret,
 premium gate, or external database is introduced.
 
