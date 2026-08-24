@@ -1411,6 +1411,51 @@ const economyLabOperations = sqliteTable('economy_lab_operations', {
     amountCheck: check('economy_lab_operations_amount_check', sql`${table.inputAmount} >= 0 AND ${table.resultAmount} >= 0`)
 }));
 
+const snipeProtections = sqliteTable('snipe_protections', {
+    userId: text('user_id').primaryKey(),
+    updatedAt: integer('updated_at').notNull()
+});
+
+const roleplayDisabled = sqliteTable('roleplay_disabled', {
+    guildId: text('guild_id').notNull(),
+    action: text('action').notNull(),
+    updatedBy: text('updated_by').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.action] })
+}));
+
+const roleplayCounts = sqliteTable('roleplay_counts', {
+    guildId: text('guild_id').notNull(),
+    actorId: text('actor_id').notNull(),
+    targetId: text('target_id').notNull(),
+    action: text('action').notNull(),
+    count: integer('count').default(0).notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.actorId, table.targetId, table.action] })
+}));
+
+const funBlunts = sqliteTable('fun_blunts', {
+    userId: text('user_id').primaryKey(),
+    sparkedAt: integer('sparked_at'),
+    lastSparkedAt: integer('last_sparked_at'),
+    taps: integer('taps').default(0).notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    tapsCheck: check('fun_blunts_taps_check', sql`${table.taps} >= 0`)
+}));
+
+const funVapes = sqliteTable('fun_vapes', {
+    guildId: text('guild_id').primaryKey(),
+    holderId: text('holder_id').notNull(),
+    flavor: text('flavor').default('mint').notNull(),
+    hits: integer('hits').default(0).notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    hitsCheck: check('fun_vapes_hits_check', sql`${table.hits} >= 0`)
+}));
+
 module.exports = {
     guilds,
     lifecycleMessages,
@@ -1522,5 +1567,10 @@ module.exports = {
     economyGangMembers,
     economyGangInvites,
     economyLabs,
-    economyLabOperations
+    economyLabOperations,
+    snipeProtections,
+    roleplayDisabled,
+    roleplayCounts,
+    funBlunts,
+    funVapes
 };
