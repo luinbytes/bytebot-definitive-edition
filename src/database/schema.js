@@ -68,7 +68,7 @@ const voiceMasterCreations = sqliteTable('voice_master_creations', {
     updatedAt: integer('updated_at').notNull(),
 }, table => ({
     pk: primaryKey({ columns: [table.guildId, table.sourceChannelId, table.memberId] }),
-    stateCheck: check('voice_master_creations_state_check', sql`${table.state} IN ('pending','active','failed')`),
+    stateCheck: check('voice_master_creations_state_check', sql`${table.state} IN ('pending','deleting','active','failed')`),
 }));
 
 const voiceMasterAccess = sqliteTable('voice_master_access', {

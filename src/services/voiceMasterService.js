@@ -422,7 +422,9 @@ class VoiceMasterService {
             const existing = this.sqlite.prepare(`SELECT * FROM voice_master_creations
                 WHERE guild_id = ? AND source_channel_id = ? AND member_id = ?`)
                 .get(guildId, sourceChannelId, memberId);
-            if (existing?.state === 'active' || existing?.state === 'pending') return { acquired: false, creation: existing };
+            if (['active', 'pending', 'deleting'].includes(existing?.state)) {
+                return { acquired: false, creation: existing };
+            }
             const generation = (existing?.generation || 0) + 1;
             this.sqlite.prepare(`INSERT INTO voice_master_creations
                 (guild_id, source_channel_id, member_id, state, generation, updated_at)
@@ -576,9 +578,9 @@ class VoiceMasterService {
             this.sqlite.prepare('DELETE FROM bytepods WHERE guild_id = ? AND channel_id = ? AND source_channel_id IS NOT NULL')
                 .run(guild.id, channel?.id || '');
             if (deletionConfirmed) this.failCreation(reservation.creation, error.message);
-            else this.sqlite.prepare(`UPDATE voice_master_creations SET state = 'pending',
+            else this.sqlite.prepare(`UPDATE voice_master_creations SET state = 'deleting',
                     error = ?, updated_at = ? WHERE guild_id = ? AND source_channel_id = ?
-                    AND member_id = ? AND generation = ?`)
+                    AND member_id = ? AND generation = ? AND state = 'pending'`)
                 .run(`Cleanup pending: ${error.message}`.slice(0, 500), this.now(), guild.id,
                     source.channel_id, member.id, reservation.creation.generation);
             logger.warn(`VoiceMaster creation failed in ${guild.id}: ${error.message}`);
@@ -589,7 +591,7 @@ class VoiceMasterService {
     failCreation(creation, error) {
         this.sqlite.prepare(`UPDATE voice_master_creations SET channel_id = NULL, state = 'failed',
             error = ?, updated_at = ? WHERE guild_id = ? AND source_channel_id = ?
-            AND member_id = ? AND generation = ?`)
+            AND member_id = ? AND generation = ? AND state IN ('pending','deleting')`)
             .run(String(error).slice(0, 500), this.now(), creation.guild_id,
                 creation.source_channel_id, creation.member_id, creation.generation);
     }
@@ -731,6 +733,9 @@ class VoiceMasterService {
                     .run(guild.id, channelId, member.id);
             }
             const alreadyHadRole = Boolean(member.roles.cache?.has(roleId));
+            const addedByBot = existing?.role_id === roleId
+                ? existing.added_by_bot
+                : Number(!alreadyHadRole);
             this.sqlite.prepare(`INSERT INTO voice_master_join_roles
                 (guild_id, channel_id, member_id, role_id, state, added_by_bot, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -738,7 +743,7 @@ class VoiceMasterService {
                     role_id = excluded.role_id, state = excluded.state,
                     added_by_bot = excluded.added_by_bot, updated_at = excluded.updated_at`)
                 .run(guild.id, channelId, member.id, roleId,
-                    alreadyHadRole ? 'active' : 'pending', Number(!alreadyHadRole), this.now());
+                    alreadyHadRole ? 'active' : 'pending', addedByBot, this.now());
             if (alreadyHadRole) return;
             await member.roles.add(roleId, 'VoiceMaster channel joined');
             roleAdded = true;
@@ -1299,6 +1304,11 @@ class VoiceMasterService {
                         }
                     }
                 } else {
+                    if (pod.state === 'deleting') {
+                        this.sqlite.prepare(`UPDATE bytepods SET state = 'active', cleanup_after = NULL
+                            WHERE guild_id = ? AND channel_id = ? AND state = 'deleting'`)
+                            .run(pod.guild_id, pod.channel_id);
+                    }
                     const config = this.config(pod.guild_id);
                     if (config?.join_role_id) {
                         for (const member of channel.members.values()) {
@@ -1348,23 +1358,38 @@ class VoiceMasterService {
     }
 
     async reconcilePendingCreations(result) {
-        const pending = this.sqlite.prepare("SELECT * FROM voice_master_creations WHERE state = 'pending'").all();
-        for (const creation of pending) {
+        const pending = this.sqlite.prepare("SELECT * FROM voice_master_creations WHERE state IN ('pending','deleting')").all();
+        for (const snapshot of pending) {
             try {
+                if (snapshot.state === 'pending') {
+                    const claimed = this.sqlite.prepare(`UPDATE voice_master_creations SET state = 'deleting', updated_at = ?
+                        WHERE guild_id = ? AND source_channel_id = ? AND member_id = ?
+                        AND generation = ? AND state = 'pending'`)
+                        .run(this.now(), snapshot.guild_id, snapshot.source_channel_id,
+                            snapshot.member_id, snapshot.generation);
+                    if (!claimed.changes) continue;
+                }
+                const creation = { ...snapshot, state: 'deleting' };
                 await this.cleanupPendingCreation(creation, 'VoiceMaster interrupted creation recovery');
             } catch (error) {
-                result.failures.push({ guildId: creation.guild_id, channelId: creation.channel_id, error: error.message });
+                result.failures.push({ guildId: snapshot.guild_id, channelId: snapshot.channel_id, error: error.message });
             }
         }
     }
 
     async cleanupPendingCreation(creation, reason) {
-        if (creation.channel_id) {
-            const guild = await this.client.guilds.fetch(creation.guild_id);
-            const channel = await this.fetchChannel(guild, creation.channel_id);
+        const current = this.sqlite.prepare(`SELECT * FROM voice_master_creations
+            WHERE guild_id = ? AND source_channel_id = ? AND member_id = ?
+            AND channel_id IS ? AND generation = ? AND state = 'deleting'`)
+            .get(creation.guild_id, creation.source_channel_id, creation.member_id,
+                creation.channel_id, creation.generation);
+        if (!current) return;
+        if (current.channel_id) {
+            const guild = await this.client.guilds.fetch(current.guild_id);
+            const channel = await this.fetchChannel(guild, current.channel_id);
             if (channel) {
                 if (channel.type !== ChannelType.GuildVoice
-                    || (channel.guildId && channel.guildId !== creation.guild_id)) {
+                    || (channel.guildId && channel.guildId !== current.guild_id)) {
                     throw new Error('Pending VoiceMaster channel is ambiguous.');
                 }
                 try {
@@ -1374,7 +1399,7 @@ class VoiceMasterService {
                 }
             }
         }
-        this.failCreation(creation, 'Creation cleanup completed.');
+        this.failCreation(current, 'Creation cleanup completed.');
     }
 
     async reconcilePendingSources(result) {
@@ -1507,9 +1532,9 @@ class VoiceMasterService {
                         AND state = 'pending' AND generation = ?`)
                         .get(access.guild_id, access.channel_id, access.user_id, access.generation);
                     if (!current) return;
-                    const pod = this.sqlite.prepare(`SELECT 1 FROM bytepods
+                    const pod = this.sqlite.prepare(`SELECT state FROM bytepods
                         WHERE guild_id = ? AND channel_id = ? AND source_channel_id IS NOT NULL
-                        AND state = 'active' AND bot_owned = 1`).get(current.guild_id, current.channel_id);
+                        AND bot_owned = 1`).get(current.guild_id, current.channel_id);
                     if (!pod) {
                         this.sqlite.prepare(`DELETE FROM voice_master_access
                             WHERE guild_id = ? AND channel_id = ? AND user_id = ?
@@ -1517,6 +1542,7 @@ class VoiceMasterService {
                             .run(current.guild_id, current.channel_id, current.user_id, current.generation);
                         return;
                     }
+                    if (pod.state !== 'active') return;
                     const guild = await this.client.guilds.fetch(current.guild_id);
                     const channel = await this.fetchChannel(guild, current.channel_id);
                     if (!channel) {
@@ -1587,7 +1613,7 @@ class VoiceMasterService {
 
     async retryScheduledCleanup() {
         const creations = this.sqlite.prepare(`SELECT * FROM voice_master_creations
-            WHERE state = 'pending' AND channel_id IS NOT NULL ORDER BY updated_at LIMIT 25`).all();
+            WHERE state = 'deleting' AND channel_id IS NOT NULL ORDER BY updated_at LIMIT 25`).all();
         for (const creation of creations) {
             try {
                 await this.cleanupPendingCreation(creation, 'VoiceMaster scheduled creation cleanup');

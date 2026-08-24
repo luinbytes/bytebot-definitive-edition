@@ -906,7 +906,7 @@ describe('VoiceMaster lifecycle', () => {
         const member = { id: 'member-1', roles: { cache: new Map(), add, remove: jest.fn(async () => {}) } };
         database.sqlite.prepare(`INSERT INTO voice_master_join_roles
             (guild_id, channel_id, member_id, role_id, state, added_by_bot, updated_at)
-            VALUES ('guild-1', 'temporary-1', 'member-1', 'join-role', 'active', 1, 1)`).run();
+            VALUES ('guild-1', 'temporary-1', 'member-1', 'join-role', 'active', 0, 1)`).run();
         const { VoiceMasterService } = require('../src/services/voiceMasterService');
 
         await new VoiceMasterService({ sqlite: database.sqlite })
@@ -915,7 +915,7 @@ describe('VoiceMaster lifecycle', () => {
         expect(add).toHaveBeenCalledWith('join-role', 'VoiceMaster channel joined');
         expect(database.sqlite.prepare(`SELECT state, added_by_bot FROM voice_master_join_roles
             WHERE guild_id = 'guild-1' AND channel_id = 'temporary-1' AND member_id = 'member-1'`).get())
-            .toEqual({ state: 'active', added_by_bot: 1 });
+            .toEqual({ state: 'active', added_by_bot: 0 });
     });
 
     test('join-role exits wait for an in-flight grant before revoking it', async () => {
@@ -955,25 +955,35 @@ describe('VoiceMaster lifecycle', () => {
             id: 'orphan-1', type: ChannelType.GuildVoice,
             delete: jest.fn().mockRejectedValueOnce(new Error('Discord unavailable')).mockResolvedValueOnce(undefined)
         };
+        const inFlight = { id: 'active-inflight', type: ChannelType.GuildVoice, delete: jest.fn(async () => {}) };
         const guild = {
             id: 'guild-1',
-            channels: { cache: new Map([[channel.id, channel]]), fetch: jest.fn(async () => channel) }
+            channels: {
+                cache: new Map([[channel.id, channel], [inFlight.id, inFlight]]),
+                fetch: jest.fn(async id => id === channel.id ? channel : inFlight)
+            }
         };
         database.sqlite.prepare(`INSERT INTO voice_master_creations
             (guild_id, source_channel_id, member_id, channel_id, state, generation, updated_at)
-            VALUES ('guild-1', 'join-1', 'member-1', 'orphan-1', 'pending', 1, 1)`).run();
+            VALUES ('guild-1', 'join-1', 'member-1', 'orphan-1', 'deleting', 1, 1)`).run();
+        database.sqlite.prepare(`INSERT INTO voice_master_creations
+            (guild_id, source_channel_id, member_id, channel_id, state, generation, updated_at)
+            VALUES ('guild-1', 'join-2', 'member-2', 'active-inflight', 'pending', 1, 1)`).run();
         const { VoiceMasterService } = require('../src/services/voiceMasterService');
         const service = new VoiceMasterService({
             client: { guilds: { fetch: jest.fn(async () => guild) } }, sqlite: database.sqlite
         });
 
         await service.retryScheduledCleanup();
-        expect(database.sqlite.prepare('SELECT state, channel_id FROM voice_master_creations').get())
-            .toEqual({ state: 'pending', channel_id: 'orphan-1' });
+        expect(database.sqlite.prepare(`SELECT state, channel_id FROM voice_master_creations
+            WHERE member_id = 'member-1'`).get())
+            .toEqual({ state: 'deleting', channel_id: 'orphan-1' });
         await service.retryScheduledCleanup();
 
         expect(channel.delete).toHaveBeenCalledTimes(2);
-        expect(database.sqlite.prepare('SELECT state, channel_id FROM voice_master_creations').get())
+        expect(inFlight.delete).not.toHaveBeenCalled();
+        expect(database.sqlite.prepare(`SELECT state, channel_id FROM voice_master_creations
+            WHERE member_id = 'member-1'`).get())
             .toEqual({ state: 'failed', channel_id: null });
     });
 
@@ -1009,8 +1019,40 @@ describe('VoiceMaster lifecycle', () => {
         expect(channel.delete).not.toHaveBeenCalled();
         expect(edit).not.toHaveBeenCalled();
         expect(result.failures).toHaveLength(2);
-        expect(database.sqlite.prepare('SELECT state FROM voice_master_creations').get().state).toBe('pending');
+        expect(database.sqlite.prepare('SELECT state FROM voice_master_creations').get().state).toBe('deleting');
         expect(database.sqlite.prepare('SELECT state FROM voice_master_access').get().state).toBe('pending');
+    });
+
+    test('pending access waits while its owned channel is deleting', async () => {
+        const edit = jest.fn(async () => {});
+        const channel = {
+            id: 'temporary-1', guildId: 'guild-1', type: ChannelType.GuildVoice,
+            permissionOverwrites: { edit }
+        };
+        const guild = {
+            id: 'guild-1', channels: { cache: new Map([[channel.id, channel]]), fetch: jest.fn(async () => channel) }
+        };
+        database.sqlite.prepare(`INSERT INTO bytepods
+            (channel_id, guild_id, owner_id, original_owner_id, source_channel_id,
+             state, generation, bot_owned, created_at)
+            VALUES ('temporary-1', 'guild-1', 'owner-1', 'owner-1', 'join-1', 'deleting', 1, 1, 1)`).run();
+        database.sqlite.prepare(`INSERT INTO voice_master_access
+            (guild_id, channel_id, user_id, effect, state, generation, updated_at)
+            VALUES ('guild-1', 'temporary-1', 'member-1', 'permit', 'pending', 1, 1)`).run();
+        const { VoiceMasterService } = require('../src/services/voiceMasterService');
+        const service = new VoiceMasterService({
+            client: { guilds: { fetch: jest.fn(async () => guild) } }, sqlite: database.sqlite
+        });
+        const result = { failures: [] };
+
+        await service.reconcilePendingOperations(result);
+        expect(edit).not.toHaveBeenCalled();
+        expect(database.sqlite.prepare('SELECT state FROM voice_master_access').get().state).toBe('pending');
+        database.sqlite.prepare("UPDATE bytepods SET state = 'active' WHERE channel_id = 'temporary-1'").run();
+        await service.reconcilePendingOperations(result);
+
+        expect(edit).toHaveBeenCalledWith('member-1', { ViewChannel: true, Connect: true });
+        expect(database.sqlite.prepare('SELECT state FROM voice_master_access').get().state).toBe('active');
     });
 
     test('scheduled cleanup rechecks membership immediately before deletion', async () => {

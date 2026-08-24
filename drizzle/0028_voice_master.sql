@@ -44,7 +44,7 @@ CREATE TABLE `voice_master_creations` (
     `error` text,
     `updated_at` integer NOT NULL,
     PRIMARY KEY (`guild_id`,`source_channel_id`,`member_id`),
-    CONSTRAINT `voice_master_creations_state_check` CHECK (`state` IN ('pending','active','failed'))
+    CONSTRAINT `voice_master_creations_state_check` CHECK (`state` IN ('pending','deleting','active','failed'))
 );
 --> statement-breakpoint
 CREATE TABLE `voice_master_access` (
