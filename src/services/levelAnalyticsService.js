@@ -825,6 +825,9 @@ class LevelAnalyticsService {
         this.sqlite.prepare(`INSERT OR IGNORE INTO level_configs (guild_id, updated_at) VALUES (?, ?)`)
             .run(interaction.guildId, this.now());
         if (interaction.isModalSubmit()) {
+            const acknowledged = action === 'role-remove'
+                ? await this.acknowledge(interaction, [MessageFlags.Ephemeral])
+                : false;
             if (action === 'message') {
                 const script = interaction.fields.getTextInputValue('script');
                 if ([...script].length > 2000) throw new Error('Message must be 2000 characters or less.');
@@ -875,7 +878,9 @@ class LevelAnalyticsService {
                         .run(interaction.guildId, level, role.id, this.now());
                 }
             }
-            return interaction.reply(this.response('Level Setup', 'Level setup updated.', { flags: [MessageFlags.Ephemeral] }));
+            return this.send(interaction, this.response('Level Setup', 'Level setup updated.', {
+                ...(!acknowledged && { flags: [MessageFlags.Ephemeral] })
+            }), acknowledged);
         }
         if (interaction.isChannelSelectMenu()) {
             const channel = interaction.channels.first();

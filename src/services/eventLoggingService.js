@@ -19,7 +19,7 @@ class EventLoggingService {
         this.now = now;
         this.pending = new Map();
         this.confirmations = new Map();
-        this.sqlite.prepare(`UPDATE event_log_outbox SET status = 'sent' WHERE status = 'sending'`).run();
+        this.sqlite.prepare(`UPDATE event_log_outbox SET status = 'pending' WHERE status = 'sending'`).run();
     }
 
     module(value) {

@@ -503,7 +503,9 @@ module.exports = {
             if (channel) sqlite.prepare(`UPDATE guilds SET log_channel = ? WHERE id = ?`).run(channel.id, interaction.guildId);
             const current = channel?.id || sqlite.prepare(`SELECT log_channel FROM guilds WHERE id = ?`).get(interaction.guildId)?.log_channel;
             return interaction.reply({
-                content: current ? `Moderation log channel has been set to <#${current}>` : 'A moderation log channel has not been configured.',
+                embeds: [embeds.brand('Moderation Logs', current
+                    ? `Moderation log channel has been set to <#${current}>`
+                    : 'A moderation log channel has not been configured.')],
                 flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
             });
         }

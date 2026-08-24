@@ -519,6 +519,41 @@ describe('LevelAnalyticsService', () => {
         await expect(service.handleInteraction(confirmation)).rejects.toThrow('expired');
     });
 
+    test('setup acknowledges reward removal before member-wide Discord work', async () => {
+        database.sqlite.prepare(`INSERT INTO level_configs (guild_id, updated_at) VALUES ('guild1', 1)`).run();
+        database.sqlite.prepare(`
+            INSERT INTO level_role_rewards (guild_id, level, role_id, created_at)
+            VALUES ('guild1', 1, 'reward1', 1)
+        `).run();
+        const highest = { comparePositionTo: () => 1 };
+        const permissions = { has: permission => [PermissionFlagsBits.ManageGuild, PermissionFlagsBits.ManageRoles].includes(permission) };
+        const affected = {
+            id: 'user1', user: { bot: false },
+            roles: { cache: new Map([['reward1', {}]]), remove: jest.fn(), add: jest.fn() }
+        };
+        const guild = {
+            id: 'guild1', roles: { cache: new Map([['reward1', { id: 'reward1', managed: false }]]) },
+            members: {
+                me: { permissions, roles: { highest } },
+                fetch: jest.fn(async () => new Map([['user1', affected]]))
+            }
+        };
+        affected.guild = guild;
+        const interaction = {
+            customId: 'levels:setup:role-remove:admin1', guildId: 'guild1', guild,
+            user: { id: 'admin1' }, member: { permissions, roles: { highest } },
+            fields: { getTextInputValue: name => name === 'role' ? 'reward1' : '1' },
+            isModalSubmit: () => true, isChannelSelectMenu: () => false,
+            deferReply: jest.fn(), editReply: jest.fn(), reply: jest.fn()
+        };
+
+        await service.handleInteraction(interaction);
+
+        expect(interaction.deferReply.mock.invocationCallOrder[0])
+            .toBeLessThan(guild.members.fetch.mock.invocationCallOrder[0]);
+        expect(interaction.editReply).toHaveBeenCalled();
+    });
+
     test('rank-card color and layout are ungated and render a PNG', async () => {
         const values = { action: 'color', color: '#12abef', layout: null, border: null };
         const interaction = {

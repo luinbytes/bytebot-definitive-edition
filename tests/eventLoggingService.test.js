@@ -122,14 +122,21 @@ describe('EventLoggingService', () => {
         ]);
     });
 
-    test('startup never retries an ambiguously claimed delivery', () => {
+    test('startup safely retries an ambiguously claimed delivery with the stable nonce', async () => {
+        const channel = { id: 'channel1', send: jest.fn().mockResolvedValue({}) };
+        const server = guild([channel]);
+        service.client.guilds.cache.set(server.id, server);
         database.sqlite.prepare(`
             INSERT INTO event_log_outbox
                 (guild_id, event_key, channel_id, module, payload, attempts, next_attempt_at, status, created_at)
-            VALUES ('guild1', 'event1', 'channel1', 'messages', '{}', 1, 1, 'sending', 1)
+            VALUES ('guild1', 'event1', 'channel1', 'messages', '{"title":"Event","description":"Body","color":"#8A2BE2"}', 1, 1, 'sending', 1)
         `).run();
         const EventLoggingService = require('../src/services/eventLoggingService');
-        new EventLoggingService({ sqlite: database.sqlite, client: service.client, now: () => now });
+        const recovered = new EventLoggingService({ sqlite: database.sqlite, client: service.client, now: () => now });
+        await recovered.processOutbox();
+        expect(channel.send).toHaveBeenCalledWith(expect.objectContaining({
+            enforceNonce: true, nonce: expect.any(String)
+        }));
         expect(database.sqlite.prepare(`SELECT status FROM event_log_outbox WHERE event_key = 'event1'`).get())
             .toEqual({ status: 'sent' });
     });
