@@ -871,6 +871,168 @@ const customAchievements = sqliteTable('custom_achievements', {
     guildEnabledIdx: index('custom_achievements_guild_enabled_idx').on(table.guildId, table.enabled)
 }));
 
+const ticketConfigs = sqliteTable('ticket_configs', {
+    guildId: text('guild_id').primaryKey(),
+    nextNumber: integer('next_number').default(1).notNull(),
+    defaultCategoryId: text('default_category_id'),
+    supportRoleId: text('support_role_id'),
+    openingMessage: text('opening_message').default('Thanks for contacting support.').notNull(),
+    buttonLabel: text('button_label').default('Create ticket').notNull(),
+    buttonStyle: text('button_style').default('primary').notNull(),
+    dmsEnabled: integer('dms_enabled', { mode: 'boolean' }).default(false).notNull(),
+    inactivityHours: integer('inactivity_hours'),
+    limitMode: text('limit_mode').default('one_total').notNull(),
+    logChannelId: text('log_channel_id'),
+    ratingsEnabled: integer('ratings_enabled', { mode: 'boolean' }).default(false).notNull(),
+    vouchChannelId: text('vouch_channel_id'),
+    updatedAt: integer('updated_at').notNull()
+});
+
+const ticketPanels = sqliteTable('ticket_panels', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    name: text('name').notNull(),
+    mode: text('mode').default('dropdown').notNull(),
+    defaultCategoryId: text('default_category_id'),
+    messageScript: text('message_script'),
+    channelId: text('channel_id'),
+    messageId: text('message_id'),
+    enabled: integer('enabled', { mode: 'boolean' }).default(true).notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({ guildNameUnique: unique().on(table.guildId, table.name) }));
+
+const ticketTopics = sqliteTable('ticket_topics', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    categoryId: text('category_id'),
+    embedScript: text('embed_script'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({ guildNameUnique: unique().on(table.guildId, table.name) }));
+
+const ticketTopicRoles = sqliteTable('ticket_topic_roles', {
+    topicId: integer('topic_id').notNull(),
+    roleId: text('role_id').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.topicId, table.roleId] }) }));
+
+const ticketForms = sqliteTable('ticket_forms', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    panelId: integer('panel_id').notNull(),
+    name: text('name').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({ panelNameUnique: unique().on(table.panelId, table.name) }));
+
+const ticketFormFields = sqliteTable('ticket_form_fields', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    formId: integer('form_id').notNull(),
+    label: text('label').notNull(),
+    type: text('type').default('short').notNull(),
+    placeholder: text('placeholder'),
+    required: integer('required', { mode: 'boolean' }).default(true).notNull(),
+    position: integer('position').notNull()
+}, table => ({ formPositionUnique: unique().on(table.formId, table.position) }));
+
+const ticketOptions = sqliteTable('ticket_options', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    panelId: integer('panel_id').notNull(),
+    label: text('label').notNull(),
+    description: text('description'),
+    emoji: text('emoji'),
+    style: text('style').default('primary').notNull(),
+    categoryId: text('category_id'),
+    topicId: integer('topic_id'),
+    formId: integer('form_id'),
+    closeOnLeave: integer('close_on_leave', { mode: 'boolean' }).default(false).notNull(),
+    traineeClaim: integer('trainee_claim', { mode: 'boolean' }).default(false).notNull(),
+    enabled: integer('enabled', { mode: 'boolean' }).default(true).notNull(),
+    position: integer('position').notNull()
+}, table => ({ panelPositionUnique: unique().on(table.panelId, table.position) }));
+
+const ticketOptionRoles = sqliteTable('ticket_option_roles', {
+    optionId: integer('option_id').notNull(),
+    roleId: text('role_id').notNull(),
+    kind: text('kind').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.optionId, table.roleId, table.kind] }) }));
+
+const ticketBlacklist = sqliteTable('ticket_blacklist', {
+    guildId: text('guild_id').notNull(),
+    targetType: text('target_type').notNull(),
+    targetId: text('target_id').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.targetType, table.targetId] }) }));
+
+const ticketProfiles = sqliteTable('ticket_profiles', {
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    greeting: text('greeting').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.userId] }) }));
+
+const tickets = sqliteTable('tickets', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    number: integer('number').notNull(),
+    openerId: text('opener_id').notNull(),
+    panelId: integer('panel_id'),
+    optionId: integer('option_id'),
+    topicId: integer('topic_id'),
+    topicName: text('topic_name'),
+    channelId: text('channel_id'),
+    status: text('status').default('pending').notNull(),
+    claimerId: text('claimer_id'),
+    reason: text('reason'),
+    formSnapshot: text('form_snapshot'),
+    accessSnapshot: text('access_snapshot'),
+    inactivityDeadline: integer('inactivity_deadline'),
+    warnedAt: integer('warned_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    closedAt: integer('closed_at'),
+    deletedAt: integer('deleted_at')
+}, table => ({
+    guildNumberUnique: unique().on(table.guildId, table.number),
+    channelUnique: unique().on(table.channelId),
+    openerStatusIdx: index('tickets_guild_opener_status_idx').on(table.guildId, table.openerId, table.status),
+    deadlineIdx: index('tickets_inactivity_deadline_idx').on(table.inactivityDeadline, table.status)
+}));
+
+const ticketMembers = sqliteTable('ticket_members', {
+    ticketId: integer('ticket_id').notNull(),
+    targetType: text('target_type').notNull(),
+    targetId: text('target_id').notNull(),
+    addedBy: text('added_by').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.ticketId, table.targetType, table.targetId] }) }));
+
+const ticketActions = sqliteTable('ticket_actions', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    ticketId: integer('ticket_id').notNull(),
+    actorId: text('actor_id').notNull(),
+    action: text('action').notNull(),
+    detail: text('detail'),
+    createdAt: integer('created_at').notNull()
+}, table => ({ ticketIdx: index('ticket_actions_ticket_idx').on(table.ticketId, table.id) }));
+
+const ticketTranscripts = sqliteTable('ticket_transcripts', {
+    ticketId: integer('ticket_id').primaryKey(),
+    html: text('html').notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+});
+
+const ticketRatings = sqliteTable('ticket_ratings', {
+    ticketId: integer('ticket_id').primaryKey(),
+    userId: text('user_id').notNull(),
+    stars: integer('stars').notNull(),
+    comment: text('comment'),
+    createdAt: integer('created_at').notNull()
+});
+
 module.exports = {
     guilds,
     lifecycleMessages,
@@ -938,5 +1100,20 @@ module.exports = {
     achievementDefinitions,
     achievementRoleConfig,
     achievementRoles,
-    customAchievements
+    customAchievements,
+    ticketConfigs,
+    ticketPanels,
+    ticketTopics,
+    ticketTopicRoles,
+    ticketForms,
+    ticketFormFields,
+    ticketOptions,
+    ticketOptionRoles,
+    ticketBlacklist,
+    ticketProfiles,
+    tickets,
+    ticketMembers,
+    ticketActions,
+    ticketTranscripts,
+    ticketRatings
 };

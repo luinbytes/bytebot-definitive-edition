@@ -316,6 +316,16 @@ module.exports = {
             logger.error(`Failed to initialize automation service: ${e}`);
         }
 
+        try {
+            const { TicketService } = require('../services/ticketService');
+            client.ticketService = new TicketService(client);
+            await client.ticketService.reconcile();
+            client.ticketService.start();
+            logger.success('Ticket service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize ticket service: ${e}`);
+        }
+
         // --- Initialize Starboard Service ---
         try {
             const StarboardService = require('../services/starboardService');

@@ -12,6 +12,7 @@ module.exports = {
 
         try {
             // Cleanup guild data
+            guild.client.ticketService?.purgeGuild(guild.id);
             await db.delete(lifecycleMessages).where(eq(lifecycleMessages.guildId, guild.id));
             await db.delete(automationRules).where(eq(automationRules.guildId, guild.id));
             await db.delete(autoResponses).where(eq(autoResponses.guildId, guild.id));

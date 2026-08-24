@@ -76,6 +76,8 @@ async function showCommandDetails(interaction, client, commandName) {
                 return `\`${group.name}\`: ${subcommands}`;
             }).join('\n');
             embed.addFields({ name: 'Command Groups', value: groupList });
+            const direct = command.data.options.filter(opt => opt.type === 1).map(sub => sub.name);
+            if (direct.length) embed.addFields({ name: 'Direct Subcommands', value: direct.map(name => `\`${name}\``).join(', ') });
         } else {
             const optionsList = command.data.options.map(opt => {
                 const required = opt.required ? '(required)' : '(optional)';
@@ -203,6 +205,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/server automod settings` • `/server automod filter`\n' +
                     '`/server permissions disable` • `/server permissions denyperm` • `/server permissions protect`\n' +
                     '`/reactionrole add` • `/buttonrole add` • `/temprole add` • `/boosterrole create`\n' +
+                    '`/ticket setup` • `/ticket panel manage` • `/ticket settings view`\n' +
                     '`/mod user warn` • `/mod case view` • `/mod config setup`\n' +
                     '`/mod template set` • `/game warthunder stats`\n' +
                     '`/fun uwuify` • `/fun uwulock add`',
@@ -213,7 +216,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                 value:
                     'Greed source categories route through ByteBot\'s existing hubs as features land:\n' +
                     '`/community` Levels, Socials • `/me` Information, Utility\n' +
-                    '`/server` Auto, Logs, Security, Server, Settings • `/mod` Moderation\n' +
+                    '`/server` Auto, Logs, Security, Server, Settings • `/ticket` Tickets • `/mod` Moderation\n' +
                     '`/fun` Fun, Manipulation, Roleplay, Snipe • `/boosterrole` Boosters\n' +
                     '**Not yet available (planned):** Economy, LastFM, Voice\n' +
                     '**Registry-only evidence gaps:** Developer, Music',
@@ -270,7 +273,8 @@ function buildCategoryEmbed(categoryName, categoryCommands) {
                     .filter(opt => opt.type === 2)
                     .map(group => `${group.name}: ${(group.options || []).filter(opt => opt.type === 1).map(sub => sub.name).join(', ')}`)
                     .join(' • ');
-                return `**/${cmd.data.name}** \`${groups}\`\n${desc}`;
+                const direct = cmd.data.options.filter(opt => opt.type === 1).map(sub => sub.name).join(', ');
+                return `**/${cmd.data.name}** \`${groups}${direct ? ` • direct: ${direct}` : ''}\`\n${desc}`;
             }
 
             const hasSubcommands = cmd.data.options && cmd.data.options.some(opt => opt.type === 1);
