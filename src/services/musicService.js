@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn: spawnProcess, spawnSync } = require('node:child_process');
-const { ChannelType, MessageFlags, PermissionFlagsBits } = require('discord.js');
+const { ChannelType, PermissionFlagsBits } = require('discord.js');
 const { eq } = require('drizzle-orm');
 const { musicConfig } = require('../database/schema');
 const embeds = require('../utils/embeds');
@@ -211,6 +211,7 @@ class MusicService {
         this.players = new Map();
         this.pendingConnections = new Map();
         this.removedGuilds = new Set();
+        this.generations = new Map();
         this.operations = new Map();
         this.pendingCounts = new Map();
         this.closing = false;
@@ -227,20 +228,19 @@ class MusicService {
         }
     }
 
-    reply(interaction, embed, ephemeral = true) {
+    reply(interaction, embed) {
         const payload = {
-            embeds: [embed], flags: ephemeral ? [MessageFlags.Ephemeral] : [], allowedMentions: { parse: [] }
+            embeds: [embed], allowedMentions: { parse: [] }
         };
         if (interaction.deferred) {
-            delete payload.flags;
             return interaction.editReply(payload);
         }
         return interaction.reply(payload);
     }
 
-    async defer(interaction, ephemeral = false) {
+    async defer(interaction) {
         if (!interaction.deferred && !interaction.replied && interaction.deferReply) {
-            await interaction.deferReply({ flags: ephemeral ? [MessageFlags.Ephemeral] : [] });
+            await interaction.deferReply({});
         }
     }
 
@@ -249,6 +249,7 @@ class MusicService {
         if (this.closing || this.removedGuilds.has(guildId)) {
             return this.reply(interaction, embeds.error('Music Unavailable', 'The music service is shutting down.'));
         }
+        const generation = this.generations.get(guildId) || 0;
         const pending = this.pendingCounts.get(guildId) || 0;
         if (pending >= MAX_QUEUE) return this.reply(interaction, embeds.error('Music Busy', 'Too many music requests are already pending.'));
         this.pendingCounts.set(guildId, pending + 1);
@@ -256,9 +257,9 @@ class MusicService {
         try {
             const previous = this.operations.get(guildId) || Promise.resolve();
             const deferred = this.operations.has(guildId)
-                ? this.defer(interaction, interaction.options.getSubcommandGroup(false) === 'settings')
+                ? this.defer(interaction)
                 : Promise.resolve();
-            operation = previous.catch(() => {}).then(() => deferred).then(() => this.executeOnce(interaction));
+            operation = previous.catch(() => {}).then(() => deferred).then(() => this.executeOnce(interaction, generation));
             this.operations.set(guildId, operation);
             return await operation;
         } finally {
@@ -269,11 +270,12 @@ class MusicService {
         }
     }
 
-    async executeOnce(interaction) {
+    async executeOnce(interaction, generation) {
+        this.assertActive(interaction.guild.id, generation);
         const group = interaction.options.getSubcommandGroup(false);
         const subcommand = interaction.options.getSubcommand();
         if (group !== 'settings') {
-            if (subcommand === 'play') return this.play(interaction);
+            if (subcommand === 'play') return this.play(interaction, generation);
             if (subcommand === 'queue') return this.queue(interaction);
             if (subcommand === 'pause') return this.pause(interaction);
             if (subcommand === 'resume') return this.resume(interaction);
@@ -292,8 +294,9 @@ class MusicService {
             if (!role || role.guild?.id !== interaction.guild.id || !interaction.guild.roles.cache.has(role.id)) {
                 return this.reply(interaction, embeds.error('Invalid Role', 'Choose a role from this server.'));
             }
-            await this.db.insert(musicConfig).values({ guildId: interaction.guild.id, djRoleId: role.id })
-                .onConflictDoUpdate({ target: musicConfig.guildId, set: { djRoleId: role.id } });
+            this.assertActive(interaction.guild.id, generation);
+            this.db.insert(musicConfig).values({ guildId: interaction.guild.id, djRoleId: role.id })
+                .onConflictDoUpdate({ target: musicConfig.guildId, set: { djRoleId: role.id } }).run();
             return this.reply(interaction, embeds.success('DJ Role Set', `${role} is now the DJ role.`));
         }
 
@@ -302,8 +305,9 @@ class MusicService {
         if (!enabled && !['off', 'disable', 'false'].includes(state)) {
             return this.reply(interaction, embeds.error('Invalid State', 'Use on, off, enable, disable, true, or false.'));
         }
-        await this.db.insert(musicConfig).values({ guildId: interaction.guild.id, autoplay: enabled })
-            .onConflictDoUpdate({ target: musicConfig.guildId, set: { autoplay: enabled } });
+        this.assertActive(interaction.guild.id, generation);
+        this.db.insert(musicConfig).values({ guildId: interaction.guild.id, autoplay: enabled })
+            .onConflictDoUpdate({ target: musicConfig.guildId, set: { autoplay: enabled } }).run();
         return this.reply(interaction, embeds.success('Autoplay Updated', `Autoplay is now **${enabled ? 'enabled' : 'disabled'}**.`));
     }
 
@@ -317,7 +321,7 @@ class MusicService {
             await this.reply(interaction, embeds.error('Different Voice Channel', 'Join my voice channel to control music.'));
             return null;
         }
-        const config = await this.db.select().from(musicConfig).where(eq(musicConfig.guildId, interaction.guild.id)).get();
+        const config = this.db.select().from(musicConfig).where(eq(musicConfig.guildId, interaction.guild.id)).get();
         const bypass = interaction.guild.ownerId === interaction.user.id
             || interaction.member.permissions.has(PermissionFlagsBits.Administrator);
         if (config?.djRoleId && !bypass && !interaction.member.roles.cache.has(config.djRoleId)) {
@@ -441,7 +445,7 @@ class MusicService {
         return this.voice;
     }
 
-    async play(interaction) {
+    async play(interaction, generation) {
         const channel = interaction.member.voice?.channel;
         if (!channel) return this.reply(interaction, embeds.error('Not In Voice', 'You must be in a voice channel to play music.'));
         if (channel.type !== ChannelType.GuildVoice) {
@@ -465,14 +469,17 @@ class MusicService {
 
         await this.defer(interaction);
         try {
-            for (const track of result.tracks) await this.validateTrack(track);
+            for (const track of result.tracks) {
+                await this.validateTrack(track);
+                this.assertActive(interaction.guild.id, generation);
+            }
         } catch (error) {
             return this.reply(interaction, embeds.error('Invalid Track', error.message));
         }
 
         if (!state) {
             try {
-                state = await this.createPlayer(interaction.guild, channel);
+                state = await this.createPlayer(interaction.guild, channel, generation);
             } catch (error) {
                 return this.reply(interaction, embeds.error('Playback Failed', error.message));
             }
@@ -499,8 +506,8 @@ class MusicService {
         ), false);
     }
 
-    async createPlayer(guild, channel) {
-        if (this.closing || this.removedGuilds.has(guild.id)) throw new Error('Music playback was cancelled.');
+    async createPlayer(guild, channel, generation) {
+        this.assertActive(guild.id, generation);
         const required = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak];
         if (!channel.permissionsFor(guild.members.me).has(required)) {
             throw new Error('I need View Channel, Connect, and Speak in your voice channel.');
@@ -521,9 +528,11 @@ class MusicService {
         } finally {
             if (this.pendingConnections.get(guild.id) === connection) this.pendingConnections.delete(guild.id);
         }
-        if (this.closing || this.removedGuilds.has(guild.id)) {
+        try {
+            this.assertActive(guild.id, generation);
+        } catch (error) {
             connection.destroy();
-            throw new Error('Music playback was cancelled.');
+            throw error;
         }
         const player = voice.createAudioPlayer({ behaviors: { noSubscriber: voice.NoSubscriberBehavior.Pause } });
         if (!connection.subscribe(player)) {
@@ -533,7 +542,7 @@ class MusicService {
         const state = {
             guild, channelId: channel.id, connection, player, current: null, queue: [],
             volume: 100, preset: null, process: null, idleTimer: null, suppressIdle: false,
-            recent: [], advancing: null
+            recent: [], advancing: null, generation
         };
         player.on('error', error => {
             logger.error(`Music playback failed in guild ${guild.id}: ${error.message}`);
@@ -565,13 +574,18 @@ class MusicService {
     }
 
     async startTrack(state, track) {
-        if (this.closing || this.removedGuilds.has(state.guild.id)) throw new Error('Music playback was cancelled.');
+        this.assertActive(state.guild.id, state.generation);
         const voice = this.voiceAdapter();
         const file = await this.validateTrack(track);
+        this.assertActive(state.guild.id, state.generation);
         const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-i', file, '-vn', '-t', String(track.durationSeconds)];
         if (state.preset) args.push('-af', PRESET_FILTERS[state.preset]);
         args.push('-ac', '2', '-ar', '48000', '-f', 's16le', 'pipe:1');
         const child = this.spawn(process.env.FFMPEG_PATH || 'ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+        state.process = child;
+        child.once('close', () => {
+            if (state.process === child) state.process = null;
+        });
         try {
             await new Promise((resolve, reject) => {
                 const timer = setTimeout(() => reject(new Error('FFmpeg did not start within 5 seconds.')), 5000);
@@ -580,20 +594,19 @@ class MusicService {
                 child.once('error', error => { clearTimeout(timer); reject(new Error(`FFmpeg could not start: ${error.message}`)); });
             });
         } catch (error) {
+            if (state.process === child) state.process = null;
             child.kill('SIGKILL');
             throw error;
         }
         child.stderr.resume();
-        if (this.closing || this.removedGuilds.has(state.guild.id)) {
+        try {
+            this.assertActive(state.guild.id, state.generation);
+        } catch (error) {
             await stopProcess(child);
-            throw new Error('Music playback was cancelled.');
+            throw error;
         }
         if (state.idleTimer) clearTimeout(state.idleTimer);
         state.idleTimer = null;
-        state.process = child;
-        child.once('close', () => {
-            if (state.process === child) state.process = null;
-        });
         state.current = track;
         if (state.recent.at(-1) !== track.id) state.recent.push(track.id);
         if (state.recent.length > MAX_QUEUE) state.recent.shift();
@@ -617,7 +630,7 @@ class MusicService {
         await stopProcess(process);
         state.current = null;
         let next = state.queue.shift();
-        const config = await this.db.select().from(musicConfig).where(eq(musicConfig.guildId, state.guild.id)).get();
+        const config = this.db.select().from(musicConfig).where(eq(musicConfig.guildId, state.guild.id)).get();
         if (!next && finished && config?.autoplay) {
             next = this.library.related(finished.id).find(track => !state.recent.includes(track.id));
         }
@@ -674,6 +687,12 @@ class MusicService {
         return file;
     }
 
+    assertActive(guildId, generation) {
+        if (this.closing || this.removedGuilds.has(guildId) || (this.generations.get(guildId) || 0) !== generation) {
+            throw new Error('Music playback was cancelled.');
+        }
+    }
+
     destroy(guildId) {
         this.pendingConnections.get(guildId)?.destroy();
         this.pendingConnections.delete(guildId);
@@ -688,6 +707,7 @@ class MusicService {
     }
 
     async purgeGuild(guildId) {
+        this.generations.set(guildId, (this.generations.get(guildId) || 0) + 1);
         this.removedGuilds.add(guildId);
         this.destroy(guildId);
         const operation = this.operations.get(guildId);
@@ -699,6 +719,7 @@ class MusicService {
     }
 
     reactivateGuild(guildId) {
+        this.generations.set(guildId, (this.generations.get(guildId) || 0) + 1);
         this.removedGuilds.delete(guildId);
     }
 

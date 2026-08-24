@@ -167,14 +167,14 @@ describe('music playback', () => {
             library: new MusicLibrary(libraryRoot), db: testDb(sqlite), voice: voice.adapter, probe: testProbe
         });
 
-        const joining = service.createPlayer(guild, channel);
+        const joining = service.createPlayer(guild, channel, 0);
         await service.purgeGuild(guild.id);
+        service.reactivateGuild(guild.id);
         ready(voice.connection);
 
         await expect(joining).rejects.toThrow('cancelled');
         expect(voice.connection.destroy).toHaveBeenCalled();
         expect(service.players.has(guild.id)).toBe(false);
-        service.reactivateGuild(guild.id);
         expect(service.removedGuilds.has(guild.id)).toBe(false);
         sqlite.close();
     });
@@ -223,6 +223,36 @@ describe('music playback', () => {
             guild_id: 'guild1', dj_role_id: 'dj1', autoplay: 1
         });
         expect(reply).toHaveBeenCalledTimes(2);
+        sqlite.close();
+    });
+
+    test('does not let stale queued settings recreate purged guild config', async () => {
+        const { MusicLibrary, MusicService } = require('../src/services/musicService');
+        const sqlite = new Database(':memory:');
+        sqlite.exec('CREATE TABLE music_config (guild_id TEXT PRIMARY KEY, dj_role_id TEXT, autoplay INTEGER NOT NULL DEFAULT 0)');
+        const service = new MusicService({ library: new MusicLibrary(libraryRoot), db: testDb(sqlite), probe: testProbe });
+        let release;
+        service.operations.set('guild1', new Promise(resolve => { release = resolve; }));
+        const interaction = {
+            guild: { id: 'guild1' },
+            member: { permissions: { has: () => true } },
+            options: {
+                getSubcommandGroup: () => 'settings', getSubcommand: () => 'autoplay',
+                getString: () => 'enable'
+            },
+            deferReply: jest.fn(), reply: jest.fn()
+        };
+        const setting = service.execute(interaction);
+        jest.useFakeTimers();
+        const purge = service.purgeGuild('guild1');
+        await jest.advanceTimersByTimeAsync(5000);
+        await purge;
+        service.reactivateGuild('guild1');
+        release();
+
+        await expect(setting).rejects.toThrow('cancelled');
+        expect(sqlite.prepare('SELECT * FROM music_config').get()).toBeUndefined();
+        jest.useRealTimers();
         sqlite.close();
     });
 

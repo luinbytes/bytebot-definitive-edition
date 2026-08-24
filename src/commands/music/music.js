@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder } = require('discord.js');
 const embeds = require('../../utils/embeds');
 const { PRESET_NAMES } = require('../../services/musicService');
 
@@ -36,11 +36,9 @@ module.exports = {
         if (client.musicService) return client.musicService.execute(interaction);
         const payload = {
             embeds: [embeds.error('Music Unavailable', 'The music service is not initialized.')],
-            flags: [MessageFlags.Ephemeral],
             allowedMentions: { parse: [] }
         };
         if (interaction.deferred) {
-            delete payload.flags;
             return interaction.editReply(payload);
         }
         return interaction.reply(payload);

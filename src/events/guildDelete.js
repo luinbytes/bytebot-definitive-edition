@@ -4,10 +4,9 @@ const { guilds, musicConfig, lifecycleMessages, reminders, automationRules, auto
 const { eq, and } = require('drizzle-orm');
 const logger = require('../utils/logger');
 const { dbLog } = require('../utils/dbLogger');
+const { runGuildLifecycle } = require('../utils/guildLifecycle');
 
-module.exports = {
-    name: Events.GuildDelete,
-    async execute(guild) {
+async function handleGuildDelete(guild) {
         logger.info(`Left or kicked from guild: ${guild.name} (ID: ${guild.id})`);
 
         try {
@@ -48,5 +47,9 @@ module.exports = {
         } catch (error) {
             logger.error(`Failed to cleanup reminders for guild ${guild.id}: ${error}`);
         }
-    },
+}
+
+module.exports = {
+    name: Events.GuildDelete,
+    execute: guild => runGuildLifecycle(guild.id, () => handleGuildDelete(guild)),
 };

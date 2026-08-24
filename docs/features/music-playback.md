@@ -65,13 +65,18 @@ playback. FFmpeg hard-stops each stream at its declared duration.
 ## Runtime
 
 Music requires Node 22.12 or newer, `@discordjs/voice`, `opusscript`, Discord
-UDP reachability, FFmpeg, and FFprobe. The Docker image installs both. A native
-host may set `FFMPEG_PATH` or `FFPROBE_PATH` when either executable uses a
-nonstandard name. Startup checks the dependencies and executables within five seconds; a failure leaves music
+UDP reachability, FFmpeg, and FFprobe. The Docker image pins Debian's `ffmpeg`
+package at `7:5.1.9-0+deb12u1`, which supplies both executables. A native host
+may set `FFMPEG_PATH` or `FFPROBE_PATH` when either executable uses a
+nonstandard name. Startup checks the dependencies and executables within five
+seconds; a failure leaves music
 disabled while the rest of ByteBot starts. One FFmpeg process may run per
 active guild. Stop, disconnect, guild removal, and process shutdown destroy the
 player, connection, timer, and child process. An idle player disconnects five
 minutes after its voice channel empties.
+
+Music command responses are public, including validation and RBAC errors, so
+entry-time deferral never changes response visibility.
 
 ByteBot deliberately does not ship YouTube/SoundCloud scraping, `yt-dlp`, a
 browser downloader, or fabricated search/similarity results. The public-source
