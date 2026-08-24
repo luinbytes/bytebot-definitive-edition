@@ -112,11 +112,11 @@ class CommunityUtilityService {
         if (!this.client || this.reconciling || this.now() < this.nextPendingReconcileAt) return;
         this.reconciling = true;
         this.nextPendingReconcileAt = this.now() + 60000;
-        const rows = [
-            ...this.sqlite.prepare("SELECT *, 'confession' kind FROM confessions WHERE status = 'pending'").all(),
-            ...this.sqlite.prepare("SELECT *, 'poll' kind FROM community_polls WHERE status = 'pending'").all()
-        ];
         try {
+            const rows = [
+                ...this.sqlite.prepare("SELECT *, 'confession' kind FROM confessions WHERE status = 'pending'").all(),
+                ...this.sqlite.prepare("SELECT *, 'poll' kind FROM community_polls WHERE status = 'pending'").all()
+            ];
             for (const row of rows) {
                 try {
                     const guild = await this.client.guilds.fetch(row.guild_id);

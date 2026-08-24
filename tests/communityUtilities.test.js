@@ -237,6 +237,17 @@ describe('community utilities', () => {
             .toEqual({ message_id: 'message3', status: 'published' });
     });
 
+    test('retries pending recovery after a database read failure', async () => {
+        service.client = { user: { id: 'bytebot' } };
+        const prepare = database.sqlite.prepare.bind(database.sqlite);
+        jest.spyOn(database.sqlite, 'prepare').mockImplementationOnce(() => { throw new Error('database busy'); }).mockImplementation(prepare);
+
+        await expect(service.reconcilePendingPublications()).rejects.toThrow('database busy');
+        expect(service.reconciling).toBe(false);
+        service.now = () => 160000;
+        await expect(service.reconcilePendingPublications()).resolves.toBeUndefined();
+    });
+
     test('does not accept votes or render controls after a poll starts ending', async () => {
         const row = database.sqlite.prepare(`INSERT INTO community_polls
             (guild_id, channel_id, message_id, creator_id, question, options_json, status, created_at)
