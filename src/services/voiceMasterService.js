@@ -9,6 +9,10 @@ const SETUP_PERMISSIONS = [
     PermissionFlagsBits.ManageRoles,
     PermissionFlagsBits.MoveMembers
 ];
+const OWNER_ACTIONS = new Set([
+    'bitrate', 'region', 'status', 'limit', 'rename', 'lock', 'unlock', 'hide',
+    'reveal', 'claim', 'information', 'delete', 'drag', 'permit', 'reject'
+]);
 
 class VoiceMasterService {
     constructor({ client = null, sqlite, now = Date.now, delay = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
@@ -27,6 +31,7 @@ class VoiceMasterService {
         const subcommand = interaction.options.getSubcommand();
         if (subcommand === 'setup') return this.setup(interaction);
         if (subcommand === 'sendinterface') return this.sendInterface(interaction);
+        if (!group && OWNER_ACTIONS.has(subcommand)) return this.executeOwnerAction(interaction, subcommand);
         return interaction.editReply({ embeds: [embeds.error('Not Available', `VoiceMaster ${group ? `${group} ` : ''}${subcommand} is not available yet.`)] });
     }
 
@@ -286,6 +291,128 @@ class VoiceMasterService {
             }
         }
         return true;
+    }
+
+    ownerContext(interaction, allowClaim = false) {
+        const channel = interaction.member.voice?.channel;
+        if (!channel || channel.type !== ChannelType.GuildVoice) throw new Error('You are not in a VoiceMaster channel.');
+        const pod = this.sqlite.prepare(`SELECT * FROM bytepods
+            WHERE guild_id = ? AND channel_id = ? AND state = 'active' AND bot_owned = 1`)
+            .get(interaction.guildId, channel.id);
+        if (!pod) throw new Error('You are not in a VoiceMaster channel.');
+        if (!allowClaim && pod.owner_id !== interaction.user.id) throw new Error('You are not the owner of this voice channel.');
+        return { channel, pod };
+    }
+
+    requireChannelPermissions(guild, channel, permissions) {
+        const available = channel.permissionsFor?.(guild.members.me) || guild.members.me?.permissions;
+        if (!available || permissions.some(permission => !available.has(permission))) {
+            throw new Error('ByteBot is missing a required channel permission for this action.');
+        }
+    }
+
+    async executeOwnerAction(interaction, action) {
+        try {
+            const { channel, pod } = this.ownerContext(interaction, action === 'claim');
+            switch (action) {
+            case 'lock':
+                this.requireChannelPermissions(interaction.guild, channel, [PermissionFlagsBits.ManageRoles]);
+                await channel.permissionOverwrites.edit(interaction.guild.id, { Connect: false });
+                break;
+            case 'unlock':
+                this.requireChannelPermissions(interaction.guild, channel, [PermissionFlagsBits.ManageRoles]);
+                await channel.permissionOverwrites.edit(interaction.guild.id, { Connect: null });
+                break;
+            case 'hide':
+                this.requireChannelPermissions(interaction.guild, channel, [PermissionFlagsBits.ManageRoles]);
+                await channel.permissionOverwrites.edit(interaction.guild.id, { ViewChannel: false });
+                break;
+            case 'reveal':
+                this.requireChannelPermissions(interaction.guild, channel, [PermissionFlagsBits.ManageRoles]);
+                await channel.permissionOverwrites.edit(interaction.guild.id, { ViewChannel: null });
+                break;
+            case 'limit': {
+                const limit = interaction.options.getInteger('limit');
+                if (!Number.isInteger(limit) || limit < 0 || limit > 99) throw new Error('The user limit must be between 0 and 99.');
+                this.requireChannelPermissions(interaction.guild, channel, [PermissionFlagsBits.ManageChannels]);
+                await channel.setUserLimit(limit);
+                break;
+            }
+            case 'rename': {
+                const name = String(interaction.options.getString('name') || '').trim();
+                if (!name || name.length > 100) throw new Error('The channel name must be 1–100 characters.');
+                this.requireChannelPermissions(interaction.guild, channel, [PermissionFlagsBits.ManageChannels]);
+                await channel.setName(name);
+                break;
+            }
+            case 'bitrate': {
+                const bitrate = interaction.options.getInteger('bitrate');
+                const maximum = interaction.guild.maximumBitrate || 96000;
+                if (!Number.isInteger(bitrate) || bitrate < 8000 || bitrate > maximum) {
+                    throw new Error(`The bitrate must be between 8000 and ${maximum}.`);
+                }
+                this.requireChannelPermissions(interaction.guild, channel, [PermissionFlagsBits.ManageChannels]);
+                await channel.setBitrate(bitrate);
+                break;
+            }
+            case 'region': {
+                const requested = interaction.options.getString('region');
+                let region = null;
+                if (requested && requested !== 'auto') {
+                    const regions = await interaction.guild.fetchVoiceRegions();
+                    const match = regions.get?.(requested)
+                        || [...regions.values()].find(item => item.id === requested);
+                    if (!match || match.deprecated) throw new Error('That voice region is unavailable.');
+                    region = match.id;
+                }
+                this.requireChannelPermissions(interaction.guild, channel, [PermissionFlagsBits.ManageChannels]);
+                await channel.setRTCRegion(region);
+                break;
+            }
+            case 'status': {
+                const value = interaction.options.getString('status');
+                const status = !value || value === 'clear' ? null : value;
+                if (status && status.length > 500) throw new Error('Voice status must be at most 500 characters.');
+                this.requireChannelPermissions(interaction.guild, channel, [PermissionFlagsBits.ManageChannels]);
+                await channel.setStatus(status);
+                break;
+            }
+            case 'information':
+                return interaction.editReply({
+                    embeds: [embeds.info('VoiceMaster Information', [
+                        `Owner: <@${pod.owner_id}>`,
+                        `Members: ${channel.members.size}`,
+                        `Limit: ${channel.userLimit || 'Unlimited'}`,
+                        `Bitrate: ${channel.bitrate}`,
+                        `Region: ${channel.rtcRegion || 'Automatic'}`
+                    ].join('\n'))],
+                    allowedMentions: { parse: [] }
+                });
+            case 'delete': {
+                const won = this.sqlite.prepare(`UPDATE bytepods SET state = 'deleting', generation = generation + 1
+                    WHERE guild_id = ? AND channel_id = ? AND owner_id = ? AND state = 'active' AND bot_owned = 1`)
+                    .run(interaction.guildId, channel.id, interaction.user.id);
+                if (!won.changes) throw new Error('This channel changed before it could be deleted.');
+                try {
+                    await channel.delete('VoiceMaster owner requested deletion');
+                    this.clearOwnedChannel(interaction.guildId, channel.id);
+                } catch (error) {
+                    if (error.code === 10003) this.clearOwnedChannel(interaction.guildId, channel.id);
+                    else {
+                        this.sqlite.prepare("UPDATE bytepods SET state = 'active' WHERE guild_id = ? AND channel_id = ? AND state = 'deleting'")
+                            .run(interaction.guildId, channel.id);
+                        throw error;
+                    }
+                }
+                break;
+            }
+            default:
+                throw new Error(`VoiceMaster ${action} is not available yet.`);
+            }
+            return interaction.editReply({ embeds: [embeds.success('VoiceMaster Updated', `Updated ${action} for ${channel}.`)] });
+        } catch (error) {
+            return interaction.editReply({ embeds: [embeds.error('VoiceMaster Action Failed', error.message)] });
+        }
     }
 
     clearOwnedChannel(guildId, channelId) {

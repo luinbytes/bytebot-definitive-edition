@@ -17,6 +17,24 @@ function interaction(guild, subcommand) {
     };
 }
 
+function memberInteraction(guild, member, subcommand, values = {}) {
+    return {
+        guild, guildId: guild.id, member, user: member.user,
+        options: {
+            getSubcommandGroup: () => null,
+            getSubcommand: () => subcommand,
+            getInteger: name => values[name] ?? null,
+            getString: name => values[name] ?? null,
+            getBoolean: name => values[name] ?? null,
+            getUser: name => values[name] ?? null,
+            getMember: name => values[name] ?? null,
+            getRole: name => values[name] ?? null,
+            getChannel: name => values[name] ?? null
+        },
+        editReply: jest.fn(async payload => payload)
+    };
+}
+
 describe('VoiceMaster lifecycle', () => {
     let tempDir;
     let database;
@@ -171,5 +189,76 @@ describe('VoiceMaster lifecycle', () => {
 
         expect(temporary.delete).toHaveBeenCalledTimes(1);
         expect(join.delete).not.toHaveBeenCalled();
+    });
+
+    test('only the persisted owner can mutate current-channel settings', async () => {
+        const channels = new Map();
+        const category = { id: 'category-1', type: ChannelType.GuildCategory, delete: jest.fn() };
+        const join = { id: 'join-1', type: ChannelType.GuildVoice, send: jest.fn(async () => ({ id: 'interface-1' })), delete: jest.fn() };
+        const overwrites = { edit: jest.fn(async () => {}) };
+        const temporary = {
+            id: 'temporary-1', type: ChannelType.GuildVoice, name: "Member's channel", members: new Map(),
+            bitrate: 64000, rtcRegion: null, userLimit: 0, permissionOverwrites: overwrites,
+            send: jest.fn(async () => ({ id: 'controls-1' })), delete: jest.fn(),
+            setUserLimit: jest.fn(async value => { temporary.userLimit = value; }),
+            setName: jest.fn(async value => { temporary.name = value; }),
+            setBitrate: jest.fn(async value => { temporary.bitrate = value; }),
+            setRTCRegion: jest.fn(async value => { temporary.rtcRegion = value; }),
+            setStatus: jest.fn(async value => { temporary.status = value; })
+        };
+        const create = jest.fn(async values => {
+            const channel = values.type === ChannelType.GuildCategory
+                ? category
+                : values.name === 'Join to Create' ? join : temporary;
+            channels.set(channel.id, channel);
+            return channel;
+        });
+        const voiceStates = new Map();
+        const owner = {
+            id: 'member-1', user: { id: 'member-1', bot: false, username: 'Member' }, displayName: 'Member',
+            permissions: { has: () => false }, roles: { cache: new Map() },
+            voice: { channelId: 'join-1', channel: join, setChannel: jest.fn(async channel => {
+                owner.voice.channelId = channel.id;
+                owner.voice.channel = channel;
+                voiceStates.set(owner.id, { channelId: channel.id });
+                channel.members.set(owner.id, owner);
+            }) }
+        };
+        const outsider = {
+            id: 'member-2', user: { id: 'member-2', bot: false, username: 'Other' },
+            permissions: { has: () => false }, roles: { cache: new Map() },
+            voice: { channelId: 'temporary-1', channel: temporary }
+        };
+        voiceStates.set(owner.id, { channelId: 'join-1' });
+        const guild = {
+            id: 'guild-1', name: 'Guild', maximumBitrate: 96000,
+            members: { me: { id: 'bot-1', permissions: { has: () => true } } },
+            roles: { everyone: { id: 'guild-1' } }, voiceStates: { cache: voiceStates },
+            channels: { cache: channels, create, fetch: jest.fn(async id => channels.get(id) || null) },
+            fetchVoiceRegions: jest.fn(async () => new Map([['eu-west', { id: 'eu-west', deprecated: false }]]))
+        };
+        const { VoiceMasterService } = require('../src/services/voiceMasterService');
+        const service = new VoiceMasterService({ sqlite: database.sqlite });
+        await service.execute(interaction(guild, 'setup'));
+        await service.handleVoiceState(
+            { channelId: null },
+            { member: owner, guild, channelId: 'join-1', channel: join, client: {} }
+        );
+
+        const lockInteraction = memberInteraction(guild, owner, 'lock');
+        await service.execute(lockInteraction);
+        await service.execute(memberInteraction(guild, owner, 'hide'));
+        await service.execute(memberInteraction(guild, owner, 'limit', { limit: 12 }));
+        await service.execute(memberInteraction(guild, owner, 'rename', { name: 'Focus Room' }));
+        await service.execute(memberInteraction(guild, owner, 'bitrate', { bitrate: 80000 }));
+        await service.execute(memberInteraction(guild, owner, 'region', { region: 'eu-west' }));
+        await service.execute(memberInteraction(guild, outsider, 'delete'));
+
+        expect(overwrites.edit).toHaveBeenCalledWith('guild-1', { Connect: false });
+        expect(overwrites.edit).toHaveBeenCalledWith('guild-1', { ViewChannel: false });
+        expect([temporary.userLimit, temporary.name, temporary.bitrate, temporary.rtcRegion]).toEqual([
+            12, 'Focus Room', 80000, 'eu-west'
+        ]);
+        expect(temporary.delete).not.toHaveBeenCalled();
     });
 });
