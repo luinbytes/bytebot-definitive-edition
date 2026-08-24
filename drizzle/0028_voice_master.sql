@@ -67,19 +67,3 @@ CREATE TABLE `voice_master_join_roles` (
     `updated_at` integer NOT NULL,
     PRIMARY KEY (`guild_id`,`channel_id`,`member_id`)
 );
---> statement-breakpoint
-ALTER TABLE `bytepods` ADD `source_channel_id` text;
---> statement-breakpoint
-ALTER TABLE `bytepods` ADD `state` text DEFAULT 'active' NOT NULL;
---> statement-breakpoint
-ALTER TABLE `bytepods` ADD `generation` integer DEFAULT 0 NOT NULL;
---> statement-breakpoint
-ALTER TABLE `bytepods` ADD `cleanup_after` integer;
---> statement-breakpoint
-ALTER TABLE `bytepods` ADD `bot_owned` integer DEFAULT 1 NOT NULL;
---> statement-breakpoint
-ALTER TABLE `bytepods` ADD `pending_owner_id` text;
---> statement-breakpoint
-ALTER TABLE `bytepods` ADD `claim_snapshot` text;
---> statement-breakpoint
-CREATE INDEX `bytepods_guild_state_idx` ON `bytepods` (`guild_id`,`state`);

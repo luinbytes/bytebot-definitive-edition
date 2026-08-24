@@ -1498,6 +1498,7 @@ function validateAndFixSchema() {
         sqlite.exec('CREATE INDEX IF NOT EXISTS tickets_inactivity_deadline_idx ON tickets (inactivity_deadline, status)');
     }
     if (tableExists('ticket_actions')) sqlite.exec('CREATE INDEX IF NOT EXISTS ticket_actions_ticket_idx ON ticket_actions (ticket_id, id)');
+    if (tableExists('bytepods')) sqlite.exec('CREATE INDEX IF NOT EXISTS bytepods_guild_state_idx ON bytepods (guild_id, state)');
 
     return fixes;
 }
