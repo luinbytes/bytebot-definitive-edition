@@ -89,6 +89,38 @@ describe('community utilities', () => {
         expect(service.confessionConfig('guild1').next_number).toBe(1);
     });
 
+    test('serializes concurrent confession publication without numbering gaps', async () => {
+        service.setConfessionConfig('guild1', 'channel1');
+        const message = { id: 'message2', react: jest.fn().mockResolvedValue({}) };
+        const channel = { isTextBased: () => true, send: jest.fn().mockRejectedValueOnce(new Error('first failed')).mockResolvedValueOnce(message) };
+        const makeInteraction = userId => ({
+            guildId: 'guild1', user: { id: userId }, fields: { getTextInputValue: () => 'A private confession' },
+            guild: { channels: { fetch: jest.fn().mockResolvedValue(channel) } },
+            deferReply: jest.fn().mockResolvedValue({}), editReply: jest.fn().mockResolvedValue({})
+        });
+
+        const first = service.submitConfession(makeInteraction('author1'), 0);
+        const second = service.submitConfession(makeInteraction('author2'), 0);
+
+        await expect(first).rejects.toThrow('first failed');
+        await expect(second).resolves.toBeDefined();
+        expect(database.sqlite.prepare('SELECT number FROM confessions').all()).toEqual([{ number: 1 }]);
+        expect(service.confessionConfig('guild1').next_number).toBe(2);
+    });
+
+    test('keeps published confession attribution when acknowledgement fails', async () => {
+        service.setConfessionConfig('guild1', 'channel1');
+        const message = { id: 'message1', react: jest.fn().mockResolvedValue({}) };
+        const interaction = {
+            guildId: 'guild1', user: { id: 'author1' }, fields: { getTextInputValue: () => 'A private confession' },
+            guild: { channels: { fetch: jest.fn().mockResolvedValue({ isTextBased: () => true, send: jest.fn().mockResolvedValue(message) }) } },
+            deferReply: jest.fn().mockResolvedValue({}), editReply: jest.fn().mockRejectedValue(new Error('token expired'))
+        };
+
+        await expect(service.submitConfession(interaction, 0)).rejects.toThrow('token expired');
+        expect(database.sqlite.prepare('SELECT author_id, status FROM confessions').get()).toEqual({ author_id: 'author1', status: 'published' });
+    });
+
     test('rejects links, blocked phrases, muted authors, and cooldown replays', () => {
         service.setConfessionConfig('guild1', 'channel1');
         service.configureBlacklist('guild1', 'add', 'secret phrase', 'mod1');
@@ -124,9 +156,11 @@ describe('community utilities', () => {
             deferReply: jest.fn().mockResolvedValue({}), editReply: jest.fn().mockResolvedValue({})
         };
 
-        const poll = await service.createPoll(interaction, 'Question?', ['Yes', 'No'], null);
+        const question = 'Q'.repeat(300);
+        const poll = await service.createPoll(interaction, question, ['Yes', 'No'], null);
 
         expect(poll.status).toBe('active');
+        expect(interaction.channel.send.mock.calls[0][0].embeds[0].data.description).toContain(question);
         expect(interaction.channel.send.mock.calls[0][0].components.flatMap(component => component.components)
             .every(button => button.data.disabled === false)).toBe(true);
     });
@@ -219,6 +253,33 @@ describe('community utilities', () => {
         expect(guild.members.fetch).toHaveBeenCalledTimes(1);
     });
 
+    test('retries member refresh after a transient failure', async () => {
+        service.randomInt = () => 0;
+        const cache = new Map([['bot', { user: { bot: true } }]]);
+        const guild = { id: 'guild1', memberCount: 2, members: { cache, fetch: jest.fn()
+            .mockRejectedValueOnce(new Error('Discord unavailable'))
+            .mockImplementationOnce(async () => {
+                cache.set('one', { user: { bot: false }, id: 'one' });
+                return cache;
+            }) } };
+
+        await expect(service.randomMember(guild)).rejects.toThrow('Discord unavailable');
+        await expect(service.randomMember(guild)).resolves.toMatchObject({ id: 'one' });
+        expect(guild.members.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    test('keeps a published poll when acknowledgement fails', async () => {
+        const message = { id: 'message1', url: 'https://discord.com/channels/guild1/channel1/message1' };
+        const interaction = {
+            guildId: 'guild1', channelId: 'channel1', user: { id: 'creator' },
+            channel: { send: jest.fn().mockResolvedValue(message) },
+            deferReply: jest.fn().mockResolvedValue({}), editReply: jest.fn().mockRejectedValue(new Error('token expired'))
+        };
+
+        await expect(service.createPoll(interaction, 'Question?', ['Yes', 'No'], null)).rejects.toThrow('token expired');
+        expect(database.sqlite.prepare('SELECT status, message_id FROM community_polls').get()).toEqual({ status: 'active', message_id: 'message1' });
+    });
+
     test('requires target-channel moderation permission to end another creator poll', async () => {
         database.sqlite.prepare(`INSERT INTO community_polls
             (guild_id, channel_id, message_id, creator_id, question, options_json, status, created_at)
@@ -258,6 +319,40 @@ describe('community utilities', () => {
         expect(Buffer.isBuffer(attachment.attachment)).toBe(true);
         expect(attachment.attachment.subarray(1, 4).toString()).toBe('PNG');
         expect(attachment.attachment.length).toBeLessThan(8_000_000);
+    });
+
+    test('does not enable confession setup when panel publication fails', async () => {
+        const { executeCommunityUtilityAdmin } = require('../src/utils/communityUtilityCommand');
+        const channel = { id: 'channel1', send: jest.fn().mockRejectedValue(new Error('Discord unavailable')), toString: () => '#confessions' };
+        const interaction = {
+            guildId: 'guild1', guild: { members: { me: { permissionsIn: () => ({ has: () => true }) } } },
+            user: { id: 'admin' }, memberPermissions: { has: () => true }, reply: jest.fn().mockResolvedValue({}),
+            options: { getSubcommandGroup: () => 'confessions', getSubcommand: () => 'setup', getChannel: () => channel }
+        };
+
+        await executeCommunityUtilityAdmin(interaction, { communityUtilityService: service });
+
+        expect(service.confessionConfig('guild1')).toBeUndefined();
+        expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Discord unavailable' }));
+    });
+
+    test('allows unmute all with Manage Messages in every confession channel', async () => {
+        const { executeCommunityUtilityAdmin } = require('../src/utils/communityUtilityCommand');
+        service.setConfessionConfig('guild1', 'channel1');
+        const channel = { toString: () => '#confessions' };
+        const interaction = {
+            guildId: 'guild1', guild: { channels: { fetch: jest.fn().mockResolvedValue(channel) } },
+            user: { id: 'moderator' }, memberPermissions: { has: () => false },
+            member: { permissionsIn: () => ({ has: permission => permission === PermissionFlagsBits.ManageMessages }) },
+            reply: jest.fn().mockResolvedValue({}),
+            options: {
+                getSubcommandGroup: () => 'confessions', getSubcommand: () => 'unmute', getBoolean: () => true, getInteger: () => null
+            }
+        };
+
+        await executeCommunityUtilityAdmin(interaction, { communityUtilityService: service });
+
+        expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Removed 0 confession mutes.' }));
     });
 
     test('purges every private community record for a departed guild', () => {

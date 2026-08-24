@@ -83,6 +83,7 @@ class CommunityUtilityService {
         this.interval = null;
         this.running = false;
         this.memberRefreshes = new Map();
+        this.confessionSubmissions = new Map();
     }
 
     start() {
@@ -95,6 +96,7 @@ class CommunityUtilityService {
         if (this.interval) clearInterval(this.interval);
         this.interval = null;
         this.memberRefreshes.clear();
+        this.confessionSubmissions.clear();
     }
 
     async reconcile() {
@@ -241,6 +243,18 @@ class CommunityUtilityService {
 
     async submitConfession(interaction, categoryId) {
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+        const prior = this.confessionSubmissions.get(interaction.guildId) || Promise.resolve();
+        // ponytail: per-guild serialization keeps public numbering gap-free; add a distributed lock only for multi-process deployment.
+        const submission = prior.catch(() => null).then(() => this.publishConfession(interaction, categoryId));
+        this.confessionSubmissions.set(interaction.guildId, submission);
+        try {
+            return await submission;
+        } finally {
+            if (this.confessionSubmissions.get(interaction.guildId) === submission) this.confessionSubmissions.delete(interaction.guildId);
+        }
+    }
+
+    async publishConfession(interaction, categoryId) {
         const config = this.confessionConfig(interaction.guildId);
         if (!config?.enabled) throw new Error('Confessions are not configured in this server.');
         const content = this.validateConfessionText(interaction.guildId, interaction.user.id, interaction.fields.getTextInputValue('content'));
@@ -256,16 +270,17 @@ class CommunityUtilityService {
             return this.sqlite.prepare(`INSERT INTO confessions (guild_id, number, category_id, channel_id, author_id, content, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *`).get(interaction.guildId, current.next_number, category?.id || null, channelId, interaction.user.id, content, this.now());
         }).immediate();
+        let message;
         try {
             const controls = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(`community:cf:r:${row.id}`).setLabel('Anonymous reply').setStyle(ButtonStyle.Secondary),
                 new ButtonBuilder().setCustomId(`community:cf:g:${row.id}`).setLabel('Report').setStyle(ButtonStyle.Danger)
             );
-            const message = await channel.send({ embeds: [this.confessionEmbed(row, category?.name)], components: [controls], allowedMentions: SAFE_MENTIONS });
+            message = await channel.send({ embeds: [this.confessionEmbed(row, category?.name)], components: [controls], allowedMentions: SAFE_MENTIONS });
             this.sqlite.prepare("UPDATE confessions SET message_id = ?, status = 'published' WHERE id = ?").run(message.id, row.id);
             for (const emoji of [config.up_emoji, config.down_emoji]) if (emoji !== 'none') await message.react(emoji).catch(() => null);
-            return interaction.editReply({ content: `Confession #${row.number} was posted anonymously.`, allowedMentions: SAFE_MENTIONS });
         } catch (error) {
+            if (message) await message.delete().catch(() => null);
             this.sqlite.transaction(() => {
                 this.sqlite.prepare('DELETE FROM confessions WHERE id = ?').run(row.id);
                 this.sqlite.prepare('UPDATE confession_configs SET next_number = next_number - 1 WHERE guild_id = ? AND next_number = ?')
@@ -273,6 +288,7 @@ class CommunityUtilityService {
             }).immediate();
             throw error;
         }
+        return interaction.editReply({ content: `Confession #${row.number} was posted anonymously.`, allowedMentions: SAFE_MENTIONS });
     }
 
     async submitAnonymousReply(interaction, confessionId) {
@@ -335,7 +351,7 @@ class CommunityUtilityService {
         const counts = this.pollCounts(poll);
         const total = counts.reduce((sum, value) => sum + value, 0);
         const description = poll.options.map((option, index) => `**${index + 1}. ${option}** — ${counts[index]} vote${counts[index] === 1 ? '' : 's'}`).join('\n');
-        const embed = new EmbedBuilder().setColor(ended ? 0x64748b : 0x8b5cf6).setTitle(poll.question).setDescription(description)
+        const embed = new EmbedBuilder().setColor(ended ? 0x64748b : 0x8b5cf6).setTitle('Poll').setDescription(`**${poll.question}**\n\n${description}`)
             .setFooter({ text: `${total} vote${total === 1 ? '' : 's'}${ended ? ' • Poll ended' : poll.ends_at ? ' • Timed poll' : ' • Quick poll'}` });
         if (poll.ends_at && !ended) embed.setTimestamp(poll.ends_at);
         const buttons = poll.options.map((option, index) => new ButtonBuilder().setCustomId(`community:poll:${poll.id}:${index}`)
@@ -355,15 +371,18 @@ class CommunityUtilityService {
             VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *`).get(interaction.guildId, interaction.channelId, interaction.user.id, cleanQuestion,
             JSON.stringify(values), durationMs == null ? null : this.now() + durationMs, this.now());
         const poll = pollFromRow(row);
+        let message;
         try {
-            const message = await interaction.channel.send(this.pollPayload({ ...poll, status: 'active' }));
+            message = await interaction.channel.send(this.pollPayload({ ...poll, status: 'active' }));
             this.sqlite.prepare("UPDATE community_polls SET message_id = ?, status = 'active' WHERE id = ?").run(message.id, poll.id);
-            await interaction.editReply({ content: `Poll created: ${message.url}`, allowedMentions: SAFE_MENTIONS });
-            return pollFromRow(this.sqlite.prepare('SELECT * FROM community_polls WHERE id = ?').get(poll.id));
         } catch (error) {
+            if (message) await message.delete().catch(() => null);
             this.sqlite.prepare('DELETE FROM community_polls WHERE id = ?').run(poll.id);
             throw error;
         }
+        const published = pollFromRow(this.sqlite.prepare('SELECT * FROM community_polls WHERE id = ?').get(poll.id));
+        await interaction.editReply({ content: `Poll created: ${message.url}`, allowedMentions: SAFE_MENTIONS });
+        return published;
     }
 
     getPollByMessage(guildId, messageId) {
@@ -494,7 +513,11 @@ class CommunityUtilityService {
             let refresh = this.memberRefreshes.get(guild.id);
             if (!refresh || refresh.expiresAt <= this.now()) {
                 // ponytail: one full refresh per guild per five minutes; revisit only if Discord stops returning a complete member fetch.
-                refresh = { expiresAt: this.now() + 300000, promise: guild.members.fetch() };
+                refresh = { expiresAt: this.now() + 300000 };
+                refresh.promise = guild.members.fetch().catch(error => {
+                    if (this.memberRefreshes.get(guild.id) === refresh) this.memberRefreshes.delete(guild.id);
+                    throw error;
+                });
                 this.memberRefreshes.set(guild.id, refresh);
             }
             await refresh.promise;
@@ -556,6 +579,7 @@ class CommunityUtilityService {
 
     purgeGuild(guildId) {
         this.memberRefreshes.delete(guildId);
+        this.confessionSubmissions.delete(guildId);
         this.sqlite.transaction(() => {
             const pollIds = this.sqlite.prepare('SELECT id FROM community_polls WHERE guild_id = ?').all(guildId).map(row => row.id);
             if (pollIds.length) this.sqlite.prepare(`DELETE FROM community_poll_votes WHERE poll_id IN (${pollIds.map(() => '?').join(',')})`).run(...pollIds);

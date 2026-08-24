@@ -28,6 +28,17 @@ async function confessionForModerator(interaction, service, number) {
     return confession;
 }
 
+async function requireAllConfessionChannels(interaction, service) {
+    const config = service.confessionConfig(interaction.guildId);
+    const ids = new Set([config?.channel_id, ...service.confessionCategories(interaction.guildId).map(row => row.channel_id)].filter(Boolean));
+    if (!ids.size) return requireMember(interaction, PermissionFlagsBits.ManageMessages, 'Manage Messages');
+    for (const id of ids) {
+        const channel = await interaction.guild.channels.fetch(id).catch(() => null);
+        if (!channel) throw new Error('A configured confession channel is unavailable.');
+        requireMemberIn(interaction, channel, PermissionFlagsBits.ManageMessages, 'Manage Messages');
+    }
+}
+
 async function confessionAdmin(interaction, service, subcommand) {
     const guildId = interaction.guildId;
     if (subcommand === 'view') {
@@ -45,9 +56,14 @@ async function confessionAdmin(interaction, service, subcommand) {
         const channel = interaction.options.getChannel('channel', true);
         requireBot(interaction, channel, [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks,
             PermissionFlagsBits.AddReactions, PermissionFlagsBits.ManageMessages], ['View Channel', 'Send Messages', 'Embed Links', 'Add Reactions', 'Manage Messages']);
-        service.setConfessionConfig(guildId, channel.id);
         const panel = await channel.send(service.panelPayload(guildId));
-        service.setPanelMessage(guildId, panel.id);
+        try {
+            service.setConfessionConfig(guildId, channel.id);
+            service.setPanelMessage(guildId, panel.id);
+        } catch (error) {
+            await panel.delete().catch(() => null);
+            throw error;
+        }
         return interaction.reply({ ...EPHEMERAL, content: `Confessions are enabled in ${channel}; the submission panel is ${panel.url}.` });
     }
     if (subcommand === 'remove') {
@@ -63,8 +79,8 @@ async function confessionAdmin(interaction, service, subcommand) {
         const channel = interaction.options.getChannel('channel');
         if (action === 'add' && (!name || !channel)) throw new Error('name and channel are required when adding a category.');
         if (action === 'remove' && !name) throw new Error('name is required when removing a category.');
-        if (channel) requireBot(interaction, channel, [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks],
-            ['View Channel', 'Send Messages', 'Embed Links']);
+        if (channel) requireBot(interaction, channel, [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.AddReactions],
+            ['View Channel', 'Send Messages', 'Embed Links', 'Add Reactions']);
         const rows = service.configureCategory(guildId, action, name, channel?.id);
         return interaction.reply({ ...EPHEMERAL, content: rows.length ? rows.map(row => `**${row.name}** → <#${row.channel_id}>`).join('\n') : 'No confession categories configured.' });
     }
@@ -95,7 +111,7 @@ async function confessionAdmin(interaction, service, subcommand) {
         const all = interaction.options.getBoolean('all') || false;
         const number = interaction.options.getInteger('number');
         if (!all && !number) throw new Error('Provide a confession number or set all to true.');
-        if (all) requireMember(interaction, PermissionFlagsBits.ManageGuild, 'Manage Server');
+        if (all) await requireAllConfessionChannels(interaction, service);
         else await confessionForModerator(interaction, service, number);
         const count = service.unmuteConfessionAuthor(guildId, number, all);
         return interaction.reply({ ...EPHEMERAL, content: `Removed ${count} confession mute${count === 1 ? '' : 's'}.` });
