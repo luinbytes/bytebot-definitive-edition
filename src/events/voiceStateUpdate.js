@@ -83,7 +83,7 @@ async function finalizeVoiceSession(session, client) {
 
     // Track activity streak (convert seconds to minutes)
     const durationMinutes = Math.floor(durationSeconds / 60);
-    if (durationMinutes > 0 && client.activityStreakService) {
+    if (durationMinutes > 0 && client.activityStreakService && !client.levelAnalyticsService) {
         try {
             await client.activityStreakService.recordActivity(
                 session.userId,
@@ -307,6 +307,15 @@ module.exports = {
         const guild = newState.guild;
 
         if (member.user.bot) return;
+
+        try {
+            const activity = await newState.client.levelAnalyticsService?.reconcileVoiceState(oldState, newState);
+            if (activity?.settledSeconds > 0) {
+                await newState.client.activityStreakService?.recordCommittedActivity(member.id, guild.id);
+            }
+        } catch (error) {
+            logger.error(`Level voice analytics failed for ${member.id}: ${error.message}`);
+        }
 
         // DB Fetch
         const guildData = await dbLog.select('guilds',

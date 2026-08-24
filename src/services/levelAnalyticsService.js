@@ -264,6 +264,133 @@ class LevelAnalyticsService {
         })();
     }
 
+    reconcileVoiceState(oldState, newState) {
+        const guild = newState?.guild || oldState?.guild;
+        if (!guild?.id) return { settledSeconds: 0, xpAwarded: 0 };
+        const now = this.now();
+        const day = new Date(now).toISOString().slice(0, 10);
+        const states = [...(guild.voiceStates?.cache?.values?.() || [])]
+            .filter(state => state.channelId && !state.member?.user?.bot);
+
+        return this.sqlite.transaction(() => {
+            this.sqlite.prepare(`INSERT OR IGNORE INTO level_configs (guild_id, updated_at) VALUES (?, ?)`)
+                .run(guild.id, now);
+            const config = this.sqlite.prepare(`SELECT * FROM level_configs WHERE guild_id = ?`).get(guild.id);
+            const peers = new Map();
+            for (const state of states) peers.set(state.channelId, (peers.get(state.channelId) || 0) + 1);
+            const desired = new Map(states.map(state => [state.member.id, {
+                state,
+                eligible: Boolean(config.voice_enabled && !state.mute && !state.deaf
+                    && (!config.antiafk_enabled || peers.get(state.channelId) > 1))
+            }]));
+            let settledSeconds = 0;
+            let xpAwarded = 0;
+
+            const sessions = this.sqlite.prepare(`
+                SELECT * FROM level_voice_sessions WHERE guild_id = ?
+            `).all(guild.id);
+            for (const session of sessions) {
+                let remainder = session.remainder_seconds;
+                let sessionAwarded = session.awarded_xp;
+                if (session.eligible_since != null) {
+                    const seconds = Math.max(0, Math.floor((now - session.last_observed_at) / 1000));
+                    if (seconds) {
+                        settledSeconds += seconds;
+                        this.sqlite.prepare(`
+                            INSERT INTO activity_logs
+                                (user_id, guild_id, activity_date, voice_seconds, updated_at)
+                            VALUES (?, ?, ?, ?, ?)
+                            ON CONFLICT(user_id, guild_id, activity_date) DO UPDATE SET
+                                voice_seconds = voice_seconds + excluded.voice_seconds,
+                                updated_at = excluded.updated_at
+                        `).run(session.user_id, guild.id, day, seconds, now);
+                        this.sqlite.prepare(`
+                            UPDATE activity_logs SET voice_minutes = CAST(voice_seconds / 60 AS INTEGER)
+                            WHERE user_id = ? AND guild_id = ? AND activity_date = ?
+                        `).run(session.user_id, guild.id, day);
+                        this.sqlite.prepare(`
+                            INSERT INTO server_daily_metrics
+                                (guild_id, activity_date, voice_seconds, updated_at)
+                            VALUES (?, ?, ?, ?)
+                            ON CONFLICT(guild_id, activity_date) DO UPDATE SET
+                                voice_seconds = voice_seconds + excluded.voice_seconds,
+                                updated_at = excluded.updated_at
+                        `).run(guild.id, day, seconds, now);
+
+                        const active = desired.get(session.user_id)?.state;
+                        const observedMember = active?.member
+                            || (oldState?.member?.id === session.user_id ? oldState.member : null);
+                        const roles = roleIds(observedMember);
+                        const targets = [['channel', session.channel_id], ...roles.map(id => ['role', id])];
+                        let targetMultiplier = 1;
+                        for (const [type, id] of targets) {
+                            const boost = this.sqlite.prepare(`
+                                SELECT multiplier FROM level_boosts
+                                WHERE guild_id = ? AND target_type = ? AND target_id = ?
+                            `).get(guild.id, type, id);
+                            if (boost) targetMultiplier = Math.max(targetMultiplier, boost.multiplier);
+                        }
+                        const total = remainder + seconds;
+                        const completeMinutes = Math.floor(total / 60);
+                        remainder = total % 60;
+                        const calculated = Math.floor(completeMinutes * config.voice_xp_per_minute
+                            * Math.min(10, config.base_multiplier * targetMultiplier));
+                        const award = Math.min(calculated, Math.max(0, config.voice_session_xp_cap - sessionAwarded));
+                        sessionAwarded += award;
+                        xpAwarded += award;
+
+                        this.sqlite.prepare(`
+                            INSERT OR IGNORE INTO member_levels
+                                (guild_id, user_id, xp, level, text_xp, voice_xp,
+                                 manual_adjustment, level_floor, message_count, voice_seconds, updated_at)
+                            VALUES (?, ?, 0, 0, 0, 0, 0, 0, 0, 0, ?)
+                        `).run(guild.id, session.user_id, now);
+                        const member = this.sqlite.prepare(`
+                            SELECT * FROM member_levels WHERE guild_id = ? AND user_id = ?
+                        `).get(guild.id, session.user_id);
+                        const voiceXp = member.voice_xp + award;
+                        const xp = Math.max(0, member.text_xp + voiceXp + member.manual_adjustment);
+                        const level = Math.max(member.level_floor, levelForXp(xp));
+                        this.sqlite.prepare(`
+                            UPDATE member_levels SET xp = ?, level = ?, voice_xp = ?,
+                                voice_seconds = voice_seconds + ?, updated_at = ?
+                            WHERE guild_id = ? AND user_id = ?
+                        `).run(xp, level, voiceXp, seconds, now, guild.id, session.user_id);
+                    }
+                }
+
+                const next = desired.get(session.user_id);
+                if (!next) {
+                    this.sqlite.prepare(`
+                        DELETE FROM level_voice_sessions WHERE guild_id = ? AND user_id = ?
+                    `).run(guild.id, session.user_id);
+                    continue;
+                }
+                if (next.state.channelId !== session.channel_id) {
+                    remainder = 0;
+                    sessionAwarded = 0;
+                }
+                this.sqlite.prepare(`
+                    UPDATE level_voice_sessions SET channel_id = ?, eligible_since = ?,
+                        last_observed_at = ?, remainder_seconds = ?, awarded_xp = ?
+                    WHERE guild_id = ? AND user_id = ?
+                `).run(next.state.channelId, next.eligible ? now : null, now, remainder,
+                    sessionAwarded, guild.id, session.user_id);
+                desired.delete(session.user_id);
+            }
+
+            const insert = this.sqlite.prepare(`
+                INSERT INTO level_voice_sessions
+                    (guild_id, user_id, channel_id, eligible_since, last_observed_at)
+                VALUES (?, ?, ?, ?, ?)
+            `);
+            for (const [userId, next] of desired) {
+                insert.run(guild.id, userId, next.state.channelId, next.eligible ? now : null, now);
+            }
+            return { settledSeconds, xpAwarded };
+        })();
+    }
+
     async reconcileStartup(client) {
         const results = [];
         const failures = [];

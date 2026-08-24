@@ -168,4 +168,33 @@ describe('LevelAnalyticsService', () => {
             { user_id: 'user2', eligible_since: now, last_observed_at: now }
         ]);
     });
+
+    test('voice transitions settle eligible peer time exactly once', () => {
+        const first = { id: 'user1', user: { id: 'user1', bot: false }, roles: { cache: new Map() } };
+        const second = { id: 'user2', user: { id: 'user2', bot: false }, roles: { cache: new Map() } };
+        const cache = new Map();
+        const guild = { id: 'guild1', voiceStates: { cache } };
+        const firstState = { guild, member: first, channelId: 'voice1', mute: false, deaf: false };
+        const secondState = { guild, member: second, channelId: 'voice1', mute: false, deaf: false };
+        cache.set(first.id, firstState);
+        service.reconcileVoiceState({ guild, member: first, channelId: null }, firstState);
+        cache.set(second.id, secondState);
+        service.reconcileVoiceState({ guild, member: second, channelId: null }, secondState);
+
+        now += 61_000;
+        cache.delete(second.id);
+        service.reconcileVoiceState(secondState, { guild, member: second, channelId: null, mute: false, deaf: false });
+        service.reconcileVoiceState(secondState, { guild, member: second, channelId: null, mute: false, deaf: false });
+
+        expect(database.sqlite.prepare(`
+            SELECT user_id, xp, voice_xp, voice_seconds FROM member_levels
+            WHERE guild_id = 'guild1' ORDER BY user_id
+        `).all()).toEqual([
+            { user_id: 'user1', xp: 5, voice_xp: 5, voice_seconds: 61 },
+            { user_id: 'user2', xp: 5, voice_xp: 5, voice_seconds: 61 }
+        ]);
+        expect(database.sqlite.prepare(`
+            SELECT voice_seconds FROM server_daily_metrics WHERE guild_id = 'guild1'
+        `).get().voice_seconds).toBe(122);
+    });
 });

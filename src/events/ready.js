@@ -96,7 +96,7 @@ async function finalizeStaleSession(session, client) {
 
     // Track activity streak (convert seconds to minutes)
     const durationMinutes = Math.floor(durationSeconds / 60);
-    if (durationMinutes > 0 && client?.activityStreakService) {
+    if (durationMinutes > 0 && client?.activityStreakService && !client.levelAnalyticsService) {
         try {
             await client.activityStreakService.recordActivity(
                 session.userId,
