@@ -327,6 +327,19 @@ module.exports = {
         }
 
         try {
+            const { EconomyService } = require('../services/economyService');
+            const { sqlite } = require('../database');
+            client.economyService = new EconomyService({ client, sqlite });
+            const recovery = await client.economyService.reconcile();
+            if (recovery.reconciled || recovery.pending) {
+                logger.info(`Economy shop recovery: ${recovery.reconciled} reconciled, ${recovery.pending} pending`);
+            }
+            logger.success('Economy service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize economy service: ${e}`);
+        }
+
+        try {
             const { TicketService } = require('../services/ticketService');
             client.ticketService = new TicketService(client);
             await client.ticketService.reconcile();

@@ -1,4 +1,5 @@
-const { sqliteTable, text, integer, real, index, unique, primaryKey } = require('drizzle-orm/sqlite-core');
+const { sql } = require('drizzle-orm');
+const { sqliteTable, text, integer, real, index, uniqueIndex, unique, primaryKey, check } = require('drizzle-orm/sqlite-core');
 
 const guilds = sqliteTable('guilds', {
     id: text('id').primaryKey(),
@@ -1176,6 +1177,139 @@ const serverListings = sqliteTable('server_listings', {
     updatedAt: integer('updated_at').notNull()
 }, table => ({ bumpedIdx: index('server_listings_bumped_idx').on(table.bumpedAt) }));
 
+const economyConfigs = sqliteTable('economy_configs', {
+    guildId: text('guild_id').primaryKey(),
+    enabled: integer('enabled', { mode: 'boolean' }).default(false).notNull(),
+    currencyName: text('currency_name').default('coins').notNull(),
+    currencyEmoji: text('currency_emoji').default('🪙').notNull(),
+    startingBalance: integer('starting_balance').default(0).notNull(),
+    dailyCap: integer('daily_cap').default(50000).notNull(),
+    preset: text('preset').default('standard').notNull(),
+    updatedBy: text('updated_by').notNull(),
+    updatedAt: integer('updated_at').notNull()
+});
+
+const economyModes = sqliteTable('economy_modes', {
+    userId: text('user_id').primaryKey(),
+    scopeType: text('scope_type').default('guild').notNull(),
+    updatedAt: integer('updated_at').notNull()
+});
+
+const economyScopeTotals = sqliteTable('economy_scope_totals', {
+    scopeType: text('scope_type').notNull(),
+    scopeId: text('scope_id').notNull(),
+    mintedText: text('minted_text').default('0').notNull(),
+    destroyedText: text('destroyed_text').default('0').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.scopeType, table.scopeId] }) }));
+
+const economyAccounts = sqliteTable('economy_accounts', {
+    scopeType: text('scope_type').notNull(),
+    scopeId: text('scope_id').notNull(),
+    userId: text('user_id').notNull(),
+    wallet: integer('wallet').default(0).notNull(),
+    bank: integer('bank').default(0).notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.scopeType, table.scopeId, table.userId] }),
+    rankIdx: index('economy_accounts_rank_idx').on(table.scopeType, table.scopeId, table.wallet, table.bank),
+    walletCheck: check('economy_accounts_wallet_check', sql`${table.wallet} BETWEEN 0 AND 1000000000000`),
+    bankCheck: check('economy_accounts_bank_check', sql`${table.bank} BETWEEN 0 AND 1000000000000`)
+}));
+
+const economyLedger = sqliteTable('economy_ledger', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    transactionId: text('transaction_id').notNull(),
+    scopeType: text('scope_type').notNull(),
+    scopeId: text('scope_id').notNull(),
+    userId: text('user_id').notNull(),
+    walletDelta: integer('wallet_delta').default(0).notNull(),
+    bankDelta: integer('bank_delta').default(0).notNull(),
+    supplyDelta: integer('supply_delta').default(0).notNull(),
+    walletBalance: integer('wallet_balance').notNull(),
+    bankBalance: integer('bank_balance').notNull(),
+    kind: text('kind').notNull(),
+    actorId: text('actor_id').notNull(),
+    counterpartyId: text('counterparty_id'),
+    reason: text('reason'),
+    createdAt: integer('created_at').notNull()
+}, table => ({
+    transactionIdx: index('economy_ledger_transaction_idx').on(table.transactionId),
+    accountIdx: index('economy_ledger_account_idx').on(table.scopeType, table.scopeId, table.userId, table.id),
+    walletBalanceCheck: check('economy_ledger_wallet_balance_check', sql`${table.walletBalance} BETWEEN 0 AND 1000000000000`),
+    bankBalanceCheck: check('economy_ledger_bank_balance_check', sql`${table.bankBalance} BETWEEN 0 AND 1000000000000`)
+}));
+
+const economyEarnedTotals = sqliteTable('economy_earned_totals', {
+    userId: text('user_id').notNull(),
+    utcDay: text('utc_day').notNull(),
+    amount: integer('amount').default(0).notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.userId, table.utcDay] }) }));
+
+const economyEarningGuilds = sqliteTable('economy_earning_guilds', {
+    userId: text('user_id').notNull(),
+    utcDay: text('utc_day').notNull(),
+    guildId: text('guild_id').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.userId, table.utcDay, table.guildId] }) }));
+
+const economyActionCooldowns = sqliteTable('economy_action_cooldowns', {
+    userId: text('user_id').notNull(),
+    action: text('action').notNull(),
+    scopeType: text('scope_type').notNull(),
+    scopeId: text('scope_id').notNull(),
+    subjectId: text('subject_id').notNull(),
+    availableAt: integer('available_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.userId, table.action, table.scopeType, table.scopeId, table.subjectId] }) }));
+
+const economyJobs = sqliteTable('economy_jobs', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    name: text('name').notNull(),
+    minimum: integer('minimum').notNull(),
+    maximum: integer('maximum').notNull(),
+    cooldownSeconds: integer('cooldown_seconds').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({ nameUnique: unique('economy_jobs_name_unique').on(table.guildId, table.name) }));
+
+const economyShopItems = sqliteTable('economy_shop_items', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    roleId: text('role_id').notNull(),
+    roleName: text('role_name').notNull(),
+    price: integer('price').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({ roleUnique: unique('economy_shop_items_role_unique').on(table.guildId, table.roleId) }));
+
+const economyShopPurchases = sqliteTable('economy_shop_purchases', {
+    id: text('id').primaryKey(),
+    transactionId: text('transaction_id').notNull(),
+    reversalTransactionId: text('reversal_transaction_id'),
+    guildId: text('guild_id').notNull(),
+    itemId: integer('item_id').notNull(),
+    userId: text('user_id').notNull(),
+    scopeType: text('scope_type').notNull(),
+    scopeId: text('scope_id').notNull(),
+    roleId: text('role_id').notNull(),
+    price: integer('price').notNull(),
+    status: text('status').default('pending').notNull(),
+    error: text('error'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    deliveredAt: integer('delivered_at'),
+    reversedAt: integer('reversed_at')
+}, table => ({
+    pendingIdx: index('economy_shop_purchases_pending_idx').on(table.status, table.guildId, table.id),
+    onePendingItem: uniqueIndex('economy_shop_purchases_one_pending_item')
+        .on(table.guildId, table.userId, table.itemId).where(sql`${table.status} = 'pending'`)
+}));
+
 module.exports = {
     guilds,
     lifecycleMessages,
@@ -1270,5 +1404,16 @@ module.exports = {
     giveawayActions,
     guildBackups,
     customizationPresets,
-    serverListings
+    serverListings,
+    economyConfigs,
+    economyModes,
+    economyScopeTotals,
+    economyAccounts,
+    economyLedger,
+    economyEarnedTotals,
+    economyEarningGuilds,
+    economyActionCooldowns,
+    economyJobs,
+    economyShopItems,
+    economyShopPurchases
 };
