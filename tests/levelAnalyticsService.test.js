@@ -1,6 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { PermissionFlagsBits } = require('discord.js');
 
 describe('LevelAnalyticsService', () => {
     let tempDir;
@@ -196,5 +197,31 @@ describe('LevelAnalyticsService', () => {
         expect(database.sqlite.prepare(`
             SELECT voice_seconds FROM server_daily_metrics WHERE guild_id = 'guild1'
         `).get().voice_seconds).toBe(122);
+    });
+
+    test('/levels config rate enforces Manage Server and persists the bounded value', async () => {
+        const interaction = canManage => ({
+            guildId: 'guild1',
+            guild: { id: 'guild1' },
+            user: { id: 'admin1' },
+            member: { permissions: { has: permission => canManage && permission === PermissionFlagsBits.ManageGuild } },
+            options: {
+                getSubcommandGroup: () => 'config',
+                getSubcommand: () => 'rate',
+                getNumber: name => name === 'multiplier' ? 2.5 : null
+            },
+            reply: jest.fn()
+        });
+
+        await expect(service.execute(interaction(false))).rejects.toThrow('Manage Server');
+        const allowed = interaction(true);
+        await service.execute(allowed);
+
+        expect(database.sqlite.prepare(`
+            SELECT base_multiplier FROM level_configs WHERE guild_id = 'guild1'
+        `).get().base_multiplier).toBe(2.5);
+        expect(allowed.reply).toHaveBeenCalledWith(expect.objectContaining({
+            content: 'XP gain multiplier has been set to **2.5x**.'
+        }));
     });
 });

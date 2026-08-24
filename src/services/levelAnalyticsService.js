@@ -1,3 +1,5 @@
+const { MessageFlags, PermissionFlagsBits } = require('discord.js');
+
 const MAX_LEVEL = 999;
 
 function levelForXp(xp) {
@@ -403,6 +405,36 @@ class LevelAnalyticsService {
             }
         }
         return { results, failures };
+    }
+
+    async execute(interaction) {
+        const group = interaction.options.getSubcommandGroup(false);
+        const action = interaction.options.getSubcommand();
+        if (group === 'config') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                throw new Error('You need Manage Server to configure levels.');
+            }
+            if (action === 'rate') {
+                const multiplier = interaction.options.getNumber('multiplier', true);
+                if (!Number.isFinite(multiplier) || multiplier < 0 || multiplier > 10) {
+                    throw new Error('Multiplier must be between 0 and 10.');
+                }
+                const now = this.now();
+                this.sqlite.prepare(`
+                    INSERT INTO level_configs (guild_id, base_multiplier, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(guild_id) DO UPDATE SET
+                        base_multiplier = excluded.base_multiplier,
+                        updated_at = excluded.updated_at
+                `).run(interaction.guildId, multiplier, now);
+                return interaction.reply({
+                    content: `XP gain multiplier has been set to **${multiplier}x**.`,
+                    flags: [MessageFlags.Ephemeral],
+                    allowedMentions: { parse: [] }
+                });
+            }
+        }
+        throw new Error('That levels action is not available yet.');
     }
 }
 
