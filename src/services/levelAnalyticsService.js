@@ -518,6 +518,60 @@ class LevelAnalyticsService {
                 flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
             });
         }
+        if (group === 'admin') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                throw new Error('You need Manage Server to manage member XP.');
+            }
+            const user = interaction.options.getUser('member', true);
+            const now = this.now();
+            this.sqlite.prepare(`
+                INSERT OR IGNORE INTO member_levels
+                    (guild_id, user_id, xp, level, text_xp, voice_xp,
+                     manual_adjustment, level_floor, message_count, voice_seconds, updated_at)
+                VALUES (?, ?, 0, 0, 0, 0, 0, 0, 0, 0, ?)
+            `).run(interaction.guildId, user.id, now);
+            const current = this.sqlite.prepare(`
+                SELECT * FROM member_levels WHERE guild_id = ? AND user_id = ?
+            `).get(interaction.guildId, user.id);
+            let total;
+            let floor = current.level_floor;
+            let content;
+            if (action === 'award') {
+                const amount = interaction.options.getInteger('amount', true);
+                if (amount <= 0) throw new Error('Amount must be greater than zero.');
+                total = current.xp + amount;
+                content = `Awarded **${amount}** XP to <@${user.id}>. New total XP: **${total}**.`;
+            } else if (action === 'removexp') {
+                const amount = interaction.options.getInteger('amount', true);
+                if (amount <= 0) throw new Error('Amount must be greater than zero.');
+                total = Math.max(0, current.xp - amount);
+                content = `Removed **${amount}** XP from <@${user.id}>. New total XP: **${total}**.`;
+            } else if (action === 'setxp') {
+                total = interaction.options.getInteger('xp', true);
+                if (total < 0) throw new Error('Amount must be zero or greater.');
+                floor = 0;
+                content = `Set total XP for <@${user.id}> to **${total}**.`;
+            } else if (action === 'setlevel') {
+                const level = interaction.options.getInteger('level', true);
+                if (level < 1 || level > 999) throw new Error('Level must be between 1 and 999.');
+                total = 100 * level * level;
+                floor = level;
+                content = `Set level for <@${user.id}> to **${level}**.`;
+            }
+            if (total == null) throw new Error('Unknown XP management action.');
+            const manual = total - current.text_xp - current.voice_xp;
+            const level = Math.max(floor, levelForXp(total));
+            this.sqlite.prepare(`
+                UPDATE member_levels SET xp = ?, level = ?, manual_adjustment = ?,
+                    level_floor = ?, updated_at = ?
+                WHERE guild_id = ? AND user_id = ?
+            `).run(total, level, manual, floor, now, interaction.guildId, user.id);
+            return interaction.reply({
+                content,
+                flags: [MessageFlags.Ephemeral],
+                allowedMentions: { parse: [] }
+            });
+        }
         throw new Error('That levels action is not available yet.');
     }
 }

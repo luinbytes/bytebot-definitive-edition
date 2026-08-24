@@ -270,4 +270,34 @@ describe('LevelAnalyticsService', () => {
         values.channel = { id: 'channel1' };
         await expect(service.execute(interaction)).rejects.toThrow('exactly one');
     });
+
+    test('/levels admin setxp explicitly replaces a legacy floor without corrupting tracks', async () => {
+        database.sqlite.prepare(`
+            INSERT INTO member_levels
+                (guild_id, user_id, xp, level, text_xp, voice_xp, manual_adjustment,
+                 level_floor, message_count, voice_seconds, updated_at)
+            VALUES ('guild1', 'user1', 4321, 17, 0, 0, 4321, 17, 0, 0, 1)
+        `).run();
+        const interaction = {
+            guildId: 'guild1',
+            member: { permissions: { has: permission => permission === PermissionFlagsBits.ManageGuild } },
+            options: {
+                getSubcommandGroup: () => 'admin',
+                getSubcommand: () => 'setxp',
+                getUser: () => ({ id: 'user1' }),
+                getInteger: name => name === 'xp' ? 100 : null
+            },
+            reply: jest.fn()
+        };
+
+        await service.execute(interaction);
+
+        expect(database.sqlite.prepare(`
+            SELECT xp, level, text_xp, voice_xp, manual_adjustment, level_floor
+            FROM member_levels WHERE guild_id = 'guild1' AND user_id = 'user1'
+        `).get()).toEqual({
+            xp: 100, level: 1, text_xp: 0, voice_xp: 0,
+            manual_adjustment: 100, level_floor: 0
+        });
+    });
 });
