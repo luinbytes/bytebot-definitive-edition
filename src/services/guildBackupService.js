@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { PermissionFlagsBits } = require('discord.js');
 
 const SCHEMA_VERSION = 1;
 const MAX_BACKUPS = 5;
@@ -103,6 +104,7 @@ class GuildBackupService {
         this.sqlite = options.sqlite;
         this.now = options.now || Date.now;
         this.randomUUID = options.randomUUID || crypto.randomUUID;
+        this.sleep = options.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
     }
 
     create({ guild, creatorId, name, description = null }) {
@@ -175,6 +177,146 @@ class GuildBackupService {
             remove.stickers = selected.includes('stickers') ? serializeStickers(guild).length : 0;
         }
         return { backupId: backup.id, mode, sections: selected, create: counts, remove };
+    }
+
+    requirePermissions(guild, sections) {
+        const required = [
+            ['roles', PermissionFlagsBits.ManageRoles, 'Manage Roles'],
+            ['channels', PermissionFlagsBits.ManageChannels, 'Manage Channels'],
+            ['emojis', PermissionFlagsBits.ManageGuildExpressions, 'Manage Expressions'],
+            ['stickers', PermissionFlagsBits.ManageGuildExpressions, 'Manage Expressions']
+        ];
+        for (const [section, permission, name] of required) {
+            if (sections.includes(section) && !guild.members.me.permissions.has(permission)) {
+                throw new Error(`I need ${name} to restore ${section}.`);
+            }
+        }
+    }
+
+    async restore({ guild, creatorId, id, mode = 'merge', sections = SECTIONS, confirmed = false }) {
+        if (!confirmed) throw new Error('Restore requires explicit confirmation.');
+        const plan = this.preview({ guild, creatorId, id, mode, sections });
+        this.requirePermissions(guild, plan.sections);
+        const backup = this.view(guild.id, creatorId, id);
+        const created = Object.fromEntries(SECTIONS.map(section => [section, 0]));
+        const removed = Object.fromEntries(SECTIONS.map(section => [section, 0]));
+        const failures = [];
+        const roleIds = new Map([[backup.guildId, guild.roles.everyone.id]]);
+
+        if (mode === 'destructive') {
+            const removals = [
+                ['channels', serializeChannels(guild)],
+                ['roles', serializeRoles(guild)],
+                ['emojis', serializeEmojis(guild)],
+                ['stickers', serializeStickers(guild)]
+            ];
+            for (const [section, items] of removals) {
+                if (!plan.sections.includes(section)) continue;
+                const cache = guild[section].cache;
+                for (const item of [...items].reverse()) {
+                    try {
+                        await cache.get(item.sourceId).delete(`ByteBot destructive restore ${backup.id}`);
+                        removed[section]++;
+                    } catch (error) {
+                        failures.push({ section, name: item.name, error: `Remove failed: ${error.message}` });
+                    }
+                    if (section === 'roles' || section === 'channels') await this.sleep(250);
+                }
+            }
+        }
+
+        if (plan.sections.includes('roles')) {
+            for (const role of backup.payload.roles) {
+                try {
+                    const restored = await guild.roles.create({
+                        name: role.name,
+                        color: role.color,
+                        permissions: role.permissions,
+                        position: role.position,
+                        hoist: role.hoist,
+                        mentionable: role.mentionable,
+                        icon: role.icon,
+                        reason: `ByteBot backup ${backup.id}`
+                    });
+                    roleIds.set(role.sourceId, restored.id);
+                    created.roles++;
+                } catch (error) {
+                    failures.push({ section: 'roles', name: role.name, error: error.message });
+                }
+                await this.sleep(250);
+            }
+        }
+
+        if (plan.sections.includes('channels')) {
+            const channelIds = new Map();
+            for (const channel of backup.payload.channels) {
+                try {
+                    const permissionOverwrites = channel.overwrites.map(overwrite => {
+                        const mappedId = overwrite.type === 0
+                            ? (roleIds.get(overwrite.sourceId) || guild.roles.cache.get(overwrite.sourceId)?.id)
+                            : overwrite.sourceId;
+                        if (!mappedId) throw new Error(`Referenced role ${overwrite.sourceId} was not restored.`);
+                        return { id: mappedId, type: overwrite.type, allow: overwrite.allow, deny: overwrite.deny };
+                    });
+                    const options = {
+                        name: channel.name,
+                        type: channel.type,
+                        position: channel.position,
+                        parent: channel.parentSourceId ? channelIds.get(channel.parentSourceId) : null,
+                        permissionOverwrites,
+                        reason: `ByteBot backup ${backup.id}`
+                    };
+                    if (channel.type !== 4) {
+                        options.nsfw = channel.nsfw;
+                        options.rateLimitPerUser = channel.slowmode;
+                    }
+                    if ([0, 15].includes(channel.type)) options.topic = channel.topic;
+                    const restored = await guild.channels.create(options);
+                    channelIds.set(channel.sourceId, restored.id);
+                    created.channels++;
+                } catch (error) {
+                    failures.push({ section: 'channels', name: channel.name, error: error.message });
+                }
+                await this.sleep(250);
+            }
+        }
+
+        if (plan.sections.includes('emojis')) {
+            for (const emoji of backup.payload.emojis) {
+                try {
+                    const roles = emoji.roleSourceIds.map(sourceId => roleIds.get(sourceId) || guild.roles.cache.get(sourceId)?.id)
+                        .filter(Boolean);
+                    await guild.emojis.create({
+                        attachment: emoji.url,
+                        name: emoji.name,
+                        roles,
+                        reason: `ByteBot backup ${backup.id}`
+                    });
+                    created.emojis++;
+                } catch (error) {
+                    failures.push({ section: 'emojis', name: emoji.name, error: error.message });
+                }
+            }
+        }
+
+        if (plan.sections.includes('stickers')) {
+            for (const sticker of backup.payload.stickers) {
+                try {
+                    await guild.stickers.create({
+                        file: sticker.url,
+                        name: sticker.name,
+                        tags: sticker.tags,
+                        description: sticker.description,
+                        reason: `ByteBot backup ${backup.id}`
+                    });
+                    created.stickers++;
+                } catch (error) {
+                    failures.push({ section: 'stickers', name: sticker.name, error: error.message });
+                }
+            }
+        }
+
+        return { backupId: backup.id, mode, created, removed, failures };
     }
 }
 
