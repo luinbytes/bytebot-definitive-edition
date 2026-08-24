@@ -406,7 +406,7 @@ describe('music playback', () => {
         sqlite.close();
     });
 
-    test('disconnects five minutes after playback is idle and the voice channel empties', async () => {
+    test('disconnects five minutes after paused playback is left alone', async () => {
         const { MusicLibrary, MusicService } = require('../src/services/musicService');
         const sqlite = new Database(':memory:');
         sqlite.exec('CREATE TABLE music_config (guild_id TEXT PRIMARY KEY, dj_role_id TEXT, autoplay INTEGER NOT NULL DEFAULT 0)');
@@ -421,8 +421,7 @@ describe('music playback', () => {
         };
         const service = new MusicService({ library: new MusicLibrary(libraryRoot), db: testDb(sqlite), voice: voice.adapter, spawn: fakeSpawn, probe: testProbe });
         await service.execute(play);
-        voice.player.emit('idle');
-        await new Promise(resolve => setImmediate(resolve));
+        voice.player.state.status = voice.adapter.AudioPlayerStatus.Paused;
 
         jest.useFakeTimers();
         channel.members.clear();

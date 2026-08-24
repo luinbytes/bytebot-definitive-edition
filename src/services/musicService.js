@@ -339,6 +339,7 @@ class MusicService {
             return this.reply(interaction, embeds.error('Already Paused', 'The player is already paused.'));
         }
         if (!state.player.pause()) return this.reply(interaction, embeds.error('Pause Failed', 'The player could not be paused.'));
+        this.scheduleIdle(state);
         return this.reply(interaction, embeds.success('Paused', 'Paused the player.'), false);
     }
 
@@ -350,6 +351,8 @@ class MusicService {
             return this.reply(interaction, embeds.error('Not Paused', 'The player is not paused.'));
         }
         if (!state.player.unpause()) return this.reply(interaction, embeds.error('Resume Failed', 'The player could not be resumed.'));
+        if (state.idleTimer) clearTimeout(state.idleTimer);
+        state.idleTimer = null;
         return this.reply(interaction, embeds.success('Resumed', 'Resumed the player.'), false);
     }
 
@@ -639,7 +642,7 @@ class MusicService {
     }
 
     scheduleIdle(state) {
-        if (state.current || state.queue.length || state.idleTimer) return;
+        if (!this.isIdle(state) || state.idleTimer) return;
         const channel = state.guild.channels.cache.get(state.channelId);
         const listeners = [...(channel?.members?.values?.() || [])].filter(member => !member.user?.bot);
         if (listeners.length > 0) return;
@@ -648,7 +651,7 @@ class MusicService {
             const current = this.players.get(state.guild.id);
             const currentChannel = state.guild.channels.cache.get(state.channelId);
             const humans = [...(currentChannel?.members?.values?.() || [])].filter(member => !member.user?.bot);
-            if (current === state && !state.current && state.queue.length === 0 && humans.length === 0) {
+            if (current === state && this.isIdle(state) && humans.length === 0) {
                 this.destroy(state.guild.id, state);
             }
         }, 5 * 60 * 1000);
@@ -661,12 +664,20 @@ class MusicService {
         if (!state || (oldState.channelId !== state.channelId && newState.channelId !== state.channelId)) return;
         const channel = guild.channels.cache.get(state.channelId);
         const listeners = [...(channel?.members?.values?.() || [])].filter(member => !member.user?.bot);
-        if (listeners.length > 0 || state.current || state.queue.length > 0) {
+        if (listeners.length > 0 || !this.isIdle(state)) {
             if (state.idleTimer) clearTimeout(state.idleTimer);
             state.idleTimer = null;
             return;
         }
         this.scheduleIdle(state);
+    }
+
+    isIdle(state) {
+        const voice = this.voiceAdapter();
+        const status = state.player.state.status;
+        return status === voice.AudioPlayerStatus.Paused
+            || (voice.AudioPlayerStatus.AutoPaused && status === voice.AudioPlayerStatus.AutoPaused)
+            || (!state.current && state.queue.length === 0);
     }
 
     duration(seconds) {
