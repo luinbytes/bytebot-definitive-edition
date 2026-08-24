@@ -170,7 +170,7 @@ describe('community public interaction routing', () => {
         }));
     });
 
-    test('replays duplicate economy lab commands through the full command pipeline', async () => {
+    test('deduplicates repeated economy lab gateway events', async () => {
         const execute = jest.fn();
         const client = createClient();
         client.commands.set('economy', {
@@ -182,7 +182,7 @@ describe('community public interaction routing', () => {
         await interactionCreate.execute(first, client);
         await interactionCreate.execute(replay, client);
 
-        expect(execute).toHaveBeenCalledTimes(2);
+        expect(execute).toHaveBeenCalledTimes(1);
     });
 
     test('routes /server community view through the server alias', async () => {

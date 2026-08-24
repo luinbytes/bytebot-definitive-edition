@@ -347,8 +347,10 @@ and update timestamp.
 user/guild IDs, kind, input amount, result amount, exact result JSON, and
 created time with a unique operation ID.
 The operation UUID is the Discord interaction ID, not a newly generated ID.
-Discord redelivery of the same interaction therefore returns its committed
-row; a later invocation has a new ID and is an intentional new operation.
+A redelivery that must be reprocessed after restart or uncertain local state
+therefore returns its committed row; an already-acknowledged duplicate gateway
+event in the same process remains suppressed by the central interaction guard.
+A later invocation has a new ID and is an intentional new operation.
 This gives platform retries a durable answer without an in-memory map or an
 undocumented slash option.
 

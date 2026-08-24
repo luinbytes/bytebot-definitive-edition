@@ -19,15 +19,11 @@ module.exports = {
     name: Events.InteractionCreate,
     async execute(interaction, client) {
         // Prevent duplicate processing of the same interaction
-        const duplicate = processedInteractions.has(interaction.id);
-        const economyLabReplay = duplicate && interaction.isChatInputCommand?.()
-            && interaction.commandName === 'economy'
-            && interaction.options?.getSubcommandGroup?.(false) === 'lab';
-        if (duplicate && !economyLabReplay) {
+        if (processedInteractions.has(interaction.id)) {
             logger.debug(`Skipping duplicate interaction: ${interaction.id}`);
             return;
         }
-        if (!duplicate) processedInteractions.add(interaction.id);
+        processedInteractions.add(interaction.id);
         if (interaction.customId?.startsWith('economy:')
             && (interaction.isButton() || interaction.isStringSelectMenu())) {
             if (!client.economyService) {
@@ -563,7 +559,7 @@ module.exports = {
         const defaultCooldownDuration = 3;
         const cooldownAmount = (command.cooldown ?? defaultCooldownDuration) * 1000;
 
-        if (!economyLabReplay && timestamps.has(interaction.user.id)) {
+        if (timestamps.has(interaction.user.id)) {
             const expirationTime = timestamps.get(interaction.user.id) + cooldownAmount;
 
             if (now < expirationTime) {
@@ -585,7 +581,7 @@ module.exports = {
         }
 
         // Update database tracking
-        if (!economyLabReplay) try {
+        try {
             await dbLog.insert('users',
                 () => db.insert(users).values({
                     id: interaction.user.id,
@@ -605,17 +601,15 @@ module.exports = {
             logger.error(`Failed to update user stats: ${error}`);
         }
 
-        if (!economyLabReplay) {
-            timestamps.set(interaction.user.id, now);
-            setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
-        }
+        timestamps.set(interaction.user.id, now);
+        setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
 
         // 7. Execution
         try {
             await command.execute(interaction, client);
 
             // 8. Activity Streak Tracking (only on successful command execution)
-            if (!economyLabReplay && client.activityStreakService && interaction.guild) {
+            if (client.activityStreakService && interaction.guild) {
                 try {
                     await client.activityStreakService.recordActivity(
                         interaction.user.id,

@@ -38,7 +38,7 @@ CREATE UNIQUE INDEX `economy_gangs_name_unique` ON `economy_gangs` (`guild_id`,`
 --> statement-breakpoint
 CREATE TABLE `economy_gang_members` (
     `guild_id` text NOT NULL,
-    `gang_id` text,
+    `gang_id` text NOT NULL,
     `user_id` text NOT NULL,
     `role` text NOT NULL,
     `joined_at` integer NOT NULL,
@@ -54,7 +54,7 @@ CREATE INDEX `economy_gang_members_gang_idx` ON `economy_gang_members` (`gang_id
 CREATE TABLE `economy_gang_invites` (
     `id` text PRIMARY KEY NOT NULL,
     `guild_id` text NOT NULL,
-    `gang_id` text NOT NULL,
+    `gang_id` text,
     `inviter_id` text NOT NULL,
     `invitee_id` text NOT NULL,
     `status` text DEFAULT 'pending' NOT NULL,
