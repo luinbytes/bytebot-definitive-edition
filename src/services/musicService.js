@@ -384,7 +384,7 @@ class MusicService {
             state.current = null;
             await this.startTrack(state, track);
         } catch (error) {
-            this.destroy(interaction.guild.id);
+            this.destroy(interaction.guild.id, state);
             return this.reply(interaction, embeds.error('Preset Failed', error.message));
         } finally {
             state.suppressIdle = false;
@@ -409,7 +409,7 @@ class MusicService {
         try {
             await this.advance(state);
         } catch (error) {
-            this.destroy(interaction.guild.id);
+            this.destroy(interaction.guild.id, state);
             return this.reply(interaction, embeds.error('Skip Failed', error.message));
         }
         state.suppressIdle = false;
@@ -498,7 +498,7 @@ class MusicService {
         try {
             await this.startTrack(state, track);
         } catch (error) {
-            this.destroy(interaction.guild.id);
+            this.destroy(interaction.guild.id, state);
             return this.reply(interaction, embeds.error('Playback Failed', error.message));
         }
         return this.reply(interaction, embeds.success(
@@ -548,14 +548,14 @@ class MusicService {
             logger.error(`Music playback failed in guild ${guild.id}: ${error.message}`);
             this.advance(state).catch(nextError => {
                 logger.error(`Music queue advance failed in guild ${guild.id}: ${nextError.message}`);
-                this.destroy(guild.id);
+                this.destroy(guild.id, state);
             });
         });
         player.on(voice.AudioPlayerStatus.Idle, () => {
             if (!state.suppressIdle && state.current) {
                 this.advance(state).catch(error => {
                     logger.error(`Music queue advance failed in guild ${guild.id}: ${error.message}`);
-                    this.destroy(guild.id);
+                    this.destroy(guild.id, state);
                 });
             }
         });
@@ -566,7 +566,7 @@ class MusicService {
                     voice.entersState(connection, voice.VoiceConnectionStatus.Connecting, 5000)
                 ]);
             } catch {
-                this.destroy(guild.id);
+                this.destroy(guild.id, state);
             }
         });
         this.players.set(guild.id, state);
@@ -649,7 +649,7 @@ class MusicService {
             const currentChannel = state.guild.channels.cache.get(state.channelId);
             const humans = [...(currentChannel?.members?.values?.() || [])].filter(member => !member.user?.bot);
             if (current === state && !state.current && state.queue.length === 0 && humans.length === 0) {
-                this.destroy(state.guild.id);
+                this.destroy(state.guild.id, state);
             }
         }, 5 * 60 * 1000);
         state.idleTimer.unref?.();
@@ -693,10 +693,11 @@ class MusicService {
         }
     }
 
-    destroy(guildId) {
+    destroy(guildId, expectedState = null) {
+        const state = this.players.get(guildId);
+        if (expectedState && state !== expectedState) return;
         this.pendingConnections.get(guildId)?.destroy();
         this.pendingConnections.delete(guildId);
-        const state = this.players.get(guildId);
         if (!state) return;
         if (state.idleTimer) clearTimeout(state.idleTimer);
         state.process?.kill('SIGKILL');

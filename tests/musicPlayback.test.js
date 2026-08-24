@@ -194,6 +194,23 @@ describe('music playback', () => {
         sqlite.close();
     });
 
+    test('does not let stale callbacks destroy a reactivated guild player', () => {
+        const { MusicLibrary, MusicService } = require('../src/services/musicService');
+        const sqlite = new Database(':memory:');
+        const service = new MusicService({ library: new MusicLibrary(libraryRoot), db: testDb(sqlite), probe: testProbe });
+        const current = {
+            idleTimer: null, process: null, suppressIdle: false,
+            player: { stop: jest.fn() }, connection: { destroy: jest.fn() }
+        };
+        service.players.set('guild1', current);
+
+        service.destroy('guild1', { generation: 0 });
+
+        expect(service.players.get('guild1')).toBe(current);
+        expect(current.connection.destroy).not.toHaveBeenCalled();
+        sqlite.close();
+    });
+
     test('persists DJ and universal autoplay settings only for Manage Server members', async () => {
         const { MusicLibrary, MusicService } = require('../src/services/musicService');
         const sqlite = new Database(':memory:');
