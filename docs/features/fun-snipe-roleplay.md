@@ -31,6 +31,9 @@ NEKOSBEST attribution. The provider's current terms allow non-commercial
 developer use; commercial deployments must disable this provider or replace it
 with a licensed source.
 
+The normal per-user command cooldown is supplemented by a 20-request per
+10-second guild window before any provider request.
+
 `fuck`, `spank`, and `nutkick` remain visible in `/fun roleplay list` as policy
 exclusions. The first is targeted explicit sexual content under a non-age-
 restricted root; the latter two have no matching provider category and would

@@ -230,6 +230,15 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                 inline: false
             },
             {
+                name: 'More Common Paths',
+                value:
+                    '`/reactionrole add` • `/buttonrole add` • `/temprole add` • `/boosterrole create`\n' +
+                    '`/server backup create` • `/server customize preset` • `/server discovery publish`\n' +
+                    '`/server stats days:60` • `/mod user warn` • `/mod case view` • `/mod config setup`\n' +
+                    '`/mod template set`',
+                inline: false
+            },
+            {
                 name: 'Public Parity Map',
                 value:
                     'Greed source categories route through ByteBot\'s existing hubs as features land:\n' +

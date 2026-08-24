@@ -68,8 +68,9 @@ them to `/fun roleplay action action:<choice> member:<user>`, with autocomplete
 for all enabled actions, plus `/fun roleplay list` and `/fun roleplay toggle`.
 `toggle` requires Manage Server and the existing path-aware RBAC check; member
 paths remain public. Bots and self-targets are rejected. Counters and per-guild
-toggles are persistent. Provider requests are limited to one result, use a
-five-second timeout and the mandated identifying User-Agent, validate the JSON
+toggles are persistent. The existing per-user command cooldown is paired with
+a ByteBot-owned 20-request/10-second guild window. Provider requests are
+limited to one result, use a five-second timeout and the mandated identifying User-Agent, validate the JSON
 and HTTPS result URL, never cache media, and credit NEKOSBEST in the response.
 
 NEKOSBEST currently supplies 40 of the 43 actions. `fuck` is
@@ -163,9 +164,11 @@ Only state that must survive restart is stored in SQLite:
 - per-user blunt counters/cooldown state; and
 - one vape holder, flavor, and hit count per guild.
 
-Transient snipe entries and active games remain bounded in memory. New tables
-use existing migrations, database logging, guild scoping where applicable,
-and guild-delete cleanup. No new dependency, worker, scheduler, cache, secret,
+Transient snipe entries and active games remain bounded in memory. A single
+service-owned interval physically evicts expired snipe payloads every minute;
+game timers enforce the published session deadlines. New tables use existing
+migrations, database logging, guild scoping where applicable, and guild-delete
+cleanup. No new dependency, worker, external scheduler, cache, secret,
 premium gate, or external database is introduced.
 
 ## Verification contract
@@ -180,4 +183,3 @@ syntax checks for changed production JavaScript, migration/schema checks,
 `git diff --check`, dependency audit, thread-aware PR review inspection, and a
 security diff review. Live Discord behavior remains a separate deployment
 proof and is not inferred from mocked tests.
-

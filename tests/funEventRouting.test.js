@@ -35,6 +35,29 @@ describe('fun event routing', () => {
         expect(funService.captureReaction).toHaveBeenCalledWith(reaction, user);
     });
 
+    test('never captures originally partial edit or reaction events', async () => {
+        const funService = { captureEdited: jest.fn(), captureReaction: jest.fn() };
+        const message = {
+            id: 'message1', partial: true, guild: { id: 'guild1' }, author: { bot: false },
+            content: 'before', fetch: jest.fn().mockResolvedValue({
+                id: 'message1', partial: false, guild: { id: 'guild1' }, author: { bot: false }, content: 'after'
+            })
+        };
+        await updated.execute({ ...message, partial: false }, message, { funService });
+
+        const reaction = {
+            partial: true,
+            client: { funService },
+            fetch: jest.fn().mockResolvedValue(undefined),
+            emoji: { name: '🔥' },
+            message: { partial: false, guild: { id: 'guild1' } }
+        };
+        await reactionRemoved.execute(reaction, { id: 'user1', bot: false });
+
+        expect(funService.captureEdited).not.toHaveBeenCalled();
+        expect(funService.captureReaction).not.toHaveBeenCalled();
+    });
+
     test('lets active games consume member messages before responders', async () => {
         const funService = { handleMessage: jest.fn().mockResolvedValue(true) };
         const autoResponderService = { checkMessage: jest.fn() };

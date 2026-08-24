@@ -22,6 +22,8 @@ const SNIPE_LIMIT = 10;
 const SNIPE_TTL_MS = 15 * 60 * 1000;
 const BLUNT_ACTIVE_MS = 5 * 60 * 1000;
 const BLUNT_COOLDOWN_MS = 10 * 60 * 1000;
+const ROLEPLAY_GUILD_LIMIT = 20;
+const ROLEPLAY_GUILD_WINDOW_MS = 10 * 1000;
 const USER_AGENT = 'ByteBot (https://github.com/luinbytes/bytebot-definitive-edition)';
 const WORDS = Object.freeze([
     'adventure', 'airplane', 'another', 'beautiful', 'because', 'birthday', 'building', 'careful',
@@ -76,6 +78,7 @@ class FunService {
         this.clearInterval = stopRepeating;
         this.snipes = new Map();
         this.sessions = new Map();
+        this.roleplayGuildWindows = new Map();
         this.snipePruner = repeat(() => {
             for (const channelId of this.snipes.keys()) this._pruneChannel(channelId);
         }, 60000);
@@ -141,10 +144,7 @@ class FunService {
     captureEdited(oldMessage, newMessage) {
         if (!this._canCaptureMessage(oldMessage) || !newMessage?.guild
             || !oldMessage.content?.trim() || oldMessage.content === newMessage.content) return false;
-        return this._pushSnipe(oldMessage.channelId, 'edited', {
-            ...this._messageEntry(oldMessage),
-            editedContent: String(newMessage.content || '').slice(0, 2000)
-        });
+        return this._pushSnipe(oldMessage.channelId, 'edited', this._messageEntry(oldMessage));
     }
 
     captureReaction(reaction, user) {
@@ -196,6 +196,18 @@ class FunService {
     recordRoleplay(guildId, actorId, targetId, action) {
         this._assertRoleplayAction(action);
         return this.statements.incrementRoleplay.get(guildId, actorId, targetId, action, this.now()).count;
+    }
+
+    consumeRoleplayQuota(guildId) {
+        const now = this.now();
+        let window = this.roleplayGuildWindows.get(guildId);
+        if (!window || now - window.startedAt >= ROLEPLAY_GUILD_WINDOW_MS) {
+            window = { startedAt: now, count: 0 };
+            this.roleplayGuildWindows.set(guildId, window);
+        }
+        if (window.count >= ROLEPLAY_GUILD_LIMIT) return false;
+        window.count += 1;
+        return true;
     }
 
     async fetchRoleplay(action) {
@@ -478,6 +490,7 @@ class FunService {
         this.sqlite.prepare('DELETE FROM roleplay_disabled WHERE guild_id = ?').run(guildId);
         this.sqlite.prepare('DELETE FROM roleplay_counts WHERE guild_id = ?').run(guildId);
         this.sqlite.prepare('DELETE FROM fun_vapes WHERE guild_id = ?').run(guildId);
+        this.roleplayGuildWindows.delete(guildId);
         for (const [channelId, bucket] of this.snipes) {
             if (Object.values(bucket).some(entries => entries.some(entry => entry.guildId === guildId))) {
                 this.snipes.delete(channelId);
@@ -490,6 +503,7 @@ class FunService {
 
     cleanup() {
         this.snipes.clear();
+        this.roleplayGuildWindows.clear();
         this.clearInterval(this.snipePruner);
         for (const session of this.sessions.values()) this.clearTimeout(session.timer);
         this.sessions.clear();

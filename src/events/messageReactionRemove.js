@@ -8,6 +8,7 @@ module.exports = {
         const client = reaction.client;
 
         try {
+            const captureSnipe = !reaction.partial && !reaction.message.partial;
             // Handle partials
             if (reaction.partial) {
                 try {
@@ -33,7 +34,7 @@ module.exports = {
             // Ignore DMs
             if (!reaction.message.guild) return;
 
-            client.funService?.captureReaction(reaction, user);
+            if (captureSnipe) client.funService?.captureReaction(reaction, user);
 
             // Check starboard
             if (client.starboardService) {

@@ -292,7 +292,7 @@ async function handleSnipe(interaction, subcommand) {
     const suffix = kind === 'reaction' ? 'reactions' : kind === 'edited' ? 'edits' : 'messages';
     const age = Math.max(0, Math.floor((Date.now() - entry.occurredAt) / 1000));
     const description = kind === 'edited'
-        ? `**Before**\n${entry.content}\n\n**After**\n${entry.editedContent}`
+        ? `**Before edit**\n${entry.content}`
         : kind === 'reaction'
             ? `${entry.emoji} removed by **${entry.actorName}**${entry.messageUrl ? `\n[Jump to message](${entry.messageUrl})` : ''}`
             : entry.content;
@@ -335,6 +335,9 @@ async function handleRoleplay(interaction, subcommand) {
     }
     if (target.bot || target.id === interaction.user.id) {
         return interaction.reply({ embeds: [embeds.error('Invalid Target', target.bot ? 'Bots cannot be targeted.' : 'You cannot target yourself.')], flags: [MessageFlags.Ephemeral] });
+    }
+    if (!service.consumeRoleplayQuota(interaction.guildId)) {
+        return interaction.reply({ embeds: [embeds.error('Roleplay Rate Limited', 'This server is sending roleplay actions too quickly. Try again in a few seconds.')], flags: [MessageFlags.Ephemeral] });
     }
     await interaction.deferReply();
     try {

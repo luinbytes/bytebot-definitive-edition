@@ -16,6 +16,7 @@ test('/bot help discovers every public Greed category without advertising unfini
     const response = reply.mock.calls[0][0];
     const parityField = response.embeds[0].data.fields.find(field => field.name === 'Public Parity Map');
     const commonPaths = response.embeds[0].data.fields.find(field => field.name === 'Common Paths');
+    const moreCommonPaths = response.embeds[0].data.fields.find(field => field.name === 'More Common Paths');
     const publicCategories = [
         'Auto', 'Economy', 'Fun', 'Information', 'LastFM', 'Levels', 'Logs',
         'Manipulation', 'Moderation', 'Roleplay', 'Security', 'Server', 'Settings',
@@ -38,6 +39,9 @@ test('/bot help discovers every public Greed category without advertising unfini
     expect(commonPaths.value).toContain('/counter add');
     expect(commonPaths.value).toContain('/economy balance');
     expect(commonPaths.value).toContain('/economy game coinflip');
+    expect(moreCommonPaths.value).toContain('/reactionrole add');
+    expect(moreCommonPaths.value).toContain('/server backup create');
+    expect(moreCommonPaths.value).toContain('/mod user warn');
     expect(parityField.value).toContain('/economy` Economy');
     expect(parityField.value).toContain('/ticket` Tickets');
 });

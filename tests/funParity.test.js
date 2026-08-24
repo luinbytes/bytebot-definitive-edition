@@ -76,7 +76,8 @@ describe('snipe, roleplay, and persistent fun state', () => {
             member: { displayName: 'Author' }, partial: false, webhookId: null, system: false
         };
         service.captureEdited(oldMessage, { ...oldMessage, content: 'after' });
-        expect(service.getSnipe('channel1', 'edited', 1)).toMatchObject({ content: 'before', editedContent: 'after' });
+        expect(service.getSnipe('channel1', 'edited', 1)).toMatchObject({ content: 'before' });
+        expect(service.getSnipe('channel1', 'edited', 1)).not.toHaveProperty('editedContent');
 
         const reaction = {
             emoji: { toString: () => '🔥' },
@@ -115,6 +116,16 @@ describe('snipe, roleplay, and persistent fun state', () => {
         http.get.mockResolvedValue({ data: { results: [{ url: 'https://evil.example/image.gif' }] } });
         await expect(service.fetchRoleplay('hug')).rejects.toThrow('invalid media');
         await expect(service.fetchRoleplay('fuck')).rejects.toThrow('unavailable');
+    });
+
+    test('bounds provider-backed roleplay calls per guild', () => {
+        for (let request = 0; request < 20; request++) {
+            expect(service.consumeRoleplayQuota('guild1')).toBe(true);
+        }
+        expect(service.consumeRoleplayQuota('guild1')).toBe(false);
+        expect(service.consumeRoleplayQuota('guild2')).toBe(true);
+        now += 10 * 1000 + 1;
+        expect(service.consumeRoleplayQuota('guild1')).toBe(true);
     });
 
     test('persists bounded blunt and guild vape transitions', () => {
