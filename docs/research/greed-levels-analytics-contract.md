@@ -23,7 +23,7 @@ or an absent command row.
 | [Current Premium guide](https://greed.best/docs/premium) | Analytics retention is 60 days free / 3 years Server Premium; “Server stats card” is named as Premium-only; free/premium log-channel caps are 4/15. | These are the current numeric entitlement facts. ByteBot has no billing service, so it provides the highest documented non-billing allowance (15 log channels and 1,095 days) and labels that as a ByteBot policy. |
 | [Current command catalog](https://greed.best/commands) | The catalog claims to list every command with arguments and permissions. | The page is client-rendered; its public HTML exposes the claim and controls but not the Levels, analytics, or Logs rows. It cannot prove exact registration, option types, permissions, or Premium flags. |
 | [Pinned official English i18n tree](https://github.com/greedbest/i18n/tree/3dadc41852a09567add8a6b2b522d5e2b1a53b2f/locales/en/commands) at [commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](https://github.com/greedbest/i18n/commit/3dadc41852a09567add8a6b2b522d5e2b1a53b2f) | Exact public names, descriptions, response copy, errors, setup labels, limits explicitly present in English JSON. | This is the exact localization baseline for the pinned snapshot. A localized path proves a public subject/message surface, not that it is currently registered or that the JSON contains its option schema/permission. |
-| ByteBot's existing [stats handler](../../src/commands/utility/stats.js), [`/server` hub](../../src/commands/administration/server.js), [activity schema](../../src/database/schema.js), and event handlers | Existing `/stats server` and `/server stats` range (1–1,095 days, default 60), daily message/reaction/voice/command rows, member-level rows, and current event filters. | Existing behavior is preserved. New work must use one shared LevelAnalyticsService seam and must not claim historical membership or general-voice coverage that ByteBot has not persisted. |
+| ByteBot's existing [stats handler](../../src/commands/utility/stats.js), [`/server` hub](../../src/commands/administration/server.js), [activity schema](../../src/database/schema.js), and event handlers | The internal `stats` handler powers the registered `/server stats` path with a 1-1,095 day range (default 60), daily message/reaction/voice/command rows, member-level rows, and current event filters. | Existing behavior is preserved. New work must use one shared `LevelAnalyticsService` seam and must not claim historical membership or general-voice coverage that ByteBot has not persisted. The internal `stats` handler remains `register: false`; no duplicate `/stats` root is introduced. |
 
 The pinned tree has both a legacy-looking `locales/en/commands/levels` tree
 and the more explicit `locales/en/commands/server/levels` tree. The former
@@ -184,9 +184,10 @@ permission to invent a Greed command.
 
 ### Existing ByteBot evidence
 
-ByteBot already exposes [`/stats server`](../../src/commands/utility/stats.js)
-and the [`/server stats`](../../src/commands/administration/server.js) alias.
-Both accept `days` from 1 through 1,095 and default to 60; `/stats server` also
+ByteBot's internal [`stats server`](../../src/commands/utility/stats.js) handler
+is loaded with `register: false` and is invoked by the registered
+[`/server stats`](../../src/commands/administration/server.js) path. The
+registered path accepts `days` from 1 through 1,095, defaults to 60, and
 accepts an optional `private` Boolean. The handler renders current guild
 structure plus real stored range sums for messages, reactions, voice minutes,
 and commands. It labels a range when stored activity starts after the
@@ -226,7 +227,7 @@ metadata cannot replace those path-specific checks.
 | `/levels leaderboard` | optional `metric` choice `total`, `text`, `voice`; optional `page`; optional `private` | Any guild member; read-only. |
 | `/levels roles` | optional `page`; optional `private` | Any guild member; read-only. |
 | `/levels live text|voice` | Subcommands `text` and `voice`; optional `channel` (defaults current) | Manage Server plus bot Send Messages, Embed Links, and message edit/delete in the target channel. |
-| `/levels boost add|remove|list` | `add` takes a role/channel target and multiplier; `remove` takes the target; `list` has no required option | Manage Server; role targets additionally require Manage Roles/hierarchy. `add` multiplier is 0–10 from pinned validation; remove/list are ByteBot-owned completion paths because only `add` is publicly documented. |
+| `/levels boost add|remove|list` | `add` takes a role/channel target and multiplier; `remove` takes the target; `list` has no required option | Manage Server. Merely referencing a role as an XP condition does not mutate it, so no caller/bot Manage Roles check is invented. `add` multiplier is 0–10 from pinned validation; remove/list are ByteBot-owned completion paths because only `add` is publicly documented. |
 | `/levels admin award|removexp|setxp|setlevel` | `award`/`removexp` take `member` and amount; `setxp` takes `member` and total XP; `setlevel` takes `member` and level | Manage Server; amount is non-negative for set, positive for removal; level is 1–999 from pinned validation. |
 | `/levels reward add|remove|sync|stack` | `add`/`remove` take role + level; `sync` has no required option; `stack` takes `on`/`off` | Manage Server; all role actions additionally require Manage Roles/hierarchy. `stack` exact values are pinned; reward grouping is a Discord-compatible mapping. |
 | `/levels ignore channel|role|list` | `channel` or `role` target; `list` no option | Manage Server. Role-ignore/list are pinned handler surfaces; group shape is ByteBot-owned. |
@@ -239,17 +240,18 @@ one-subcommand nesting limit and stays below 25 root options. Help displays
 Greed aliases `level`, `rank`, `xp`, `lvl`, `levels lb`, and `levels top` as
 text compatibility names; it does not register duplicate slash commands.
 
-### Analytics (`/stats`, existing Utility implementation category)
+### Analytics (`/server stats`, existing Server presentation category)
 
-Keep `/stats server` and `/server stats` as the canonical server view, with the
-existing `days` (1–1,095, default 60) and `private` options. Use component
+Keep `/server stats` as the one registered server view, backed by the existing
+unregistered Utility handler, with the existing `days` (1-1,095, default 60)
+and `private` options. Use component
 pages/charts inside that response for metric drilldowns rather than adding a
 second `/analytics` root. Greed's `analytics` marketing term is a help/ledger
 mapping only; no Greed command is asserted.
 
 | Slash path | Options | Contract |
 | --- | --- | --- |
-| `/stats server` | optional `days`, optional `private`, optional `metric` choice `all/messages/reactions/voice/membership` | Sum only persisted daily rows. `membership` must say unavailable until daily join/leave/snapshot rows exist. Metric pages/charts are components on this response. |
+| `/server stats` | optional `days`, optional `private`, optional `metric` choice `all/messages/reactions/voice/membership` | Sum only persisted daily rows. `membership` must say unavailable until daily join/leave/snapshot rows exist. Metric pages/charts are components on this response. |
 
 No `/analytics` Greed-compatible path is claimed until a first-party source
 names it. The help/category ledger may label these rows `Analytics` while the
@@ -262,7 +264,7 @@ top-level root:
 
 | Slash path | Options | Mapping |
 | --- | --- | --- |
-| `/server logs add` | required `channel`; required `module` multi-choice from 12 canonical modules; optional interactive select | `,logs add (channel) (module)`; singular hosted aliases normalize to canonical plural names. |
+| `/server logs add` | optional `channel`; optional `module` choice from 12 canonical modules | With both values, add directly. With neither, open an actor-bound channel/module selector matching the hosted no-argument form. Supplying only one returns a validation prompt. Singular hosted aliases normalize to canonical plural names. |
 | `/server logs view` | optional `private` | `,logs view`. |
 | `/server logs remove` | optional `channel`; optional `module` | `,logs remove [channel] [module]`; no options removes all only after confirmation. |
 | `/server logs color` | required `channel`, `module`, six-digit `hex` | Pinned `logs color`; validate `#RRGGBB` before write. |
@@ -296,44 +298,56 @@ mutating.
 
 ## Persistence, transactions, and idempotency
 
-Implement one deep module, `LevelAnalyticsService`, with event-facing methods
-(`recordMessage`, `recordReaction`, `recordVoiceSession`,
-`recordMemberJoin`, `recordMemberLeave`, `recordMemberSnapshot`) and command
-methods for level configuration and read models. Event handlers should remain
-thin adapters. Reuse `member_levels` and `activity_logs`; do not create a
-second XP or analytics source of truth.
+Implement one deep module, `LevelAnalyticsService`, with the narrow event
+interface `recordMessage(message)`, `recordReactionChange(reaction, user,
+present)`, `reconcileVoiceState(oldState, newState)`,
+`recordMembership(member, present)`, and `snapshotGuild(guild)`, plus command
+and component handling. A separate `EventLoggingService` owns general log
+configuration, delivery, and its command/components; logging must not enlarge
+the leveling interface. Event handlers remain thin adapters. Reuse
+`member_levels` and `activity_logs`; do not create a second XP or analytics
+source of truth. The adapters replace the existing direct message/reaction/
+voice counter calls; after an activity transaction commits they call the
+existing streak update seam without incrementing `activity_logs` a second time.
 
 The minimum schema additions are:
 
 - guild-scoped level config: enabled text/voice flags, award channel/message,
   text cooldown, voice rate/minimum/session cap, base multiplier, stacking;
+- additive columns on canonical `member_levels` for text XP, voice XP, signed
+  manual adjustment, message count, voice seconds, and cooldown timestamps;
 - guild-scoped level role rewards keyed by `(guild_id, level)` plus ignored
   channels/roles;
 - persisted live leaderboard messages keyed by `(guild_id, channel_id, metric)`
   with bot message ID and last-rendered revision;
 - daily server metrics keyed by `(guild_id, activity_date)` with message,
   reaction, voice-minute, join, leave, and member-count-snapshot fields; and
-- an idempotency ledger keyed by source event type and Discord event ID (or a
-  deterministic composite for reactions/voice), with a unique guild scope.
+- a bounded idempotency ledger for events with stable Discord IDs, plus
+  reaction-placement, active-voice-session, and member-presence state tables
+  whose unique keys make state transitions idempotent.
 
-Each accepted message/reaction/voice/member event runs in a transaction that
-inserts its idempotency key and updates the daily row, then updates
-`member_levels` when XP is earned. Duplicate delivery returns the prior result
-without a second increment. A failed external Discord send never rolls back a
-committed analytics event; live-board rendering is an idempotent outbox/job
-that can be retried. Level-role reconciliation is likewise idempotent and
-rechecks the current member/role hierarchy on every attempt.
+Each accepted message event transaction inserts its stable message ID, updates
+the daily rows, and updates `member_levels` when XP is earned. Reaction adds
+and removes transition one `(guild,message,user,emoji)` placement row, so a
+duplicate add is ignored while a real remove then re-add counts again. Voice
+accounting settles persisted eligible intervals before changing session state;
+replaying the same voice state cannot accrue the interval twice. Membership
+join/leave counters change only when the persisted presence state changes.
+A failed external Discord send never rolls back committed analytics; live-board
+rendering and role reconciliation are idempotent retry jobs that recheck the
+current bot permissions and role hierarchy on every attempt.
 
 Membership rows are snapshots of observed events, not a claim that Discord can
 provide historical joins. On first enable, the service records the current
 member count as a baseline and reports “history unavailable before
 <baseline-date>.” It never backfills joins/leaves from current member lists.
 
-Analytics retention is bounded to 1,095 daily rows (three years) per guild,
-matching the current Premium duration and the existing `/stats` maximum. A
-scheduled prune deletes rows older than the bound in small batches; pruning is
+Analytics retention is bounded by age to 1,095 days (three years), not to
+1,095 physical rows: per-user `activity_logs` may contain many rows for the
+same guild/date. A scheduled prune deletes daily analytics and expired dedupe
+rows older than the bound in small batches; pruning is
 audited and never deletes level balances, role configuration, or immutable
-security logs. Query ranges are clamped to 1–1,095 days, with a default of 60.
+security logs. Query ranges are clamped to 1-1,095 days, with a default of 60.
 There is no hidden “unlimited” storage mode.
 
 Logging configuration writes are transactional. A guild/module mapping is
@@ -355,13 +369,14 @@ can change them through a migration rather than silently changing balances.
 | Level cap | 999, matching the pinned public validation string. |
 | XP formula | Level `n` requires `100 × n²` total XP; level is `min(999, floor(sqrt(totalXP / 100)))`. XP is integer and never negative. |
 | Text XP | 20 XP per eligible message; one award per user/guild every 60 seconds. The event still counts in analytics when it is ineligible for XP. |
-| Text anti-abuse | Ignore bots, DMs, webhooks, empty content, and configured channel/role exclusions. A user is capped at 20,000 text XP/day; rejected XP is not queued or retroactively awarded. |
+| Text anti-abuse | Bots, DMs, webhooks, and empty content earn no XP and no analytics count. Configured level channel/role exclusions block XP only; an otherwise accepted human guild message still counts in analytics. A user is capped at 20,000 text XP/day; rejected XP is not queued or retroactively awarded. |
 | Voice XP | 5 XP per complete eligible minute, with sub-minute remainder carried in the active session. Eligibility requires a non-bot member, unmuted/non-deafened state, and at least one other non-bot member in the same voice channel. |
 | Voice bounds | Minimum eligible session 60 seconds; maximum award 3,600 XP per session; sessions split at UTC midnight and channel moves. Analytics records real seconds; XP rounds only at minute boundaries. |
-| Multipliers | Default 1.0x. Role and channel multipliers are each in `[0,10]`; when stacking is on they multiply and clamp to 10.0x, otherwise the highest applicable multiplier wins. XP is rounded down after multiplication. |
-| Level roles | At most 50 reward rows per guild; one role per level. Stacking defaults off. A role is assigned once on upward threshold crossing and removed only by explicit configuration/reconciliation, never by an XP read. |
+| Multipliers | Default server rate is 1.0x. Role and channel multipliers are each in `[0,10]`; the effective rate is the server rate times the highest applicable role/channel multiplier, clamped to 10.0x. Level-role stacking does not change XP multiplier math. XP is rounded down after multiplication. |
+| Manual XP | `text_xp` and `voice_xp` remain activity tracks. A signed `manual_adjustment` records admin changes; cached canonical `xp` is `max(0, text_xp + voice_xp + manual_adjustment)`. `award` adds a positive adjustment, `removexp` subtracts without taking total below zero, and `setxp`/`setlevel` replace the adjustment so the requested total/threshold is exact. Track leaderboards therefore remain truthful after admin changes. |
+| Level roles | At most 50 reward rows per guild; one role per level. Stacking defaults off: reconciliation keeps only the highest configured reward at or below the member's level. With stacking on it keeps every configured reward at or below the level. XP commits enqueue reconciliation; reads never mutate roles. Resets commit level state first, then the retryable reconciler removes obsolete configured rewards. |
 | Level-up message | Default `Congratulations {user}, you reached level {level}!`; custom message max 2,000 Unicode characters; only `{user}` and `{level}` variables are substituted. Disabled means no announcement. |
-| Live board | One board per `(guild, channel, metric)`, 10 entries per page, page 1 default, max 100 pages/1,000 rows, update every 5 minutes. Ties sort by total XP descending then user ID ascending. A missing/deleted message is recreated only when the owner still has Manage Server. |
+| Live board | One board per `(guild, channel, metric)`, 10 entries per page, page 1 default, max 100 pages/1,000 rows, update every 5 minutes. Ties sort by total XP descending then user ID ascending. A missing/deleted message is recreated while the configuration remains active and the bot still has target-channel permissions; the original administrator need not remain in the guild. |
 | Analytics | Daily UTC buckets. `messages` counts accepted non-bot guild message-create events; `reactions` counts add events; `voice` counts observed eligible voice seconds converted to minutes for display; `membership` counts join/leave events plus the latest daily member snapshot. Missing history is rendered as unavailable, never zero-filled as historical fact. |
 | Analytics ranges | Default 60 days; minimum 1; maximum and retention 1,095 days. A request outside the bound returns a validation error before querying. |
 | Logging modules | Canonical plural set is `messages`, `members`, `moderation`, `server`, `voice`, `channels`, `roles`, `invites`, `emojis`, `stickers`, `integrations`, `soundboard`; singular hosted names are aliases. Maximum configured channels is 15, matching current Server Premium. |
@@ -408,12 +423,12 @@ Implementation is not complete until focused tests and review cover:
 
 | Area | Acceptance evidence |
 | --- | --- |
-| Command contract | Generated slash JSON includes visible `/levels`, existing `/stats server`, `/server stats`, and `/server logs` paths; options have the stated ranges/choices; help lists prefix aliases without duplicate roots. |
+| Command contract | Generated slash JSON includes visible `/levels`, `/server stats`, and `/server logs` paths; the internal `stats` handler remains unregistered; options have the stated ranges/choices; help lists prefix aliases without duplicate roots. |
 | Levels math | Table-driven XP/level boundaries at 0, 99, 100, 399, 100,000, and level 999 cap; multiplier order, stack toggle, role thresholds, message variables, and 2,000-character validation. |
-| Event ingestion | Bot/DM/ignored filtering; one XP cooldown; voice mute/alone/minimum/session split; membership baseline; message/reaction/voice/member idempotency keys; duplicate/retry delivery produces one counter. |
+| Event ingestion | Bot/DM/ignored filtering; one XP cooldown; voice mute/alone/minimum/session split; membership baseline; stable message IDs and state-driven reaction/voice/member dedupe; duplicate/retry delivery produces one counter. |
 | Persistence | Fresh and upgrade migrations preserve `member_levels`, existing `activity_logs`, and existing `/stats` output; unique guild/user/date and guild/event keys reject cross-guild collisions; transactions do not partially award XP. |
 | Analytics | Exact daily sums for messages, reactions, voice minutes, joins, leaves, and snapshots; unavailable-history labels; 1/60/1,095 range boundaries; prune deletes only old daily rows and is resumable. |
 | Live boards | 5-minute scheduler, one board identity, actor/guild binding, stale/deleted-message recreation, deterministic pagination/ties, and no duplicate boards on retries. |
 | Logging | Union module choices and aliases; channel cap 15; add/move/remove/view/color/ignore responses; no-argument remove confirmation; outbox retry/dedupe; inaccessible channel and missing audit-log handling. |
 | RBAC and safety | Caller and bot permission checks are path-specific; role hierarchy is rechecked; all destructive actions require the exact confirmation; logs cannot recurse on bot messages or leak another guild's data. |
-| Runtime | Only after this contract is accepted: focused unit/integration checks, generated command inspection, and a user-approved Discord test-guild proof for message deletion/replay, level awards, analytics events, live boards, and logging. |
+| Runtime | Only after this contract is accepted: focused unit/integration checks, generated command inspection, and a user-approved Discord test-guild proof for level awards, analytics events, live boards, and logging delivery. |
