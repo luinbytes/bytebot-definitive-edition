@@ -14,6 +14,7 @@ A highly modular, scalable, and future-proof Discord bot boilerplate built with 
 -   **Case-backed Moderation**: Action-specific Discord permissions, protected targets, setup-owned mute/jail roles, warning escalation, hardbans, history, recovery, and invoke templates under `/mod`.
 -   **Rich Content Platform**: Saved embeds, Components V2 layouts, custom responses, global tags, durable pagination, managed webhooks, and server theme colors.
 -   **Server Portability and Presentation**: Versioned guild backups, per-server ByteBot profiles, opt-in discovery listings, and range-aware server cards under `/server`.
+-   **Information and Lookups**: Discord-native profiles, assets, roles, invites, permissions, and observed name history under `/me` and `/server`, plus bounded web tools under `/lookup`.
 
 ## Project Structure
 
@@ -83,6 +84,8 @@ Admins use `/server permissions` to manage granular permissions. The group provi
 Moderators use `/mod` for member actions, guild-local cases and history, invoke templates, warning punishments, and owned setup/reset. See [`docs/features/moderation-workflow.md`](docs/features/moderation-workflow.md).
 
 Server owners and administrators use `/server backup`, `/server customize`, `/server discovery`, and `/server stats` for portability and public presentation. See [`docs/features/server-presentation.md`](docs/features/server-presentation.md).
+
+Members use `/me`, `/server`, and `/lookup` for the public information and utility family. Weather, definitions, and QR codes use fixed public providers; translation and website screenshots require the optional provider settings documented in [`.env.example`](.env.example). See [`docs/features/information-lookups.md`](docs/features/information-lookups.md).
 
 ### 4. Visual Consistency & Branding
 Always use the `src/utils/embeds.js` utility for bot responses to maintain the "ByteBot Purple" theme.
