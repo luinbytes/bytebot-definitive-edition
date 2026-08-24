@@ -247,4 +247,27 @@ describe('LevelAnalyticsService', () => {
             content: 'Text XP is now **disabled**.'
         }));
     });
+
+    test('/levels boost requires exactly one typed target and persists its multiplier', async () => {
+        const values = { role: { id: 'role1' }, channel: null };
+        const interaction = {
+            guildId: 'guild1',
+            member: { permissions: { has: permission => permission === PermissionFlagsBits.ManageGuild } },
+            options: {
+                getSubcommandGroup: () => 'boost',
+                getSubcommand: () => 'add',
+                getRole: () => values.role,
+                getChannel: () => values.channel,
+                getNumber: () => 1.5
+            },
+            reply: jest.fn()
+        };
+
+        await service.execute(interaction);
+        expect(database.sqlite.prepare(`
+            SELECT target_type, target_id, multiplier FROM level_boosts WHERE guild_id = 'guild1'
+        `).get()).toEqual({ target_type: 'role', target_id: 'role1', multiplier: 1.5 });
+        values.channel = { id: 'channel1' };
+        await expect(service.execute(interaction)).rejects.toThrow('exactly one');
+    });
 });

@@ -476,6 +476,48 @@ class LevelAnalyticsService {
                 });
             }
         }
+        if (group === 'boost') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                throw new Error('You need Manage Server to configure XP multipliers.');
+            }
+            if (action === 'list') {
+                const rows = this.sqlite.prepare(`
+                    SELECT target_type, target_id, multiplier FROM level_boosts
+                    WHERE guild_id = ? ORDER BY target_type, target_id
+                `).all(interaction.guildId);
+                const content = rows.length
+                    ? rows.map(row => `${row.target_type === 'role' ? `<@&${row.target_id}>` : `<#${row.target_id}>`} — **${row.multiplier}x**`).join('\n')
+                    : 'No XP multipliers are configured.';
+                return interaction.reply({ content, flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] } });
+            }
+            const role = interaction.options.getRole('role');
+            const channel = interaction.options.getChannel('channel');
+            if (Boolean(role) === Boolean(channel)) throw new Error('Choose exactly one role or channel.');
+            const type = role ? 'role' : 'channel';
+            const target = role || channel;
+            if (action === 'remove') {
+                this.sqlite.prepare(`
+                    DELETE FROM level_boosts WHERE guild_id = ? AND target_type = ? AND target_id = ?
+                `).run(interaction.guildId, type, target.id);
+                return interaction.reply({
+                    content: `Removed the XP multiplier from ${type === 'role' ? `<@&${target.id}>` : `<#${target.id}>`}.`,
+                    flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+                });
+            }
+            const multiplier = interaction.options.getNumber('multiplier', true);
+            if (!Number.isFinite(multiplier) || multiplier < 0 || multiplier > 10) {
+                throw new Error('Multiplier must be between 0 and 10.');
+            }
+            this.sqlite.prepare(`
+                INSERT INTO level_boosts (guild_id, target_type, target_id, multiplier, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(guild_id, target_type, target_id) DO UPDATE SET multiplier = excluded.multiplier
+            `).run(interaction.guildId, type, target.id, multiplier, this.now());
+            return interaction.reply({
+                content: `Set ${type === 'role' ? `<@&${target.id}>` : `<#${target.id}>`} to **${multiplier}x** XP.`,
+                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+            });
+        }
         throw new Error('That levels action is not available yet.');
     }
 }
