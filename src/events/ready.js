@@ -2,7 +2,7 @@ const { Events, ActivityType } = require('discord.js');
 const logger = require('../utils/logger');
 const { db } = require('../database');
 const { bytepodActiveSessions, bytepodVoiceStats, bytepods } = require('../database/schema');
-const { eq, and } = require('drizzle-orm');
+const { eq, and, isNull } = require('drizzle-orm');
 const { dbLog } = require('../utils/dbLogger');
 const { scheduleOwnershipTransfer } = require('./voiceStateUpdate');
 const { reconcileForcedNicknamesWithRetry } = require('../services/roleModerationService');
@@ -229,7 +229,7 @@ module.exports = {
         // --- Validate BytePod Channels (Cleanup orphans & empty pods) ---
         try {
             const allPods = await dbLog.select('bytepods',
-                () => db.select().from(bytepods),
+                () => db.select().from(bytepods).where(isNull(bytepods.sourceChannelId)),
                 { operation: 'startupCleanup' }
             );
             let deleted = 0;

@@ -24,6 +24,7 @@ const musicConfig = sqliteTable('music_config', {
 const voiceMasterConfigs = sqliteTable('voice_master_configs', {
     guildId: text('guild_id').primaryKey(),
     state: text('state').default('active').notNull(),
+    generation: integer('generation').default(0).notNull(),
     categoryId: text('category_id'),
     primaryChannelId: text('primary_channel_id'),
     interfaceMessageId: text('interface_message_id'),
@@ -75,10 +76,22 @@ const voiceMasterAccess = sqliteTable('voice_master_access', {
     channelId: text('channel_id').notNull(),
     userId: text('user_id').notNull(),
     effect: text('effect').notNull(),
+    state: text('state').default('active').notNull(),
     updatedAt: integer('updated_at').notNull(),
 }, table => ({
     pk: primaryKey({ columns: [table.guildId, table.channelId, table.userId] }),
     effectCheck: check('voice_master_access_effect_check', sql`${table.effect} IN ('permit','reject')`),
+    stateCheck: check('voice_master_access_state_check', sql`${table.state} IN ('pending','active')`),
+}));
+
+const voiceMasterJoinRoles = sqliteTable('voice_master_join_roles', {
+    guildId: text('guild_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    memberId: text('member_id').notNull(),
+    roleId: text('role_id').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.channelId, table.memberId] }),
 }));
 
 const lifecycleMessages = sqliteTable('lifecycle_messages', {
@@ -487,6 +500,8 @@ const bytepods = sqliteTable('bytepods', {
     generation: integer('generation').default(0).notNull(),
     cleanupAfter: integer('cleanup_after'),
     botOwned: integer('bot_owned', { mode: 'boolean' }).default(true).notNull(),
+    pendingOwnerId: text('pending_owner_id'),
+    claimSnapshot: text('claim_snapshot'),
     createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date()),
 }, table => ({
     guildStateIdx: index('bytepods_guild_state_idx').on(table.guildId, table.state),
@@ -1491,6 +1506,7 @@ module.exports = {
     voiceMasterSources,
     voiceMasterCreations,
     voiceMasterAccess,
+    voiceMasterJoinRoles,
     lifecycleMessages,
     users,
     moderationLogs,

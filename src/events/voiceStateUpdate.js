@@ -1,7 +1,7 @@
 const { Events, ChannelType, PermissionFlagsBits } = require('discord.js');
 const { db } = require('../database');
 const { guilds, bytepods, bytepodAutoWhitelist, bytepodUserSettings, bytepodActiveSessions, bytepodVoiceStats, bytepodSessionHistory } = require('../database/schema');
-const { eq, and } = require('drizzle-orm');
+const { eq, and, isNull } = require('drizzle-orm');
 const logger = require('../utils/logger');
 const embeds = require('../utils/embeds');
 const { checkBotPermissions } = require('../utils/permissionCheck');
@@ -388,7 +388,8 @@ module.exports = {
                 const existingOwnedPod = await dbLog.select('bytepods',
                     () => db.select().from(bytepods).where(and(
                         eq(bytepods.ownerId, member.id),
-                        eq(bytepods.guildId, guild.id)
+                        eq(bytepods.guildId, guild.id),
+                        isNull(bytepods.sourceChannelId)
                     )).get(),
                     { userId: member.id, guildId: guild.id, operation: 'existingOwnedPodCheck' }
                 );
@@ -580,7 +581,10 @@ module.exports = {
             }
 
             const podData = await dbLog.select('bytepods',
-                () => db.select().from(bytepods).where(eq(bytepods.channelId, joinedChannelId)).get(),
+                () => db.select().from(bytepods).where(and(
+                    eq(bytepods.channelId, joinedChannelId),
+                    isNull(bytepods.sourceChannelId)
+                )).get(),
                 { podId: joinedChannelId, guildId: guild.id }
             );
 
@@ -763,7 +767,10 @@ module.exports = {
 
             // Check if it's a BytePod
             const podData = await dbLog.select('bytepods',
-                () => db.select().from(bytepods).where(eq(bytepods.channelId, leftChannelId)).get(),
+                () => db.select().from(bytepods).where(and(
+                    eq(bytepods.channelId, leftChannelId),
+                    isNull(bytepods.sourceChannelId)
+                )).get(),
                 { podId: leftChannelId, guildId: guild.id }
             );
 

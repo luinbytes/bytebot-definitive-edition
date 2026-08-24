@@ -1,6 +1,7 @@
 CREATE TABLE `voice_master_configs` (
     `guild_id` text PRIMARY KEY NOT NULL,
     `state` text DEFAULT 'active' NOT NULL,
+    `generation` integer DEFAULT 0 NOT NULL,
     `category_id` text,
     `primary_channel_id` text,
     `interface_message_id` text,
@@ -51,9 +52,20 @@ CREATE TABLE `voice_master_access` (
     `channel_id` text NOT NULL,
     `user_id` text NOT NULL,
     `effect` text NOT NULL,
+    `state` text DEFAULT 'active' NOT NULL,
     `updated_at` integer NOT NULL,
     PRIMARY KEY (`guild_id`,`channel_id`,`user_id`),
-    CONSTRAINT `voice_master_access_effect_check` CHECK (`effect` IN ('permit','reject'))
+    CONSTRAINT `voice_master_access_effect_check` CHECK (`effect` IN ('permit','reject')),
+    CONSTRAINT `voice_master_access_state_check` CHECK (`state` IN ('pending','active'))
+);
+--> statement-breakpoint
+CREATE TABLE `voice_master_join_roles` (
+    `guild_id` text NOT NULL,
+    `channel_id` text NOT NULL,
+    `member_id` text NOT NULL,
+    `role_id` text NOT NULL,
+    `updated_at` integer NOT NULL,
+    PRIMARY KEY (`guild_id`,`channel_id`,`member_id`)
 );
 --> statement-breakpoint
 ALTER TABLE `bytepods` ADD `source_channel_id` text;
@@ -65,5 +77,9 @@ ALTER TABLE `bytepods` ADD `generation` integer DEFAULT 0 NOT NULL;
 ALTER TABLE `bytepods` ADD `cleanup_after` integer;
 --> statement-breakpoint
 ALTER TABLE `bytepods` ADD `bot_owned` integer DEFAULT 1 NOT NULL;
+--> statement-breakpoint
+ALTER TABLE `bytepods` ADD `pending_owner_id` text;
+--> statement-breakpoint
+ALTER TABLE `bytepods` ADD `claim_snapshot` text;
 --> statement-breakpoint
 CREATE INDEX `bytepods_guild_state_idx` ON `bytepods` (`guild_id`,`state`);

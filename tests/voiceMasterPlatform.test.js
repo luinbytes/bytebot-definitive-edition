@@ -50,8 +50,10 @@ function componentInteraction(guild, member, action) {
     return {
         guild, guildId: guild.id, member, user: member.user,
         customId: `voicemaster:temporary-1:${action}`,
+        message: { id: 'controls-1' },
         isButton: () => true,
         isModalSubmit: () => false,
+        reply: jest.fn(async payload => payload),
         deferReply: jest.fn(async () => {}),
         editReply: jest.fn(async payload => payload),
         showModal: jest.fn(async () => {})
@@ -107,6 +109,88 @@ describe('VoiceMaster lifecycle', () => {
             ['Join to Create', ChannelType.GuildVoice]
         ]);
         expect(join.send).toHaveBeenCalledTimes(2);
+    });
+
+    test('concurrent setup calls reserve one generation before Discord resources are created', async () => {
+        const channels = new Map();
+        let releaseCategory;
+        const categoryGate = new Promise(resolve => { releaseCategory = resolve; });
+        const category = { id: 'category-1', type: ChannelType.GuildCategory, delete: jest.fn() };
+        const join = {
+            id: 'join-1', type: ChannelType.GuildVoice, delete: jest.fn(),
+            send: jest.fn(async () => ({ id: 'interface-1' }))
+        };
+        const create = jest.fn(async values => {
+            if (values.type === ChannelType.GuildCategory) await categoryGate;
+            const channel = values.type === ChannelType.GuildCategory ? category : join;
+            channels.set(channel.id, channel);
+            return channel;
+        });
+        const guild = {
+            id: 'guild-1', members: { me: { id: 'bot-1', permissions: { has: () => true } } },
+            channels: { cache: channels, create, fetch: jest.fn(async id => channels.get(id) || null) }
+        };
+        const { VoiceMasterService } = require('../src/services/voiceMasterService');
+        const service = new VoiceMasterService({ sqlite: database.sqlite });
+
+        const first = service.execute(interaction(guild, 'setup'));
+        await Promise.resolve();
+        await service.execute(interaction(guild, 'setup'));
+        releaseCategory();
+        await first;
+
+        expect(create).toHaveBeenCalledTimes(2);
+        expect(service.config(guild.id)).toMatchObject({ state: 'active', generation: 1 });
+    });
+
+    test('reset cancels an in-flight creation before it can persist or move the member', async () => {
+        const channels = new Map();
+        let releaseTemporary;
+        let temporaryStarted;
+        const started = new Promise(resolve => { temporaryStarted = resolve; });
+        const gate = new Promise(resolve => { releaseTemporary = resolve; });
+        const category = { id: 'category-1', type: ChannelType.GuildCategory, delete: jest.fn() };
+        const join = {
+            id: 'join-1', type: ChannelType.GuildVoice, delete: jest.fn(),
+            send: jest.fn(async () => ({ id: 'interface-1' }))
+        };
+        const temporary = {
+            id: 'temporary-1', type: ChannelType.GuildVoice, members: new Map(),
+            send: jest.fn(async () => ({ id: 'controls-1' })), delete: jest.fn(async () => {})
+        };
+        const create = jest.fn(async values => {
+            if (values.type === ChannelType.GuildCategory) return category;
+            if (values.name === 'Join to Create') return join;
+            temporaryStarted();
+            await gate;
+            channels.set(temporary.id, temporary);
+            return temporary;
+        });
+        channels.set(category.id, category);
+        channels.set(join.id, join);
+        const voiceStates = new Map([['member-1', { channelId: 'join-1' }]]);
+        const member = {
+            id: 'member-1', displayName: 'Member', user: { id: 'member-1', bot: false, username: 'Member' },
+            voice: { channelId: 'join-1', setChannel: jest.fn() }
+        };
+        const guild = {
+            id: 'guild-1', voiceStates: { cache: voiceStates },
+            members: { me: { id: 'bot-1', permissions: { has: () => true } } },
+            channels: { cache: channels, create, fetch: jest.fn(async id => channels.get(id) || null) }
+        };
+        const { VoiceMasterService } = require('../src/services/voiceMasterService');
+        const service = new VoiceMasterService({ sqlite: database.sqlite });
+        await service.execute(interaction(guild, 'setup'));
+
+        const creating = service.handleVoiceState({ channelId: null }, { guild, member, channelId: join.id });
+        await started;
+        await service.execute(interaction(guild, 'reset'));
+        releaseTemporary();
+        await creating;
+
+        expect(temporary.delete).toHaveBeenCalledTimes(1);
+        expect(member.voice.setChannel).not.toHaveBeenCalled();
+        expect(database.sqlite.prepare('SELECT COUNT(*) count FROM bytepods WHERE source_channel_id IS NOT NULL').get().count).toBe(0);
     });
 
     test('duplicate join events and a restart reuse one durably reserved channel', async () => {
@@ -297,6 +381,9 @@ describe('VoiceMaster lifecycle', () => {
         await service.handleInteraction(rename);
         const outsiderDelete = componentInteraction(guild, outsider, 'delete');
         await service.handleInteraction(outsiderDelete);
+        const stale = componentInteraction(guild, owner, 'increase');
+        stale.message.id = 'old-controls';
+        await service.handleInteraction(stale);
         await service.execute(memberInteraction(guild, outsider, 'delete'));
 
         expect(overwrites.edit).toHaveBeenCalledWith('guild-1', { Connect: false });
@@ -310,7 +397,37 @@ describe('VoiceMaster lifecycle', () => {
         expect(target.voice.disconnect).toHaveBeenCalledTimes(1);
         expect(restPut).toHaveBeenCalledWith('/channels/temporary-1/voice-status', { body: { status: 'Working' } });
         expect(rename.showModal).toHaveBeenCalledTimes(1);
+        expect(stale.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('stale') }));
         expect(temporary.delete).not.toHaveBeenCalled();
+    });
+
+    test('component actions pass through the same command RBAC path as slash commands', async () => {
+        const denied = { title: 'Access Denied' };
+        const checkUserPermissions = jest.fn(async () => ({ allowed: false, error: denied }));
+        jest.doMock('../src/utils/permissions', () => ({ checkUserPermissions }));
+        const event = require('../src/events/interactionCreate');
+        const handleInteraction = jest.fn();
+        const interaction = {
+            id: 'component-rbac-1', customId: 'voicemaster:temporary-1:delete', guildId: 'guild-1',
+            guild: { id: 'guild-1' }, channelId: 'text-1', user: { id: 'member-1' },
+            member: { permissions: { has: () => false }, roles: { cache: new Map() } },
+            isButton: () => true, isModalSubmit: () => false, isAutocomplete: () => false,
+            isAnySelectMenu: () => false, isStringSelectMenu: () => false,
+            reply: jest.fn(async payload => payload)
+        };
+        const client = {
+            commands: new Map([['voicemaster', { data: { name: 'voicemaster' } }]]),
+            voiceMasterService: { handleInteraction }
+        };
+
+        await event.execute(interaction, client);
+
+        expect(checkUserPermissions).toHaveBeenCalledTimes(1);
+        expect(checkUserPermissions.mock.calls[0][0].commandName).toBe('voicemaster');
+        expect(checkUserPermissions.mock.calls[0][0].options.getSubcommand()).toBe('delete');
+        expect(checkUserPermissions.mock.calls[0][1]).toBe(client.commands.get('voicemaster'));
+        expect(handleInteraction).not.toHaveBeenCalled();
+        expect(interaction.reply).toHaveBeenCalledWith({ embeds: [denied], flags: [expect.anything()] });
     });
 
     test('claim atomically transfers control after the persisted owner leaves', async () => {

@@ -92,6 +92,23 @@ module.exports = {
                 }).catch(() => null);
             }
             try {
+                const command = client.commands.get('voicemaster');
+                const rawAction = interaction.customId.split(':')[2];
+                const action = rawAction === 'rename-submit' ? 'rename'
+                    : ['increase', 'decrease'].includes(rawAction) ? 'limit' : rawAction;
+                const permissionInteraction = new Proxy(interaction, {
+                    get(target, property) {
+                        if (property === 'commandName') return 'voicemaster';
+                        if (property === 'options') return {
+                            getSubcommandGroup: () => false,
+                            getSubcommand: () => action
+                        };
+                        return target[property];
+                    }
+                });
+                const { checkUserPermissions } = require('../utils/permissions');
+                const { allowed, error } = await checkUserPermissions(permissionInteraction, command);
+                if (!allowed) return interaction.reply({ embeds: [error], flags: [MessageFlags.Ephemeral] });
                 await client.voiceMasterService.handleInteraction(interaction);
             } catch (error) {
                 logger.errorContext('VoiceMaster Interaction Error', error, {

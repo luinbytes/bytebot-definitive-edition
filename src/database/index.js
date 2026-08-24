@@ -463,11 +463,14 @@ const expectedSchema = {
         generation: 'INTEGER DEFAULT 0 NOT NULL',
         cleanup_after: 'INTEGER',
         bot_owned: 'INTEGER DEFAULT 1 NOT NULL',
+        pending_owner_id: 'TEXT',
+        claim_snapshot: 'TEXT',
         created_at: 'INTEGER'
     },
     voice_master_configs: {
         guild_id: 'TEXT PRIMARY KEY',
         state: "TEXT DEFAULT 'active' NOT NULL",
+        generation: 'INTEGER DEFAULT 0 NOT NULL',
         category_id: 'TEXT',
         primary_channel_id: 'TEXT',
         interface_message_id: 'TEXT',
@@ -505,6 +508,14 @@ const expectedSchema = {
         channel_id: 'TEXT NOT NULL',
         user_id: 'TEXT NOT NULL',
         effect: 'TEXT NOT NULL',
+        state: "TEXT DEFAULT 'active' NOT NULL",
+        updated_at: 'INTEGER NOT NULL'
+    },
+    voice_master_join_roles: {
+        guild_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        member_id: 'TEXT NOT NULL',
+        role_id: 'TEXT NOT NULL',
         updated_at: 'INTEGER NOT NULL'
     },
     bytepod_autowhitelist: {

@@ -26,6 +26,32 @@ class VoiceMasterService {
         return this.sqlite.prepare('SELECT * FROM voice_master_configs WHERE guild_id = ?').get(guildId) || null;
     }
 
+    reserveSetup(guildId) {
+        return this.sqlite.transaction(() => {
+            const now = this.now();
+            const inserted = this.sqlite.prepare(`INSERT INTO voice_master_configs
+                (guild_id, state, generation, updated_at) VALUES (?, 'creating', 1, ?)
+                ON CONFLICT (guild_id) DO NOTHING`).run(guildId, now);
+            if (inserted.changes) return 1;
+            const existing = this.config(guildId);
+            if (existing?.state !== 'failed') return null;
+            const generation = existing.generation + 1;
+            const retried = this.sqlite.prepare(`UPDATE voice_master_configs SET state = 'creating',
+                generation = ?, updated_at = ? WHERE guild_id = ? AND state = 'failed' AND generation = ?`)
+                .run(generation, now, guildId, existing.generation);
+            return retried.changes ? generation : null;
+        })();
+    }
+
+    configIs(guildId, state, generation) {
+        return Boolean(this.sqlite.prepare(`SELECT 1 FROM voice_master_configs
+            WHERE guild_id = ? AND state = ? AND generation = ?`).get(guildId, state, generation));
+    }
+
+    assertConfig(guildId, state, generation) {
+        if (!this.configIs(guildId, state, generation)) throw new Error('VoiceMaster configuration changed during this operation.');
+    }
+
     async execute(interaction) {
         const group = interaction.options.getSubcommandGroup(false);
         const subcommand = interaction.options.getSubcommand();
@@ -44,8 +70,14 @@ class VoiceMasterService {
     async handleInteraction(interaction) {
         const [namespace, scopeId, action] = String(interaction.customId || '').split(':');
         if (namespace !== 'voicemaster' || !scopeId || !action) return;
+        let context;
+        try {
+            context = this.validateComponent(interaction, scopeId);
+        } catch (error) {
+            return interaction.reply({ content: error.message, flags: [MessageFlags.Ephemeral] });
+        }
         if (interaction.isButton() && action === 'rename') {
-            return interaction.showModal(voiceMasterRenameModal(scopeId));
+            return interaction.showModal(voiceMasterRenameModal(context.pod.channel_id));
         }
 
         let mappedAction = action;
@@ -77,6 +109,26 @@ class VoiceMasterService {
         return this.executeOwnerAction(commandInteraction, mappedAction);
     }
 
+    validateComponent(interaction, scopeId) {
+        const currentChannelId = interaction.member.voice?.channel?.id || interaction.member.voice?.channelId;
+        const pod = currentChannelId && this.sqlite.prepare(`SELECT * FROM bytepods
+            WHERE guild_id = ? AND channel_id = ? AND state = 'active' AND bot_owned = 1`)
+            .get(interaction.guildId, currentChannelId);
+        if (!pod) throw new Error('You are not in an active VoiceMaster channel.');
+        if (interaction.isModalSubmit()) {
+            if (scopeId !== pod.channel_id) throw new Error('This VoiceMaster form is stale. Open the interface again.');
+            return { pod };
+        }
+        const source = this.sqlite.prepare(`SELECT * FROM voice_master_sources
+            WHERE guild_id = ? AND channel_id = ? AND state = 'active'`).get(interaction.guildId, scopeId);
+        const expectedMessageId = source?.interface_message_id
+            || (scopeId === pod.channel_id ? pod.panel_message_id : null);
+        if (!expectedMessageId || interaction.message?.id !== expectedMessageId) {
+            throw new Error('This VoiceMaster interface is stale. Ask an administrator to send it again.');
+        }
+        return { pod };
+    }
+
     requireAdmin(interaction) {
         if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
             throw new Error('Only server administrators can configure VoiceMaster.');
@@ -92,40 +144,40 @@ class VoiceMasterService {
         try {
             this.requireAdmin(interaction);
             this.requireBotPermissions(interaction.guild);
-            const existing = this.config(interaction.guildId);
-            if (existing?.state === 'active') {
+            const generation = this.reserveSetup(interaction.guildId);
+            if (!generation) {
                 return interaction.editReply({ embeds: [embeds.warn('Already Setup', 'VoiceMaster is already configured for this server.')] });
             }
-
             const now = this.now();
-            this.sqlite.prepare(`INSERT INTO voice_master_configs (guild_id, state, updated_at)
-                VALUES (?, 'creating', ?)
-                ON CONFLICT (guild_id) DO UPDATE SET state = 'creating', updated_at = excluded.updated_at`)
-                .run(interaction.guildId, now);
 
             let category = null;
             let channel = null;
             try {
                 category = await interaction.guild.channels.create({ name: 'VoiceMaster', type: ChannelType.GuildCategory });
+                this.assertConfig(interaction.guildId, 'creating', generation);
                 channel = await interaction.guild.channels.create({
                     name: 'Join to Create', type: ChannelType.GuildVoice, parent: category.id
                 });
+                this.assertConfig(interaction.guildId, 'creating', generation);
                 const message = await channel.send(voiceMasterInterface(channel.id));
                 this.sqlite.transaction(() => {
+                    const activated = this.sqlite.prepare(`UPDATE voice_master_configs SET state = 'active', category_id = ?,
+                        primary_channel_id = ?, interface_message_id = ?, updated_at = ?
+                        WHERE guild_id = ? AND state = 'creating' AND generation = ?`)
+                        .run(category.id, channel.id, message.id, now, interaction.guildId, generation);
+                    if (!activated.changes) throw new Error('VoiceMaster setup was cancelled.');
                     this.sqlite.prepare(`INSERT INTO voice_master_sources
                         (channel_id, guild_id, category_id, interface_message_id, is_primary, owned, created_at)
                         VALUES (?, ?, ?, ?, 1, 1, ?)`)
                         .run(channel.id, interaction.guildId, category.id, message.id, now);
-                    this.sqlite.prepare(`UPDATE voice_master_configs SET state = 'active', category_id = ?,
-                        primary_channel_id = ?, interface_message_id = ?, updated_at = ? WHERE guild_id = ?`)
-                        .run(category.id, channel.id, message.id, now, interaction.guildId);
                 })();
                 return interaction.editReply({ embeds: [embeds.success('VoiceMaster Setup', `Created ${channel} in ${category}.`)] });
             } catch (error) {
                 if (channel) await channel.delete('VoiceMaster setup failed').catch(() => null);
                 if (category) await category.delete?.('VoiceMaster setup failed').catch(() => null);
-                this.sqlite.prepare("UPDATE voice_master_configs SET state = 'failed', updated_at = ? WHERE guild_id = ?")
-                    .run(this.now(), interaction.guildId);
+                this.sqlite.prepare(`UPDATE voice_master_configs SET state = 'failed', updated_at = ?
+                    WHERE guild_id = ? AND state = 'creating' AND generation = ?`)
+                    .run(this.now(), interaction.guildId, generation);
                 throw error;
             }
         } catch (error) {
@@ -143,11 +195,17 @@ class VoiceMasterService {
             if (!channel || channel.type !== ChannelType.GuildVoice) throw new Error('The configured join channel is missing.');
             const message = await channel.send(voiceMasterInterface(channel.id));
             this.sqlite.transaction(() => {
-                this.sqlite.prepare('UPDATE voice_master_configs SET interface_message_id = ?, updated_at = ? WHERE guild_id = ?')
-                    .run(message.id, this.now(), interaction.guildId);
+                const changed = this.sqlite.prepare(`UPDATE voice_master_configs SET interface_message_id = ?, updated_at = ?
+                    WHERE guild_id = ? AND state = 'active' AND generation = ? AND interface_message_id = ?`)
+                    .run(message.id, this.now(), interaction.guildId, config.generation, config.interface_message_id);
+                if (!changed.changes) throw new Error('Another VoiceMaster interface replaced this one.');
                 this.sqlite.prepare('UPDATE voice_master_sources SET interface_message_id = ? WHERE channel_id = ? AND guild_id = ?')
                     .run(message.id, channel.id, interaction.guildId);
             })();
+            if (config.interface_message_id && config.interface_message_id !== message.id) {
+                const previous = await channel.messages?.fetch?.(config.interface_message_id).catch(() => null);
+                if (previous) await previous.delete().catch(() => previous.edit({ components: [] }).catch(() => null));
+            }
             return interaction.editReply({ embeds: [embeds.success('Interface Sent', `Sent the VoiceMaster interface in ${channel}.`)] });
         } catch (error) {
             return interaction.editReply({ embeds: [embeds.error('Interface Failed', error.message)] });
@@ -185,6 +243,7 @@ class VoiceMasterService {
             } else if (action === 'category') {
                 const category = interaction.options.getChannel('category');
                 if (!category || category.type !== ChannelType.GuildCategory) throw new Error('Choose a server category.');
+                if ((category.children?.cache?.size || 0) >= 50) throw new Error('That category already has Discord’s maximum of 50 channels.');
                 const changed = this.sqlite.prepare(`UPDATE voice_master_sources SET category_id = ?
                     WHERE guild_id = ? AND channel_id = ? AND is_primary = 0`)
                     .run(category.id, interaction.guildId, channel.id);
@@ -208,8 +267,14 @@ class VoiceMasterService {
             this.requireAdmin(interaction);
             const config = this.config(interaction.guildId);
             if (!config || config.state !== 'active') throw new Error('VoiceMaster is not setup for this server.');
-            this.sqlite.prepare("UPDATE voice_master_configs SET state = 'resetting', updated_at = ? WHERE guild_id = ? AND state = 'active'")
-                .run(this.now(), interaction.guildId);
+            const generation = config.generation + 1;
+            const reserved = this.sqlite.prepare(`UPDATE voice_master_configs SET state = 'resetting', generation = ?, updated_at = ?
+                WHERE guild_id = ? AND state = 'active' AND generation = ?`)
+                .run(generation, this.now(), interaction.guildId, config.generation);
+            if (!reserved.changes) throw new Error('VoiceMaster configuration changed before reset.');
+            this.sqlite.prepare(`UPDATE voice_master_creations SET state = 'failed', channel_id = NULL,
+                error = 'VoiceMaster was reset during creation.', updated_at = ?
+                WHERE guild_id = ? AND state = 'pending'`).run(this.now(), interaction.guildId);
             const primary = this.sqlite.prepare(`SELECT * FROM voice_master_sources
                 WHERE guild_id = ? AND is_primary = 1 AND owned = 1`).get(interaction.guildId);
             if (primary) {
@@ -224,12 +289,13 @@ class VoiceMasterService {
             }
             this.sqlite.transaction(() => {
                 this.sqlite.prepare('DELETE FROM voice_master_sources WHERE guild_id = ?').run(interaction.guildId);
-                this.sqlite.prepare('DELETE FROM voice_master_configs WHERE guild_id = ?').run(interaction.guildId);
+                this.sqlite.prepare(`DELETE FROM voice_master_configs
+                    WHERE guild_id = ? AND state = 'resetting' AND generation = ?`).run(interaction.guildId, generation);
             })();
             return interaction.editReply({ embeds: [embeds.success('VoiceMaster Reset', 'VoiceMaster setup resources were removed.')] });
         } catch (error) {
-            this.sqlite.prepare("UPDATE voice_master_configs SET state = 'active', updated_at = ? WHERE guild_id = ? AND state = 'resetting'")
-                .run(this.now(), interaction.guildId);
+            this.sqlite.prepare(`UPDATE voice_master_configs SET state = 'active', updated_at = ?
+                WHERE guild_id = ? AND state = 'resetting'`).run(this.now(), interaction.guildId);
             return interaction.editReply({ embeds: [embeds.error('VoiceMaster Reset Failed', error.message)] });
         }
     }
@@ -237,7 +303,7 @@ class VoiceMasterService {
     source(guildId, channelId) {
         return this.sqlite.prepare(`SELECT source.*, config.name_template, config.default_role_id,
             config.default_bitrate, config.default_region, config.send_interface,
-            config.temporary_enabled, config.join_role_id
+            config.temporary_enabled, config.join_role_id, config.generation AS config_generation
             FROM voice_master_sources source
             JOIN voice_master_configs config ON config.guild_id = source.guild_id
             WHERE source.guild_id = ? AND source.channel_id = ?
@@ -268,6 +334,8 @@ class VoiceMasterService {
 
     async reuseCreation(guild, member, creation) {
         if (creation?.state !== 'active' || !creation.channel_id) return false;
+        const currentVoice = guild.voiceStates.cache.get(member.id);
+        if (!currentVoice || currentVoice.channelId !== creation.source_channel_id) return true;
         const channel = guild.channels.cache.get(creation.channel_id)
             || await guild.channels.fetch(creation.channel_id).catch(() => null);
         const owned = this.sqlite.prepare(`SELECT 1 FROM bytepods
@@ -287,6 +355,9 @@ class VoiceMasterService {
             await this.removeJoinRoleAfterExit(guild, member, oldState.channelId, newState.channelId);
             handled = await this.handleOwnedLeave(guild, oldState.channelId, member.id);
         }
+        if (newState.channelId && oldState.channelId !== newState.channelId) {
+            await this.addJoinRole(guild, member, newState.channelId);
+        }
         const source = this.source(guild.id, newState.channelId);
         if (!source || !source.temporary_enabled || oldState.channelId === newState.channelId) return handled;
 
@@ -301,6 +372,7 @@ class VoiceMasterService {
         let channel = null;
         try {
             this.requireBotPermissions(guild);
+            this.assertConfig(guild.id, 'active', source.config_generation);
             const ownerName = member.displayName || member.user.username;
             const name = source.name_template.replaceAll('{owner}', ownerName).slice(0, 100);
             const permissionOverwrites = [{
@@ -332,6 +404,7 @@ class VoiceMasterService {
                 permissionOverwrites,
                 reason: `VoiceMaster channel for ${member.user.username}`
             });
+            this.assertConfig(guild.id, 'active', source.config_generation);
 
             const freshVoice = guild.voiceStates.cache.get(member.id);
             if (!freshVoice || freshVoice.channelId !== source.channel_id) {
@@ -340,29 +413,31 @@ class VoiceMasterService {
                 return true;
             }
 
+            let panelMessage = null;
+            if (source.send_interface) {
+                panelMessage = await channel.send(voiceMasterInterface(channel.id));
+            }
+            this.assertConfig(guild.id, 'active', source.config_generation);
             const now = this.now();
             this.sqlite.transaction(() => {
+                this.assertConfig(guild.id, 'active', source.config_generation);
                 this.sqlite.prepare(`INSERT INTO bytepods
                     (channel_id, guild_id, owner_id, original_owner_id, source_channel_id,
-                     state, generation, bot_owned, created_at)
-                    VALUES (?, ?, ?, ?, ?, 'active', ?, 1, ?)`)
-                    .run(channel.id, guild.id, member.id, member.id, source.channel_id, reservation.creation.generation, now);
-                this.sqlite.prepare(`UPDATE voice_master_creations SET channel_id = ?, state = 'active',
+                     panel_message_id, state, generation, bot_owned, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, 'active', ?, 1, ?)`)
+                    .run(channel.id, guild.id, member.id, member.id, source.channel_id,
+                        panelMessage?.id || null, reservation.creation.generation, now);
+                const activated = this.sqlite.prepare(`UPDATE voice_master_creations SET channel_id = ?, state = 'active',
                     error = NULL, updated_at = ? WHERE guild_id = ? AND source_channel_id = ?
                     AND member_id = ? AND generation = ? AND state = 'pending'`)
                     .run(channel.id, now, guild.id, source.channel_id, member.id, reservation.creation.generation);
+                if (!activated.changes) throw new Error('VoiceMaster creation was cancelled.');
             })();
 
+            this.assertConfig(guild.id, 'active', source.config_generation);
             await member.voice.setChannel(channel);
             if (source.join_role_id) {
-                await member.roles.add(source.join_role_id, 'VoiceMaster channel joined').catch(error => {
-                    logger.warn(`VoiceMaster join role failed for ${member.id}: ${error.message}`);
-                });
-            }
-            if (source.send_interface) {
-                await channel.send(voiceMasterInterface(channel.id)).catch(error => {
-                    logger.warn(`VoiceMaster interface send failed for ${channel.id}: ${error.message}`);
-                });
+                await this.grantJoinRole(guild, member, channel.id, source.join_role_id);
             }
             return true;
         } catch (error) {
@@ -428,15 +503,34 @@ class VoiceMasterService {
             WHERE guild_id = ? AND channel_id = ? AND state = 'active' AND bot_owned = 1`)
             .get(guild.id, oldChannelId);
         if (!oldOwned) return;
-        const stillInside = newChannelId && this.sqlite.prepare(`SELECT 1 FROM bytepods
-            WHERE guild_id = ? AND channel_id = ? AND state = 'active' AND bot_owned = 1`)
-            .get(guild.id, newChannelId);
-        if (stillInside) return;
-        const config = this.config(guild.id);
-        if (!config?.join_role_id) return;
-        await member.roles.remove(config.join_role_id, 'VoiceMaster channel left').catch(error => {
+        const grant = this.sqlite.prepare(`SELECT role_id FROM voice_master_join_roles
+            WHERE guild_id = ? AND channel_id = ? AND member_id = ?`).get(guild.id, oldChannelId, member.id);
+        if (!grant) return;
+        await member.roles.remove(grant.role_id, 'VoiceMaster channel left').catch(error => {
             logger.warn(`VoiceMaster join role removal failed for ${member.id}: ${error.message}`);
         });
+        this.sqlite.prepare(`DELETE FROM voice_master_join_roles
+            WHERE guild_id = ? AND channel_id = ? AND member_id = ?`).run(guild.id, oldChannelId, member.id);
+    }
+
+    async addJoinRole(guild, member, channelId) {
+        const pod = this.sqlite.prepare(`SELECT 1 FROM bytepods
+            WHERE guild_id = ? AND channel_id = ? AND state = 'active' AND bot_owned = 1`).get(guild.id, channelId);
+        const config = pod && this.config(guild.id);
+        if (config?.join_role_id) await this.grantJoinRole(guild, member, channelId, config.join_role_id);
+    }
+
+    async grantJoinRole(guild, member, channelId, roleId) {
+        try {
+            await member.roles.add(roleId, 'VoiceMaster channel joined');
+            this.sqlite.prepare(`INSERT INTO voice_master_join_roles
+                (guild_id, channel_id, member_id, role_id, updated_at) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (guild_id, channel_id, member_id) DO UPDATE SET
+                    role_id = excluded.role_id, updated_at = excluded.updated_at`)
+                .run(guild.id, channelId, member.id, roleId, this.now());
+        } catch (error) {
+            logger.warn(`VoiceMaster join role failed for ${member.id}: ${error.message}`);
+        }
     }
 
     ownerContext(interaction, allowClaim = false) {
@@ -454,6 +548,48 @@ class VoiceMasterService {
         const available = channel.permissionsFor?.(guild.members.me) || guild.members.me?.permissions;
         if (!available || permissions.some(permission => !available.has(permission))) {
             throw new Error('ByteBot is missing a required channel permission for this action.');
+        }
+    }
+
+    permissionSnapshot(channel, id) {
+        const overwrite = channel.permissionOverwrites.cache?.get(id);
+        if (!overwrite) return { exists: false };
+        const permissions = {};
+        for (const [name, bit] of Object.entries(PermissionFlagsBits)) {
+            permissions[name] = overwrite.allow.has(bit) ? true : overwrite.deny.has(bit) ? false : null;
+        }
+        return { exists: true, permissions };
+    }
+
+    async restorePermission(channel, id, snapshot) {
+        if (!snapshot?.exists) {
+            if (channel.permissionOverwrites.delete) return channel.permissionOverwrites.delete(id);
+            return channel.permissionOverwrites.edit(id, {
+                ViewChannel: null, Connect: null, ManageChannels: null, MoveMembers: null
+            });
+        }
+        return channel.permissionOverwrites.edit(id, snapshot.permissions);
+    }
+
+    async updateAccess(channel, guildId, userId, effect, permissions) {
+        const snapshot = this.permissionSnapshot(channel, userId);
+        this.persistAccess(guildId, channel.id, userId, effect, 'pending');
+        try {
+            await channel.permissionOverwrites.edit(userId, permissions);
+            const completed = this.sqlite.prepare(`UPDATE voice_master_access SET state = 'active', updated_at = ?
+                WHERE guild_id = ? AND channel_id = ? AND user_id = ? AND effect = ? AND state = 'pending'`)
+                .run(this.now(), guildId, channel.id, userId, effect);
+            if (!completed.changes) throw new Error('VoiceMaster access changed before completion.');
+        } catch (error) {
+            try {
+                await this.restorePermission(channel, userId, snapshot);
+                this.sqlite.prepare(`DELETE FROM voice_master_access
+                    WHERE guild_id = ? AND channel_id = ? AND user_id = ? AND state = 'pending'`)
+                    .run(guildId, channel.id, userId);
+            } catch (restoreError) {
+                logger.warn(`VoiceMaster access compensation failed for ${channel.id}/${userId}: ${restoreError.message}`);
+            }
+            throw error;
         }
     }
 
@@ -527,8 +663,7 @@ class VoiceMasterService {
                 const target = await this.targetMember(interaction);
                 if (target.id === interaction.user.id) throw new Error('You already have access to your channel.');
                 this.requireChannelPermissions(interaction.guild, channel, [PermissionFlagsBits.ManageRoles]);
-                await channel.permissionOverwrites.edit(target.id, { ViewChannel: true, Connect: true });
-                this.persistAccess(interaction.guildId, channel.id, target.id, 'permit');
+                await this.updateAccess(channel, interaction.guildId, target.id, 'permit', { ViewChannel: true, Connect: true });
                 break;
             }
             case 'drag': {
@@ -544,31 +679,40 @@ class VoiceMasterService {
                 const permissions = [PermissionFlagsBits.ManageRoles];
                 if (target.voice?.channelId === channel.id) permissions.push(PermissionFlagsBits.MoveMembers);
                 this.requireChannelPermissions(interaction.guild, channel, permissions);
-                await channel.permissionOverwrites.edit(target.id, { Connect: false });
-                this.persistAccess(interaction.guildId, channel.id, target.id, 'reject');
+                await this.updateAccess(channel, interaction.guildId, target.id, 'reject', { Connect: false });
                 if (target.voice?.channelId === channel.id) await target.voice.disconnect('Rejected from VoiceMaster channel');
                 break;
             }
             case 'information':
+                {
+                    const everyone = channel.permissionOverwrites.cache?.get(interaction.guild.id);
+                    const locked = Boolean(everyone?.deny.has(PermissionFlagsBits.Connect));
+                    const hidden = Boolean(everyone?.deny.has(PermissionFlagsBits.ViewChannel));
                 return interaction.editReply({
                     embeds: [embeds.info('VoiceMaster Information', [
                         `Owner: <@${pod.owner_id}>`,
                         `Members: ${channel.members.size}`,
+                        `Locked: ${locked ? 'Yes' : 'No'}`,
+                        `Hidden: ${hidden ? 'Yes' : 'No'}`,
                         `Limit: ${channel.userLimit || 'Unlimited'}`,
                         `Bitrate: ${channel.bitrate}`,
                         `Region: ${channel.rtcRegion || 'Automatic'}`
                     ].join('\n'))],
                     allowedMentions: { parse: [] }
                 });
+                }
             case 'claim': {
                 if (pod.owner_id === interaction.user.id) throw new Error('You already own this voice channel.');
                 if (channel.members.has(pod.owner_id)) throw new Error('The current owner is still in this voice channel.');
                 this.requireChannelPermissions(interaction.guild, channel, [PermissionFlagsBits.ManageRoles]);
-                const won = this.sqlite.prepare(`UPDATE bytepods SET owner_id = ?, owner_left_at = NULL,
-                    reclaim_request_pending = 0, generation = generation + 1
+                const snapshot = JSON.stringify({
+                    previous: this.permissionSnapshot(channel, pod.owner_id),
+                    next: this.permissionSnapshot(channel, interaction.user.id)
+                });
+                const won = this.sqlite.prepare(`UPDATE bytepods SET state = 'claiming', pending_owner_id = ?, claim_snapshot = ?
                     WHERE guild_id = ? AND channel_id = ? AND owner_id = ? AND generation = ?
                     AND state = 'active' AND bot_owned = 1`)
-                    .run(interaction.user.id, interaction.guildId, channel.id, pod.owner_id, pod.generation);
+                    .run(interaction.user.id, snapshot, interaction.guildId, channel.id, pod.owner_id, pod.generation);
                 if (!won.changes) throw new Error('Another member claimed this channel first.');
                 try {
                     await channel.permissionOverwrites.edit(pod.owner_id, {
@@ -577,10 +721,24 @@ class VoiceMasterService {
                     await channel.permissionOverwrites.edit(interaction.user.id, {
                         ViewChannel: true, Connect: true, ManageChannels: true, MoveMembers: true
                     });
+                    const completed = this.sqlite.prepare(`UPDATE bytepods SET owner_id = pending_owner_id,
+                        pending_owner_id = NULL, claim_snapshot = NULL, owner_left_at = NULL,
+                        reclaim_request_pending = 0, state = 'active', generation = generation + 1
+                        WHERE guild_id = ? AND channel_id = ? AND owner_id = ?
+                        AND pending_owner_id = ? AND generation = ? AND state = 'claiming'`)
+                        .run(interaction.guildId, channel.id, pod.owner_id, interaction.user.id, pod.generation);
+                    if (!completed.changes) throw new Error('VoiceMaster claim changed before completion.');
                 } catch (error) {
-                    this.sqlite.prepare(`UPDATE bytepods SET owner_id = ?, generation = generation + 1
-                        WHERE guild_id = ? AND channel_id = ? AND owner_id = ? AND generation = ?`)
-                        .run(pod.owner_id, interaction.guildId, channel.id, interaction.user.id, pod.generation + 1);
+                    try {
+                        const parsed = JSON.parse(snapshot);
+                        await this.restorePermission(channel, pod.owner_id, parsed.previous);
+                        await this.restorePermission(channel, interaction.user.id, parsed.next);
+                        this.sqlite.prepare(`UPDATE bytepods SET state = 'active', pending_owner_id = NULL, claim_snapshot = NULL
+                            WHERE guild_id = ? AND channel_id = ? AND owner_id = ? AND generation = ? AND state = 'claiming'`)
+                            .run(interaction.guildId, channel.id, pod.owner_id, pod.generation);
+                    } catch (restoreError) {
+                        logger.warn(`VoiceMaster claim compensation failed for ${channel.id}: ${restoreError.message}`);
+                    }
                     throw error;
                 }
                 break;
@@ -616,6 +774,8 @@ class VoiceMasterService {
         this.sqlite.transaction(() => {
             this.sqlite.prepare('DELETE FROM voice_master_access WHERE guild_id = ? AND channel_id = ?')
                 .run(guildId, channelId);
+            this.sqlite.prepare('DELETE FROM voice_master_join_roles WHERE guild_id = ? AND channel_id = ?')
+                .run(guildId, channelId);
             this.sqlite.prepare('DELETE FROM voice_master_creations WHERE guild_id = ? AND channel_id = ?')
                 .run(guildId, channelId);
             this.sqlite.prepare('DELETE FROM bytepod_active_sessions WHERE guild_id = ? AND pod_id = ?')
@@ -635,12 +795,12 @@ class VoiceMasterService {
         return member;
     }
 
-    persistAccess(guildId, channelId, userId, effect) {
-        this.sqlite.prepare(`INSERT INTO voice_master_access (guild_id, channel_id, user_id, effect, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+    persistAccess(guildId, channelId, userId, effect, state = 'active') {
+        this.sqlite.prepare(`INSERT INTO voice_master_access (guild_id, channel_id, user_id, effect, state, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT (guild_id, channel_id, user_id) DO UPDATE SET
-                effect = excluded.effect, updated_at = excluded.updated_at`)
-            .run(guildId, channelId, userId, effect, this.now());
+                effect = excluded.effect, state = excluded.state, updated_at = excluded.updated_at`)
+            .run(guildId, channelId, userId, effect, state, this.now());
     }
 
     activeConfig(interaction) {
@@ -731,6 +891,26 @@ class VoiceMasterService {
 
     async reconcile() {
         const result = { active: 0, deleted: 0, lost: 0, ambiguous: 0, failures: [] };
+        const configs = this.sqlite.prepare("SELECT * FROM voice_master_configs WHERE state = 'active'").all();
+        for (const config of configs) {
+            try {
+                const guild = await this.client.guilds.fetch(config.guild_id);
+                const category = guild.channels.cache.get(config.category_id)
+                    || await guild.channels.fetch(config.category_id).catch(error => {
+                        if (error.code === 10003) return null;
+                        throw error;
+                    });
+                if (!category) {
+                    this.sqlite.prepare("UPDATE voice_master_configs SET state = 'failed', updated_at = ? WHERE guild_id = ? AND generation = ?")
+                        .run(this.now(), config.guild_id, config.generation);
+                    result.lost++;
+                } else if (category.type !== ChannelType.GuildCategory) {
+                    result.ambiguous++;
+                }
+            } catch (error) {
+                result.failures.push({ guildId: config.guild_id, channelId: config.category_id, error: error.message });
+            }
+        }
         const sources = this.sqlite.prepare("SELECT * FROM voice_master_sources WHERE state = 'active'").all();
         for (const source of sources) {
             let guild;
@@ -746,6 +926,19 @@ class VoiceMasterService {
                     result.lost++;
                 } else if (channel.type !== ChannelType.GuildVoice) {
                     result.ambiguous++;
+                } else if (source.interface_message_id && channel.messages?.fetch) {
+                    const message = await channel.messages.fetch(source.interface_message_id).catch(() => null);
+                    if (!message) {
+                        const replacement = await channel.send(voiceMasterInterface(channel.id));
+                        this.sqlite.transaction(() => {
+                            this.sqlite.prepare(`UPDATE voice_master_sources SET interface_message_id = ?
+                                WHERE guild_id = ? AND channel_id = ? AND interface_message_id = ?`)
+                                .run(replacement.id, source.guild_id, source.channel_id, source.interface_message_id);
+                            if (source.is_primary) this.sqlite.prepare(`UPDATE voice_master_configs
+                                SET interface_message_id = ?, updated_at = ? WHERE guild_id = ? AND interface_message_id = ?`)
+                                .run(replacement.id, this.now(), source.guild_id, source.interface_message_id);
+                        })();
+                    }
                 }
             } catch (error) {
                 result.failures.push({ guildId: source.guild_id, channelId: source.channel_id, error: error.message });
@@ -792,6 +985,14 @@ class VoiceMasterService {
                         }
                     }
                 } else {
+                    const config = this.config(pod.guild_id);
+                    if (config?.join_role_id) {
+                        for (const member of channel.members.values()) {
+                            if (!member.user?.bot && !member.roles.cache?.has(config.join_role_id)) {
+                                await this.grantJoinRole(guild, member, channel.id, config.join_role_id);
+                            }
+                        }
+                    }
                     result.active++;
                 }
             } catch (error) {
@@ -802,7 +1003,42 @@ class VoiceMasterService {
             error = 'Creation timed out during restart.', updated_at = ?
             WHERE state = 'pending' AND updated_at < ?`)
             .run(this.now(), this.now() - 300000);
+        await this.reconcilePendingOperations(result);
         return result;
+    }
+
+    async reconcilePendingOperations(result) {
+        const claims = this.sqlite.prepare("SELECT * FROM bytepods WHERE state = 'claiming' AND bot_owned = 1").all();
+        for (const pod of claims) {
+            try {
+                const guild = await this.client.guilds.fetch(pod.guild_id);
+                const channel = guild.channels.cache.get(pod.channel_id) || await guild.channels.fetch(pod.channel_id);
+                const snapshot = JSON.parse(pod.claim_snapshot);
+                await this.restorePermission(channel, pod.owner_id, snapshot.previous);
+                await this.restorePermission(channel, pod.pending_owner_id, snapshot.next);
+                this.sqlite.prepare(`UPDATE bytepods SET state = 'active', pending_owner_id = NULL, claim_snapshot = NULL
+                    WHERE guild_id = ? AND channel_id = ? AND state = 'claiming'`)
+                    .run(pod.guild_id, pod.channel_id);
+            } catch (error) {
+                result.failures.push({ guildId: pod.guild_id, channelId: pod.channel_id, error: error.message });
+            }
+        }
+        const accessRows = this.sqlite.prepare("SELECT * FROM voice_master_access WHERE state = 'pending'").all();
+        for (const access of accessRows) {
+            try {
+                const guild = await this.client.guilds.fetch(access.guild_id);
+                const channel = guild.channels.cache.get(access.channel_id) || await guild.channels.fetch(access.channel_id);
+                const permissions = access.effect === 'permit'
+                    ? { ViewChannel: true, Connect: true }
+                    : { Connect: false };
+                await channel.permissionOverwrites.edit(access.user_id, permissions);
+                this.sqlite.prepare(`UPDATE voice_master_access SET state = 'active', updated_at = ?
+                    WHERE guild_id = ? AND channel_id = ? AND user_id = ? AND state = 'pending'`)
+                    .run(this.now(), access.guild_id, access.channel_id, access.user_id);
+            } catch (error) {
+                result.failures.push({ guildId: access.guild_id, channelId: access.channel_id, error: error.message });
+            }
+        }
     }
 
     markSourceLost(source) {
@@ -841,6 +1077,7 @@ class VoiceMasterService {
     purgeGuild(guildId) {
         this.sqlite.transaction(() => {
             this.sqlite.prepare('DELETE FROM voice_master_access WHERE guild_id = ?').run(guildId);
+            this.sqlite.prepare('DELETE FROM voice_master_join_roles WHERE guild_id = ?').run(guildId);
             this.sqlite.prepare('DELETE FROM voice_master_creations WHERE guild_id = ?').run(guildId);
             this.sqlite.prepare('DELETE FROM bytepods WHERE guild_id = ? AND source_channel_id IS NOT NULL').run(guildId);
             this.sqlite.prepare('DELETE FROM voice_master_sources WHERE guild_id = ?').run(guildId);
