@@ -774,6 +774,8 @@ const activityLogs = sqliteTable('activity_logs', {
     activityDate: text('activity_date').notNull(), // YYYY-MM-DD format
     messageCount: integer('message_count').default(0).notNull(),
     voiceMinutes: integer('voice_minutes').default(0).notNull(),
+    textXpAwarded: integer('text_xp_awarded').default(0).notNull(),
+    voiceSeconds: integer('voice_seconds').default(0).notNull(),
     commandsRun: integer('commands_run').default(0).notNull(),
     reactionsGiven: integer('reactions_given').default(0).notNull(), // Track reactions given
     channelsJoined: integer('channels_joined').default(0).notNull(), // Track unique voice channels joined

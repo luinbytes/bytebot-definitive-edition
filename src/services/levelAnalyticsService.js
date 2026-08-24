@@ -73,6 +73,10 @@ class LevelAnalyticsService {
             const current = this.sqlite.prepare(`
                 SELECT * FROM member_levels WHERE guild_id = ? AND user_id = ?
             `).get(guildId, userId);
+            const daily = this.sqlite.prepare(`
+                SELECT text_xp_awarded FROM activity_logs
+                WHERE user_id = ? AND guild_id = ? AND activity_date = ?
+            `).get(userId, guildId, day);
             const onCooldown = current.last_text_xp_at != null
                 && now - current.last_text_xp_at < config.text_cooldown_seconds * 1000;
 
@@ -87,8 +91,14 @@ class LevelAnalyticsService {
                     `).get(guildId, type, id);
                     if (boost) targetMultiplier = Math.max(targetMultiplier, boost.multiplier);
                 }
-                xpAwarded = Math.floor(20 * Math.min(10, config.base_multiplier * targetMultiplier));
+                const calculated = Math.floor(20 * Math.min(10, config.base_multiplier * targetMultiplier));
+                xpAwarded = Math.min(calculated, Math.max(0, 20_000 - daily.text_xp_awarded));
             }
+
+            if (xpAwarded) this.sqlite.prepare(`
+                UPDATE activity_logs SET text_xp_awarded = text_xp_awarded + ?
+                WHERE user_id = ? AND guild_id = ? AND activity_date = ?
+            `).run(xpAwarded, userId, guildId, day);
 
             const textXp = current.text_xp + xpAwarded;
             const xp = Math.max(0, textXp + current.voice_xp + current.manual_adjustment);
