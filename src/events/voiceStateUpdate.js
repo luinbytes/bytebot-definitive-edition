@@ -310,6 +310,11 @@ module.exports = {
 
         try {
             const activity = await newState.client.levelAnalyticsService?.reconcileVoiceState(oldState, newState);
+            for (const userId of activity?.roleReconcileUserIds || []) {
+                const member = newState.guild.members.cache.get(userId)
+                    || await newState.guild.members.fetch(userId).catch(() => null);
+                if (member) await newState.client.levelAnalyticsService.reconcileMemberRoles(member);
+            }
             if (activity?.settledSeconds > 0) {
                 await newState.client.activityStreakService?.recordCommittedActivity(member.id, guild.id);
             }

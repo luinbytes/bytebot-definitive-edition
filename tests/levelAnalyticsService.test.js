@@ -324,4 +324,61 @@ describe('LevelAnalyticsService', () => {
             SELECT message_count FROM server_daily_metrics WHERE guild_id = 'guild1'
         `).get().message_count).toBe(1);
     });
+
+    test('/levels rank and leaderboard read the canonical lossless totals', async () => {
+        database.sqlite.prepare(`
+            INSERT INTO member_levels
+                (guild_id, user_id, xp, level, text_xp, voice_xp, manual_adjustment,
+                 level_floor, message_count, voice_seconds, updated_at)
+            VALUES ('guild1', 'user1', 400, 2, 300, 50, 50, 0, 7, 125, 1)
+        `).run();
+        const reply = jest.fn();
+        const options = {
+            getSubcommandGroup: () => null,
+            getSubcommand: () => 'rank',
+            getUser: () => ({ id: 'user1', username: 'Member' }),
+            getBoolean: () => true
+        };
+        await service.execute({ guildId: 'guild1', user: { id: 'viewer' }, options, reply });
+        expect(reply.mock.calls[0][0].embeds[0].data.description).toContain('Level **2**');
+
+        options.getSubcommand = () => 'leaderboard';
+        options.getString = () => 'text';
+        options.getInteger = () => 1;
+        await service.execute({ guildId: 'guild1', user: { id: 'viewer' }, options, reply });
+        expect(reply.mock.calls[1][0].content).toContain('**300** text XP');
+    });
+
+    test('/levels reward enforces hierarchy and reconciles non-stacking roles', async () => {
+        const reward = { id: 'reward1', managed: false };
+        const highest = { comparePositionTo: () => 1 };
+        const permissions = { has: permission => [PermissionFlagsBits.ManageGuild, PermissionFlagsBits.ManageRoles].includes(permission) };
+        const interaction = {
+            guildId: 'guild1',
+            guild: { id: 'guild1', members: { me: { permissions, roles: { highest } } } },
+            member: { permissions, roles: { highest } },
+            options: {
+                getSubcommandGroup: () => 'reward', getSubcommand: () => 'add',
+                getRole: () => reward, getInteger: () => 2
+            },
+            reply: jest.fn()
+        };
+        await service.execute(interaction);
+        expect(database.sqlite.prepare(`SELECT level, role_id FROM level_role_rewards WHERE guild_id = 'guild1'`).get())
+            .toEqual({ level: 2, role_id: 'reward1' });
+
+        database.sqlite.prepare(`
+            INSERT INTO member_levels
+                (guild_id, user_id, xp, level, text_xp, voice_xp, manual_adjustment,
+                 level_floor, message_count, voice_seconds, updated_at)
+            VALUES ('guild1', 'user1', 400, 2, 400, 0, 0, 0, 0, 0, 1)
+        `).run();
+        const add = jest.fn();
+        const member = {
+            id: 'user1', user: { bot: false }, guild: { id: 'guild1' },
+            roles: { cache: new Map(), add, remove: jest.fn() }
+        };
+        await service.reconcileMemberRoles(member);
+        expect(add).toHaveBeenCalledWith(['reward1'], 'Level reward reconciliation');
+    });
 });

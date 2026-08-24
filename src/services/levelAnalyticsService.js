@@ -1,4 +1,4 @@
-const { MessageFlags, PermissionFlagsBits } = require('discord.js');
+const { EmbedBuilder, MessageFlags, PermissionFlagsBits } = require('discord.js');
 
 const MAX_LEVEL = 999;
 
@@ -118,7 +118,8 @@ class LevelAnalyticsService {
                 duplicate: false,
                 xpAwarded,
                 level,
-                previousLevel: current.level
+                previousLevel: current.level,
+                roleReconcile: level !== current.level
             };
         })();
     }
@@ -287,6 +288,7 @@ class LevelAnalyticsService {
             }]));
             let settledSeconds = 0;
             let xpAwarded = 0;
+            const roleReconcileUserIds = [];
 
             const sessions = this.sqlite.prepare(`
                 SELECT * FROM level_voice_sessions WHERE guild_id = ?
@@ -358,6 +360,7 @@ class LevelAnalyticsService {
                                 voice_seconds = voice_seconds + ?, updated_at = ?
                             WHERE guild_id = ? AND user_id = ?
                         `).run(xp, level, voiceXp, seconds, now, guild.id, session.user_id);
+                        if (level !== member.level) roleReconcileUserIds.push(session.user_id);
                     }
                 }
 
@@ -389,7 +392,7 @@ class LevelAnalyticsService {
             for (const [userId, next] of desired) {
                 insert.run(guild.id, userId, next.state.channelId, next.eligible ? now : null, now);
             }
-            return { settledSeconds, xpAwarded };
+            return { settledSeconds, xpAwarded, roleReconcileUserIds };
         })();
     }
 
@@ -407,9 +410,79 @@ class LevelAnalyticsService {
         return { results, failures };
     }
 
+    memberRow(guildId, userId) {
+        return this.sqlite.prepare(`
+            SELECT * FROM member_levels WHERE guild_id = ? AND user_id = ?
+        `).get(guildId, userId) || {
+            user_id: userId, xp: 0, level: 0, text_xp: 0, voice_xp: 0,
+            message_count: 0, voice_seconds: 0
+        };
+    }
+
+    memberRank(guildId, row) {
+        return this.sqlite.prepare(`
+            SELECT COUNT(*) + 1 AS rank FROM member_levels
+            WHERE guild_id = ? AND (xp > ? OR (xp = ? AND user_id < ?))
+        `).get(guildId, row.xp, row.xp, row.user_id).rank;
+    }
+
+    async reconcileMemberRoles(member) {
+        if (!member || member.user?.bot) return false;
+        const config = this.sqlite.prepare(`SELECT stack_roles FROM level_configs WHERE guild_id = ?`).get(member.guild.id);
+        const rewards = this.sqlite.prepare(`
+            SELECT level, role_id FROM level_role_rewards WHERE guild_id = ? ORDER BY level
+        `).all(member.guild.id);
+        if (!rewards.length) return false;
+        const level = this.memberRow(member.guild.id, member.id).level;
+        const earned = rewards.filter(reward => reward.level <= level);
+        const wanted = new Set((config?.stack_roles ? earned : earned.slice(-1)).map(reward => reward.role_id));
+        const configured = new Set(rewards.map(reward => reward.role_id));
+        const add = [...wanted].filter(id => !member.roles.cache.has(id));
+        const remove = [...configured].filter(id => !wanted.has(id) && member.roles.cache.has(id));
+        if (add.length) await member.roles.add(add, 'Level reward reconciliation');
+        if (remove.length) await member.roles.remove(remove, 'Level reward reconciliation');
+        return Boolean(add.length || remove.length);
+    }
+
     async execute(interaction) {
         const group = interaction.options.getSubcommandGroup(false);
         const action = interaction.options.getSubcommand();
+        if (!group && ['rank', 'leaderboard', 'roles'].includes(action)) {
+            const privateReply = interaction.options.getBoolean?.('private') ?? false;
+            if (action === 'rank') {
+                const user = interaction.options.getUser?.('member') || interaction.user;
+                const row = this.memberRow(interaction.guildId, user.id);
+                const nextXp = row.level >= MAX_LEVEL ? row.xp : 100 * (row.level + 1) ** 2;
+                const embed = new EmbedBuilder().setColor(0x5865f2).setTitle(`${user.username || user.id}'s Level Stats`)
+                    .setDescription(`Rank **#${this.memberRank(interaction.guildId, row)}** · Level **${row.level}**\n${row.xp} / ${nextXp} XP`)
+                    .addFields(
+                        { name: 'Text Stats', value: `XP: \`${row.text_xp}\`\nMessages: \`${row.message_count}\``, inline: true },
+                        { name: 'Voice Stats', value: `XP: \`${row.voice_xp}\`\nTime Spent: \`${Math.floor(row.voice_seconds / 60)} minutes\``, inline: true }
+                    );
+                return interaction.reply({ embeds: [embed], flags: privateReply ? [MessageFlags.Ephemeral] : [], allowedMentions: { parse: [] } });
+            }
+            const page = interaction.options.getInteger?.('page') || 1;
+            if (action === 'leaderboard') {
+                const metric = interaction.options.getString?.('metric') || 'total';
+                const column = { total: 'xp', text: 'text_xp', voice: 'voice_xp' }[metric];
+                const rows = this.sqlite.prepare(`
+                    SELECT user_id, ${column} AS score FROM member_levels WHERE guild_id = ?
+                    ORDER BY ${column} DESC, user_id ASC LIMIT 10 OFFSET ?
+                `).all(interaction.guildId, (page - 1) * 10);
+                const content = rows.length
+                    ? rows.map((row, index) => `**${(page - 1) * 10 + index + 1}.** <@${row.user_id}> — **${row.score}** ${metric} XP`).join('\n')
+                    : 'No one has earned any XP yet.';
+                return interaction.reply({ content, flags: privateReply ? [MessageFlags.Ephemeral] : [], allowedMentions: { parse: [] } });
+            }
+            const rewards = this.sqlite.prepare(`
+                SELECT level, role_id FROM level_role_rewards WHERE guild_id = ?
+                ORDER BY level LIMIT 10 OFFSET ?
+            `).all(interaction.guildId, (page - 1) * 10);
+            const content = rewards.length
+                ? rewards.map(reward => `Level **${reward.level}** — <@&${reward.role_id}>`).join('\n')
+                : 'No level role rewards have been configured.';
+            return interaction.reply({ content, flags: privateReply ? [MessageFlags.Ephemeral] : [], allowedMentions: { parse: [] } });
+        }
         if (group === 'config') {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
                 throw new Error('You need Manage Server to configure levels.');
@@ -518,6 +591,70 @@ class LevelAnalyticsService {
                 flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
             });
         }
+        if (group === 'reward') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)
+                || !interaction.member.permissions.has(PermissionFlagsBits.ManageRoles)) {
+                throw new Error('You need Manage Server and Manage Roles to manage level rewards.');
+            }
+            const bot = interaction.guild.members.me;
+            if (!bot.permissions.has(PermissionFlagsBits.ManageRoles)) {
+                throw new Error('I need Manage Roles to manage level rewards.');
+            }
+            if (action === 'stack') {
+                const enabled = interaction.options.getString('mode', true) === 'on';
+                this.sqlite.prepare(`INSERT OR IGNORE INTO level_configs (guild_id, updated_at) VALUES (?, ?)`)
+                    .run(interaction.guildId, this.now());
+                this.sqlite.prepare(`UPDATE level_configs SET stack_roles = ?, updated_at = ? WHERE guild_id = ?`)
+                    .run(enabled ? 1 : 0, this.now(), interaction.guildId);
+                return interaction.reply({
+                    content: `Stacking of level roles has been **${enabled ? 'enabled' : 'disabled'}**.`,
+                    flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+                });
+            }
+            if (action === 'sync') {
+                const members = await interaction.guild.members.fetch();
+                let count = 0;
+                for (const member of members.values()) {
+                    if (!member.user.bot) {
+                        await this.reconcileMemberRoles(member);
+                        count += 1;
+                    }
+                }
+                return interaction.reply({
+                    content: `Synced level roles for **${count}** members.`,
+                    flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+                });
+            }
+            const role = interaction.options.getRole('role', true);
+            const level = interaction.options.getInteger('level', true);
+            if (role.managed || role.id === interaction.guild.id
+                || bot.roles.highest.comparePositionTo(role) <= 0
+                || interaction.member.roles?.highest?.comparePositionTo(role) <= 0) {
+                throw new Error('That role must be below both your highest role and mine.');
+            }
+            if (action === 'add') {
+                const count = this.sqlite.prepare(`SELECT COUNT(*) AS count FROM level_role_rewards WHERE guild_id = ?`)
+                    .get(interaction.guildId).count;
+                const existing = this.sqlite.prepare(`SELECT 1 FROM level_role_rewards WHERE guild_id = ? AND level = ?`)
+                    .get(interaction.guildId, level);
+                if (!existing && count >= 50) throw new Error('A server can configure at most 50 level rewards.');
+                this.sqlite.prepare(`
+                    INSERT INTO level_role_rewards (guild_id, level, role_id, created_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(guild_id, level) DO UPDATE SET role_id = excluded.role_id
+                `).run(interaction.guildId, level, role.id, this.now());
+                return interaction.reply({
+                    content: `Added <@&${role.id}> as reward for level **${level}**.`,
+                    flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+                });
+            }
+            this.sqlite.prepare(`DELETE FROM level_role_rewards WHERE guild_id = ? AND level = ? AND role_id = ?`)
+                .run(interaction.guildId, level, role.id);
+            return interaction.reply({
+                content: `Removed level role configuration for level **${level}**.`,
+                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+            });
+        }
         if (group === 'ignore') {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
                 throw new Error('You need Manage Server to configure XP exclusions.');
@@ -602,6 +739,10 @@ class LevelAnalyticsService {
                     level_floor = ?, updated_at = ?
                 WHERE guild_id = ? AND user_id = ?
             `).run(total, level, manual, floor, now, interaction.guildId, user.id);
+            const member = interaction.guild?.members?.fetch
+                ? await interaction.guild.members.fetch(user.id).catch(() => null)
+                : null;
+            if (member) await this.reconcileMemberRoles(member);
             return interaction.reply({
                 content,
                 flags: [MessageFlags.Ephemeral],
