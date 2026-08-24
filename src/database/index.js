@@ -85,7 +85,13 @@ function createFreshSchema() {
             for (const index of table.indexes) {
                 const unique = index.config.unique ? 'UNIQUE ' : '';
                 const columns = index.config.columns.map(column => sqlIdentifier(column.name)).join(', ');
-                sqlite.exec(`CREATE ${unique}INDEX ${sqlIdentifier(index.config.name)} ON ${sqlIdentifier(table.name)} (${columns})`);
+                let where = '';
+                if (index.config.where) {
+                    const query = db.dialect.sqlToQuery(index.config.where);
+                    if (query.params.length) throw new Error(`Fresh-schema index ${index.config.name} must not use parameters`);
+                    where = ` WHERE ${query.sql.replaceAll(`${sqlIdentifier(table.name)}.`, '')}`;
+                }
+                sqlite.exec(`CREATE ${unique}INDEX ${sqlIdentifier(index.config.name)} ON ${sqlIdentifier(table.name)} (${columns})${where}`);
             }
         }
 

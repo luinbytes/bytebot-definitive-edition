@@ -41,6 +41,8 @@ describe('database migrations', () => {
         expect(database.sqlite.prepare("PRAGMA table_info('economy_accounts')").all()
             .filter(column => column.pk > 0).map(column => column.name))
             .toEqual(['scope_type', 'scope_id', 'user_id']);
+        expect(database.sqlite.prepare("PRAGMA index_list('economy_shop_purchases')").all())
+            .toContainEqual(expect.objectContaining({ name: 'economy_shop_purchases_one_pending_item', unique: 1, partial: 1 }));
         expect(() => database.sqlite.prepare(`INSERT INTO economy_accounts
             (scope_type, scope_id, user_id, wallet, bank, created_at, updated_at)
             VALUES ('guild', 'guild1', 'user1', -1, 0, 1, 1)`).run()).toThrow();
@@ -72,6 +74,8 @@ describe('database migrations', () => {
             .toEqual(['scope_type', 'scope_id', 'user_id']);
         expect(database.sqlite.prepare("PRAGMA index_list('economy_ledger')").all().map(index => index.name))
             .toEqual(expect.arrayContaining(['economy_ledger_transaction_idx', 'economy_ledger_account_idx']));
+        expect(database.sqlite.prepare("PRAGMA index_list('economy_shop_purchases')").all())
+            .toContainEqual(expect.objectContaining({ name: 'economy_shop_purchases_one_pending_item', unique: 1, partial: 1 }));
         const insert = database.sqlite.prepare(`INSERT INTO economy_jobs
             (guild_id, name, minimum, maximum, cooldown_seconds, created_by, created_at, updated_at)
             VALUES ('guild1', 'worker2', 1, 2, 60, 'admin1', 1, 1)`);

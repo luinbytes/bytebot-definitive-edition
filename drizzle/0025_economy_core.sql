@@ -137,3 +137,5 @@ CREATE TABLE `economy_shop_purchases` (
 );
 --> statement-breakpoint
 CREATE INDEX `economy_shop_purchases_pending_idx` ON `economy_shop_purchases` (`status`, `guild_id`, `id`);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `economy_shop_purchases_one_pending_item` ON `economy_shop_purchases` (`guild_id`, `user_id`, `item_id`) WHERE `status` = 'pending';

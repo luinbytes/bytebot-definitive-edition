@@ -1,5 +1,5 @@
 const { sql } = require('drizzle-orm');
-const { sqliteTable, text, integer, real, index, unique, primaryKey, check } = require('drizzle-orm/sqlite-core');
+const { sqliteTable, text, integer, real, index, uniqueIndex, unique, primaryKey, check } = require('drizzle-orm/sqlite-core');
 
 const guilds = sqliteTable('guilds', {
     id: text('id').primaryKey(),
@@ -1304,7 +1304,11 @@ const economyShopPurchases = sqliteTable('economy_shop_purchases', {
     updatedAt: integer('updated_at').notNull(),
     deliveredAt: integer('delivered_at'),
     reversedAt: integer('reversed_at')
-}, table => ({ pendingIdx: index('economy_shop_purchases_pending_idx').on(table.status, table.guildId, table.id) }));
+}, table => ({
+    pendingIdx: index('economy_shop_purchases_pending_idx').on(table.status, table.guildId, table.id),
+    onePendingItem: uniqueIndex('economy_shop_purchases_one_pending_item')
+        .on(table.guildId, table.userId, table.itemId).where(sql`${table.status} = 'pending'`)
+}));
 
 module.exports = {
     guilds,

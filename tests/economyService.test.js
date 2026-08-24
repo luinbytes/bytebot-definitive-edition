@@ -141,6 +141,7 @@ describe('economy service', () => {
             .toThrow('global economy only uses');
         expect(service.work({ guildId: 'guild2', userId: 'user1', ...ages }))
             .toMatchObject({ amount: 150, baseAmount: 100, wallet: 150, job: 'worker' });
+        expect(() => service.work({ guildId: 'guild3', userId: 'user1', ...ages })).toThrow('cooldown');
     });
 
     test('delivers guild shop roles idempotently and reverses only a proven failed delivery', async () => {
@@ -202,20 +203,56 @@ describe('economy service', () => {
         expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(60);
     });
 
+    test('reconciles an uncertain role purchase before allowing another debit', async () => {
+        service.enable('guild1', 'admin1');
+        service.configure('guild1', 'admin1', { startingBalance: 100 });
+        service.open({ guildId: 'guild1', userId: 'user1' });
+        const item = service.addShopItem({ guildId: 'guild1', actorId: 'admin1', roleId: 'role1', roleName: 'VIP', price: 40 });
+        const role = { id: 'role1', editable: true, managed: false, permissions: { has: () => false } };
+        const roles = new Map();
+        const member = {
+            roles: {
+                cache: roles,
+                add: jest.fn(async assigned => {
+                    roles.set(assigned.id, assigned);
+                    throw new Error('Discord timed out');
+                })
+            }
+        };
+        const guild = {
+            id: 'guild1', roles: { everyone: { id: 'guild1' }, cache: new Map([[role.id, role]]) },
+            members: { me: { permissions: { has: () => true } }, fetch: jest.fn() }
+        };
+        guild.members.fetch
+            .mockResolvedValueOnce(member)
+            .mockRejectedValueOnce(new Error('Discord unavailable'))
+            .mockResolvedValue(member);
+
+        await expect(service.buyShopItem({ guild, userId: 'user1', itemId: item.id, member }))
+            .rejects.toThrow('pending');
+        expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(60);
+
+        guild.members.fetch.mockResolvedValue(member);
+        await expect(service.buyShopItem({ guild, userId: 'user1', itemId: item.id, member }))
+            .resolves.toMatchObject({ status: 'delivered', price: 40 });
+        expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(60);
+        expect(member.roles.add).toHaveBeenCalledTimes(1);
+    });
+
     test('rejects a 31st earning guild without paying it', () => {
         const ages = { guildCreatedAt: now - 21600000, memberJoinedAt: now - 21600000 };
-        service.enable('guild1', 'admin1');
-        service.setMode('user1', 'global');
-        service.open({ guildId: 'guild1', userId: 'user1' });
 
         for (let index = 1; index <= 31; index++) {
             const guildId = `guild${index}`;
+            service.enable(guildId, `admin${index}`);
+            service.open({ guildId, userId: 'user1' });
             const action = () => service.work({ guildId, userId: 'user1', ...ages });
             if (index <= 30) expect(action()).toMatchObject({ amount: 150 });
             else expect(action).toThrow('at most 30 servers');
         }
 
-        expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(4500);
+        expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(150);
+        expect(service.balance({ guildId: 'guild31', userId: 'user1' }).wallet).toBe(0);
     });
 
     test('binds destructive operations to a single-use exact-plan confirmation', () => {

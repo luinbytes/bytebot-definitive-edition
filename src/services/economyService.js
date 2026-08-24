@@ -461,7 +461,6 @@ class EconomyService {
         const job = scope.scopeType === 'global' ? DEFAULT_JOB : this.job(values.guildId, values.job);
         const baseAmount = this.randomInt(job.minimum, job.maximum + 1);
         return { ...this.earn({ ...values, action: 'work', subjectId: job.id, baseAmount,
-            cooldownSubjectId: `${values.guildId}:${job.id}`,
             cooldownMs: job.cooldownSeconds * 1000 }), job: job.name };
     }
 
@@ -511,6 +510,9 @@ class EconomyService {
             const { scopeType, scopeId } = scope;
             if (scopeType !== 'guild') throw new Error('The role shop is only available in guild mode.');
             this.requireEnabled(guildId);
+            if (this.pendingPurchase(guildId, userId, item.id)) {
+                throw new Error('This role purchase is pending reconciliation.');
+            }
             const account = this.account(scope, userId);
             const transactionId = this.randomUUID();
             this.apply(account, {
@@ -536,6 +538,13 @@ class EconomyService {
             userId: row.user_id, scopeType: row.scope_type, scopeId: row.scope_id,
             roleId: row.role_id, price: row.price, status: row.status, error: row.error
         };
+    }
+
+    pendingPurchase(guildId, userId, itemId) {
+        const row = this.sqlite.prepare(`SELECT id FROM economy_shop_purchases
+            WHERE guild_id = ? AND user_id = ? AND item_id = ? AND status = 'pending'
+            ORDER BY created_at, id LIMIT 1`).get(guildId, userId, itemId);
+        return row ? this.purchase(row.id) : null;
     }
 
     markPurchase(id, status, error = null) {
@@ -605,10 +614,25 @@ class EconomyService {
         return { reconciled, pending };
     }
 
+    async reconcileGuildPurchases(guild) {
+        const purchases = this.sqlite.prepare(`SELECT id FROM economy_shop_purchases
+            WHERE guild_id = ? AND status = 'pending' ORDER BY created_at, id`).all(guild.id);
+        for (const { id } of purchases) {
+            try { await this.reconcilePurchase(this.purchase(id), guild); } catch {
+                // Uncertain Discord state remains pending for the next reconciliation.
+            }
+        }
+    }
+
     async buyShopItem({ guild, userId, itemId, member }) {
         const item = this.shopItem(guild.id, itemId);
         const role = guild.roles.cache.get(item.role_id);
         this.checkShopRole(guild, role);
+        const pending = this.pendingPurchase(guild.id, userId, item.id);
+        if (pending) {
+            const reconciled = await this.reconcilePurchase(pending, guild, member);
+            if (reconciled.status === 'delivered') return reconciled;
+        }
         if (member.roles.cache.has(role.id)) throw new Error('You already have that role.');
         const purchase = this.reservePurchase({ guildId: guild.id, userId, item });
         const result = await this.reconcilePurchase(purchase, guild, member);
@@ -784,6 +808,7 @@ class EconomyService {
             }
             if (group === 'shop') {
                 if (subcommand === 'list') {
+                    await this.reconcileGuildPurchases(interaction.guild);
                     const items = this.listShopItems(guildId);
                     return this.respond(interaction, items.length
                         ? items.map(item => `**#${item.id}** <@&${item.roleId}> — ${item.price}`).join('\n')
