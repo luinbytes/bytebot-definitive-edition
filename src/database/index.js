@@ -509,6 +509,7 @@ const expectedSchema = {
         user_id: 'TEXT NOT NULL',
         effect: 'TEXT NOT NULL',
         state: "TEXT DEFAULT 'active' NOT NULL",
+        generation: 'INTEGER DEFAULT 0 NOT NULL',
         updated_at: 'INTEGER NOT NULL'
     },
     voice_master_join_roles: {
@@ -516,6 +517,8 @@ const expectedSchema = {
         channel_id: 'TEXT NOT NULL',
         member_id: 'TEXT NOT NULL',
         role_id: 'TEXT NOT NULL',
+        state: "TEXT DEFAULT 'active' NOT NULL",
+        added_by_bot: 'INTEGER DEFAULT 0 NOT NULL',
         updated_at: 'INTEGER NOT NULL'
     },
     bytepod_autowhitelist: {

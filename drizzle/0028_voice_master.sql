@@ -27,7 +27,7 @@ CREATE TABLE `voice_master_sources` (
     `is_primary` integer DEFAULT 0 NOT NULL,
     `owned` integer DEFAULT 0 NOT NULL,
     `created_at` integer NOT NULL,
-    CONSTRAINT `voice_master_sources_state_check` CHECK (`state` IN ('active','lost'))
+    CONSTRAINT `voice_master_sources_state_check` CHECK (`state` IN ('pending','active','lost'))
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `voice_master_sources_primary_unique` ON `voice_master_sources` (`guild_id`) WHERE `is_primary` = 1;
@@ -53,6 +53,7 @@ CREATE TABLE `voice_master_access` (
     `user_id` text NOT NULL,
     `effect` text NOT NULL,
     `state` text DEFAULT 'active' NOT NULL,
+    `generation` integer DEFAULT 0 NOT NULL,
     `updated_at` integer NOT NULL,
     PRIMARY KEY (`guild_id`,`channel_id`,`user_id`),
     CONSTRAINT `voice_master_access_effect_check` CHECK (`effect` IN ('permit','reject')),
@@ -64,6 +65,9 @@ CREATE TABLE `voice_master_join_roles` (
     `channel_id` text NOT NULL,
     `member_id` text NOT NULL,
     `role_id` text NOT NULL,
+    `state` text DEFAULT 'active' NOT NULL,
+    `added_by_bot` integer DEFAULT 0 NOT NULL,
     `updated_at` integer NOT NULL,
-    PRIMARY KEY (`guild_id`,`channel_id`,`member_id`)
+    PRIMARY KEY (`guild_id`,`channel_id`,`member_id`),
+    CONSTRAINT `voice_master_join_roles_state_check` CHECK (`state` IN ('pending','active'))
 );

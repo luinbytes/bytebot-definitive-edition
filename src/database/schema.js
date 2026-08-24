@@ -52,7 +52,7 @@ const voiceMasterSources = sqliteTable('voice_master_sources', {
     owned: integer('owned', { mode: 'boolean' }).default(false).notNull(),
     createdAt: integer('created_at').notNull(),
 }, table => ({
-    stateCheck: check('voice_master_sources_state_check', sql`${table.state} IN ('active','lost')`),
+    stateCheck: check('voice_master_sources_state_check', sql`${table.state} IN ('pending','active','lost')`),
     primaryUnique: uniqueIndex('voice_master_sources_primary_unique').on(table.guildId).where(sql`${table.isPrimary} = 1`),
     guildIdx: index('voice_master_sources_guild_idx').on(table.guildId, table.channelId),
 }));
@@ -77,6 +77,7 @@ const voiceMasterAccess = sqliteTable('voice_master_access', {
     userId: text('user_id').notNull(),
     effect: text('effect').notNull(),
     state: text('state').default('active').notNull(),
+    generation: integer('generation').default(0).notNull(),
     updatedAt: integer('updated_at').notNull(),
 }, table => ({
     pk: primaryKey({ columns: [table.guildId, table.channelId, table.userId] }),
@@ -89,9 +90,12 @@ const voiceMasterJoinRoles = sqliteTable('voice_master_join_roles', {
     channelId: text('channel_id').notNull(),
     memberId: text('member_id').notNull(),
     roleId: text('role_id').notNull(),
+    state: text('state').default('active').notNull(),
+    addedByBot: integer('added_by_bot', { mode: 'boolean' }).default(false).notNull(),
     updatedAt: integer('updated_at').notNull(),
 }, table => ({
     pk: primaryKey({ columns: [table.guildId, table.channelId, table.memberId] }),
+    stateCheck: check('voice_master_join_roles_state_check', sql`${table.state} IN ('pending','active')`),
 }));
 
 const lifecycleMessages = sqliteTable('lifecycle_messages', {
