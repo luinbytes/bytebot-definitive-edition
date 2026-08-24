@@ -24,6 +24,17 @@ module.exports = {
             return;
         }
         processedInteractions.add(interaction.id);
+        if (interaction.customId?.startsWith('economy:')
+            && (interaction.isButton() || interaction.isStringSelectMenu())) {
+            if (!client.economyService) {
+                return interaction.reply({
+                    embeds: [embeds.error('Economy Unavailable', 'Economy is temporarily unavailable.')],
+                    flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+                }).catch(() => null);
+            }
+            await client.economyService.handleInteraction(interaction);
+            return;
+        }
         if (interaction.isButton() && interaction.customId.startsWith('giveaway:')) {
             if (!client.giveawayService) {
                 return interaction.reply({ content: 'Giveaway service is temporarily unavailable.', flags: [MessageFlags.Ephemeral] }).catch(() => null);

@@ -50,7 +50,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | `auto` | 55 | #42 | `complete` — responders, reactions, member roles, tracking, vanity, and join notification families are reconciled |
 | `boosters` | 3 | #43 | `complete` — current/lost booster views and the full custom booster-role lifecycle are reconciled |
 | `developer` | 4 | #64 | `evidence-gap` — absent from the live public category list and may be internal-only |
-| `economy` | 50 | #48, #49 | `partial` — #48 core and cross-locale account/admin surfaces are implemented; #49 owns the remaining games/progression/gang/ranking files |
+| `economy` | 50 | #48, #49 | `complete` — accounts, banking, earnings, games, crime/robbery, gangs, laboratories, rankings, shops, and administration are reconciled; unpublished algorithms remain visibly ByteBot-owned |
 | `fun` | 71 | #35, #54, #56 | `partial` |
 | `information` | 48 | #51 | `partial` |
 | `lastfm` | 22 | #57 | `tracked` |
@@ -95,6 +95,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | Giveaways with eligibility, weighted entries, templates, edits, DMs, auditable restart-safe winner rounds and rerolls; metric counters for members, bots, online, and voice | #46 | Advances live Server/Utility and pinned `server`/`utility`; both remain `partial` while their other mapped issues are open. | `tests/giveawayPlatform.test.js`, `tests/automationPlatform.test.js`, `tests/events.test.js`, `tests/databaseMigrations.test.js`, and `tests/schema.test.js` |
 | Versioned guild backups with previewed merge/destructive restore, per-server bot profiles and presets, opt-in ByteBot discovery, hourly bumps, and 1–1095 day real-row server cards | #47 | Advances live Server/Information and pinned `server`/`information`; exact Greed discovery/card commands and font/effect values remain an explicit evidence gap. | `tests/guildBackupService.test.js`, `tests/serverPresentation.test.js`, `tests/statsCommand.test.js`, `tests/commandHubs.test.js`, `tests/databaseMigrations.test.js`, and `tests/schema.test.js` |
 | Guild/global accounts, wallet/bank, exact ledger and circulation, 1.5x daily/work earnings, anti-abuse guards, jobs, role shops, configuration, grants/removals, and confirmed reset/destroy/disable | #48 | Advances live and pinned Economy to `partial`; #49 owns every remaining game, lab, gang, crime/robbery, ladder, and leaderboard surface. | `tests/economyService.test.js`, `tests/economyCommand.test.js`, `tests/helpParity.test.js`, `tests/databaseMigrations.test.js`, and `tests/schema.test.js` |
+| Twelve wager games with durable interactive sessions, crime/robbery, race-safe gangs, passive-income laboratories, and committed guild rankings | #49 | Completes all 50 pinned Economy files. Public names, bounds, and errors match first-party evidence; unpublished odds/progression use the frozen ByteBot-owned rules contract. | `tests/economyProgression.test.js`, `tests/economyCommand.test.js`, `tests/helpParity.test.js`, `tests/interactionAcknowledgement.test.js`, `tests/databaseMigrations.test.js`, and `tests/schema.test.js` |
 
 ## Update rule
 

@@ -17,6 +17,16 @@ with `/economy enable`; members then create an account with `/economy open`.
   member in the same selected scope.
 - `/economy job list` and `/economy shop list|buy` expose guild jobs and the
   guild's role shop.
+- `/economy game` contains coinflip, dice, gamble, roulette, highlow, slots,
+  plinko, bombs, ladder, crash, scratch, and blackjack. Bets use the public
+  10–1,000,000 bound; odds and payout tables are visibly ByteBot-owned.
+- `/economy crime` and `/economy rob` use persisted one-hour/two-hour
+  cooldowns. Robbery touches wallets only, so banked currency stays safe.
+- `/economy leaderboard` shows committed guild totals in deterministic order.
+- `/economy gang` provides create, info, invite, promote, transfer, banner,
+  leave, and disband workflows with durable user-bound invites.
+- `/economy lab` provides one wallet-funded passive-income laboratory per
+  guild account with fixed, visible ByteBot-owned costs and progression.
 
 Daily and work earnings share a user-wide 50,000-per-UTC-day ceiling, a
 30-guild-per-day guard, and the public six-hour server/member age gate. The
@@ -48,7 +58,9 @@ timeouts remain pending and are reconciled on startup rather than guessing.
 to the actor, guild, action, reason, target, amount, and current account plan.
 The code expires after ten minutes, is single-use, and fails if the plan
 changes. Reset and destroy write immutable burn entries; disabling preserves
-all data.
+all data. Disable refunds active game wagers and pauses laboratory accrual;
+reset forfeits the target's active game and removes its lab while preserving
+immutable ledger and operation-replay records.
 
 ## Ledger model
 
@@ -59,6 +71,8 @@ scope totals as decimal `BigInt` values in the same transaction. Current
 circulation and ranks remain under a JavaScript-safe per-scope supply ceiling;
 lifetime totals are never read through a lossy numeric `SUM`.
 
-Issue #49 extends this same ledger with the publicly evidenced games, crime,
-robbery, laboratories, gangs, and leaderboards. `bal` is recorded as the
+Game wagers and lab purchases are declared burns; returns, refunds, and lab
+collections are declared mints. Robbery is a paired zero-supply transfer.
+Interactive games and gang invites use durable, actor-bound component state,
+and startup refunds only expired active wagers once. `bal` is recorded as the
 prefix-style alias of `/economy balance`; Discord has no slash alias field.

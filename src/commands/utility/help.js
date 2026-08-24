@@ -90,7 +90,10 @@ async function showCommandDetails(interaction, client, commandName) {
     }
 
     if (commandData.name === 'economy') {
-        embed.addFields({ name: 'Compatibility', value: '`bal` maps to `/economy balance`.' });
+        embed.addFields({
+            name: 'Compatibility',
+            value: '`bal` maps to `/economy balance`. Games use the public 10–1,000,000 bet bound; odds, crime/rob cooldowns, gang limits, and lab progression are documented ByteBot-owned rules. Member paths include `/economy game`, `crime`, `rob`, `leaderboard`, `gang`, and `lab`; gang owner/admin checks apply inside their exact paths.'
+        });
     }
 
     return interaction.reply({
@@ -197,7 +200,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/server` setup, lifecycle messages, suggestions, starboard, achievements, security\n' +
                     '`/pod` BytePod actions and settings\n' +
                     '`/mod` member actions, cases, invoke templates, setup, logs, and channel controls\n' +
-                    '`/economy` balances, banking, earnings, jobs, role shops, and administration\n' +
+                    '`/economy` balances, games, crime, gangs, labs, role shops, and administration\n' +
                     '`/game` F1 and War Thunder\n' +
                     '`/bot` help, health, deployment, and developer tools',
                 inline: false
@@ -214,7 +217,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/reactionrole add` • `/buttonrole add` • `/temprole add` • `/boosterrole create`\n' +
                     '`/ticket setup` • `/ticket panel manage` • `/ticket settings view`\n' +
                     '`/giveaway start` • `/giveaway edit prize` • `/counter add`\n' +
-                    '`/economy balance` • `/economy daily` • `/economy shop list`\n' +
+                    '`/economy balance` • `/economy game coinflip` • `/economy gang info` • `/economy lab status`\n' +
                     '`/server backup create` • `/server customize preset` • `/server discovery publish`\n' +
                     '`/server stats days:60`\n' +
                     '`/mod user warn` • `/mod case view` • `/mod config setup`\n' +

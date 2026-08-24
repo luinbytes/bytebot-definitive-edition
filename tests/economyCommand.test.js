@@ -16,10 +16,17 @@ describe('economy command', () => {
         expect(command.permissions).toEqual([]);
         expect(direct).toEqual([
             'open', 'balance', 'mode', 'deposit', 'withdraw', 'daily', 'work', 'transfer',
-            'config', 'circulation', 'enable', 'preset', 'grant', 'remove', 'reset', 'destroy', 'disable'
+            'config', 'circulation', 'enable', 'preset', 'grant', 'remove', 'reset', 'destroy', 'disable',
+            'crime', 'rob', 'leaderboard'
         ]);
-        expect(groups).toEqual({ job: ['list', 'add', 'remove'], shop: ['list', 'buy', 'add', 'remove'] });
-        expect(json.options).toHaveLength(19);
+        expect(groups).toEqual({
+            job: ['list', 'add', 'remove'],
+            shop: ['list', 'buy', 'add', 'remove'],
+            game: ['coinflip', 'dice', 'gamble', 'roulette', 'highlow', 'slots', 'plinko', 'bombs', 'ladder', 'crash', 'scratch', 'blackjack'],
+            gang: ['create', 'disband', 'info', 'invite', 'leave', 'promote', 'transfer', 'setbanner'],
+            lab: ['buy', 'status', 'upgrade', 'ampoules', 'collect']
+        });
+        expect(json.options).toHaveLength(25);
         expect(PermissionFlagsBits.ManageGuild).toBeDefined();
     });
 
@@ -30,7 +37,10 @@ describe('economy command', () => {
         const database = require('../src/database');
         await database.runMigrations();
         const { EconomyService } = require('../src/services/economyService');
-        const service = new EconomyService({ sqlite: database.sqlite, now: () => Date.UTC(2026, 0, 1, 12) });
+        const service = new EconomyService({
+            sqlite: database.sqlite, now: () => Date.UTC(2026, 0, 1, 12),
+            randomInt: minimum => minimum, randomBytes: () => Buffer.from('economy-command')
+        });
         const command = require('../src/commands/economy/economy');
         service.enable('guild1', 'admin1');
         service.configure('guild1', 'admin1', { startingBalance: 100 });
@@ -38,13 +48,14 @@ describe('economy command', () => {
         service.open({ guildId: 'guild1', userId: 'user2' });
 
         const interaction = (subcommand, values = {}, canManage = false) => ({
+            id: values.id || `interaction-${subcommand}`,
             guildId: 'guild1', guild: { id: 'guild1', createdTimestamp: Date.UTC(2025, 0, 1) },
             user: { id: 'user1', bot: false }, member: {
                 id: 'user1', joinedTimestamp: Date.UTC(2025, 0, 1),
                 permissions: { has: permission => canManage && permission === PermissionFlagsBits.ManageGuild }
             },
             options: {
-                getSubcommandGroup: () => null, getSubcommand: () => subcommand,
+                getSubcommandGroup: () => values.group || null, getSubcommand: () => subcommand,
                 getString: name => values[name] ?? null, getInteger: name => values[name] ?? null,
                 getBoolean: name => values[name] ?? null, getUser: name => values[name] ?? null,
                 getMember: name => values[`${name}GuildMember`] ?? null,
@@ -80,6 +91,19 @@ describe('economy command', () => {
         await command.execute(denied, { economyService: service });
         expect(denied.reply.mock.calls[0][0].embeds[0].data.description).toContain('Manage Server');
         expect(service.config('guild1').currency_name).toBe('coins');
+
+        const game = interaction('ladder', { group: 'game', amount: 10 });
+        await command.execute(game, { economyService: service });
+        expect(game.reply.mock.calls[0][0].embeds[0].data.description).toContain('ByteBot-owned rules');
+        expect(game.reply.mock.calls[0][0].components).toHaveLength(1);
+        expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(90);
+
+        service.createGang({ guildId: 'guild1', userId: 'user1', name: 'BYTE' });
+        const gangInfo = interaction('info', { group: 'gang' });
+        await command.execute(gangInfo, { economyService: service });
+        const gangDescription = gangInfo.reply.mock.calls[0][0].embeds[0].data.description;
+        expect(gangDescription).toContain('Created: <t:');
+        expect(gangDescription).toContain('<@user1> — owner');
 
         database.sqlite.close();
         delete process.env.DATABASE_URL;

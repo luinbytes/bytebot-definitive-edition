@@ -77,6 +77,13 @@ function createFreshSchema() {
                 if (query.params.length) throw new Error(`Fresh-schema check ${constraint.name} must not use parameters`);
                 definitions.push(`CONSTRAINT ${sqlIdentifier(constraint.name)} CHECK (${query.sql.replaceAll(`${sqlIdentifier(table.name)}.`, '')})`);
             }
+            for (const foreignKey of table.foreignKeys) {
+                const reference = foreignKey.reference();
+                const foreignTableName = reference.foreignTable[Symbol.for('drizzle:Name')];
+                const onDelete = foreignKey.onDelete ? ` ON DELETE ${foreignKey.onDelete.toUpperCase()}` : '';
+                const onUpdate = foreignKey.onUpdate ? ` ON UPDATE ${foreignKey.onUpdate.toUpperCase()}` : '';
+                definitions.push(`CONSTRAINT ${sqlIdentifier(foreignKey.getName())} FOREIGN KEY (${reference.columns.map(column => sqlIdentifier(column.name)).join(', ')}) REFERENCES ${sqlIdentifier(foreignTableName)} (${reference.foreignColumns.map(column => sqlIdentifier(column.name)).join(', ')})${onDelete}${onUpdate}`);
+            }
 
             sqlite.exec(`CREATE TABLE ${sqlIdentifier(table.name)} (${definitions.join(', ')})`);
         }
@@ -1116,6 +1123,75 @@ const expectedSchema = {
         updated_at: 'INTEGER NOT NULL',
         delivered_at: 'INTEGER',
         reversed_at: 'INTEGER'
+    },
+    economy_game_sessions: {
+        id: 'TEXT PRIMARY KEY',
+        guild_id: 'TEXT NOT NULL',
+        scope_type: "TEXT DEFAULT 'guild' NOT NULL",
+        scope_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        game: 'TEXT NOT NULL',
+        bet: 'INTEGER NOT NULL',
+        state_json: "TEXT DEFAULT '{}' NOT NULL",
+        status: 'TEXT NOT NULL',
+        nonce: 'TEXT NOT NULL',
+        transaction_id: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL',
+        expires_at: 'INTEGER NOT NULL',
+        settled_at: 'INTEGER',
+        settlement_amount: 'INTEGER'
+    },
+    economy_gangs: {
+        id: 'TEXT PRIMARY KEY',
+        guild_id: 'TEXT NOT NULL',
+        name: 'TEXT NOT NULL',
+        owner_id: 'TEXT NOT NULL',
+        banner_url: 'TEXT',
+        created_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    economy_gang_members: {
+        guild_id: 'TEXT NOT NULL',
+        gang_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        role: 'TEXT NOT NULL',
+        joined_at: 'INTEGER NOT NULL'
+    },
+    economy_gang_invites: {
+        id: 'TEXT PRIMARY KEY',
+        guild_id: 'TEXT NOT NULL',
+        gang_id: 'TEXT',
+        inviter_id: 'TEXT NOT NULL',
+        invitee_id: 'TEXT NOT NULL',
+        status: "TEXT DEFAULT 'pending' NOT NULL",
+        nonce: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL',
+        expires_at: 'INTEGER NOT NULL',
+        acted_at: 'INTEGER'
+    },
+    economy_labs: {
+        id: 'TEXT PRIMARY KEY',
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        level: 'INTEGER DEFAULT 1 NOT NULL',
+        ampoules: 'INTEGER DEFAULT 1 NOT NULL',
+        stored_amount: 'INTEGER DEFAULT 0 NOT NULL',
+        storage_cap: 'INTEGER DEFAULT 1000 NOT NULL',
+        last_accrual_at: 'INTEGER NOT NULL',
+        paused_at: 'INTEGER',
+        created_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    economy_lab_operations: {
+        operation_id: 'TEXT PRIMARY KEY',
+        lab_id: 'TEXT',
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        kind: 'TEXT NOT NULL',
+        input_amount: 'INTEGER DEFAULT 0 NOT NULL',
+        result_amount: 'INTEGER DEFAULT 0 NOT NULL',
+        result_json: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
     }
 };
 
@@ -1165,7 +1241,9 @@ const compatibilityUniqueKeys = {
     economy_earning_guilds: ['user_id', 'utc_day', 'guild_id'],
     economy_action_cooldowns: ['user_id', 'action', 'scope_type', 'scope_id', 'subject_id'],
     economy_jobs: ['guild_id', 'name'],
-    economy_shop_items: ['guild_id', 'role_id']
+    economy_shop_items: ['guild_id', 'role_id'],
+    economy_gang_members: ['guild_id', 'user_id'],
+    economy_labs: ['guild_id', 'user_id']
 };
 
 function hasUniqueKey(tableName, columns) {

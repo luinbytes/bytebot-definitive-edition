@@ -10,6 +10,7 @@ const memberAmountReason = sub => sub
     .addStringOption(option => option.setName('reason').setDescription('Audit reason').setMinLength(1).setMaxLength(256).setRequired(true));
 
 const confirmation = sub => sub.addStringOption(option => option.setName('confirmation').setDescription('Code from the exact action preview').setMinLength(10).setMaxLength(10));
+const gameBet = sub => sub.addIntegerOption(option => option.setName('amount').setDescription('Wager from 10 to 1,000,000').setMinValue(10).setMaxValue(1000000).setRequired(true));
 
 const data = new SlashCommandBuilder()
     .setName('economy')
@@ -68,7 +69,51 @@ const data = new SlashCommandBuilder()
             .addRoleOption(option => option.setName('role').setDescription('Role').setRequired(true))
             .addIntegerOption(option => option.setName('price').setDescription('Role price').setMinValue(1).setMaxValue(1000000000000).setRequired(true)))
         .addSubcommand(sub => sub.setName('remove').setDescription('Remove a role from the shop')
-            .addStringOption(option => option.setName('item').setDescription('Shop item ID').setAutocomplete(true).setRequired(true))));
+            .addStringOption(option => option.setName('item').setDescription('Shop item ID').setAutocomplete(true).setRequired(true))))
+    .addSubcommand(sub => sub.setName('crime').setDescription('Attempt a ByteBot-rules crime'))
+    .addSubcommand(sub => sub.setName('rob').setDescription('Attempt to rob a member')
+        .addUserOption(option => option.setName('member').setDescription('Member to rob').setRequired(true)))
+    .addSubcommand(sub => sub.setName('leaderboard').setDescription('View the guild economy leaderboard'))
+    .addSubcommandGroup(group => group.setName('game').setDescription('Play ByteBot-rules economy games')
+        .addSubcommand(sub => gameBet(sub.setName('coinflip').setDescription('Bet on heads or tails')
+            .addStringOption(option => option.setName('side').setDescription('Coin side').setRequired(true)
+                .addChoices({ name: 'Heads', value: 'heads' }, { name: 'Tails', value: 'tails' }))))
+        .addSubcommand(sub => gameBet(sub.setName('dice').setDescription('Roll dice against ByteBot')))
+        .addSubcommand(sub => gameBet(sub.setName('gamble').setDescription('Try the ByteBot multiplier table')))
+        .addSubcommand(sub => gameBet(sub.setName('roulette').setDescription('Play ByteBot roulette')
+            .addStringOption(option => option.setName('bet').setDescription('Roulette bet').setRequired(true)
+                .addChoices(...['red', 'black', 'green', 'odd', 'even'].map(value => ({ name: value, value }))))))
+        .addSubcommand(sub => gameBet(sub.setName('highlow').setDescription('Guess higher or lower')
+            .addStringOption(option => option.setName('guess').setDescription('Card guess').setRequired(true)
+                .addChoices({ name: 'Higher', value: 'higher' }, { name: 'Lower', value: 'lower' }))))
+        .addSubcommand(sub => gameBet(sub.setName('slots').setDescription('Play ByteBot slots')))
+        .addSubcommand(sub => gameBet(sub.setName('plinko').setDescription('Drop a ByteBot plinko chip')))
+        .addSubcommand(sub => gameBet(sub.setName('bombs').setDescription('Reveal cells and avoid bombs')))
+        .addSubcommand(sub => gameBet(sub.setName('ladder').setDescription('Climb for larger returns')))
+        .addSubcommand(sub => gameBet(sub.setName('crash').setDescription('Cash out before the crash')))
+        .addSubcommand(sub => gameBet(sub.setName('scratch').setDescription('Play a scratch-card draw')))
+        .addSubcommand(sub => gameBet(sub.setName('blackjack').setDescription('Play blackjack against ByteBot'))))
+    .addSubcommandGroup(group => group.setName('gang').setDescription('Manage guild-local gangs')
+        .addSubcommand(sub => sub.setName('create').setDescription('Create a gang')
+            .addStringOption(option => option.setName('name').setDescription('1-5 alphanumeric characters').setMinLength(1).setMaxLength(5).setRequired(true)))
+        .addSubcommand(sub => sub.setName('disband').setDescription('Disband your gang'))
+        .addSubcommand(sub => sub.setName('info').setDescription('View your gang'))
+        .addSubcommand(sub => sub.setName('invite').setDescription('Invite a member')
+            .addUserOption(option => option.setName('member').setDescription('Member to invite').setRequired(true)))
+        .addSubcommand(sub => sub.setName('leave').setDescription('Leave your gang'))
+        .addSubcommand(sub => sub.setName('promote').setDescription('Promote a gang member')
+            .addUserOption(option => option.setName('member').setDescription('Member to promote').setRequired(true)))
+        .addSubcommand(sub => sub.setName('transfer').setDescription('Transfer gang ownership')
+            .addUserOption(option => option.setName('member').setDescription('New owner').setRequired(true)))
+        .addSubcommand(sub => sub.setName('setbanner').setDescription('Set an HTTPS gang banner URL')
+            .addStringOption(option => option.setName('url').setDescription('HTTPS image URL').setRequired(true))))
+    .addSubcommandGroup(group => group.setName('lab').setDescription('Manage a ByteBot-rules laboratory')
+        .addSubcommand(sub => sub.setName('buy').setDescription('Buy a laboratory'))
+        .addSubcommand(sub => sub.setName('status').setDescription('View laboratory status'))
+        .addSubcommand(sub => sub.setName('upgrade').setDescription('Upgrade laboratory storage'))
+        .addSubcommand(sub => sub.setName('ampoules').setDescription('Buy 1-5 ampoules')
+            .addIntegerOption(option => option.setName('amount').setDescription('Ampoules to buy').setMinValue(1).setMaxValue(5).setRequired(true)))
+        .addSubcommand(sub => sub.setName('collect').setDescription('Collect laboratory earnings')));
 
 module.exports = {
     data,
@@ -80,5 +125,8 @@ module.exports = {
     },
     autocomplete(interaction, client) {
         return client.economyService?.autocomplete(interaction) || interaction.respond([]);
+    },
+    handleInteraction(interaction, client) {
+        return client.economyService?.handleInteraction(interaction);
     }
 };

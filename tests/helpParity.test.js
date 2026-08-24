@@ -34,6 +34,7 @@ test('/bot help discovers every public Greed category without advertising unfini
     expect(commonPaths.value).toContain('/giveaway start');
     expect(commonPaths.value).toContain('/counter add');
     expect(commonPaths.value).toContain('/economy balance');
+    expect(commonPaths.value).toContain('/economy game coinflip');
     expect(parityField.value).toContain('/economy` Economy');
     expect(parityField.value).toContain('/ticket` Tickets');
 });
@@ -53,4 +54,6 @@ test('/bot help records the Greed bal compatibility mapping', async () => {
         .find(field => field.name === 'Compatibility');
     expect(compatibility.value).toContain('`bal`');
     expect(compatibility.value).toContain('/economy balance');
+    expect(compatibility.value).toContain('/economy game');
+    expect(compatibility.value).toContain('ByteBot-owned');
 });

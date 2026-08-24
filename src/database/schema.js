@@ -1310,6 +1310,107 @@ const economyShopPurchases = sqliteTable('economy_shop_purchases', {
         .on(table.guildId, table.userId, table.itemId).where(sql`${table.status} = 'pending'`)
 }));
 
+const economyGameSessions = sqliteTable('economy_game_sessions', {
+    id: text('id').primaryKey(),
+    guildId: text('guild_id').notNull(),
+    scopeType: text('scope_type').default('guild').notNull(),
+    scopeId: text('scope_id').notNull(),
+    userId: text('user_id').notNull(),
+    game: text('game').notNull(),
+    bet: integer('bet').notNull(),
+    stateJson: text('state_json').default('{}').notNull(),
+    status: text('status').notNull(),
+    nonce: text('nonce').notNull(),
+    transactionId: text('transaction_id').notNull(),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    settledAt: integer('settled_at'),
+    settlementAmount: integer('settlement_amount')
+}, table => ({
+    oneActive: uniqueIndex('economy_game_sessions_one_active')
+        .on(table.guildId, table.userId).where(sql`${table.status} = 'active'`),
+    activeExpiryIdx: index('economy_game_sessions_active_expiry_idx').on(table.status, table.expiresAt),
+    scopeCheck: check('economy_game_sessions_scope_check', sql`${table.scopeType} = 'guild' AND ${table.scopeId} = ${table.guildId}`),
+    betCheck: check('economy_game_sessions_bet_check', sql`${table.bet} BETWEEN 10 AND 1000000`),
+    gameCheck: check('economy_game_sessions_game_check', sql`${table.game} IN ('coinflip','dice','gamble','roulette','highlow','slots','plinko','bombs','ladder','crash','scratch','blackjack')`),
+    statusCheck: check('economy_game_sessions_status_check', sql`${table.status} IN ('active','won','lost','cashed_out','refunded','forfeited')`)
+}));
+
+const economyGangs = sqliteTable('economy_gangs', {
+    id: text('id').primaryKey(),
+    guildId: text('guild_id').notNull(),
+    name: text('name').notNull(),
+    ownerId: text('owner_id').notNull(),
+    bannerUrl: text('banner_url'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({ nameUnique: unique('economy_gangs_name_unique').on(table.guildId, table.name) }));
+
+const economyGangMembers = sqliteTable('economy_gang_members', {
+    guildId: text('guild_id').notNull(),
+    gangId: text('gang_id').notNull().references(() => economyGangs.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull(),
+    role: text('role').notNull(),
+    joinedAt: integer('joined_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.userId] }),
+    oneOwner: uniqueIndex('economy_gang_members_one_owner').on(table.gangId).where(sql`${table.role} = 'owner'`),
+    gangIdx: index('economy_gang_members_gang_idx').on(table.gangId, table.joinedAt),
+    roleCheck: check('economy_gang_members_role_check', sql`${table.role} IN ('owner','admin','member')`)
+}));
+
+const economyGangInvites = sqliteTable('economy_gang_invites', {
+    id: text('id').primaryKey(),
+    guildId: text('guild_id').notNull(),
+    gangId: text('gang_id').references(() => economyGangs.id, { onDelete: 'set null' }),
+    inviterId: text('inviter_id').notNull(),
+    inviteeId: text('invitee_id').notNull(),
+    status: text('status').default('pending').notNull(),
+    nonce: text('nonce').notNull(),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    actedAt: integer('acted_at')
+}, table => ({
+    onePending: uniqueIndex('economy_gang_invites_one_pending')
+        .on(table.guildId, table.gangId, table.inviteeId).where(sql`${table.status} = 'pending'`),
+    statusCheck: check('economy_gang_invites_status_check', sql`${table.status} IN ('pending','accepted','declined','expired','revoked')`)
+}));
+
+const economyLabs = sqliteTable('economy_labs', {
+    id: text('id').primaryKey(),
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    level: integer('level').default(1).notNull(),
+    ampoules: integer('ampoules').default(1).notNull(),
+    storedAmount: integer('stored_amount').default(0).notNull(),
+    storageCap: integer('storage_cap').default(1000).notNull(),
+    lastAccrualAt: integer('last_accrual_at').notNull(),
+    pausedAt: integer('paused_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    ownerUnique: unique('economy_labs_owner_unique').on(table.guildId, table.userId),
+    levelCheck: check('economy_labs_level_check', sql`${table.level} BETWEEN 1 AND 10`),
+    ampoulesCheck: check('economy_labs_ampoules_check', sql`${table.ampoules} BETWEEN 1 AND 5`),
+    storageCheck: check('economy_labs_storage_check', sql`${table.storageCap} = ${table.level} * 1000 AND ${table.storedAmount} BETWEEN 0 AND ${table.storageCap}`)
+}));
+
+const economyLabOperations = sqliteTable('economy_lab_operations', {
+    operationId: text('operation_id').primaryKey(),
+    labId: text('lab_id').references(() => economyLabs.id, { onDelete: 'set null' }),
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    kind: text('kind').notNull(),
+    inputAmount: integer('input_amount').default(0).notNull(),
+    resultAmount: integer('result_amount').default(0).notNull(),
+    resultJson: text('result_json').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({
+    actorIdx: index('economy_lab_operations_actor_idx').on(table.guildId, table.userId, table.createdAt),
+    kindCheck: check('economy_lab_operations_kind_check', sql`${table.kind} IN ('buy','upgrade','ampoules','collect')`),
+    amountCheck: check('economy_lab_operations_amount_check', sql`${table.inputAmount} >= 0 AND ${table.resultAmount} >= 0`)
+}));
+
 module.exports = {
     guilds,
     lifecycleMessages,
@@ -1415,5 +1516,11 @@ module.exports = {
     economyActionCooldowns,
     economyJobs,
     economyShopItems,
-    economyShopPurchases
+    economyShopPurchases,
+    economyGameSessions,
+    economyGangs,
+    economyGangMembers,
+    economyGangInvites,
+    economyLabs,
+    economyLabOperations
 };

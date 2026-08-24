@@ -159,6 +159,32 @@ describe('community public interaction routing', () => {
         expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: expect.any(Array) }));
     });
 
+    test('uses a mention-safe embed when economy components are unavailable', async () => {
+        const interaction = createInteraction({ id: 'economy-unavailable', type: 'button', customId: 'economy:game:cashout:id:nonce' });
+        interaction.reply.mockResolvedValue(undefined);
+
+        await interactionCreate.execute(interaction, createClient());
+
+        expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({
+            embeds: expect.any(Array), allowedMentions: { parse: [] }, flags: expect.any(Array)
+        }));
+    });
+
+    test('deduplicates repeated economy lab gateway events', async () => {
+        const execute = jest.fn();
+        const client = createClient();
+        client.commands.set('economy', {
+            data: { name: 'economy', dm_permission: false }, permissions: [], cooldown: 2, execute
+        });
+        const first = createInteraction({ id: 'economy-lab-replay', type: 'command', commandName: 'economy', group: 'lab', subcommand: 'buy' });
+        const replay = createInteraction({ id: 'economy-lab-replay', type: 'command', commandName: 'economy', group: 'lab', subcommand: 'buy' });
+
+        await interactionCreate.execute(first, client);
+        await interactionCreate.execute(replay, client);
+
+        expect(execute).toHaveBeenCalledTimes(1);
+    });
+
     test('routes /server community view through the server alias', async () => {
         const interaction = createInteraction({
             id: 'community-view', type: 'command', commandName: 'server', group: 'community', subcommand: 'view'

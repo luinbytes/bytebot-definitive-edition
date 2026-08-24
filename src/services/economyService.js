@@ -1,5 +1,8 @@
 const crypto = require('crypto');
-const { MessageFlags, PermissionFlagsBits, RESTJSONErrorCodes } = require('discord.js');
+const {
+    MessageFlags, PermissionFlagsBits, RESTJSONErrorCodes,
+    ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder
+} = require('discord.js');
 const embeds = require('../utils/embeds');
 
 const GLOBAL_SCOPE = 'global';
@@ -12,6 +15,15 @@ const MAX_EARNING_GUILDS = 30;
 const DEFAULT_JOB = { id: 'worker', name: 'worker', minimum: 100, maximum: 250, cooldownSeconds: 3600, builtIn: true };
 const GLOBAL_CONFIG = Object.freeze({ currency_name: 'coins', currency_emoji: '🪙', starting_balance: 0, daily_cap: 50000 });
 const CONFIRMATION_TTL = 10 * 60 * 1000;
+const GAME_SESSION_TTL = 10 * 60 * 1000;
+const GANG_INVITE_TTL = 10 * 60 * 1000;
+const GAME_NAMES = ['coinflip', 'dice', 'gamble', 'roulette', 'highlow', 'slots', 'plinko', 'bombs', 'ladder', 'crash', 'scratch', 'blackjack'];
+const INTERACTIVE_GAMES = new Set(['bombs', 'ladder', 'crash', 'blackjack']);
+const RED_ROULETTE = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
+const SLOT_SYMBOLS = ['cherry', 'lemon', 'bell', 'star', 'seven'];
+const CRASH_POINTS = [[20, 110], [40, 125], [60, 150], [75, 200], [87, 300], [95, 500], [100, 1000]];
+const CRASH_STEPS = [110, 125, 150, 200, 300, 500, 1000];
+const GAME_STATUS = new Set(['won', 'lost', 'cashed_out', 'refunded', 'forfeited']);
 const DEFINITIVE_ROLE_ERRORS = new Set([
     RESTJSONErrorCodes.UnknownMember,
     RESTJSONErrorCodes.UnknownRole,
@@ -48,6 +60,7 @@ class EconomyService {
         this.randomBytes = options.randomBytes || crypto.randomBytes;
         this.setTimeout = options.setTimeout || setTimeout;
         this.confirmations = new Map();
+        this.pageTokens = new Map();
     }
 
     config(guildId) {
@@ -55,12 +68,16 @@ class EconomyService {
     }
 
     enable(guildId, actorId) {
-        if (this.config(guildId)?.enabled) throw new Error('Economy is already enabled in this server.');
-        const now = this.now();
-        this.sqlite.prepare(`INSERT INTO economy_configs (guild_id, enabled, updated_by, updated_at)
-            VALUES (?, 1, ?, ?) ON CONFLICT (guild_id) DO UPDATE SET enabled = 1,
-            updated_by = excluded.updated_by, updated_at = excluded.updated_at`).run(guildId, actorId, now);
-        return this.config(guildId);
+        return this.sqlite.transaction(() => {
+            if (this.config(guildId)?.enabled) throw new Error('Economy is already enabled in this server.');
+            const now = this.now();
+            this.sqlite.prepare(`INSERT INTO economy_configs (guild_id, enabled, updated_by, updated_at)
+                VALUES (?, 1, ?, ?) ON CONFLICT (guild_id) DO UPDATE SET enabled = 1,
+                updated_by = excluded.updated_by, updated_at = excluded.updated_at`).run(guildId, actorId, now);
+            this.sqlite.prepare(`UPDATE economy_labs SET last_accrual_at = ?, paused_at = NULL, updated_at = ?
+                WHERE guild_id = ? AND paused_at IS NOT NULL`).run(now, now, guildId);
+            return this.config(guildId);
+        }).immediate();
     }
 
     configure(guildId, actorId, values) {
@@ -357,6 +374,641 @@ class EconomyService {
         }));
     }
 
+    guildAccount(guildId, userId) {
+        if (this.mode(userId) !== 'guild') throw new Error('This action is only available in guild mode.');
+        this.requireEnabled(guildId);
+        return this.account({ scopeType: 'guild', scopeId: guildId }, userId);
+    }
+
+    gameSession(row) {
+        if (!row) return null;
+        return {
+            id: row.id, guildId: row.guild_id, userId: row.user_id, game: row.game, bet: row.bet,
+            state: JSON.parse(row.state_json), status: row.status, nonce: row.nonce,
+            credit: row.settlement_amount || 0, net: (row.settlement_amount || 0) - row.bet,
+            expiresAt: row.expires_at, transactionId: row.transaction_id
+        };
+    }
+
+    validateGameBet(game, bet) {
+        if (!GAME_NAMES.includes(game)) throw new Error('Unknown economy game.');
+        if (!Number.isInteger(bet) || bet < 10 || bet > 1000000) throw new Error('Game bets must be between 10 and 1,000,000.');
+    }
+
+    gameOutcome(game, choice) {
+        if (game === 'coinflip') {
+            if (!['heads', 'tails'].includes(choice)) throw new Error('Choose heads or tails.');
+            const result = this.randomInt(0, 2) ? 'tails' : 'heads';
+            return { baseReturn: result === choice ? 2 : 0, state: { result, choice } };
+        }
+        if (game === 'dice') {
+            const player = this.randomInt(1, 7);
+            const dealer = this.randomInt(1, 7);
+            return { baseReturn: player > dealer ? 2 : player === dealer ? 1 : 0, state: { player, dealer } };
+        }
+        if (game === 'gamble') {
+            const draw = this.randomInt(1, 101);
+            const baseReturn = draw <= 45 ? 0 : draw <= 70 ? 1 : draw <= 90 ? 2 : draw <= 98 ? 3 : 5;
+            return { baseReturn, state: { draw } };
+        }
+        if (game === 'roulette') {
+            if (!['red', 'black', 'green', 'odd', 'even'].includes(choice)) throw new Error('Choose red, black, green, odd, or even.');
+            const number = this.randomInt(0, 37);
+            const match = choice === 'green' ? number === 0
+                : choice === 'red' ? RED_ROULETTE.has(number)
+                    : choice === 'black' ? number !== 0 && !RED_ROULETTE.has(number)
+                        : choice === 'odd' ? number !== 0 && number % 2 === 1
+                            : number !== 0 && number % 2 === 0;
+            return { baseReturn: match ? (choice === 'green' ? 36 : 2) : 0, state: { number, choice } };
+        }
+        if (game === 'highlow') {
+            if (!['higher', 'lower'].includes(choice)) throw new Error('Choose higher or lower.');
+            const first = this.randomInt(1, 14);
+            const next = this.randomInt(1, 14);
+            const match = choice === 'higher' ? next > first : next < first;
+            return { baseReturn: next === first ? 1 : match ? 2 : 0, state: { first, next, choice } };
+        }
+        if (game === 'slots') {
+            const symbols = Array.from({ length: 3 }, () => SLOT_SYMBOLS[this.randomInt(0, SLOT_SYMBOLS.length)]);
+            const counts = [...new Set(symbols)].map(symbol => symbols.filter(value => value === symbol).length);
+            const baseReturn = symbols.every(symbol => symbol === 'seven') ? 20
+                : counts.includes(3) ? 8 : counts.includes(2) ? 2 : 0;
+            return { baseReturn, state: { symbols } };
+        }
+        if (game === 'plinko') {
+            let bin = 0;
+            for (let hop = 0; hop < 8; hop++) bin += this.randomInt(0, 2);
+            return { baseReturn: [0, 0, 1, 2, 3, 2, 1, 0, 0][bin], state: { bin } };
+        }
+        const draw = this.randomInt(1, 101);
+        const baseReturn = draw <= 60 ? 0 : draw <= 85 ? 1 : draw <= 95 ? 2 : draw <= 99 ? 5 : 10;
+        return { baseReturn, state: { draw } };
+    }
+
+    shuffledDeck() {
+        const deck = [];
+        for (const suit of ['C', 'D', 'H', 'S']) for (let rank = 1; rank <= 13; rank++) deck.push([rank, suit]);
+        for (let index = deck.length - 1; index > 0; index--) {
+            const swap = this.randomInt(0, index + 1);
+            [deck[index], deck[swap]] = [deck[swap], deck[index]];
+        }
+        return deck;
+    }
+
+    interactiveState(game) {
+        if (game === 'ladder') return { rung: 0 };
+        if (game === 'crash') {
+            const draw = this.randomInt(1, 101);
+            return { crashPoint: CRASH_POINTS.find(([limit]) => draw <= limit)[1], current: 100 };
+        }
+        if (game === 'bombs') {
+            const cells = Array.from({ length: 25 }, (_, index) => index);
+            for (let index = cells.length - 1; index > 0; index--) {
+                const swap = this.randomInt(0, index + 1);
+                [cells[index], cells[swap]] = [cells[swap], cells[index]];
+            }
+            return { bombs: cells.slice(0, 3), revealed: [] };
+        }
+        const deck = this.shuffledDeck();
+        return { deck, player: [deck.pop(), deck.pop()], dealer: [deck.pop(), deck.pop()] };
+    }
+
+    gameCredit(bet, baseReturn) {
+        const returned = Math.floor(bet * baseReturn);
+        return returned > bet ? bet + Math.floor((returned - bet) * 3 / 2) : returned;
+    }
+
+    playGame({ guildId, userId, game, bet, choice }) {
+        this.validateGameBet(game, bet);
+        return this.sqlite.transaction(() => {
+            const scope = { scopeType: 'guild', scopeId: guildId };
+            const account = this.guildAccount(guildId, userId);
+            if (INTERACTIVE_GAMES.has(game) && this.sqlite.prepare(`SELECT 1 FROM economy_game_sessions
+                WHERE guild_id = ? AND user_id = ? AND status = 'active'`).get(guildId, userId)) {
+                throw new Error('Finish your active economy game first.');
+            }
+            if (account.wallet < bet) throw new Error('Insufficient wallet balance.');
+            const transactionId = this.randomUUID();
+            const debited = this.apply(account, {
+                transactionId, walletDelta: -bet, bankDelta: 0, supplyDelta: -bet,
+                kind: 'game_bet', actorId: userId
+            });
+            this.updateTotals(scope, 0n, BigInt(bet));
+            const id = this.randomUUID();
+            const nonce = this.randomBytes(12).toString('hex').slice(0, 24);
+            const createdAt = this.now();
+            if (INTERACTIVE_GAMES.has(game)) {
+                const state = this.interactiveState(game);
+                const natural = game === 'blackjack' && this.handValue(state.player) === 21;
+                if (natural) {
+                    const credit = this.gameCredit(bet, 2);
+                    const row = this.account(scope, userId);
+                    if (this.supply(scope) + credit > MAX_SCOPE_SUPPLY) throw new Error('This economy has reached its circulation limit.');
+                    this.apply(row, {
+                        transactionId, walletDelta: credit, bankDelta: 0, supplyDelta: credit,
+                        kind: 'game_settlement', actorId: userId
+                    });
+                    this.updateTotals(scope, BigInt(credit));
+                    this.sqlite.prepare(`INSERT INTO economy_game_sessions
+                        (id, guild_id, scope_type, scope_id, user_id, game, bet, state_json, status, nonce,
+                         transaction_id, created_at, expires_at, settled_at, settlement_amount)
+                        VALUES (?, ?, 'guild', ?, ?, ?, ?, ?, 'won', ?, ?, ?, ?, ?, ?)`)
+                        .run(id, guildId, guildId, userId, game, bet, JSON.stringify(state), nonce,
+                            transactionId, createdAt, createdAt + GAME_SESSION_TTL, createdAt, credit);
+                    return this.gameSession(this.sqlite.prepare('SELECT * FROM economy_game_sessions WHERE id = ?').get(id));
+                }
+                this.sqlite.prepare(`INSERT INTO economy_game_sessions
+                    (id, guild_id, scope_type, scope_id, user_id, game, bet, state_json, status, nonce,
+                     transaction_id, created_at, expires_at)
+                    VALUES (?, ?, 'guild', ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`)
+                    .run(id, guildId, guildId, userId, game, bet, JSON.stringify(state), nonce,
+                        transactionId, createdAt, createdAt + GAME_SESSION_TTL);
+                return this.gameSession(this.sqlite.prepare('SELECT * FROM economy_game_sessions WHERE id = ?').get(id));
+            }
+            const outcome = this.gameOutcome(game, choice);
+            const credit = this.gameCredit(bet, outcome.baseReturn);
+            const status = credit > bet ? 'won' : credit === 0 ? 'lost' : 'cashed_out';
+            if (credit > 0) {
+                const row = this.account(scope, userId);
+                if (this.supply(scope) + credit > MAX_SCOPE_SUPPLY) throw new Error('This economy has reached its circulation limit.');
+                this.apply(row, {
+                    transactionId, walletDelta: credit, bankDelta: 0, supplyDelta: credit,
+                    kind: 'game_settlement', actorId: userId
+                });
+                this.updateTotals(scope, BigInt(credit));
+            } else {
+                this.record({ ...account, wallet: debited.wallet, bank: debited.bank }, {
+                    transactionId, walletDelta: 0, bankDelta: 0, kind: 'game_loss', actorId: userId
+                });
+            }
+            this.sqlite.prepare(`INSERT INTO economy_game_sessions
+                (id, guild_id, scope_type, scope_id, user_id, game, bet, state_json, status, nonce,
+                 transaction_id, created_at, expires_at, settled_at, settlement_amount)
+                VALUES (?, ?, 'guild', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+                .run(id, guildId, guildId, userId, game, bet, JSON.stringify(outcome.state), status, nonce,
+                    transactionId, createdAt, createdAt + GAME_SESSION_TTL, createdAt, credit);
+            return this.gameSession(this.sqlite.prepare('SELECT * FROM economy_game_sessions WHERE id = ?').get(id));
+        }).immediate();
+    }
+
+    handValue(hand) {
+        let value = hand.reduce((total, [rank]) => total + Math.min(rank, 10), 0);
+        let aces = hand.filter(([rank]) => rank === 1).length;
+        while (aces-- && value + 10 <= 21) value += 10;
+        return value;
+    }
+
+    settleGame(session, status, baseReturn) {
+        return this.sqlite.transaction(() => {
+            const current = this.sqlite.prepare('SELECT * FROM economy_game_sessions WHERE id = ?').get(session.id);
+            if (!current || current.status !== 'active') return this.gameSession(current);
+            const scope = { scopeType: 'guild', scopeId: current.guild_id };
+            const account = this.account(scope, current.user_id);
+            const credit = this.gameCredit(current.bet, baseReturn);
+            if (credit > 0) {
+                if (this.supply(scope) + credit > MAX_SCOPE_SUPPLY) throw new Error('This economy has reached its circulation limit.');
+                this.apply(account, {
+                    transactionId: current.transaction_id, walletDelta: credit, bankDelta: 0,
+                    supplyDelta: credit, kind: status === 'refunded' ? 'game_refund' : 'game_settlement', actorId: current.user_id
+                });
+                this.updateTotals(scope, BigInt(credit));
+            } else {
+                this.record(account, {
+                    transactionId: current.transaction_id, walletDelta: 0, bankDelta: 0,
+                    kind: 'game_loss', actorId: current.user_id
+                });
+            }
+            this.sqlite.prepare(`UPDATE economy_game_sessions SET status = ?, settled_at = ?, settlement_amount = ?
+                WHERE id = ? AND status = 'active'`).run(status, this.now(), credit, current.id);
+            return this.gameSession(this.sqlite.prepare('SELECT * FROM economy_game_sessions WHERE id = ?').get(current.id));
+        }).immediate();
+    }
+
+    actGame({ guildId, userId, sessionId, nonce, action, value }) {
+        return this.sqlite.transaction(() => {
+            this.requireEnabled(guildId);
+            const row = this.sqlite.prepare('SELECT * FROM economy_game_sessions WHERE id = ?').get(sessionId);
+        if (!row || row.guild_id !== guildId || row.nonce !== nonce) throw new Error('That game session is invalid.');
+        if (row.user_id !== userId) throw new Error('That game session does not belong to you.');
+        if (GAME_STATUS.has(row.status)) return this.gameSession(row);
+        if (row.expires_at <= this.now()) {
+            this.reconcileGameSessions();
+            return this.gameSession(this.sqlite.prepare('SELECT * FROM economy_game_sessions WHERE id = ?').get(sessionId));
+        }
+        const state = JSON.parse(row.state_json);
+        if (row.game === 'ladder') {
+            if (action === 'cashout' && state.rung > 0) return this.settleGame(row, 'cashed_out', [1, 2, 3, 5, 8, 12][state.rung - 1]);
+            if (action !== 'climb') throw new Error('Choose climb or cash out.');
+            const rung = state.rung + 1;
+            if (this.randomInt(1, 101) > [80, 70, 60, 50, 40, 30][rung - 1]) return this.settleGame(row, 'lost', 0);
+            state.rung = rung;
+            if (rung === 6) return this.settleGame(row, 'won', 12);
+        } else if (row.game === 'crash') {
+            if (action === 'cashout') return this.settleGame(row, 'cashed_out', state.current / 100);
+            if (action !== 'advance') throw new Error('Choose advance or cash out.');
+            const next = CRASH_STEPS.find(step => step > state.current);
+            if (!next || next >= state.crashPoint) return this.settleGame(row, 'lost', 0);
+            state.current = next;
+        } else if (row.game === 'bombs') {
+            if (action === 'cashout' && state.revealed.length) return this.settleGame(row, 'cashed_out', Math.min(12, 1 + Math.floor(state.revealed.length / 2)));
+            if (action !== 'reveal' || !Number.isInteger(value) || value < 0 || value > 24) throw new Error('Choose an unrevealed cell.');
+            if (state.revealed.includes(value)) throw new Error('That cell is already revealed.');
+            if (state.bombs.includes(value)) return this.settleGame(row, 'lost', 0);
+            state.revealed.push(value);
+            if (state.revealed.length === 22) return this.settleGame(row, 'won', 12);
+        } else {
+            if (action === 'hit') {
+                state.player.push(state.deck.pop());
+                if (this.handValue(state.player) > 21) return this.settleGame(row, 'lost', 0);
+            } else if (action === 'stand') {
+                while (this.handValue(state.dealer) < 17) state.dealer.push(state.deck.pop());
+                const player = this.handValue(state.player);
+                const dealer = this.handValue(state.dealer);
+                return this.settleGame(row, dealer > 21 || player > dealer ? 'won' : player === dealer ? 'cashed_out' : 'lost',
+                    dealer > 21 || player > dealer ? 2 : player === dealer ? 1 : 0);
+            } else throw new Error('Choose hit or stand.');
+        }
+        this.sqlite.prepare(`UPDATE economy_game_sessions SET state_json = ? WHERE id = ? AND status = 'active'`)
+            .run(JSON.stringify(state), row.id);
+            return this.gameSession(this.sqlite.prepare('SELECT * FROM economy_game_sessions WHERE id = ?').get(row.id));
+        }).immediate();
+    }
+
+    reconcileGameSessions() {
+        let refunded = 0;
+        const rows = this.sqlite.prepare(`SELECT * FROM economy_game_sessions
+            WHERE status = 'active' AND expires_at <= ? ORDER BY expires_at, id`).all(this.now());
+        for (const row of rows) {
+            try {
+                if (this.settleGame(row, 'refunded', 1)?.status === 'refunded') refunded++;
+            } catch (error) {
+                if (error.message === 'Economy account not found.') {
+                    this.sqlite.prepare(`UPDATE economy_game_sessions SET status = 'forfeited', settled_at = ?, settlement_amount = 0
+                        WHERE id = ? AND status = 'active'`).run(this.now(), row.id);
+                } else throw error;
+            }
+        }
+        return { refunded };
+    }
+
+    cooldownRow(userId, action, guildId) {
+        return this.sqlite.prepare(`SELECT available_at FROM economy_action_cooldowns
+            WHERE user_id = ? AND action = ? AND scope_type = 'guild' AND scope_id = ? AND subject_id = ?`)
+            .get(userId, action, guildId, action);
+    }
+
+    claimCooldown(userId, action, guildId, durationMs) {
+        const cooldown = this.cooldownRow(userId, action, guildId);
+        if (cooldown?.available_at > this.now()) throw new Error(`${action} is on cooldown.`);
+        this.sqlite.prepare(`INSERT INTO economy_action_cooldowns
+            (user_id, action, scope_type, scope_id, subject_id, available_at) VALUES (?, ?, 'guild', ?, ?, ?)
+            ON CONFLICT (user_id, action, scope_type, scope_id, subject_id)
+            DO UPDATE SET available_at = excluded.available_at`).run(userId, action, guildId, action, this.now() + durationMs);
+    }
+
+    crime({ guildId, userId, guildCreatedAt, memberJoinedAt }) {
+        return this.sqlite.transaction(() => {
+            this.checkAges(guildCreatedAt, memberJoinedAt);
+            const scope = { scopeType: 'guild', scopeId: guildId };
+            const account = this.guildAccount(guildId, userId);
+            this.claimCooldown(userId, 'crime', guildId, 3600000);
+            if (this.randomInt(1, 101) <= 60) {
+                const amount = Math.floor(this.randomInt(100, 501) * 3 / 2);
+                if (this.supply(scope) + amount > MAX_SCOPE_SUPPLY) throw new Error('This economy has reached its circulation limit.');
+                const result = this.apply(account, {
+                    transactionId: this.randomUUID(), walletDelta: amount, bankDelta: 0,
+                    supplyDelta: amount, kind: 'crime', actorId: userId
+                });
+                this.updateTotals(scope, BigInt(amount));
+                return { status: 'won', amount, ...result };
+            }
+            const amount = Math.min(account.wallet, Math.max(1, Math.floor(account.wallet / 10)));
+            if (!amount) return { status: 'lost', amount: 0, ...accountView(account) };
+            const result = this.apply(account, {
+                transactionId: this.randomUUID(), walletDelta: -amount, bankDelta: 0,
+                supplyDelta: -amount, kind: 'crime_loss', actorId: userId
+            });
+            this.updateTotals(scope, 0n, BigInt(amount));
+            return { status: 'lost', amount, ...result };
+        }).immediate();
+    }
+
+    rob({ guildId, userId, targetId }) {
+        return this.sqlite.transaction(() => {
+            if (userId === targetId) throw new Error('You cannot rob yourself.');
+            const scope = { scopeType: 'guild', scopeId: guildId };
+            const actor = this.guildAccount(guildId, userId);
+            const target = this.account(scope, targetId);
+            if (actor.wallet < 100) throw new Error('You need at least 100 in your wallet to rob.');
+            if (target.wallet < 500) throw new Error('That member needs at least 500 in their wallet to rob.');
+            this.claimCooldown(userId, 'rob', guildId, 7200000);
+            const transactionId = this.randomUUID();
+            if (this.randomInt(1, 101) <= 40) {
+                const amount = Math.max(100, Math.floor(target.wallet / 4));
+                this.apply(target, { transactionId, walletDelta: -amount, bankDelta: 0, kind: 'rob', actorId: userId, counterpartyId: userId });
+                const result = this.apply(this.account(scope, userId), {
+                    transactionId, walletDelta: amount, bankDelta: 0, kind: 'rob', actorId: userId, counterpartyId: targetId
+                });
+                return { status: 'won', amount, ...result };
+            }
+            const amount = Math.min(actor.wallet, Math.max(10, Math.floor(actor.wallet / 10)));
+            const result = this.apply(actor, {
+                transactionId, walletDelta: -amount, bankDelta: 0, supplyDelta: -amount,
+                kind: 'rob_loss', actorId: userId, counterpartyId: targetId
+            });
+            this.updateTotals(scope, 0n, BigInt(amount));
+            return { status: 'lost', amount, ...result };
+        }).immediate();
+    }
+
+    gangMembership(guildId, userId) {
+        return this.sqlite.prepare(`SELECT m.*, g.name, g.owner_id, g.banner_url, g.created_at
+            FROM economy_gang_members m JOIN economy_gangs g ON g.id = m.gang_id
+            WHERE m.guild_id = ? AND m.user_id = ?`).get(guildId, userId) || null;
+    }
+
+    createGang({ guildId, userId, name }) {
+        return this.sqlite.transaction(() => {
+            const key = String(name || '').trim().toUpperCase();
+            if (!/^[A-Z0-9]{1,5}$/.test(key)) throw new Error('Gang names must be 1-5 alphanumeric characters.');
+            if (this.gangMembership(guildId, userId)) throw new Error('You are already in a gang.');
+            const id = this.randomUUID();
+            const now = this.now();
+            this.sqlite.prepare(`INSERT INTO economy_gangs (id, guild_id, name, owner_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)`).run(id, guildId, key, userId, now, now);
+            this.sqlite.prepare(`INSERT INTO economy_gang_members (guild_id, gang_id, user_id, role, joined_at)
+                VALUES (?, ?, ?, 'owner', ?)`).run(guildId, id, userId, now);
+            return { id, guildId, name: key, ownerId: userId };
+        }).immediate();
+    }
+
+    inviteToGang({ guildId, userId, targetId }) {
+        return this.sqlite.transaction(() => {
+            if (userId === targetId) throw new Error('You cannot invite yourself.');
+            const member = this.gangMembership(guildId, userId);
+            if (!member || !['owner', 'admin'].includes(member.role)) throw new Error('Only the gang owner or admins can invite members.');
+            if (this.gangMembership(guildId, targetId)) throw new Error('That member is already in a gang.');
+            const count = this.sqlite.prepare('SELECT COUNT(*) AS count FROM economy_gang_members WHERE gang_id = ?').get(member.gang_id).count;
+            if (count >= 25) throw new Error('This gang has the ByteBot maximum of 25 members.');
+            this.sqlite.prepare(`UPDATE economy_gang_invites SET status = 'expired', acted_at = ?
+                WHERE status = 'pending' AND expires_at <= ?`).run(this.now(), this.now());
+            const pending = this.sqlite.prepare(`SELECT COUNT(*) AS count FROM economy_gang_invites
+                WHERE gang_id = ? AND status = 'pending'`).get(member.gang_id).count;
+            if (pending >= 25) throw new Error('This gang has the ByteBot maximum of 25 pending invites.');
+            const invite = {
+                id: this.randomUUID(), gangId: member.gang_id, guildId, inviterId: userId, inviteeId: targetId,
+                nonce: this.randomBytes(12).toString('hex').slice(0, 24), expiresAt: this.now() + GANG_INVITE_TTL
+            };
+            this.sqlite.prepare(`INSERT INTO economy_gang_invites
+                (id, guild_id, gang_id, inviter_id, invitee_id, status, nonce, created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`)
+                .run(invite.id, guildId, invite.gangId, userId, targetId, invite.nonce, this.now(), invite.expiresAt);
+            return { ...invite, status: 'pending' };
+        }).immediate();
+    }
+
+    respondGangInvite({ guildId, userId, inviteId, nonce, accept }) {
+        return this.sqlite.transaction(() => {
+            const invite = this.sqlite.prepare('SELECT * FROM economy_gang_invites WHERE id = ?').get(inviteId);
+            if (!invite || invite.guild_id !== guildId || invite.invitee_id !== userId || invite.nonce !== nonce) throw new Error('That gang invite is not for you.');
+            if (invite.status !== 'pending') return { status: invite.status, gangId: invite.gang_id };
+            if (invite.expires_at <= this.now()) {
+                this.sqlite.prepare(`UPDATE economy_gang_invites SET status = 'expired', acted_at = ? WHERE id = ? AND status = 'pending'`)
+                    .run(this.now(), invite.id);
+                return { status: 'expired', gangId: invite.gang_id };
+            }
+            if (!accept) {
+                this.sqlite.prepare(`UPDATE economy_gang_invites SET status = 'declined', acted_at = ? WHERE id = ? AND status = 'pending'`)
+                    .run(this.now(), invite.id);
+                return { status: 'declined', gangId: invite.gang_id };
+            }
+            if (this.gangMembership(guildId, userId)) throw new Error('You are already in a gang.');
+            const count = this.sqlite.prepare('SELECT COUNT(*) AS count FROM economy_gang_members WHERE gang_id = ?').get(invite.gang_id).count;
+            if (count >= 25) throw new Error('This gang has the ByteBot maximum of 25 members.');
+            this.sqlite.prepare(`INSERT INTO economy_gang_members (guild_id, gang_id, user_id, role, joined_at)
+                VALUES (?, ?, ?, 'member', ?)`).run(guildId, invite.gang_id, userId, this.now());
+            this.sqlite.prepare(`UPDATE economy_gang_invites SET status = 'accepted', acted_at = ? WHERE id = ? AND status = 'pending'`)
+                .run(this.now(), invite.id);
+            return { status: 'accepted', gangId: invite.gang_id };
+        }).immediate();
+    }
+
+    promoteGang({ guildId, userId, targetId }) {
+        return this.sqlite.transaction(() => {
+            const owner = this.gangMembership(guildId, userId);
+            const target = this.gangMembership(guildId, targetId);
+            if (!owner || owner.role !== 'owner') throw new Error('Only the gang owner can promote members.');
+            if (!target || target.gang_id !== owner.gang_id) throw new Error('That member is not in your gang.');
+            if (target.role === 'owner') throw new Error('The owner cannot be promoted.');
+            if (target.role === 'admin') throw new Error('That member is already an admin.');
+            this.sqlite.prepare(`UPDATE economy_gang_members SET role = 'admin' WHERE guild_id = ? AND user_id = ? AND gang_id = ?`)
+                .run(guildId, targetId, owner.gang_id);
+            return { gangId: owner.gang_id, userId: targetId, role: 'admin' };
+        }).immediate();
+    }
+
+    transferGang({ guildId, userId, targetId }) {
+        return this.sqlite.transaction(() => {
+            if (userId === targetId) throw new Error('You cannot transfer ownership to yourself.');
+            const owner = this.gangMembership(guildId, userId);
+            const target = this.gangMembership(guildId, targetId);
+            if (!owner || owner.role !== 'owner') throw new Error('Only the gang owner can transfer ownership.');
+            if (!target || target.gang_id !== owner.gang_id) throw new Error('That member is not in your gang.');
+            this.sqlite.prepare(`UPDATE economy_gang_members SET role = 'admin'
+                WHERE guild_id = ? AND user_id = ? AND gang_id = ? AND role = 'owner'`).run(guildId, userId, owner.gang_id);
+            this.sqlite.prepare(`UPDATE economy_gang_members SET role = 'owner'
+                WHERE guild_id = ? AND user_id = ? AND gang_id = ?`).run(guildId, targetId, owner.gang_id);
+            const changed = this.sqlite.prepare(`UPDATE economy_gangs SET owner_id = ?, updated_at = ?
+                WHERE id = ? AND owner_id = ?`).run(targetId, this.now(), owner.gang_id, userId).changes;
+            if (!changed) throw new Error('Gang ownership changed; try again.');
+            return { gangId: owner.gang_id, ownerId: targetId };
+        }).immediate();
+    }
+
+    gangInfo({ guildId, userId }) {
+        const membership = this.gangMembership(guildId, userId);
+        if (!membership) throw new Error('You are not in a gang.');
+        return {
+            id: membership.gang_id, name: membership.name, ownerId: membership.owner_id,
+            bannerUrl: membership.banner_url, createdAt: membership.created_at,
+            members: this.sqlite.prepare(`SELECT user_id AS userId, role, joined_at AS joinedAt
+                FROM economy_gang_members WHERE gang_id = ? ORDER BY joined_at, user_id`).all(membership.gang_id)
+        };
+    }
+
+    leaveGang({ guildId, userId }) {
+        return this.sqlite.transaction(() => {
+            const member = this.gangMembership(guildId, userId);
+            if (!member) throw new Error('You are not in a gang.');
+            if (member.role === 'owner') throw new Error('Transfer ownership or disband before leaving.');
+            return Boolean(this.sqlite.prepare('DELETE FROM economy_gang_members WHERE guild_id = ? AND user_id = ?').run(guildId, userId).changes);
+        }).immediate();
+    }
+
+    disbandGang({ guildId, userId }) {
+        return this.sqlite.transaction(() => {
+            const member = this.gangMembership(guildId, userId);
+            if (!member || member.role !== 'owner') throw new Error('Only the gang owner can disband it.');
+            this.sqlite.prepare(`UPDATE economy_gang_invites SET status = 'revoked', acted_at = ?
+                WHERE gang_id = ? AND status = 'pending'`).run(this.now(), member.gang_id);
+            return Boolean(this.sqlite.prepare('DELETE FROM economy_gangs WHERE id = ? AND owner_id = ?').run(member.gang_id, userId).changes);
+        }).immediate();
+    }
+
+    setGangBanner({ guildId, userId, url }) {
+        const member = this.gangMembership(guildId, userId);
+        if (!member || member.role !== 'owner') throw new Error('Only the gang owner can set the banner.');
+        let parsed;
+        try { parsed = new URL(url); } catch { throw new Error('Provide a valid HTTPS image URL.'); }
+        const discordCdn = ['cdn.discordapp.com', 'media.discordapp.net'].includes(parsed.hostname);
+        if (parsed.protocol !== 'https:' || (!discordCdn && !/\.(?:png|jpe?g|gif|webp)$/i.test(parsed.pathname))) {
+            throw new Error('Provide a valid HTTPS image URL.');
+        }
+        this.sqlite.prepare('UPDATE economy_gangs SET banner_url = ?, updated_at = ? WHERE id = ?').run(parsed.toString(), this.now(), member.gang_id);
+        return { gangId: member.gang_id, bannerUrl: parsed.toString() };
+    }
+
+    lab(guildId, userId) {
+        const row = this.sqlite.prepare('SELECT * FROM economy_labs WHERE guild_id = ? AND user_id = ?').get(guildId, userId);
+        if (!row) throw new Error('You do not own a laboratory.');
+        return row;
+    }
+
+    labProjection(row) {
+        const hourly = 100 * row.level + 50 * (row.ampoules - 1);
+        const elapsed = row.paused_at ? 0 : Math.max(0, this.now() - row.last_accrual_at);
+        const stored = Math.min(row.storage_cap, row.stored_amount + Math.floor(hourly * elapsed / 3600000));
+        return { stored, hourly };
+    }
+
+    labOperation(operationId, guildId, userId, kind) {
+        const row = this.sqlite.prepare('SELECT * FROM economy_lab_operations WHERE operation_id = ?').get(operationId);
+        if (!row) return null;
+        if (row.guild_id !== guildId || row.user_id !== userId || row.kind !== kind) throw new Error('Laboratory operation ID does not match this action.');
+        return JSON.parse(row.result_json);
+    }
+
+    recordLabOperation({ operationId, labId, guildId, userId, kind, inputAmount = 0, resultAmount = 0, result }) {
+        this.sqlite.prepare(`INSERT INTO economy_lab_operations
+            (operation_id, lab_id, guild_id, user_id, kind, input_amount, result_amount, result_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+            .run(operationId, labId, guildId, userId, kind, inputAmount, resultAmount, JSON.stringify(result), this.now());
+        return result;
+    }
+
+    buyLab({ guildId, userId, operationId }) {
+        return this.sqlite.transaction(() => {
+            const replay = this.labOperation(operationId, guildId, userId, 'buy');
+            if (replay) return replay;
+            const scope = { scopeType: 'guild', scopeId: guildId };
+            const account = this.guildAccount(guildId, userId);
+            if (this.sqlite.prepare('SELECT 1 FROM economy_labs WHERE guild_id = ? AND user_id = ?').get(guildId, userId)) throw new Error('You already own a laboratory.');
+            const price = 10000;
+            const balance = this.apply(account, {
+                transactionId: this.randomUUID(), walletDelta: -price, bankDelta: 0,
+                supplyDelta: -price, kind: 'lab_buy', actorId: userId
+            });
+            this.updateTotals(scope, 0n, BigInt(price));
+            const id = this.randomUUID();
+            this.sqlite.prepare(`INSERT INTO economy_labs
+                (id, guild_id, user_id, level, ampoules, stored_amount, storage_cap, last_accrual_at, created_at, updated_at)
+                VALUES (?, ?, ?, 1, 1, 0, 1000, ?, ?, ?)`).run(id, guildId, userId, this.now(), this.now(), this.now());
+            return this.recordLabOperation({
+                operationId, labId: id, guildId, userId, kind: 'buy', inputAmount: price,
+                result: { id, level: 1, ampoules: 1, stored: 0, storage: 1000, wallet: balance.wallet }
+            });
+        }).immediate();
+    }
+
+    labStatus({ guildId, userId }) {
+        this.guildAccount(guildId, userId);
+        const row = this.lab(guildId, userId);
+        const projected = this.labProjection(row);
+        return {
+            id: row.id, level: row.level, ampoules: row.ampoules, stored: projected.stored,
+            storage: row.storage_cap, hourly: projected.hourly,
+            nextUpgrade: row.level < 10 ? 5000 * (row.level + 1) : null
+        };
+    }
+
+    updateLabPurchase({ guildId, userId, operationId, kind, amount = 1 }) {
+        return this.sqlite.transaction(() => {
+            const replay = this.labOperation(operationId, guildId, userId, kind);
+            if (replay) return replay;
+            const scope = { scopeType: 'guild', scopeId: guildId };
+            const account = this.guildAccount(guildId, userId);
+            const row = this.lab(guildId, userId);
+            const projected = this.labProjection(row);
+            let level = row.level;
+            let ampoules = row.ampoules;
+            let price;
+            if (kind === 'upgrade') {
+                if (level >= 10) throw new Error('Your laboratory is already level 10.');
+                price = 5000 * (level + 1);
+                level++;
+            } else {
+                if (!Number.isInteger(amount) || amount < 1 || amount > 5) throw new Error('Buy between 1 and 5 ampoules.');
+                if (ampoules + amount > 5) throw new Error('A laboratory can have at most 5 ampoules.');
+                price = 2000 * amount;
+                ampoules += amount;
+            }
+            const balance = this.apply(account, {
+                transactionId: this.randomUUID(), walletDelta: -price, bankDelta: 0,
+                supplyDelta: -price, kind: `lab_${kind}`, actorId: userId
+            });
+            this.updateTotals(scope, 0n, BigInt(price));
+            this.sqlite.prepare(`UPDATE economy_labs SET level = ?, ampoules = ?, stored_amount = ?, storage_cap = ?,
+                last_accrual_at = ?, updated_at = ? WHERE id = ?`)
+                .run(level, ampoules, projected.stored, level * 1000, this.now(), this.now(), row.id);
+            const result = { id: row.id, level, ampoules, stored: projected.stored, storage: level * 1000, wallet: balance.wallet };
+            return this.recordLabOperation({ operationId, labId: row.id, guildId, userId, kind, inputAmount: price, result });
+        }).immediate();
+    }
+
+    upgradeLab(values) {
+        return this.updateLabPurchase({ ...values, kind: 'upgrade' });
+    }
+
+    buyAmpoules(values) {
+        return this.updateLabPurchase({ ...values, kind: 'ampoules' });
+    }
+
+    collectLab({ guildId, userId, operationId }) {
+        return this.sqlite.transaction(() => {
+            const replay = this.labOperation(operationId, guildId, userId, 'collect');
+            if (replay) return replay;
+            const scope = { scopeType: 'guild', scopeId: guildId };
+            const account = this.guildAccount(guildId, userId);
+            const row = this.lab(guildId, userId);
+            const projected = this.labProjection(row);
+            if (!projected.stored) throw new Error('Your laboratory has no earnings to collect.');
+            const amount = Math.floor(projected.stored * 3 / 2);
+            if (this.supply(scope) + amount > MAX_SCOPE_SUPPLY) throw new Error('This economy has reached its circulation limit.');
+            const balance = this.apply(account, {
+                transactionId: this.randomUUID(), walletDelta: amount, bankDelta: 0,
+                supplyDelta: amount, kind: 'lab_collect', actorId: userId
+            });
+            this.updateTotals(scope, BigInt(amount));
+            this.sqlite.prepare(`UPDATE economy_labs SET stored_amount = 0, last_accrual_at = ?, updated_at = ? WHERE id = ?`)
+                .run(this.now(), this.now(), row.id);
+            return this.recordLabOperation({
+                operationId, labId: row.id, guildId, userId, kind: 'collect', resultAmount: amount,
+                result: { id: row.id, collected: amount, stored: 0, wallet: balance.wallet }
+            });
+        }).immediate();
+    }
+
+    leaderboard({ guildId, offset = 0 }) {
+        this.requireEnabled(guildId);
+        const boundedOffset = Math.max(0, Number.isInteger(offset) ? offset : 0);
+        const rows = this.sqlite.prepare(`SELECT user_id AS userId, wallet, bank, wallet + bank AS total
+            FROM economy_accounts WHERE scope_type = 'guild' AND scope_id = ?
+            ORDER BY total DESC, user_id ASC LIMIT 25 OFFSET ?`).all(guildId, boundedOffset);
+        const count = this.sqlite.prepare(`SELECT COUNT(*) AS count FROM economy_accounts
+            WHERE scope_type = 'guild' AND scope_id = ?`).get(guildId).count;
+        return { rows, offset: boundedOffset, total: count, hasPrevious: boundedOffset > 0, hasNext: boundedOffset + rows.length < count };
+    }
+
     addJob({ guildId, actorId, name, minimum, maximum, cooldownSeconds }) {
         this.requireEnabled(guildId);
         const key = String(name || '').trim().toLowerCase();
@@ -607,7 +1259,8 @@ class EconomyService {
     }
 
     async reconcile() {
-        if (!this.client) return { reconciled: 0, pending: 0 };
+        const games = this.reconcileGameSessions();
+        if (!this.client) return { reconciled: 0, pending: 0, refundedGames: games.refunded };
         let reconciled = 0;
         const purchases = this.sqlite.prepare(`SELECT id FROM economy_shop_purchases
             WHERE status = 'pending' ORDER BY created_at, id`).all();
@@ -622,7 +1275,7 @@ class EconomyService {
         }
         const pending = this.sqlite.prepare(`SELECT COUNT(*) AS count FROM economy_shop_purchases
             WHERE status = 'pending'`).get().count;
-        return { reconciled, pending };
+        return { reconciled, pending, refundedGames: games.refunded };
     }
 
     async reconcileGuildPurchases(guild) {
@@ -658,18 +1311,37 @@ class EconomyService {
         if (!config) throw new Error('Economy has not been set up in this server.');
         if (!config.enabled) throw new Error('Economy is not enabled in this server.');
         const plan = { action, guildId, actorId, reason: auditReason, enabled: Boolean(config.enabled) };
-        if (action === 'disable') return plan;
+        if (action === 'disable') return Object.assign(plan, this.disableFeaturePlan(guildId));
         const account = this.account({ scopeType: 'guild', scopeId: guildId }, targetId);
         const pending = this.sqlite.prepare(`SELECT COUNT(*) AS count FROM economy_shop_purchases
             WHERE guild_id = ? AND user_id = ? AND status = 'pending'`).get(guildId, targetId).count;
         if (pending) throw new Error('Pending shop purchases must be reconciled before this account can be changed.');
         Object.assign(plan, { targetId, wallet: account.wallet, bank: account.bank, total: account.wallet + account.bank });
+        if (action === 'reset') Object.assign(plan, this.resetFeaturePlan(guildId, targetId));
         if (action === 'destroy') {
             this.validateAmount(amount);
             if (amount > plan.total) throw new Error('That account does not have enough currency.');
             plan.amount = amount;
         }
         return plan;
+    }
+
+    resetFeaturePlan(guildId, userId) {
+        return {
+            activeGame: this.sqlite.prepare(`SELECT id, bet, transaction_id, state_json, expires_at
+                FROM economy_game_sessions WHERE guild_id = ? AND user_id = ? AND status = 'active'`).get(guildId, userId) || null,
+            lab: this.sqlite.prepare(`SELECT id, level, ampoules, stored_amount, storage_cap, last_accrual_at, paused_at, updated_at
+                FROM economy_labs WHERE guild_id = ? AND user_id = ?`).get(guildId, userId) || null
+        };
+    }
+
+    disableFeaturePlan(guildId) {
+        return {
+            activeGames: this.sqlite.prepare(`SELECT id, user_id, bet, transaction_id, state_json, expires_at
+                FROM economy_game_sessions WHERE guild_id = ? AND status = 'active' ORDER BY id`).all(guildId),
+            labs: this.sqlite.prepare(`SELECT id, user_id, level, ampoules, stored_amount, storage_cap,
+                last_accrual_at, paused_at, updated_at FROM economy_labs WHERE guild_id = ? ORDER BY id`).all(guildId)
+        };
     }
 
     confirmationKey(values) {
@@ -715,6 +1387,15 @@ class EconomyService {
             const account = this.account(scope, values.targetId);
             const removed = account.wallet + account.bank;
             if (removed !== plan.total) throw new Error('The economy action plan changed. Preview it again.');
+            if (digest(this.resetFeaturePlan(values.guildId, values.targetId)) !== digest({ activeGame: plan.activeGame, lab: plan.lab })) {
+                throw new Error('The economy action plan changed. Preview it again.');
+            }
+            this.sqlite.prepare(`UPDATE economy_game_sessions SET status = 'forfeited', settled_at = ?, settlement_amount = 0
+                WHERE guild_id = ? AND user_id = ? AND status = 'active'`).run(this.now(), values.guildId, values.targetId);
+            this.sqlite.prepare(`UPDATE economy_lab_operations SET lab_id = NULL
+                WHERE lab_id IN (SELECT id FROM economy_labs WHERE guild_id = ? AND user_id = ?)`)
+                .run(values.guildId, values.targetId);
+            this.sqlite.prepare('DELETE FROM economy_labs WHERE guild_id = ? AND user_id = ?').run(values.guildId, values.targetId);
             if (removed > 0) {
                 this.apply(account, {
                     transactionId: this.randomUUID(), walletDelta: -account.wallet, bankDelta: -account.bank,
@@ -750,10 +1431,32 @@ class EconomyService {
     }
 
     disable(values) {
-        this.consumeConfirmation({ ...values, action: 'disable' }, values.confirmationCode);
-        this.sqlite.prepare(`UPDATE economy_configs SET enabled = 0, updated_by = ?, updated_at = ?
-            WHERE guild_id = ?`).run(values.actorId, this.now(), values.guildId);
-        return this.config(values.guildId);
+        const plan = this.consumeConfirmation({ ...values, action: 'disable' }, values.confirmationCode);
+        return this.sqlite.transaction(() => {
+            if (digest(this.disableFeaturePlan(values.guildId)) !== digest({ activeGames: plan.activeGames, labs: plan.labs })) {
+                throw new Error('The economy action plan changed. Preview it again.');
+            }
+            const scope = { scopeType: 'guild', scopeId: values.guildId };
+            for (const session of plan.activeGames) {
+                const account = this.account(scope, session.user_id);
+                if (account.wallet + session.bet > MAX_AMOUNT) throw new Error('An active game refund would exceed its wallet limit.');
+                this.apply(account, {
+                    transactionId: session.transaction_id, walletDelta: session.bet, bankDelta: 0,
+                    supplyDelta: session.bet, kind: 'game_refund', actorId: session.user_id
+                });
+                this.updateTotals(scope, BigInt(session.bet));
+                this.sqlite.prepare(`UPDATE economy_game_sessions SET status = 'refunded', settled_at = ?, settlement_amount = ?
+                    WHERE id = ? AND status = 'active'`).run(this.now(), session.bet, session.id);
+            }
+            for (const lab of plan.labs) {
+                const projected = this.labProjection(lab);
+                this.sqlite.prepare(`UPDATE economy_labs SET stored_amount = ?, last_accrual_at = ?, paused_at = ?, updated_at = ?
+                    WHERE id = ?`).run(projected.stored, this.now(), this.now(), this.now(), lab.id);
+            }
+            this.sqlite.prepare(`UPDATE economy_configs SET enabled = 0, updated_by = ?, updated_at = ?
+                WHERE guild_id = ?`).run(values.actorId, this.now(), values.guildId);
+            return this.config(values.guildId);
+        }).immediate();
     }
 
     canManage(interaction) {
@@ -764,14 +1467,15 @@ class EconomyService {
         if (!this.canManage(interaction)) throw new Error('You need Manage Server to use this economy action.');
     }
 
-    async respond(interaction, content, ephemeral = false) {
+    async respond(interaction, content, ephemeral = false, components = []) {
         const kind = content.startsWith('❌') ? 'error' : content.startsWith('✅') ? 'success'
             : content.startsWith('⚠️') ? 'warn' : 'info';
         const description = content.replace(/^[❌✅⚠️]\s*/u, '');
         const chunks = description.match(/[\s\S]{1,4000}(?:\n|$)/g) || [description];
         const payload = {
             embeds: chunks.map((chunk, index) => embeds[kind](index ? 'Economy (continued)' : 'Economy', chunk.trim())),
-            allowedMentions: { parse: [], repliedUser: false }
+            allowedMentions: { parse: [], repliedUser: false },
+            components
         };
         if (ephemeral) payload.flags = [MessageFlags.Ephemeral];
         if (interaction.deferred) return interaction.editReply(payload);
@@ -797,12 +1501,192 @@ class EconomyService {
         return `**${result.userId}**\nWallet: **${result.wallet} ${currency}**\nBank: **${result.bank} ${currency}**\nTotal: **${result.total} ${currency}**\nRank: **#${result.rank}**\nScope: **${result.scopeType}**`;
     }
 
+    gameComponents(session) {
+        if (session.status !== 'active') return [];
+        const id = action => `economy:game:${action}:${session.id}:${session.nonce}`;
+        if (session.game === 'bombs') {
+            const options = Array.from({ length: 25 }, (_, value) => value)
+                .filter(value => !session.state.revealed.includes(value))
+                .map(value => ({ label: `Cell ${value + 1}`, value: String(value) }));
+            const rows = [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
+                .setCustomId(id('reveal')).setPlaceholder('Choose a cell').addOptions(options))];
+            if (session.state.revealed.length) rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder()
+                .setCustomId(id('cashout')).setLabel('Cash out').setStyle(ButtonStyle.Success)));
+            return rows;
+        }
+        const actions = session.game === 'ladder'
+            ? [['climb', 'Climb', ButtonStyle.Primary], ...(session.state.rung ? [['cashout', 'Cash out', ButtonStyle.Success]] : [])]
+            : session.game === 'crash'
+                ? [['advance', 'Advance', ButtonStyle.Primary], ['cashout', 'Cash out', ButtonStyle.Success]]
+                : [['hit', 'Hit', ButtonStyle.Primary], ['stand', 'Stand', ButtonStyle.Secondary]];
+        return [new ActionRowBuilder().addComponents(actions.map(([action, label, style]) => new ButtonBuilder()
+            .setCustomId(id(action)).setLabel(label).setStyle(style)))];
+    }
+
+    formatGame(session) {
+        const state = session.state;
+        const detail = session.game === 'ladder' ? `Rung: **${state.rung}/6**`
+            : session.game === 'crash' ? `Current: **${(state.current / 100).toFixed(2)}x**`
+                : session.game === 'bombs' ? `Safe cells: **${state.revealed.length}/22**`
+                    : session.game === 'blackjack' ? `Your hand: **${this.handValue(state.player)}**`
+                        : Object.entries(state).map(([key, value]) => `${key}: **${Array.isArray(value) ? value.join(' ') : value}**`).join('\n');
+        if (session.status === 'active') return `**${session.game}** • Bet: **${session.bet}**\n${detail}\nByteBot-owned rules.`;
+        return `**${session.game}** • **${session.status}**\nCredit: **${session.credit}** • Net: **${session.net}**\n${detail}\nTransaction: \`${session.transactionId}\``;
+    }
+
+    gangInviteComponents(invite) {
+        const id = action => `economy:gang:${action}:${invite.id}:${invite.nonce}`;
+        return [new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(id('accept')).setLabel('Accept').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId(id('decline')).setLabel('Decline').setStyle(ButtonStyle.Secondary)
+        )];
+    }
+
+    leaderboardView(guildId, userId, offset = 0, token) {
+        const board = this.leaderboard({ guildId, offset });
+        const content = board.rows.length
+            ? board.rows.map((row, index) => `**${offset + index + 1}.** <@${row.userId}> — **${row.total}**`).join('\n')
+            : 'No economy accounts are on this page.';
+        if (!board.hasPrevious && !board.hasNext) return { content, components: [] };
+        for (const [key, page] of this.pageTokens) {
+            if (page.expiresAt <= this.now()) this.pageTokens.delete(key);
+        }
+        const pageToken = token || this.randomBytes(12).toString('hex').slice(0, 24);
+        this.pageTokens.set(pageToken, { guildId, userId, expiresAt: this.now() + GAME_SESSION_TTL });
+        const timer = this.setTimeout(() => {
+            if (this.pageTokens.get(pageToken)?.expiresAt <= this.now()) this.pageTokens.delete(pageToken);
+        }, GAME_SESSION_TTL);
+        timer.unref?.();
+        return {
+            content,
+            components: [new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(`economy:leaderboard:${Math.max(0, offset - 25)}:${pageToken}`)
+                    .setLabel('Previous').setStyle(ButtonStyle.Secondary).setDisabled(!board.hasPrevious),
+                new ButtonBuilder().setCustomId(`economy:leaderboard:${offset + 25}:${pageToken}`)
+                    .setLabel('Next').setStyle(ButtonStyle.Primary).setDisabled(!board.hasNext)
+            )]
+        };
+    }
+
+    async handleInteraction(interaction) {
+        try {
+            const parts = interaction.customId.split(':');
+            if (parts[1] === 'game') {
+                const [, , action, sessionId, nonce] = parts;
+                const result = this.actGame({
+                    guildId: interaction.guildId, userId: interaction.user.id, sessionId, nonce, action,
+                    value: action === 'reveal' ? Number(interaction.values?.[0]) : undefined
+                });
+                return interaction.update({
+                    embeds: [embeds.info('Economy', this.formatGame(result))],
+                    components: this.gameComponents(result), allowedMentions: { parse: [] }
+                });
+            }
+            if (parts[1] === 'gang') {
+                const [, , action, inviteId, nonce] = parts;
+                const result = this.respondGangInvite({
+                    guildId: interaction.guildId, userId: interaction.user.id, inviteId, nonce, accept: action === 'accept'
+                });
+                return interaction.update({
+                    embeds: [embeds.success('Economy', `Gang invite **${result.status}**.`)],
+                    components: [], allowedMentions: { parse: [] }
+                });
+            }
+            if (parts[1] === 'leaderboard') {
+                const offset = Number(parts[2]);
+                const token = parts[3];
+                const page = this.pageTokens.get(token);
+                if (page?.expiresAt <= this.now()) this.pageTokens.delete(token);
+                if (!page || page.expiresAt <= this.now() || page.guildId !== interaction.guildId || page.userId !== interaction.user.id) {
+                    throw new Error('That leaderboard page has expired or does not belong to you.');
+                }
+                const view = this.leaderboardView(interaction.guildId, interaction.user.id, offset, token);
+                return interaction.update({
+                    embeds: [embeds.info('Economy', view.content)], components: view.components, allowedMentions: { parse: [] }
+                });
+            }
+            throw new Error('Unknown economy interaction.');
+        } catch (error) {
+            return interaction.reply({
+                embeds: [embeds.error('Economy', error.message)], flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+            });
+        }
+    }
+
     async handleCommand(interaction) {
         try {
             const group = interaction.options.getSubcommandGroup(false);
             const subcommand = interaction.options.getSubcommand();
             const guildId = interaction.guildId;
             const userId = interaction.user.id;
+            if (group === 'game') {
+                const choice = interaction.options.getString('side')
+                    || interaction.options.getString('bet') || interaction.options.getString('guess');
+                const result = this.playGame({
+                    guildId, userId, game: subcommand,
+                    bet: interaction.options.getInteger('amount'), choice
+                });
+                return this.respond(interaction, this.formatGame(result), false, this.gameComponents(result));
+            }
+            if (group === 'gang') {
+                if (subcommand === 'create') {
+                    const gang = this.createGang({ guildId, userId, name: interaction.options.getString('name') });
+                    return this.respond(interaction, `✅ Created gang **${gang.name}**.`);
+                }
+                if (subcommand === 'info') {
+                    const gang = this.gangInfo({ guildId, userId });
+                    const members = gang.members.map(member => `<@${member.userId}> — ${member.role}`).join('\n');
+                    return this.respond(interaction, `**${gang.name}**\nOwner: <@${gang.ownerId}>\nCreated: <t:${Math.floor(gang.createdAt / 1000)}:F>\nMembers: **${gang.members.length}/25**\n${members}${gang.bannerUrl ? `\nBanner: ${gang.bannerUrl}` : ''}`);
+                }
+                if (subcommand === 'invite') {
+                    const target = this.target(interaction);
+                    const invite = this.inviteToGang({ guildId, userId, targetId: target.id });
+                    return this.respond(interaction, `<@${target.id}>, you were invited to a gang.`, false, this.gangInviteComponents(invite));
+                }
+                if (subcommand === 'promote') {
+                    const target = this.target(interaction);
+                    this.promoteGang({ guildId, userId, targetId: target.id });
+                    return this.respond(interaction, `✅ Promoted **${target.username || target.id}** to gang admin.`);
+                }
+                if (subcommand === 'transfer') {
+                    const target = this.target(interaction);
+                    this.transferGang({ guildId, userId, targetId: target.id });
+                    return this.respond(interaction, `✅ Transferred gang ownership to **${target.username || target.id}**.`);
+                }
+                if (subcommand === 'setbanner') {
+                    const result = this.setGangBanner({ guildId, userId, url: interaction.options.getString('url') });
+                    return this.respond(interaction, `✅ Gang banner set to ${result.bannerUrl}.`);
+                }
+                if (subcommand === 'leave') {
+                    this.leaveGang({ guildId, userId });
+                    return this.respond(interaction, '✅ You left the gang.');
+                }
+                this.disbandGang({ guildId, userId });
+                return this.respond(interaction, '✅ Gang disbanded.');
+            }
+            if (group === 'lab') {
+                const operationId = interaction.id;
+                if (subcommand === 'buy') {
+                    const result = this.buyLab({ guildId, userId, operationId });
+                    return this.respond(interaction, `✅ Bought a level **${result.level}** laboratory. Wallet: **${result.wallet}**.`);
+                }
+                if (subcommand === 'status') {
+                    const result = this.labStatus({ guildId, userId });
+                    return this.respond(interaction, `Level: **${result.level}/10**\nAmpoules: **${result.ampoules}/5**\nEarnings/hour: **${result.hourly}**\nStored: **${result.stored}/${result.storage}**\nNext upgrade: **${result.nextUpgrade ?? 'max'}**\nByteBot-owned rules.`);
+                }
+                if (subcommand === 'upgrade') {
+                    const result = this.upgradeLab({ guildId, userId, operationId });
+                    return this.respond(interaction, `✅ Upgraded laboratory to level **${result.level}**. Wallet: **${result.wallet}**.`);
+                }
+                if (subcommand === 'ampoules') {
+                    const result = this.buyAmpoules({
+                        guildId, userId, operationId, amount: interaction.options.getInteger('amount')
+                    });
+                    return this.respond(interaction, `✅ Laboratory now has **${result.ampoules}/5** ampoules. Wallet: **${result.wallet}**.`);
+                }
+                const result = this.collectLab({ guildId, userId, operationId });
+                return this.respond(interaction, `✅ Collected **${result.collected}**. Wallet: **${result.wallet}**.`);
+            }
             if (group === 'job') {
                 if (subcommand === 'list') {
                     const jobs = this.listJobs(guildId);
@@ -911,6 +1795,22 @@ class EconomyService {
             if (subcommand === 'circulation') {
                 const result = this.circulation({ guildId, userId, scope: interaction.options.getString('scope') || undefined });
                 return this.respond(interaction, `Scope: **${result.scopeType}**\nCirculation: **${result.circulation}**\nMinted: **${result.minted}**\nDestroyed: **${result.destroyed}**\nAccounts: **${result.accounts}**`);
+            }
+            if (subcommand === 'crime') {
+                const result = this.crime({
+                    guildId, userId, guildCreatedAt: interaction.guild.createdTimestamp,
+                    memberJoinedAt: interaction.member.joinedTimestamp
+                });
+                return this.respond(interaction, `${result.status === 'won' ? '✅ Earned' : '⚠️ Lost'} **${result.amount}**. Wallet: **${result.wallet}**.`);
+            }
+            if (subcommand === 'rob') {
+                const target = this.target(interaction);
+                const result = this.rob({ guildId, userId, targetId: target.id });
+                return this.respond(interaction, `${result.status === 'won' ? '✅ Robbed' : '⚠️ Lost'} **${result.amount}**${result.status === 'won' ? ` from **${target.username || target.id}**` : ''}. Wallet: **${result.wallet}**.`);
+            }
+            if (subcommand === 'leaderboard') {
+                const view = this.leaderboardView(guildId, userId);
+                return this.respond(interaction, view.content, false, view.components);
             }
 
             this.requireManage(interaction);
