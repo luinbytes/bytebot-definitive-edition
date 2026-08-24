@@ -689,6 +689,38 @@ const reminders = sqliteTable('reminders', {
     guildIdx: index('reminders_guild_idx').on(table.guildId, table.active)
 }));
 
+const personalSettings = sqliteTable('personal_settings', {
+    userId: text('user_id').primaryKey(),
+    timezone: text('timezone'),
+    afkTemplate: text('afk_template'),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    nonemptyCheck: check('personal_settings_nonempty_check', sql`${table.timezone} IS NOT NULL OR ${table.afkTemplate} IS NOT NULL`),
+    timezoneCheck: check('personal_settings_timezone_check', sql`${table.timezone} IS NULL OR length(${table.timezone}) BETWEEN 1 AND 100`),
+    templateCheck: check('personal_settings_template_check', sql`${table.afkTemplate} IS NULL OR length(${table.afkTemplate}) BETWEEN 1 AND 2000`)
+}));
+
+const afkStatuses = sqliteTable('afk_statuses', {
+    userId: text('user_id').primaryKey(),
+    status: text('status').notNull(),
+    setAt: integer('set_at').notNull()
+}, table => ({
+    statusCheck: check('afk_statuses_status_check', sql`length(${table.status}) BETWEEN 1 AND 25`)
+}));
+
+const diaryEntries = sqliteTable('diary_entries', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: text('user_id').notNull(),
+    entryDate: text('entry_date').notNull(),
+    content: text('content').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({
+    userDateUnique: unique('diary_entries_user_date_unique').on(table.userId, table.entryDate),
+    userDateIdx: index('diary_entries_user_date_idx').on(table.userId, table.entryDate),
+    dateCheck: check('diary_entries_date_check', sql`${table.entryDate} GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'`),
+    contentCheck: check('diary_entries_content_check', sql`length(${table.content}) BETWEEN 1 AND 2000`)
+}));
+
 // Suggestions configuration (per-guild)
 const suggestionConfig = sqliteTable('suggestion_config', {
     guildId: text('guild_id').primaryKey(),
@@ -1470,6 +1502,9 @@ module.exports = {
     honeypotExemptRoles,
     honeypotIncidents,
     reminders,
+    personalSettings,
+    afkStatuses,
+    diaryEntries,
     suggestionConfig,
     suggestions,
     activityStreaks,

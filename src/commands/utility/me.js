@@ -1,5 +1,8 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { executeAliasCommand } = require('../../utils/commandAlias');
+const { executePersonalUtility } = require('../../utils/personalUtilityCommand');
+
+const PERSONAL_GROUPS = new Set(['afk', 'timezone', 'diary']);
 
 const TARGETS = {
     avatar: { commandName: 'avatar', requirePath: 'src/commands/utility/avatar.js' },
@@ -110,7 +113,51 @@ module.exports = {
             .addSubcommand(sub => sub
                 .setName('cancel')
                 .setDescription('Cancel a reminder')
-                .addIntegerOption(opt => opt.setName('id').setDescription('Reminder ID').setRequired(true).setMinValue(1))))
+                .addIntegerOption(opt => opt.setName('id').setDescription('Reminder ID').setRequired(true).setMinValue(1)))
+            .addSubcommand(sub => sub
+                .setName('snooze')
+                .setDescription('Snooze an active reminder')
+                .addIntegerOption(opt => opt.setName('id').setDescription('Reminder ID').setRequired(true).setMinValue(1))
+                .addStringOption(opt => opt.setName('time').setDescription('New time until reminder').setRequired(true))))
+        .addSubcommandGroup(group => group
+            .setName('afk')
+            .setDescription('Manage your AFK status')
+            .addSubcommand(sub => sub
+                .setName('set')
+                .setDescription('Set your AFK status')
+                .addStringOption(opt => opt.setName('status').setDescription('Optional status').setMaxLength(25)))
+            .addSubcommand(sub => sub
+                .setName('embed')
+                .setDescription('Set a custom AFK response script')
+                .addStringOption(opt => opt.setName('script').setDescription('ByteBot embed or content script').setRequired(true).setMaxLength(2000)))
+            .addSubcommand(sub => sub.setName('reset').setDescription('Reset your custom AFK response')))
+        .addSubcommandGroup(group => group
+            .setName('timezone')
+            .setDescription('Manage your time zone')
+            .addSubcommand(sub => sub
+                .setName('view')
+                .setDescription('View a saved time zone')
+                .addUserOption(opt => opt.setName('user').setDescription('User to view')))
+            .addSubcommand(sub => sub
+                .setName('set')
+                .setDescription('Set your time zone')
+                .addStringOption(opt => opt.setName('timezone').setDescription('IANA zone, abbreviation, or supported city').setRequired(true).setMaxLength(100)))
+            .addSubcommand(sub => sub.setName('remove').setDescription('Remove your saved time zone')))
+        .addSubcommandGroup(group => group
+            .setName('diary')
+            .setDescription('Manage private diary entries')
+            .addSubcommand(sub => sub
+                .setName('create')
+                .setDescription('Create today\'s diary entry')
+                .addStringOption(opt => opt.setName('content').setDescription('Private diary content').setRequired(true).setMaxLength(2000)))
+            .addSubcommand(sub => sub
+                .setName('view')
+                .setDescription('View one diary entry page')
+                .addIntegerOption(opt => opt.setName('page').setDescription('Page number').setMinValue(1)))
+            .addSubcommand(sub => sub
+                .setName('delete')
+                .setDescription('Delete one diary entry')
+                .addIntegerOption(opt => opt.setName('id').setDescription('Diary entry ID').setRequired(true).setMinValue(1))))
         .addSubcommandGroup(group => group
             .setName('bookmark')
             .setDescription('Manage saved message bookmarks')
@@ -168,6 +215,7 @@ module.exports = {
                 .addBooleanOption(opt => opt.setName('private').setDescription('Show only to you')))),
 
     async execute(interaction, client) {
+        if (PERSONAL_GROUPS.has(group(interaction))) return executePersonalUtility(interaction);
         return executeAliasCommand(interaction, client, aliasFor(interaction));
     }
 };

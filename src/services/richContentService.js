@@ -11,8 +11,10 @@ const { parseEmbedScript } = require('./lifecycleMessageService');
 
 const SAFE_MENTIONS = { parse: [], repliedUser: false };
 
-function renderVariables(script, { user, member, guild, channel } = {}) {
+function renderVariables(script, context = {}) {
+    const { user, member, guild, channel, mentioner, message, time } = context;
     const subject = member?.user || user || member;
+    const mentionerAvatar = mentioner?.displayAvatarURL?.() || mentioner?.avatarURL?.() || '';
     const avatar = subject?.displayAvatarURL?.() || subject?.avatarURL?.() || '';
     const values = {
         user: subject?.username || '',
@@ -36,7 +38,12 @@ function renderVariables(script, { user, member, guild, channel } = {}) {
         'channel.id': channel?.id || '',
         'channel.name': channel?.name || '',
         'channel.mention': channel?.id ? `<#${channel.id}>` : '',
-        'channel.topic': channel?.topic || ''
+        'channel.topic': channel?.topic || '',
+        message: message || '',
+        time: time || '',
+        mentioner: mentioner?.username || '',
+        'mentioner.name': mentioner?.username || '',
+        'mentioner.avatar': mentionerAvatar
     };
     return String(script).replace(/\{([a-z]+(?:\.[a-z_]+)?)\}/g,
         (token, name) => Object.hasOwn(values, name)

@@ -66,6 +66,13 @@ module.exports = {
                             .setRequired(true)
                             .setMinValue(1)
                     )
+            )
+            .addSubcommand(subcommand =>
+                subcommand
+                    .setName('snooze')
+                    .setDescription('Snooze an active reminder')
+                    .addIntegerOption(option => option.setName('id').setDescription('Reminder ID').setRequired(true).setMinValue(1))
+                    .addStringOption(option => option.setName('time').setDescription('New time until reminder').setRequired(true))
             )),
 
     longRunning: true,
@@ -86,6 +93,9 @@ module.exports = {
                 break;
             case 'cancel':
                 await handleCancel(interaction, client);
+                break;
+            case 'snooze':
+                await handleSnooze(interaction, client);
                 break;
         }
     }
@@ -310,5 +320,24 @@ async function handleCancel(interaction, client) {
 
     } catch (error) {
         await handleCommandError(error, interaction, 'cancelling reminder');
+    }
+}
+
+async function handleSnooze(interaction, client) {
+    const reminderId = interaction.options.getInteger('id');
+    const parsedTime = parseTime(interaction.options.getString('time'));
+    if (!parsedTime.success) {
+        return interaction.editReply({ embeds: [embeds.error('Invalid Time', parsedTime.error)] });
+    }
+    try {
+        if (!client.reminderService) {
+            return interaction.editReply({ embeds: [embeds.error('Service Unavailable', 'Reminder service is not available.')] });
+        }
+        await client.reminderService.snoozeReminder(reminderId, interaction.user.id, new Date(parsedTime.timestamp));
+        return interaction.editReply({
+            embeds: [embeds.success('⏰ Reminder Snoozed', `Reminder #${reminderId} will run <t:${Math.floor(parsedTime.timestamp / 1000)}:R>.`)]
+        });
+    } catch (error) {
+        return handleCommandError(error, interaction, 'snoozing reminder');
     }
 }

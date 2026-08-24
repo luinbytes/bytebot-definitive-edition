@@ -4,6 +4,7 @@ const { handleHoneypotMessage } = require('../utils/honeypotUtil');
 const { handleUwuLockMessage } = require('../utils/uwuLockUtil');
 const { handleMassMention } = require('../services/antiraidService');
 const { handleMessage: handleAutomodMessage } = require('../services/automodService');
+const { handleAfkMessage } = require('../services/personalUtilityService');
 
 module.exports = {
     name: Events.MessageCreate,
@@ -19,6 +20,12 @@ module.exports = {
 
         // Guild only (auto-responder doesn't work in DMs)
         if (!message.guild) return;
+
+        try {
+            await handleAfkMessage(message);
+        } catch (error) {
+            logger.error('AFK handler error:', error);
+        }
 
         try {
             if (await handleHoneypotMessage(message)) return;

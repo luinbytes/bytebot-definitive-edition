@@ -639,6 +639,24 @@ const expectedSchema = {
         created_at: 'INTEGER NOT NULL',
         active: 'INTEGER DEFAULT 1 NOT NULL'
     },
+    personal_settings: {
+        user_id: 'TEXT PRIMARY KEY',
+        timezone: 'TEXT',
+        afk_template: 'TEXT',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    afk_statuses: {
+        user_id: 'TEXT PRIMARY KEY',
+        status: 'TEXT NOT NULL',
+        set_at: 'INTEGER NOT NULL'
+    },
+    diary_entries: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        user_id: 'TEXT NOT NULL',
+        entry_date: 'TEXT NOT NULL',
+        content: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
     suggestion_config: {
         guild_id: 'TEXT PRIMARY KEY',
         channel_id: 'TEXT NOT NULL',
@@ -1435,6 +1453,10 @@ function validateAndFixSchema() {
         sqlite.exec('CREATE INDEX IF NOT EXISTS tickets_inactivity_deadline_idx ON tickets (inactivity_deadline, status)');
     }
     if (tableExists('ticket_actions')) sqlite.exec('CREATE INDEX IF NOT EXISTS ticket_actions_ticket_idx ON ticket_actions (ticket_id, id)');
+    if (tableExists('diary_entries')) {
+        sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS diary_entries_user_date_unique ON diary_entries (user_id, entry_date)');
+        sqlite.exec('CREATE INDEX IF NOT EXISTS diary_entries_user_date_idx ON diary_entries (user_id, entry_date)');
+    }
 
     return fixes;
 }
