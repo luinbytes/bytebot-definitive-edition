@@ -17,11 +17,13 @@ function schema(sqlite) {
 }
 
 function response(body, headers = {}) {
+    const raw = JSON.stringify(body);
     headers['content-type'] ??= 'application/json';
+    headers['content-length'] ??= String(Buffer.byteLength(raw));
     return {
         ok: true,
         headers: { get: name => headers[name.toLowerCase()] || null },
-        text: async () => JSON.stringify(body)
+        text: async () => raw
     };
 }
 
@@ -49,7 +51,7 @@ describe('LastfmService', () => {
         const { LastfmService } = require('../src/services/lastfmService');
         await expect(new LastfmService({ sqlite }).request('user.getInfo', { user: 'a' })).rejects.toThrow('configured');
         const service = new LastfmService({ sqlite, apiKey: 'key', fetch: jest.fn(async () => ({
-            ok: true, headers: { get: name => name === 'content-length' ? String(2 * 1024 * 1024 + 1) : null }, text: async () => '{}'
+            ok: true, headers: { get: name => name === 'content-length' ? String(2 * 1024 * 1024 + 1) : name === 'content-type' ? 'application/json' : null }, text: async () => '{}'
         })) });
         await expect(service.request('track.scrobble', {})).rejects.toThrow('method');
         await expect(service.request('user.getInfo', { user: 'a' })).rejects.toThrow('large');
@@ -57,6 +59,12 @@ describe('LastfmService', () => {
         await expect(service.request('user.getInfo', { user: 'a' })).rejects.toThrow('payload');
         service.fetch = jest.fn(async () => response({ nope: true }));
         await expect(service.recentTracks('a')).rejects.toThrow('malformed recent');
+        service.fetch = jest.fn(async () => response({ nope: true }));
+        await expect(service.top('artists', 'a')).rejects.toThrow('malformed chart');
+        service.fetch = jest.fn(async () => response({ nope: true }));
+        await expect(service.library('a')).rejects.toThrow('malformed library');
+        service.fetch = jest.fn(async () => ({ ok: true, headers: { get: name => name === 'content-type' ? 'application/json' : null }, text: async () => '{}' }));
+        await expect(service.request('user.getInfo', { user: 'no-stream' })).rejects.toThrow('safely');
     });
 
     test('honors no-store and stops a chunked body above two MiB', async () => {

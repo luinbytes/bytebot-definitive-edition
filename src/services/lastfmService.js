@@ -79,14 +79,23 @@ function normalizeItem(item, kind) {
 async function boundedText(response) {
     const length = Number(response.headers?.get?.('content-length') || 0);
     if (!Number.isFinite(length) || length < 0 || length > MAX_RESPONSE_BYTES) throw new Error('Last.fm response is too large.');
-    if (!response.body?.getReader) {
+    if (!response.body?.getReader && !response.body?.[Symbol.asyncIterator]) {
+        if (!length) throw new Error('Last.fm response cannot be read safely.');
         const raw = await response.text();
         if (Buffer.byteLength(raw) > MAX_RESPONSE_BYTES) throw new Error('Last.fm response is too large.');
         return raw;
     }
-    const reader = response.body.getReader();
     const chunks = [];
     let total = 0;
+    if (response.body[Symbol.asyncIterator]) {
+        for await (const value of response.body) {
+            total += value.length;
+            if (total > MAX_RESPONSE_BYTES) throw new Error('Last.fm response is too large.');
+            chunks.push(Buffer.from(value));
+        }
+        return Buffer.concat(chunks, total).toString('utf8');
+    }
+    const reader = response.body.getReader();
     while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -135,7 +144,7 @@ class LastfmService {
         const response = await this.fetch(`${API_URL}?${query}`, { signal: AbortSignal.timeout(10000), redirect: 'error' });
         if (!response?.ok) throw new Error('Last.fm request failed.');
         const contentType = response.headers?.get?.('content-type');
-        if (contentType && !/^application\/json\b/i.test(contentType)) throw new Error('Last.fm returned a non-JSON response.');
+        if (!/^application\/json\b/i.test(contentType || '')) throw new Error('Last.fm returned a non-JSON response.');
         const raw = await boundedText(response);
         let payload;
         try { payload = JSON.parse(raw); } catch { throw new Error('Last.fm returned invalid JSON.'); }
@@ -406,7 +415,7 @@ class LastfmService {
         const response = await this.fetch(API_URL, { method: 'POST', body, signal: AbortSignal.timeout(10000), redirect: 'error' });
         if (!response.ok) throw new Error('Last.fm OAuth exchange failed.');
         const contentType = response.headers?.get?.('content-type');
-        if (contentType && !/^application\/json\b/i.test(contentType)) throw new Error('Last.fm OAuth returned a non-JSON response.');
+        if (!/^application\/json\b/i.test(contentType || '')) throw new Error('Last.fm OAuth returned a non-JSON response.');
         const raw = await boundedText(response);
         let payload;
         try { payload = JSON.parse(raw); } catch { throw new Error('Last.fm OAuth returned invalid JSON.'); }
