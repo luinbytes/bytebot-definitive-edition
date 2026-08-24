@@ -110,6 +110,7 @@ describe('snipe, roleplay, and persistent fun state', () => {
         expect(http.get).toHaveBeenCalledWith('https://nekos.best/api/v2/hug?amount=1', expect.objectContaining({
             timeout: 5000,
             maxContentLength: 65536,
+            maxRedirects: 0,
             headers: { 'User-Agent': 'ByteBot (https://github.com/luinbytes/bytebot-definitive-edition)' }
         }));
 

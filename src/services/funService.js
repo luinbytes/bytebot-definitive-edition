@@ -215,6 +215,7 @@ class FunService {
         const response = await this.http.get(`https://nekos.best/api/v2/${action}?amount=1`, {
             timeout: 5000,
             maxContentLength: 65536,
+            maxRedirects: 0,
             headers: { 'User-Agent': USER_AGENT }
         });
         const result = response?.data?.results?.[0];

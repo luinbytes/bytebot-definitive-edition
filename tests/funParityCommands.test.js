@@ -3,6 +3,8 @@ const os = require('os');
 const path = require('path');
 const { PermissionFlagsBits } = require('discord.js');
 
+jest.mock('axios', () => ({ get: jest.fn() }));
+
 function makeInteraction({ group, subcommand, strings = {}, integers = {}, users = {}, manage = true, service }) {
     return {
         commandName: 'fun',
@@ -131,5 +133,15 @@ describe('/fun public parity surface', () => {
         const hit = makeInteraction({ group: 'vape', subcommand: 'hit', service });
         await fun.execute(hit);
         expect(hit.reply.mock.calls[0][0].embeds[0].data.description).toContain('1');
+    });
+
+    test('does not follow redirects from the joke provider', async () => {
+        const axios = require('axios');
+        axios.get.mockResolvedValue({ data: { setup: 'Setup', punchline: 'Punchline' } });
+        const joke = makeInteraction({ subcommand: 'joke', service });
+        await fun.execute(joke);
+        expect(axios.get).toHaveBeenCalledWith('https://official-joke-api.appspot.com/random_joke', expect.objectContaining({
+            maxRedirects: 0
+        }));
     });
 });

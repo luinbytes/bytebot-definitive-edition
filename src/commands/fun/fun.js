@@ -621,7 +621,8 @@ async function handleJoke(interaction) {
     try {
         const response = await axios.get('https://official-joke-api.appspot.com/random_joke', {
             timeout: 5000,
-            maxContentLength: 32768
+            maxContentLength: 32768,
+            maxRedirects: 0
         });
         const joke = response.data;
 
