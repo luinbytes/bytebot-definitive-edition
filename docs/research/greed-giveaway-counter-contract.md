@@ -1,7 +1,9 @@
 # Greed giveaway and counter compatibility contract
 
-Issue: [#46](https://github.com/luinbytes/bytebot-definitive-edition/issues/46)  
-Parent: [#33](https://github.com/luinbytes/bytebot-definitive-edition/issues/33)  
+Issue: [#46](https://github.com/luinbytes/bytebot-definitive-edition/issues/46)
+
+Parent: [#33](https://github.com/luinbytes/bytebot-definitive-edition/issues/33)
+
 Research frozen: 2026-08-24
 
 This is the implementation gate for ByteBot giveaways and the remaining server-counter delta. It records every behavior evidenced by Greed's current public documentation and command catalog, the older public guide, and the official English localization registry pinned by the parity program. No live Greed bot was queried.
