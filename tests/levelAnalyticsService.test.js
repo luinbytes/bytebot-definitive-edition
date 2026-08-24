@@ -471,4 +471,37 @@ describe('LevelAnalyticsService', () => {
         const metadata = await require('sharp')(interaction.reply.mock.calls[2][0].files[0].attachment).metadata();
         expect(metadata).toEqual(expect.objectContaining({ format: 'png', width: 760, height: 220 }));
     });
+
+    test('live boards persist and recreate a missing bot message', async () => {
+        const send = jest.fn()
+            .mockResolvedValueOnce({ id: 'board1' })
+            .mockResolvedValueOnce({ id: 'board2' });
+        const channel = {
+            id: 'channel1', send,
+            messages: { fetch: jest.fn(async () => null) }
+        };
+        const guild = {
+            id: 'guild1', channels: { cache: new Map([['channel1', channel]]), fetch: jest.fn() },
+            members: {
+                me: {
+                    permissionsIn: () => ({ has: () => true })
+                }
+            }
+        };
+        const interaction = {
+            guildId: 'guild1', guild, channel,
+            member: { permissions: { has: permission => permission === PermissionFlagsBits.ManageGuild } },
+            options: {
+                getSubcommandGroup: () => 'live', getSubcommand: () => 'text', getChannel: () => null
+            },
+            reply: jest.fn()
+        };
+        await service.execute(interaction);
+        service.client = { guilds: { cache: new Map([['guild1', guild]]) } };
+        await service.refreshLiveBoards();
+
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(database.sqlite.prepare(`SELECT message_id, revision FROM level_live_boards WHERE guild_id = 'guild1'`).get())
+            .toEqual({ message_id: 'board2', revision: 2 });
+    });
 });

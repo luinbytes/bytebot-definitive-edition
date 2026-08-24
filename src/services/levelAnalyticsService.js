@@ -479,6 +479,48 @@ class LevelAnalyticsService {
         return { files: [new AttachmentBuilder(png, { name: `rank-${user.id}.png` })], allowedMentions: { parse: [] } };
     }
 
+    liveBoardPayload(guildId, metric) {
+        const column = metric === 'voice' ? 'voice_xp' : 'text_xp';
+        const rows = this.sqlite.prepare(`
+            SELECT user_id, ${column} AS score, xp FROM member_levels WHERE guild_id = ?
+            ORDER BY ${column} DESC, xp DESC, user_id ASC LIMIT 10
+        `).all(guildId);
+        return {
+            content: rows.length
+                ? `**Live ${metric} XP leaderboard**\n${rows.map((row, index) => `**${index + 1}.** <@${row.user_id}> — **${row.score}** XP`).join('\n')}`
+                : `**Live ${metric} XP leaderboard**\nNo one has earned any XP yet.`,
+            allowedMentions: { parse: [] }
+        };
+    }
+
+    async refreshLiveBoards() {
+        if (!this.client) return { updated: 0, failures: [] };
+        let updated = 0;
+        const failures = [];
+        for (const board of this.sqlite.prepare(`SELECT * FROM level_live_boards ORDER BY guild_id, channel_id, metric`).all()) {
+            try {
+                const guild = this.client.guilds.cache.get(board.guild_id);
+                const channel = guild?.channels.cache.get(board.channel_id)
+                    || await guild?.channels.fetch(board.channel_id).catch(() => null);
+                if (!channel?.send || !channel.messages?.fetch) throw new Error('channel unavailable');
+                const payload = this.liveBoardPayload(board.guild_id, board.metric);
+                let message = board.message_id
+                    ? await channel.messages.fetch(board.message_id).catch(() => null)
+                    : null;
+                if (message) await message.edit(payload);
+                else message = await channel.send(payload);
+                this.sqlite.prepare(`
+                    UPDATE level_live_boards SET message_id = ?, revision = revision + 1, updated_at = ?
+                    WHERE guild_id = ? AND channel_id = ? AND metric = ?
+                `).run(message.id, this.now(), board.guild_id, board.channel_id, board.metric);
+                updated += 1;
+            } catch (error) {
+                failures.push({ guildId: board.guild_id, channelId: board.channel_id, metric: board.metric, error: error.message });
+            }
+        }
+        return { updated, failures };
+    }
+
     async reconcileMemberRoles(member) {
         if (!member || member.user?.bot) return false;
         const config = this.sqlite.prepare(`SELECT stack_roles FROM level_configs WHERE guild_id = ?`).get(member.guild.id);
@@ -838,6 +880,36 @@ class LevelAnalyticsService {
             `).run(interaction.guildId, type, target.id, multiplier, this.now());
             return interaction.reply({
                 content: `Set ${type === 'role' ? `<@&${target.id}>` : `<#${target.id}>`} to **${multiplier}x** XP.`,
+                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+            });
+        }
+        if (group === 'live') {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                throw new Error('You need Manage Server to create a live leaderboard.');
+            }
+            const channel = interaction.options.getChannel('channel') || interaction.channel;
+            const permissions = interaction.guild.members.me.permissionsIn(channel);
+            if (!permissions.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks])) {
+                throw new Error('I need View Channel, Send Messages, and Embed Links there.');
+            }
+            const payload = this.liveBoardPayload(interaction.guildId, action);
+            const existing = this.sqlite.prepare(`
+                SELECT message_id FROM level_live_boards WHERE guild_id = ? AND channel_id = ? AND metric = ?
+            `).get(interaction.guildId, channel.id, action);
+            let message = existing?.message_id
+                ? await channel.messages.fetch(existing.message_id).catch(() => null)
+                : null;
+            if (message) await message.edit(payload);
+            else message = await channel.send(payload);
+            this.sqlite.prepare(`
+                INSERT INTO level_live_boards (guild_id, channel_id, metric, message_id, revision, updated_at)
+                VALUES (?, ?, ?, ?, 1, ?)
+                ON CONFLICT(guild_id, channel_id, metric) DO UPDATE SET
+                    message_id = excluded.message_id, revision = level_live_boards.revision + 1,
+                    updated_at = excluded.updated_at
+            `).run(interaction.guildId, channel.id, action, message.id, this.now());
+            return interaction.reply({
+                content: `Live ${action} XP leaderboard created in <#${channel.id}>.`,
                 flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
             });
         }

@@ -164,6 +164,16 @@ module.exports = {
             recovery.failures.forEach(failure => logger.error(
                 `Level analytics baseline failed for ${failure.guildId}: ${failure.error}`
             ));
+            const boards = await client.levelAnalyticsService.refreshLiveBoards();
+            boards.failures.forEach(failure => logger.error(
+                `Live level board recovery failed for ${failure.guildId}/${failure.channelId}/${failure.metric}: ${failure.error}`
+            ));
+            const liveBoardTimer = setInterval(() => client.levelAnalyticsService.refreshLiveBoards()
+                .then(result => result.failures.forEach(failure => logger.error(
+                    `Live level board refresh failed for ${failure.guildId}/${failure.channelId}/${failure.metric}: ${failure.error}`
+                )))
+                .catch(error => logger.error(`Live level board refresh failed: ${error.message}`)), 5 * 60 * 1000);
+            liveBoardTimer.unref?.();
             logger.success('Level analytics service initialized');
         } catch (e) {
             logger.error(`Failed to initialize level analytics service: ${e}`);
