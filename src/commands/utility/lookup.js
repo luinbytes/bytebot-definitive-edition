@@ -20,15 +20,67 @@ module.exports = {
             .addStringOption(option => option.setName('word').setDescription('Word or phrase').setRequired(true).setMaxLength(100)))
         .addSubcommand(sub => sub.setName('translate').setDescription('Translate text to another language')
             .addStringOption(option => option.setName('language').setDescription('Language code or full name').setRequired(true).setMaxLength(50))
-            .addStringOption(option => option.setName('text').setDescription('Text to translate').setRequired(true).setMaxLength(2000))),
+            .addStringOption(option => option.setName('text').setDescription('Text to translate').setRequired(true).setMaxLength(2000)))
+        .addSubcommandGroup(group => group.setName('github').setDescription('Look up public GitHub data')
+            .addSubcommand(sub => sub.setName('user').setDescription('Look up a public GitHub profile')
+                .addStringOption(option => option.setName('username').setDescription('GitHub username').setRequired(true).setMaxLength(39)))
+            .addSubcommand(sub => sub.setName('repository').setDescription('Search public GitHub repositories')
+                .addStringOption(option => option.setName('query').setDescription('Repository name').setRequired(true).setMaxLength(100)))
+            .addSubcommand(sub => sub.setName('email').setDescription('Find public commits authored by an email')
+                .addStringOption(option => option.setName('email').setDescription('Commit author email').setRequired(true).setMaxLength(254)))),
 
     longRunning: true,
     sourceCategories: ['Information', 'Utility'],
 
     async execute(interaction, client) {
         const action = interaction.options.getSubcommand();
+        const group = interaction.options.getSubcommandGroup(false);
         const service = client.informationLookupService;
         if (!service) throw new UserFacingError('Lookup service is temporarily unavailable.');
+
+        if (group === 'github') {
+            if (action === 'user') {
+                const user = await service.githubUser(interaction.options.getString('username', true));
+                const embed = embeds.brand(user.name || user.username, user.bio || 'No public bio.')
+                    .setURL(user.url)
+                    .setThumbnail(user.avatar)
+                    .addFields(
+                        { name: 'Username', value: user.username, inline: true },
+                        { name: 'GitHub ID', value: String(user.id), inline: true },
+                        { name: 'Repositories', value: String(user.repositories), inline: true },
+                        { name: 'Followers', value: String(user.followers), inline: true },
+                        { name: 'Following', value: String(user.following), inline: true },
+                        { name: 'Gists', value: String(user.gists), inline: true },
+                        { name: 'Created', value: `<t:${Math.floor(Date.parse(user.createdAt) / 1000)}:D>`, inline: true },
+                        { name: 'Contributions', value: 'Not available through GitHub’s keyless REST API.' }
+                    );
+                const details = [user.company, user.location, user.website].filter(Boolean).join(' · ');
+                if (details) embed.addFields({ name: 'Profile', value: details.slice(0, 1024) });
+                return interaction.editReply({ embeds: [embed], allowedMentions: { parse: [] } });
+            }
+            if (action === 'repository') {
+                const query = interaction.options.getString('query', true);
+                const rows = await service.githubRepositories(query);
+                const description = rows.map(row => {
+                    const details = [`⭐ ${row.stars}`, `⑂ ${row.forks}`, row.language, row.archived && 'Archived'].filter(Boolean).join(' · ');
+                    return `**[${row.name}](${row.url})**\n${(row.description || 'No description.').slice(0, 300)}\n${details}`;
+                }).join('\n\n').slice(0, 4000);
+                return interaction.editReply({
+                    embeds: [embeds.brand(`GitHub repositories: ${query}`, description)],
+                    allowedMentions: { parse: [] }
+                });
+            }
+            const email = interaction.options.getString('email', true);
+            const rows = await service.githubEmail(email);
+            const description = rows.map(row => {
+                const message = row.message.split('\n')[0].slice(0, 200);
+                return `**[${row.repository}](${row.repositoryUrl})** · [${row.sha.slice(0, 7)}](${row.url})\n${message}`;
+            }).join('\n\n').slice(0, 4000);
+            return interaction.editReply({
+                embeds: [embeds.brand(`Public GitHub commits: ${email}`, description)],
+                allowedMentions: { parse: [] }
+            });
+        }
 
         if (action === 'calculate') {
             const expression = interaction.options.getString('expression', true);

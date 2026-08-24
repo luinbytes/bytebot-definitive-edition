@@ -110,6 +110,76 @@ test('provider bodies are stopped at the byte limit without relying on Content-L
     await expect(service.json('https://provider.example/data')).rejects.toThrow('invalid payload');
 });
 
+test('GitHub user lookup returns only validated public profile fields', async () => {
+    const fetch = jest.fn().mockResolvedValue(new Response(JSON.stringify({
+        login: 'octocat', id: 1, html_url: 'https://github.com/octocat',
+        avatar_url: 'https://avatars.githubusercontent.com/u/1?v=4',
+        name: 'The Octocat', bio: 'A public profile', company: '@github', location: 'San Francisco',
+        blog: 'https://github.blog', public_repos: 8, public_gists: 8,
+        followers: 100, following: 2, created_at: '2011-01-25T18:44:36Z'
+    }), { headers: { 'content-type': 'application/json' } }));
+    const service = new InformationLookupService({ fetch });
+
+    await expect(service.githubUser('octocat')).resolves.toEqual({
+        username: 'octocat', id: 1, url: 'https://github.com/octocat',
+        avatar: 'https://avatars.githubusercontent.com/u/1?v=4',
+        name: 'The Octocat', bio: 'A public profile', company: '@github', location: 'San Francisco',
+        website: 'https://github.blog', repositories: 8, gists: 8,
+        followers: 100, following: 2, createdAt: '2011-01-25T18:44:36Z'
+    });
+    expect(fetch.mock.calls[0][0].toString()).toBe('https://api.github.com/users/octocat');
+});
+
+test('GitHub repository search returns a bounded public result set', async () => {
+    const fetch = jest.fn().mockResolvedValue(new Response(JSON.stringify({ items: [{
+        id: 1, full_name: 'octocat/Hello-World', html_url: 'https://github.com/octocat/Hello-World',
+        description: 'A repository', stargazers_count: 80, forks_count: 9,
+        language: 'JavaScript', archived: false, private: false, updated_at: '2026-08-25T00:00:00Z'
+    }] }), { headers: { 'content-type': 'application/json' } }));
+    const service = new InformationLookupService({ fetch });
+
+    await expect(service.githubRepositories('Hello World')).resolves.toEqual([{
+        id: 1, name: 'octocat/Hello-World', url: 'https://github.com/octocat/Hello-World',
+        description: 'A repository', stars: 80, forks: 9, language: 'JavaScript',
+        archived: false, updatedAt: '2026-08-25T00:00:00Z'
+    }]);
+    expect(fetch.mock.calls[0][0].searchParams.get('q')).toBe('Hello World in:name');
+    expect(fetch.mock.calls[0][0].searchParams.get('per_page')).toBe('5');
+});
+
+test('GitHub email lookup returns only public commit matches', async () => {
+    const fetch = jest.fn().mockResolvedValue(new Response(JSON.stringify({ items: [{
+        sha: 'abc123', html_url: 'https://github.com/octocat/Hello-World/commit/abc123',
+        repository: { full_name: 'octocat/Hello-World', html_url: 'https://github.com/octocat/Hello-World' },
+        commit: { message: 'Initial commit', author: { date: '2026-08-25T00:00:00Z' } },
+        author: { login: 'octocat' }
+    }] }), { headers: { 'content-type': 'application/json' } }));
+    const service = new InformationLookupService({ fetch });
+
+    await expect(service.githubEmail('octocat@example.com')).resolves.toEqual([{
+        sha: 'abc123', url: 'https://github.com/octocat/Hello-World/commit/abc123',
+        repository: 'octocat/Hello-World', repositoryUrl: 'https://github.com/octocat/Hello-World',
+        message: 'Initial commit', author: 'octocat', authoredAt: '2026-08-25T00:00:00Z'
+    }]);
+    expect(fetch.mock.calls[0][0].searchParams.get('q')).toBe('author-email:octocat@example.com');
+});
+
+test('GitHub lookups distinguish missing, rate-limited, and invalid responses', async () => {
+    const missing = new InformationLookupService({ fetch: jest.fn().mockResolvedValue(new Response('{}', {
+        status: 404, headers: { 'content-type': 'application/json' }
+    })) });
+    const limited = new InformationLookupService({ fetch: jest.fn().mockResolvedValue(new Response('{}', {
+        status: 403, headers: { 'content-type': 'application/json', 'x-ratelimit-remaining': '0' }
+    })) });
+    const malformed = new InformationLookupService({ fetch: jest.fn().mockResolvedValue(new Response(JSON.stringify({
+        login: 'octocat'
+    }), { headers: { 'content-type': 'application/json' } })) });
+
+    await expect(missing.githubUser('octocat')).rejects.toThrow('was not found');
+    await expect(limited.githubUser('octocat')).rejects.toThrow('rate limit');
+    await expect(malformed.githubUser('octocat')).rejects.toThrow('invalid profile');
+});
+
 test('name history records only observed former names in the existing automation store', () => {
     const sqlite = new Database(':memory:');
     sqlite.exec(`CREATE TABLE automation_rules (

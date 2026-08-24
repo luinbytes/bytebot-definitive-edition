@@ -4,6 +4,14 @@ const net = require('net');
 const { privateAddress } = require('./serverPresentationService');
 const { UserFacingError } = require('../utils/errorHandlerUtil');
 
+function httpsUrl(value, hosts) {
+    try {
+        const url = new URL(value);
+        if (url.protocol === 'https:' && hosts.includes(url.hostname) && !url.username && !url.password) return url.toString();
+    } catch { /* Invalid provider URL. */ }
+    throw new UserFacingError('Lookup provider returned an invalid payload.');
+}
+
 function evaluateExpression(input) {
     const expression = String(input || '').trim();
     if (!expression || expression.length > 500) throw new UserFacingError('Invalid expression.');
@@ -94,15 +102,23 @@ class InformationLookupService {
     }
 
     async json(url, options = {}) {
+        const { errors = {}, ...request } = options;
         let response;
         try {
             response = await this.fetch(url, {
-                ...options,
+                ...request,
                 redirect: 'error',
-                signal: options.signal || AbortSignal.timeout(10000)
+                signal: request.signal || AbortSignal.timeout(10000)
             });
-        } catch { throw new UserFacingError('Lookup provider request failed.'); }
-        if (!response.ok) throw new UserFacingError('Lookup provider request failed.');
+        } catch { throw new UserFacingError(errors.failed || 'Lookup provider request failed.'); }
+        if (!response.ok) {
+            const exhausted = response.status === 429
+                || (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0');
+            if (exhausted) throw new UserFacingError(errors.rateLimited || 'Lookup provider rate limit reached. Try again later.');
+            if (response.status === 404 && errors.notFound) throw new UserFacingError(errors.notFound);
+            if ([401, 403].includes(response.status) && errors.inaccessible) throw new UserFacingError(errors.inaccessible);
+            throw new UserFacingError(errors.failed || 'Lookup provider request failed.');
+        }
         const type = response.headers.get('content-type') || '';
         if (!type.toLowerCase().includes('application/json')) {
             throw new UserFacingError('Lookup provider returned an invalid payload.');
@@ -196,6 +212,117 @@ class InformationLookupService {
             throw new UserFacingError('Screenshot service is not configured correctly.');
         }
         return this.image(provider);
+    }
+
+    async githubJson(path, errors) {
+        return this.json(new URL(path, 'https://api.github.com'), {
+            headers: {
+                accept: 'application/vnd.github+json',
+                'x-github-api-version': '2022-11-28',
+                'user-agent': 'ByteBot'
+            },
+            errors
+        });
+    }
+
+    async githubUser(input) {
+        const username = String(input || '').trim();
+        if (!/^(?!-)(?!.*--)[a-z\d-]{1,39}(?<!-)$/i.test(username)) {
+            throw new UserFacingError('Use a valid GitHub username.');
+        }
+        const row = await this.githubJson(`/users/${encodeURIComponent(username)}`, {
+            notFound: `GitHub user ${username} was not found.`,
+            inaccessible: 'That GitHub profile is not publicly accessible.',
+            rateLimited: 'GitHub rate limit reached. Try again later.'
+        });
+        const numbers = ['id', 'public_repos', 'public_gists', 'followers', 'following'];
+        if (typeof row?.login !== 'string' || !numbers.every(key => Number.isSafeInteger(row[key]) && row[key] >= 0)
+            || typeof row.created_at !== 'string' || !Number.isFinite(Date.parse(row.created_at))) {
+            throw new UserFacingError('GitHub returned an invalid profile.');
+        }
+        const optional = key => typeof row[key] === 'string' && row[key] ? row[key] : null;
+        return {
+            username: row.login,
+            id: row.id,
+            url: httpsUrl(row.html_url, ['github.com']),
+            avatar: httpsUrl(row.avatar_url, ['avatars.githubusercontent.com']),
+            name: optional('name'),
+            bio: optional('bio'),
+            company: optional('company'),
+            location: optional('location'),
+            website: optional('blog'),
+            repositories: row.public_repos,
+            gists: row.public_gists,
+            followers: row.followers,
+            following: row.following,
+            createdAt: row.created_at
+        };
+    }
+
+    async githubRepositories(input) {
+        const query = String(input || '').trim();
+        if (!query || query.length > 100) throw new UserFacingError('Provide a repository search up to 100 characters.');
+        const url = new URL('/search/repositories', 'https://api.github.com');
+        url.searchParams.set('q', `${query} in:name`);
+        url.searchParams.set('per_page', '5');
+        const rows = (await this.githubJson(url, {
+            rateLimited: 'GitHub search rate limit reached. Try again later.'
+        }))?.items;
+        if (!Array.isArray(rows)) throw new UserFacingError('GitHub returned an invalid repository search.');
+        const repositories = rows.slice(0, 5).filter(row => row?.private === false).map(row => {
+            if (!Number.isSafeInteger(row.id) || typeof row.full_name !== 'string'
+                || !Number.isSafeInteger(row.stargazers_count) || !Number.isSafeInteger(row.forks_count)
+                || typeof row.archived !== 'boolean' || typeof row.updated_at !== 'string'
+                || !Number.isFinite(Date.parse(row.updated_at))) {
+                throw new UserFacingError('GitHub returned an invalid repository search.');
+            }
+            return {
+                id: row.id,
+                name: row.full_name,
+                url: httpsUrl(row.html_url, ['github.com']),
+                description: typeof row.description === 'string' && row.description ? row.description : null,
+                stars: row.stargazers_count,
+                forks: row.forks_count,
+                language: typeof row.language === 'string' && row.language ? row.language : null,
+                archived: row.archived,
+                updatedAt: row.updated_at
+            };
+        });
+        if (!repositories.length) throw new UserFacingError('No accessible public GitHub repositories found.');
+        return repositories;
+    }
+
+    async githubEmail(input) {
+        const email = String(input || '').trim();
+        if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            throw new UserFacingError('Use a valid email address.');
+        }
+        const url = new URL('/search/commits', 'https://api.github.com');
+        url.searchParams.set('q', `author-email:${email}`);
+        url.searchParams.set('per_page', '5');
+        const rows = (await this.githubJson(url, {
+            rateLimited: 'GitHub search rate limit reached. Try again later.'
+        }))?.items;
+        if (!Array.isArray(rows)) throw new UserFacingError('GitHub returned an invalid commit search.');
+        const commits = rows.slice(0, 5).map(row => {
+            const authoredAt = row?.commit?.author?.date;
+            if (typeof row?.sha !== 'string' || typeof row?.repository?.full_name !== 'string'
+                || typeof row?.commit?.message !== 'string' || typeof authoredAt !== 'string'
+                || !Number.isFinite(Date.parse(authoredAt))) {
+                throw new UserFacingError('GitHub returned an invalid commit search.');
+            }
+            return {
+                sha: row.sha,
+                url: httpsUrl(row.html_url, ['github.com']),
+                repository: row.repository.full_name,
+                repositoryUrl: httpsUrl(row.repository.html_url, ['github.com']),
+                message: row.commit.message,
+                author: typeof row.author?.login === 'string' ? row.author.login : null,
+                authoredAt
+            };
+        });
+        if (!commits.length) throw new UserFacingError('No public commits found for that email.');
+        return commits;
     }
 
     async weather(input) {

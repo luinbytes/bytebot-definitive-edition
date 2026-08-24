@@ -11,12 +11,38 @@ test('/lookup exposes every provider-backed public parity path with bounded opti
     expect(command.name).toBe('lookup');
     expect(command.dm_permission).toBe(true);
     expect(Object.keys(options)).toEqual([
-        'calculate', 'qr', 'screenshot', 'weather', 'definition', 'translate'
+        'calculate', 'qr', 'screenshot', 'weather', 'definition', 'translate', 'github'
     ]);
     expect(options.calculate.options[0]).toMatchObject({ name: 'expression', required: true, max_length: 500 });
     expect(options.translate.options).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: 'language', required: true, max_length: 50 }),
         expect.objectContaining({ name: 'text', required: true, max_length: 2000 })
+    ]));
+    expect(options.github.options.map(option => option.name)).toEqual(['user', 'repository', 'email']);
+});
+
+test('/lookup github user renders validated provider data and the contributions limitation', async () => {
+    const lookup = require('../src/commands/utility/lookup');
+    const interaction = {
+        options: {
+            getSubcommandGroup: jest.fn().mockReturnValue('github'),
+            getSubcommand: jest.fn().mockReturnValue('user'),
+            getString: jest.fn().mockReturnValue('octocat')
+        },
+        editReply: jest.fn().mockResolvedValue()
+    };
+    const client = { informationLookupService: { githubUser: jest.fn().mockResolvedValue({
+        username: 'octocat', id: 1, url: 'https://github.com/octocat', avatar: 'https://avatars.githubusercontent.com/u/1',
+        name: 'The Octocat', bio: 'A profile', company: '@github', location: 'San Francisco', website: null,
+        repositories: 8, gists: 8, followers: 100, following: 2, createdAt: '2011-01-25T18:44:36Z'
+    }) } };
+
+    await lookup.execute(interaction, client);
+
+    const embed = interaction.editReply.mock.calls[0][0].embeds[0].data;
+    expect(embed.url).toBe('https://github.com/octocat');
+    expect(embed.fields).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: 'Contributions', value: expect.stringContaining('Not available') })
     ]));
 });
 
