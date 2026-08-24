@@ -30,14 +30,20 @@ compatibility decisions.
 | [Discord Permissions](https://docs.discord.com/developers/topics/permissions) | `VIEW_CHANNEL` includes joining voice; `CONNECT` joins voice; `SPEAK` speaks; `MOVE_MEMBERS` moves members; `MANAGE_CHANNELS` edits channels; `MANAGE_ROLES` edits overwrites/roles. Denying `CONNECT` implicitly denies other voice interaction. | The bot must have `View Channel`, `Manage Channels`, `Manage Roles`, and `Move Members` where the requested action needs them. A caller's role may control their owned channel only through an explicit member overwrite; ByteBot rules never grant Discord permissions. |
 | [Discord Voice Resource](https://docs.discord.com/developers/resources/voice) | Voice-region objects expose `id`, `name`, `optimal`, `deprecated`, and `custom`; `rtc_region` accepts a region ID and `null` means automatic. Voice-state objects expose `channel_id`; user voice state changes produce gateway events. | Region options are validated against the guild's current region list; deprecated/unknown regions fail closed; automatic is represented by `null`. Voice state events are the source of creation/empty-channel lifecycle transitions. |
 | [Discord Components](https://docs.discord.com/developers/components/reference) | Legacy action rows contain up to five buttons, each interactive button has a unique 1–100-character `custom_id`, and text inputs are modal-only. | Render the ten public actions over at least two action rows; use modal input for rename. Never trust a component ID alone. |
+| [Discord Application Commands](https://docs.discord.com/developers/interactions/application-commands) | A chat-input command accepts at most 25 top-level options, and a subcommand group may contain up to 25 subcommands with one supported nesting level. | The registry's 25 direct actions plus its `default` group cannot all be direct Discord options. Keep every evidenced leaf name, but group the four secondary-channel actions under `secondary` so the single `/voicemaster` root is valid. |
 
 ## Exact public command inventory
 
 The registry provides names and descriptions, but not a machine-readable
-application-command option schema. The slash option names and types below are
-therefore the **minimum safe ByteBot mapping**, selected from the registry's
-error strings, public guide examples, and Discord field types. A row marked
-“registry gap” must not be described as a verified Greed option requirement.
+application-command option schema. It exposes 25 direct actions plus the
+`default` group, while Discord permits at most 25 top-level options. ByteBot
+therefore keeps every public leaf name but groups `add`, `remove`, `list`, and
+`category` under `/voicemaster secondary`; this grouping is a documented
+platform mapping, not a claim about Greed's live slash layout. The slash option
+names and types below are the **minimum safe ByteBot mapping**, selected from
+the registry's error strings, public guide examples, and Discord field types.
+A row marked “registry gap” must not be described as a verified Greed option
+requirement.
 
 ### Direct `/voicemaster` subcommands
 
@@ -46,10 +52,10 @@ error strings, public guide examples, and Discord field types. A row marked
 | `/voicemaster setup` | `Setup the voicemaster interface`; guide creates category, join-to-create channel, and interface. | No options in the public source. Creates/reconciles the server's primary join channel and category. |
 | `/voicemaster reset` | `Reset the voicemaster interface`; reset errors distinguish not setup and reset failure. | No options. Disables the interface and removes only owned setup messages/resources; existing temporary channels are cleaned only through the owned cleanup path. |
 | `/voicemaster sendinterface` | `Forcefully resend the VoiceMaster interface`. | No options. Sends a fresh interface to the configured destination and records its message ID. |
-| `/voicemaster add` | `Add a secondary join-to-create channel (Premium)`. | `channel:<voice channel>` or equivalent creation target is a **registry gap**; use a guild voice-channel option only if implementation chooses to add an existing channel. Do not silently claim Greed's exact option shape. |
-| `/voicemaster remove` | `Remove a secondary join-to-create channel (Premium)`. | `channel:<voice channel>` is the minimum unambiguous slash option; only remove a channel recorded as a secondary owned join channel. |
-| `/voicemaster list` | `List all secondary join-to-create channels (Premium)`. | No options; return a bounded list of configured secondary join channels. |
-| `/voicemaster category` | `Set the category for a secondary join-to-create channel (Premium)`. | `channel:<voice channel>` and `category:<category>` are needed to identify both resources; exact required/optional status is a registry gap. Validate same guild and category capacity. |
+| `/voicemaster secondary add` | `Add a secondary join-to-create channel (Premium)`. | `channel:<voice channel>` or equivalent creation target is a **registry gap**; ByteBot accepts an existing guild voice channel and records it without claiming ownership. |
+| `/voicemaster secondary remove` | `Remove a secondary join-to-create channel (Premium)`. | `channel:<voice channel>` is the minimum unambiguous slash option; remove only its configuration record and never delete an existing user-owned channel. |
+| `/voicemaster secondary list` | `List all secondary join-to-create channels (Premium)`. | No options; return a bounded list of configured secondary join channels. |
+| `/voicemaster secondary category` | `Set the category for a secondary join-to-create channel (Premium)`. | `channel:<voice channel>` and `category:<category>` identify both resources; both are required in ByteBot. Validate same guild and category capacity. |
 | `/voicemaster bitrate` | `Change the bitrate of your current voice channel`. | `bitrate:<integer>`; minimum 8,000 bps. Maximum is Discord's guild-dependent cap, not a Greed-owned constant. |
 | `/voicemaster region` | `Change the region of your current voice channel`. | `region:<string>` from current guild voice-region IDs; `auto`/omitted reset is ByteBot-owned because the registry does not publish reset syntax. |
 | `/voicemaster status` | `Set the voice status for your current voice channel`. | `status:<string>`; Discord allows up to 500 characters. The registry does not publish whether omission clears it; ByteBot uses empty/`clear` to clear and documents that as owned behavior. |
@@ -128,7 +134,7 @@ not publish application-command permission metadata. ByteBot therefore uses
 the following explicit policy:
 
 1. `/voicemaster setup`, `/voicemaster reset`, `/voicemaster sendinterface`,
-   `/voicemaster add|remove|list|category`, `/voicemaster template`,
+   `/voicemaster secondary add|remove|list|category`, `/voicemaster template`,
    `/voicemaster temporary`, `/voicemaster joinrole`, and every
    `/voicemaster default ...` path require the caller's real
    `Administrator` permission. The handler also checks bot-effective
