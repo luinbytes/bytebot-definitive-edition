@@ -209,11 +209,16 @@ describe('community utilities', () => {
         database.sqlite.prepare(`INSERT INTO confessions (guild_id, number, channel_id, author_id, content, created_at)
             VALUES ('guild1',2,'channel1','author2','unresolved',2)`).run();
         database.sqlite.prepare("UPDATE confession_configs SET next_number = 3 WHERE guild_id = 'guild1'").run();
-        service.client = { guilds: { fetch: jest.fn().mockResolvedValue({ channels: { fetch: jest.fn().mockResolvedValue({ messages: { fetch: jest.fn()
-            .mockResolvedValue(new Map([
-                ['message1', { id: 'message1', components: [{ components: [{ customId: 'community:cf:r:1' }] }] }],
-                ['message2', { id: 'message2', components: [{ components: [{ customId: 'community:poll:1:0' }] }] }]
-            ])) } }) } }) } };
+        const recent = new Map([
+            ['message1', { id: 'message1', author: { id: 'bytebot' }, embeds: [{ title: 'Anonymous Confession #1' }],
+                components: [{ components: [{ customId: 'community:cf:r:1' }, { customId: 'community:cf:g:1' }] }] }],
+            ['message2', { id: 'message2', author: { id: 'bytebot' }, embeds: [{ description: '**Question?**\n\nresults' }],
+                components: [{ components: [{ customId: 'community:poll:1:0' }, { customId: 'community:poll:1:1' }] }] }],
+            ['forged', { id: 'forged', author: { id: 'another-bot' }, embeds: [{ title: 'Anonymous Confession #2' }],
+                components: [{ components: [{ customId: 'community:cf:r:2' }, { customId: 'community:cf:g:2' }] }] }]
+        ]);
+        service.client = { user: { id: 'bytebot' }, guilds: { fetch: jest.fn().mockResolvedValue({ channels: { fetch: jest.fn()
+            .mockResolvedValue({ messages: { fetch: jest.fn().mockImplementation(async () => recent) } }) } }) } };
 
         await service.reconcile();
 
@@ -223,6 +228,13 @@ describe('community utilities', () => {
         ]);
         expect(database.sqlite.prepare('SELECT message_id, status FROM community_polls').get()).toEqual({ message_id: 'message2', status: 'active' });
         expect(service.confessionConfig('guild1').next_number).toBe(3);
+
+        recent.set('message3', { id: 'message3', author: { id: 'bytebot' }, embeds: [{ title: 'Anonymous Confession #2' }],
+            components: [{ components: [{ customId: 'community:cf:r:2' }, { customId: 'community:cf:g:2' }] }] });
+        service.now = () => 160000;
+        await service.reconcilePendingPublications();
+        expect(database.sqlite.prepare('SELECT message_id, status FROM confessions WHERE number = 2').get())
+            .toEqual({ message_id: 'message3', status: 'published' });
     });
 
     test('does not accept votes or render controls after a poll starts ending', async () => {

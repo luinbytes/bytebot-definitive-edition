@@ -82,13 +82,16 @@ class CommunityUtilityService {
         this.randomInt = options.randomInt || crypto.randomInt;
         this.interval = null;
         this.running = false;
+        this.reconciling = false;
+        this.nextPendingReconcileAt = 0;
         this.memberRefreshes = new Map();
         this.confessionSubmissions = new Map();
     }
 
     start() {
         if (this.interval) return;
-        this.interval = setInterval(() => this.runDuePolls().catch(error => logger.error(`Community poll scheduler failed: ${error.message}`)), 5000);
+        this.interval = setInterval(() => this.reconcilePendingPublications().then(() => this.runDuePolls())
+            .catch(error => logger.error(`Community scheduler failed: ${error.message}`)), 5000);
         this.interval.unref?.();
     }
 
@@ -106,25 +109,38 @@ class CommunityUtilityService {
     }
 
     async reconcilePendingPublications() {
-        if (!this.client) return;
+        if (!this.client || this.reconciling || this.now() < this.nextPendingReconcileAt) return;
+        this.reconciling = true;
+        this.nextPendingReconcileAt = this.now() + 60000;
         const rows = [
-            ...this.sqlite.prepare("SELECT id, guild_id, channel_id, 'confession' kind FROM confessions WHERE status = 'pending'").all(),
-            ...this.sqlite.prepare("SELECT id, guild_id, channel_id, 'poll' kind FROM community_polls WHERE status = 'pending'").all()
+            ...this.sqlite.prepare("SELECT *, 'confession' kind FROM confessions WHERE status = 'pending'").all(),
+            ...this.sqlite.prepare("SELECT *, 'poll' kind FROM community_polls WHERE status = 'pending'").all()
         ];
-        for (const row of rows) {
-            try {
-                const guild = await this.client.guilds.fetch(row.guild_id);
-                const channel = await guild.channels.fetch(row.channel_id);
-                const messages = channel?.messages && await channel.messages.fetch({ limit: 100 });
-                const prefix = row.kind === 'confession' ? `community:cf:r:${row.id}` : `community:poll:${row.id}:`;
-                const message = messages && [...messages.values()].find(candidate => candidate.components?.some(actionRow =>
-                    actionRow.components?.some(component => (component.customId || component.data?.custom_id || '').startsWith(prefix))));
-                if (!message) continue;
-                const table = row.kind === 'confession' ? 'confessions' : 'community_polls';
-                const status = row.kind === 'confession' ? 'published' : 'active';
-                this.sqlite.prepare(`UPDATE ${table} SET message_id = ?, status = ? WHERE id = ? AND status = 'pending'`)
-                    .run(message.id, status, row.id);
-            } catch { /* retain attribution and retry on the next startup */ }
+        try {
+            for (const row of rows) {
+                try {
+                    const guild = await this.client.guilds.fetch(row.guild_id);
+                    const channel = await guild.channels.fetch(row.channel_id);
+                    const messages = channel?.messages && await channel.messages.fetch({ limit: 100 });
+                    const message = messages && [...messages.values()].find(candidate => {
+                        if (candidate.author?.id !== this.client.user?.id) return false;
+                        const ids = candidate.components?.flatMap(actionRow => actionRow.components || [])
+                            .map(component => component.customId || component.data?.custom_id) || [];
+                        if (row.kind === 'confession') return candidate.embeds?.[0]?.title === `Anonymous Confession #${row.number}`
+                            && ids.includes(`community:cf:r:${row.id}`) && ids.includes(`community:cf:g:${row.id}`);
+                        const poll = pollFromRow(row);
+                        return candidate.embeds?.[0]?.description?.startsWith(`**${poll.question}**`)
+                            && poll.options.every((_, index) => ids.includes(`community:poll:${row.id}:${index}`));
+                    });
+                    if (!message) continue;
+                    const table = row.kind === 'confession' ? 'confessions' : 'community_polls';
+                    const status = row.kind === 'confession' ? 'published' : 'active';
+                    this.sqlite.prepare(`UPDATE ${table} SET message_id = ?, status = ? WHERE id = ? AND status = 'pending'`)
+                        .run(message.id, status, row.id);
+                } catch { /* retain attribution for the bounded retry */ }
+            }
+        } finally {
+            this.reconciling = false;
         }
     }
 
