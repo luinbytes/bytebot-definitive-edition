@@ -33,6 +33,10 @@ class VoiceMasterService {
         if (subcommand === 'sendinterface') return this.sendInterface(interaction);
         if (subcommand === 'reset') return this.reset(interaction);
         if (group === 'secondary') return this.executeSecondary(interaction, subcommand);
+        if (group === 'default') return this.executeDefaults(interaction, subcommand);
+        if (['template', 'temporary', 'joinrole'].includes(subcommand)) {
+            return this.executeConfiguration(interaction, subcommand);
+        }
         if (!group && OWNER_ACTIONS.has(subcommand)) return this.executeOwnerAction(interaction, subcommand);
         return interaction.editReply({ embeds: [embeds.error('Not Available', `VoiceMaster ${group ? `${group} ` : ''}${subcommand} is not available yet.`)] });
     }
@@ -196,7 +200,8 @@ class VoiceMasterService {
 
     source(guildId, channelId) {
         return this.sqlite.prepare(`SELECT source.*, config.name_template, config.default_role_id,
-            config.default_bitrate, config.default_region, config.send_interface, config.temporary_enabled
+            config.default_bitrate, config.default_region, config.send_interface,
+            config.temporary_enabled, config.join_role_id
             FROM voice_master_sources source
             JOIN voice_master_configs config ON config.guild_id = source.guild_id
             WHERE source.guild_id = ? AND source.channel_id = ? AND config.state = 'active'`)
@@ -311,6 +316,11 @@ class VoiceMasterService {
             })();
 
             await member.voice.setChannel(channel);
+            if (source.join_role_id) {
+                await member.roles.add(source.join_role_id, 'VoiceMaster channel joined').catch(error => {
+                    logger.warn(`VoiceMaster join role failed for ${member.id}: ${error.message}`);
+                });
+            }
             if (source.send_interface) {
                 await channel.send(voiceMasterInterface(channel.id)).catch(error => {
                     logger.warn(`VoiceMaster interface send failed for ${channel.id}: ${error.message}`);
@@ -577,6 +587,92 @@ class VoiceMasterService {
             ON CONFLICT (guild_id, channel_id, user_id) DO UPDATE SET
                 effect = excluded.effect, updated_at = excluded.updated_at`)
             .run(guildId, channelId, userId, effect, this.now());
+    }
+
+    activeConfig(interaction) {
+        this.requireAdmin(interaction);
+        const config = this.config(interaction.guildId);
+        if (!config || config.state !== 'active') throw new Error('VoiceMaster is not setup for this server.');
+        return config;
+    }
+
+    validateRole(interaction, role) {
+        if (!role) return null;
+        this.requireBotPermissions(interaction.guild, [PermissionFlagsBits.ManageRoles]);
+        if (role.managed || role.editable === false) throw new Error('That role cannot be managed by ByteBot.');
+        return role.id;
+    }
+
+    validateTemplate(value) {
+        const template = String(value || "{owner}'s channel").trim();
+        if (!template || template.length > 32) throw new Error('Voice channel templates must be 1–32 characters.');
+        return template;
+    }
+
+    async validatedRegion(guild, requested) {
+        if (!requested || requested === 'auto') return null;
+        const regions = await guild.fetchVoiceRegions();
+        const region = regions.get?.(requested) || [...regions.values()].find(item => item.id === requested);
+        if (!region || region.deprecated) throw new Error('That voice region is unavailable.');
+        return region.id;
+    }
+
+    async executeConfiguration(interaction, action) {
+        try {
+            this.activeConfig(interaction);
+            let column;
+            let value;
+            if (action === 'template') {
+                column = 'name_template';
+                value = this.validateTemplate(interaction.options.getString('template'));
+            } else if (action === 'temporary') {
+                column = 'temporary_enabled';
+                value = Number(Boolean(interaction.options.getBoolean('enabled')));
+            } else if (action === 'joinrole') {
+                column = 'join_role_id';
+                value = this.validateRole(interaction, interaction.options.getRole('role'));
+            }
+            this.sqlite.prepare(`UPDATE voice_master_configs SET ${column} = ?, updated_at = ? WHERE guild_id = ?`)
+                .run(value, this.now(), interaction.guildId);
+            return interaction.editReply({ embeds: [embeds.success('VoiceMaster Updated', `Updated ${action}.`)] });
+        } catch (error) {
+            return interaction.editReply({ embeds: [embeds.error('VoiceMaster Configuration Failed', error.message)] });
+        }
+    }
+
+    async executeDefaults(interaction, action) {
+        try {
+            this.activeConfig(interaction);
+            let column;
+            let value;
+            if (action === 'role') {
+                column = 'default_role_id';
+                value = this.validateRole(interaction, interaction.options.getRole('role'));
+            } else if (action === 'name') {
+                column = 'name_template';
+                value = this.validateTemplate(interaction.options.getString('template'));
+            } else if (action === 'bitrate') {
+                column = 'default_bitrate';
+                value = interaction.options.getInteger('bitrate');
+                const maximum = interaction.guild.maximumBitrate || 96000;
+                if (!Number.isInteger(value) || value < 8000 || value > maximum) {
+                    throw new Error(`The bitrate must be between 8000 and ${maximum}.`);
+                }
+            } else if (action === 'region') {
+                column = 'default_region';
+                value = await this.validatedRegion(interaction.guild, interaction.options.getString('region'));
+            } else if (action === 'interface') {
+                column = 'send_interface';
+                value = Number(Boolean(interaction.options.getBoolean('enabled')));
+            } else {
+                throw new Error('Unknown VoiceMaster default setting.');
+            }
+            this.sqlite.prepare(`UPDATE voice_master_configs SET ${column} = ?, updated_at = ? WHERE guild_id = ?`)
+                .run(value, this.now(), interaction.guildId);
+            return interaction.editReply({ embeds: [embeds.success('VoiceMaster Defaults Updated', `Updated default ${action}.`)] });
+        } catch (error) {
+            return interaction.editReply({ embeds: [embeds.error('VoiceMaster Configuration Failed', error.message)] });
+        }
     }
 }
 

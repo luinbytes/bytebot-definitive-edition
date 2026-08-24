@@ -394,4 +394,66 @@ describe('VoiceMaster lifecycle', () => {
         expect(join.delete).toHaveBeenCalledTimes(1);
         expect(category.delete).toHaveBeenCalledTimes(1);
     });
+
+    test('default settings and temporary mode drive the next created channel', async () => {
+        const channels = new Map();
+        const category = { id: 'category-1', type: ChannelType.GuildCategory, delete: jest.fn() };
+        const join = { id: 'join-1', type: ChannelType.GuildVoice, send: jest.fn(async () => ({ id: 'interface-1' })), delete: jest.fn() };
+        const temporary = {
+            id: 'temporary-1', type: ChannelType.GuildVoice, members: new Map(),
+            send: jest.fn(async () => ({ id: 'controls-1' })), delete: jest.fn()
+        };
+        let temporaryOptions;
+        const create = jest.fn(async values => {
+            const channel = values.type === ChannelType.GuildCategory
+                ? category
+                : values.name === 'Join to Create' ? join : temporary;
+            if (channel === temporary) temporaryOptions = values;
+            channels.set(channel.id, channel);
+            return channel;
+        });
+        const visitorRole = { id: 'visitor-role', managed: false, editable: true };
+        const joinRole = { id: 'join-role', managed: false, editable: true };
+        const voiceStates = new Map();
+        const owner = {
+            id: 'member-1', user: { id: 'member-1', bot: false, username: 'Member' }, displayName: 'Member',
+            permissions: { has: () => false },
+            roles: { cache: new Map(), add: jest.fn(async () => {}) },
+            voice: { channelId: 'join-1', channel: join, setChannel: jest.fn(async channel => {
+                owner.voice.channelId = channel.id; owner.voice.channel = channel;
+                voiceStates.set(owner.id, { channelId: channel.id }); channel.members.set(owner.id, owner);
+            }) }
+        };
+        voiceStates.set(owner.id, { channelId: 'join-1' });
+        const guild = {
+            id: 'guild-1', name: 'Guild', maximumBitrate: 96000,
+            members: { me: { id: 'bot-1', permissions: { has: () => true } } },
+            roles: { everyone: { id: 'guild-1' } }, voiceStates: { cache: voiceStates },
+            channels: { cache: channels, create, fetch: jest.fn(async id => channels.get(id) || null) },
+            fetchVoiceRegions: jest.fn(async () => new Map([['eu-west', { id: 'eu-west', deprecated: false }]]))
+        };
+        const { VoiceMasterService } = require('../src/services/voiceMasterService');
+        const service = new VoiceMasterService({ sqlite: database.sqlite });
+        await service.execute(adminInteraction(guild, 'setup'));
+        await service.execute(adminInteraction(guild, 'template', { template: '{owner} lounge' }));
+        await service.execute(adminInteraction(guild, 'temporary', { enabled: false }));
+        await service.handleVoiceState({ channelId: null }, { member: owner, guild, channelId: 'join-1', channel: join, client: {} });
+        await service.execute(adminInteraction(guild, 'joinrole', { role: joinRole }));
+        await service.execute(adminInteraction(guild, 'role', { role: visitorRole }, 'default'));
+        await service.execute(adminInteraction(guild, 'bitrate', { bitrate: 80000 }, 'default'));
+        await service.execute(adminInteraction(guild, 'region', { region: 'eu-west' }, 'default'));
+        await service.execute(adminInteraction(guild, 'interface', { enabled: false }, 'default'));
+        await service.execute(adminInteraction(guild, 'temporary', { enabled: true }));
+        await service.handleVoiceState({ channelId: null }, { member: owner, guild, channelId: 'join-1', channel: join, client: {} });
+
+        expect(create).toHaveBeenCalledTimes(3);
+        expect(temporaryOptions).toEqual(expect.objectContaining({
+            name: 'Member lounge', bitrate: 80000, rtcRegion: 'eu-west'
+        }));
+        expect(temporaryOptions.permissionOverwrites).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'visitor-role', allow: expect.arrayContaining([PermissionFlagsBits.Connect]) })
+        ]));
+        expect(temporary.send).not.toHaveBeenCalled();
+        expect(owner.roles.add).toHaveBeenCalledWith('join-role', 'VoiceMaster channel joined');
+    });
 });
