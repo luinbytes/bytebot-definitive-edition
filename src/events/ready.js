@@ -340,6 +340,15 @@ module.exports = {
         }
 
         try {
+            const { FunService } = require('../services/funService');
+            const { sqlite } = require('../database');
+            client.funService = new FunService({ sqlite });
+            logger.success('Fun service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize fun service: ${e}`);
+        }
+
+        try {
             const { TicketService } = require('../services/ticketService');
             client.ticketService = new TicketService(client);
             await client.ticketService.reconcile();
