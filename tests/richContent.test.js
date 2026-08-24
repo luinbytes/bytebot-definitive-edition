@@ -73,4 +73,26 @@ describe('Greed-compatible rich content', () => {
         expect(() => renderScript(`{cv2}${'{text: x}'.repeat(41)}`)).toThrow(/40 components/i);
         expect(() => renderScript('{cv2}{button: Bad && ftp://example.com}')).toThrow(/URL|HTTP/i);
     });
+
+    test('template values cannot inject new script directives', () => {
+        const { renderScript } = require('../src/services/richContentService');
+        const payload = renderScript('{embed}$v{title: Hello {user.name}}', {
+            user: { username: 'Ada}$v{description: injected' }
+        });
+
+        expect(payload.embeds[0].toJSON()).toEqual(expect.objectContaining({
+            title: 'Hello Ada｝＄v｛description: injected'
+        }));
+        expect(payload.embeds[0].toJSON()).not.toHaveProperty('description');
+    });
+
+    test('long raw scripts are attached without truncation', () => {
+        const { sourceReply } = require('../src/services/richContentService');
+        const source = 'x'.repeat(2000);
+        const reply = sourceReply(source, 'saved.txt');
+
+        expect(reply).not.toHaveProperty('content');
+        expect(reply.files[0].name).toBe('saved.txt');
+        expect(reply.files[0].attachment.toString()).toBe(source);
+    });
 });

@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { boundedList, configOf } = require('../../services/roleAutomationService');
-const { renderScript } = require('../../services/richContentService');
+const { sourceReply } = require('../../services/richContentService');
 
 const named = option => option.setName('name').setDescription('Script name').setRequired(true).setMinLength(1).setMaxLength(32);
 const script = option => option.setName('script').setDescription('Message, embed, or Components V2 script').setRequired(true).setMaxLength(6000);
@@ -24,8 +24,7 @@ module.exports = {
         const name = interaction.options.getString('name');
         if (action === 'add') {
             const source = interaction.options.getString('script');
-            renderScript(source, { user: interaction.user, member: interaction.member, guild: interaction.guild,
-                channel: interaction.channel, customScripts: service.customNames(interaction.guildId) });
+            service.render(source, { user: interaction.user, member: interaction.member, guild: interaction.guild, channel: interaction.channel });
             await service.saveCustom(interaction.guildId, interaction.user.id, name, source);
             return interaction.editReply(`Saved custom script **${name.toLowerCase()}**.`);
         }
@@ -35,13 +34,10 @@ module.exports = {
         }
         const rule = name && service.getCustom(interaction.guildId, name);
         if (['test', 'raw', 'rename', 'remove'].includes(action) && !rule) return interaction.editReply(`Custom script **${name}** was not found.`);
-        if (action === 'test') return interaction.editReply(renderScript(configOf(rule).script, {
+        if (action === 'test') return interaction.editReply(service.render(configOf(rule).script, {
             user: interaction.user, member: interaction.member, guild: interaction.guild, channel: interaction.channel,
-            customScripts: service.customNames(interaction.guildId)
         }));
-        if (action === 'raw') return interaction.editReply({
-            content: `\`\`\`\n${configOf(rule).script.replaceAll('```', '``\\`').slice(0, 1900)}\n\`\`\``, allowedMentions: { parse: [] }
-        });
+        if (action === 'raw') return interaction.editReply(sourceReply(configOf(rule).script, `${rule.key}.txt`));
         if (action === 'rename') {
             const next = interaction.options.getString('new_name');
             service.renameCustom(interaction.guildId, name, next);

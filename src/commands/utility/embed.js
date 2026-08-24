@@ -1,6 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { boundedList, configOf } = require('../../services/roleAutomationService');
-const { renderScript, messageToScript } = require('../../services/richContentService');
+const { messageToScript, sourceReply } = require('../../services/richContentService');
 
 const named = option => option.setName('name').setDescription('Saved embed name').setRequired(true).setMaxLength(32);
 const script = option => option.setName('script').setDescription('Message, embed, or Components V2 script').setRequired(true).setMaxLength(6000);
@@ -47,8 +47,8 @@ module.exports = {
             if (!interaction.guild) return interaction.editReply('Server embed colors are unavailable in DMs.');
             if (action === 'colors') {
                 const colors = service.getEmbedColors(interaction.guildId);
-                const lines = ['information', 'success', 'error', 'warning'].map(type => `**${type}:** ${colors[type] || 'default'}`);
-                return interaction.editReply(lines.join('\n'));
+                return interaction.editReply(['information', 'success', 'error', 'warning']
+                    .map(type => `**${type}:** ${colors[type] || 'default'}`).join('\n'));
             }
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) return interaction.editReply('You need **Manage Server** to change embed colors.');
             if (action === 'setcolor') {
@@ -64,9 +64,8 @@ module.exports = {
         if (action === 'create') {
             if (!interaction.channel?.send) return interaction.editReply('Rich messages cannot be sent here.');
             const source = interaction.options.getString('script');
-            await interaction.channel.send(renderScript(source, { user: interaction.user, member: interaction.member,
-                guild: interaction.guild, channel: interaction.channel,
-                customScripts: interaction.guild ? service.customNames(interaction.guildId) : new Set() }));
+            await interaction.channel.send(service.render(source, { user: interaction.user, member: interaction.member,
+                guild: interaction.guild, channel: interaction.channel }));
             return interaction.editReply('Rich message sent.');
         }
         if (action === 'copy') {
@@ -79,22 +78,18 @@ module.exports = {
             }
             const message = await fetchMessage(interaction, messageInput);
             if (!message) return interaction.editReply('That message was not found or is not accessible.');
-            const source = messageToScript(message);
-            return interaction.editReply({ content: `\`\`\`\n${source.replaceAll('```', '``\\`').slice(0, 1900)}\n\`\`\``, allowedMentions: { parse: [] } });
+            return interaction.editReply(sourceReply(messageToScript(message)));
         }
         if (action === 'save') {
             const source = interaction.options.getString('script');
-            renderScript(source, { user: interaction.user, member: interaction.member, guild: interaction.guild,
-                channel: interaction.channel, customScripts: interaction.guild ? service.customNames(interaction.guildId) : new Set() });
+            service.render(source, { user: interaction.user, member: interaction.member, guild: interaction.guild, channel: interaction.channel });
             await service.saveEmbed(interaction.user.id, name, source);
             return interaction.editReply(`Saved embed **${name.toLowerCase()}**.`);
         }
-        if (action === 'list') {
-            return interaction.editReply({ content: boundedList(service.listEmbeds(interaction.user.id).map(rule => `\`${rule.key}\``), 'You have no saved embeds.'), allowedMentions: { parse: [] } });
-        }
+        if (action === 'list') return interaction.editReply({ content: boundedList(service.listEmbeds(interaction.user.id)
+            .map(rule => `\`${rule.key}\``), 'You have no saved embeds.'), allowedMentions: { parse: [] } });
         if (action === 'published') {
-            const rules = service.listPublished(interaction.options.getString('category') || '');
-            const lines = rules.map(rule => {
+            const lines = service.listPublished(interaction.options.getString('category') || '').map(rule => {
                 const config = configOf(rule);
                 return `\`${rule.key}\` — **${config.category}** — ${config.description || 'No description'} — ${config.copies || 0} copies`;
             });
@@ -102,7 +97,7 @@ module.exports = {
         }
         const saved = name && service.getEmbed(interaction.user.id, name);
         if (['raw', 'rename', 'remove', 'publish'].includes(action) && !saved) return interaction.editReply(`Saved embed **${name}** was not found.`);
-        if (action === 'raw') return interaction.editReply({ content: `\`\`\`\n${configOf(saved).script.replaceAll('```', '``\\`').slice(0, 1900)}\n\`\`\``, allowedMentions: { parse: [] } });
+        if (action === 'raw') return interaction.editReply(sourceReply(configOf(saved).script, `${saved.key}.txt`));
         if (action === 'rename') {
             const next = interaction.options.getString('new_name');
             service.renameEmbed(interaction.user.id, name, next);
@@ -113,7 +108,7 @@ module.exports = {
             await service.publishEmbed(interaction.user.id, name, interaction.options.getString('category'), interaction.options.getString('description'));
             return interaction.editReply(`Published **${name}**.`);
         }
-        service.unpublishEmbed(interaction.user.id, name);
+        if (!service.unpublishEmbed(interaction.user.id, name)) return interaction.editReply(`Published embed **${name}** was not found.`);
         return interaction.editReply(`Unpublished **${name}**.`);
     }
 };

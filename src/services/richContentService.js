@@ -1,6 +1,6 @@
 const {
     ActionRowBuilder, ButtonBuilder, ButtonStyle, ContainerBuilder, MediaGalleryBuilder,
-    MediaGalleryItemBuilder, MessageFlags, SectionBuilder, SeparatorBuilder,
+    EmbedBuilder, MediaGalleryItemBuilder, MessageFlags, SectionBuilder, SeparatorBuilder,
     SeparatorSpacingSize, StringSelectMenuBuilder, TextDisplayBuilder, ThumbnailBuilder
 } = require('discord.js');
 const crypto = require('crypto');
@@ -39,7 +39,10 @@ function renderVariables(script, { user, member, guild, channel } = {}) {
         'channel.topic': channel?.topic || ''
     };
     return String(script).replace(/\{([a-z]+(?:\.[a-z_]+)?)\}/g,
-        (token, name) => Object.hasOwn(values, name) ? values[name] : token);
+        (token, name) => Object.hasOwn(values, name)
+            ? String(values[name]).replaceAll('{', '｛').replaceAll('}', '｝')
+                .replaceAll('$v', '＄v')
+            : token);
 }
 
 function nodes(source) {
@@ -276,6 +279,11 @@ function renderScript(script, context) {
         if (rendered.length > 2000) throw new Error('Message content cannot exceed 2000 characters.');
         payload = { content: rendered };
     }
+    if (payload.embeds?.length && context?.embedColors?.information) {
+        payload.embeds = payload.embeds.map(embed => embed.data?.color == null
+            ? EmbedBuilder.from(embed).setColor(context.embedColors.information)
+            : embed);
+    }
     return { ...payload, allowedMentions: SAFE_MENTIONS };
 }
 
@@ -330,6 +338,14 @@ class RichContentService {
         this.client = client;
         this.automation = automation;
         this.paginationLocks = new Map();
+    }
+
+    render(script, context = {}) {
+        const guildId = context.guild?.id;
+        return renderScript(script, { ...context,
+            customScripts: guildId ? this.customNames(guildId) : new Set(),
+            embedColors: guildId ? this.getEmbedColors(guildId) : {}
+        });
     }
 
     getTag(name) {
@@ -462,9 +478,9 @@ class RichContentService {
         if (!rule) {
             return interaction.reply({ content: 'That custom response is no longer available.', flags: MessageFlags.Ephemeral });
         }
-        const payload = renderScript(configOf(rule).script, {
+        const payload = this.render(configOf(rule).script, {
             user: interaction.user, member: interaction.member, guild: interaction.guild,
-            channel: interaction.channel, customScripts: this.customNames(interaction.guildId)
+            channel: interaction.channel
         });
         payload.flags = (payload.flags || 0) | MessageFlags.Ephemeral;
         await interaction.reply(payload);
@@ -626,7 +642,7 @@ class RichContentService {
     }
 
     addPaginationPage(message, script, actorId) {
-        const payload = renderScript(script, { guild: message.guild, channel: message.channel });
+        const payload = this.render(script, { guild: message.guild, channel: message.channel });
         if (!payload.embeds?.length || payload.flags === MessageFlags.IsComponentsV2) throw new Error('Pagination pages must be embed scripts.');
         return db.transaction(tx => {
             const rule = tx.select().from(automationRules).where(and(
@@ -642,7 +658,7 @@ class RichContentService {
     }
 
     updatePaginationPage(message, page, script) {
-        const payload = renderScript(script, { guild: message.guild, channel: message.channel });
+        const payload = this.render(script, { guild: message.guild, channel: message.channel });
         if (!payload.embeds?.length || payload.flags === MessageFlags.IsComponentsV2) throw new Error('Pagination pages must be embed scripts.');
         return this.changePaginationPages(message, config => {
             if (page < 1 || page > config.pages.length) throw new Error(`Page must be between 1 and ${config.pages.length}.`);
@@ -706,8 +722,7 @@ class RichContentService {
             const config = configOf(rule);
             const delta = reaction.emoji.name === '➡️' ? 1 : -1;
             const page = (Number(config.page || 0) + delta + config.pages.length) % config.pages.length;
-            const payload = renderScript(config.pages[page], { user, guild: message.guild, channel: message.channel,
-                customScripts: this.customNames(message.guild.id) });
+            const payload = this.render(config.pages[page], { user, guild: message.guild, channel: message.channel });
             await message.edit(payload);
             this.automation.upsert({ guildId: message.guild.id, kind: 'pagination', key: message.id,
                 config: { ...config, page }, createdBy: rule.createdBy });
@@ -762,14 +777,18 @@ class RichContentService {
 
     async sendWebhook(guild, shortId, script, context = {}) {
         const managed = await this.managedWebhook(guild, shortId);
-        const payload = renderScript(script, { ...context, guild, channel: managed.channel,
-            customScripts: this.customNames(guild.id) });
+        const payload = this.render(script, { ...context, guild, channel: managed.channel });
         let message;
         try { message = await managed.webhook.send(payload); }
         catch { throw new Error('Discord could not send the managed webhook message.'); }
-        this.automation.upsert({ guildId: guild.id, kind: 'webhook-message', key: `${managed.channel.id}:${message.id}`,
-            config: { shortId: managed.rule.key, webhookId: managed.config.webhookId, channelId: managed.channel.id },
-            createdBy: managed.rule.createdBy });
+        try {
+            this.automation.upsert({ guildId: guild.id, kind: 'webhook-message', key: `${managed.channel.id}:${message.id}`,
+                config: { shortId: managed.rule.key, webhookId: managed.config.webhookId, channelId: managed.channel.id },
+                createdBy: managed.rule.createdBy });
+        } catch {
+            await managed.webhook.deleteMessage(message.id).catch(() => null);
+            throw new Error('The webhook message could not be tracked and was removed.');
+        }
         return message;
     }
 
@@ -778,7 +797,7 @@ class RichContentService {
         if (!tracked) throw new Error('No tracked managed-webhook message was found.');
         const trackedConfig = configOf(tracked);
         const managed = await this.managedWebhook(guild, trackedConfig.shortId);
-        const payload = renderScript(script, { ...context, guild, channel, customScripts: this.customNames(guild.id) });
+        const payload = this.render(script, { ...context, guild, channel });
         try { return await managed.webhook.editMessage(messageId, payload); }
         catch { throw new Error('Discord could not edit the managed webhook message.'); }
     }

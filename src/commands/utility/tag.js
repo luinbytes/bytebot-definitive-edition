@@ -1,7 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const crypto = require('crypto');
 const { boundedList, configOf } = require('../../services/roleAutomationService');
-const { renderScript } = require('../../services/richContentService');
 
 const named = option => option.setName('name').setDescription('Tag name').setRequired(true).setMaxLength(32);
 const content = option => option.setName('content').setDescription('Tag message or script').setRequired(true).setMaxLength(6000);
@@ -42,8 +41,7 @@ module.exports = {
             const existing = await service.getTag(name);
             if (action === 'add' && existing) return interaction.editReply(`Tag **${name}** already exists.`);
             if (action === 'edit' && !existing) return interaction.editReply(`Tag **${name}** was not found.`);
-            renderScript(source, { user: interaction.user, member: interaction.member, guild: interaction.guild, channel: interaction.channel,
-                customScripts: interaction.guild ? service.customNames(interaction.guildId) : new Set() });
+            service.render(source, { user: interaction.user, member: interaction.member, guild: interaction.guild, channel: interaction.channel });
             await service.saveTag(interaction.user.id, name, source, { canManage });
             return interaction.editReply(`${action === 'add' ? 'Saved' : 'Updated'} tag **${name.toLowerCase()}**.`);
         }
@@ -63,9 +61,8 @@ module.exports = {
         }
         if (['send', 'random'].includes(action)) {
             if (!rule) return interaction.editReply('No matching tag was found.');
-            const payload = renderScript(configOf(rule).script, { user: interaction.user, member: interaction.member,
-                guild: interaction.guild, channel: interaction.channel,
-                customScripts: interaction.guild ? service.customNames(interaction.guildId) : new Set() });
+            const payload = service.render(configOf(rule).script, { user: interaction.user, member: interaction.member,
+                guild: interaction.guild, channel: interaction.channel });
             if (interaction.channel?.send) await interaction.channel.send(payload);
             return interaction.editReply(`Sent tag **${rule.key}**.`);
         }

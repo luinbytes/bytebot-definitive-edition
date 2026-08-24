@@ -97,6 +97,21 @@ describe('rich-content persistence', () => {
         expect(JSON.parse(service.listPublished('Staff')[0].config).copies).toBe(1);
     });
 
+    test('server information color applies only when a rich embed has no explicit color', () => {
+        service.setEmbedColor('guild1', 'information', '#123456', 'admin1');
+        service.setEmbedColor('guild1', 'success', '#654321', 'admin1');
+        const guild = { id: 'guild1' };
+
+        expect(service.render('{embed}$v{title: Default}', { guild }).embeds[0].toJSON().color).toBe(0x123456);
+        expect(service.render('{embed}$v{title: Explicit}$v{color: #abcdef}', { guild }).embeds[0].toJSON().color).toBe(0xabcdef);
+
+        const embeds = require('../src/utils/embeds');
+        embeds.withGuild({ richContentService: service }, 'guild1', () => {
+            expect(embeds.info('Info').toJSON().color).toBe(0x123456);
+            expect(embeds.success('Done').toJSON().color).toBe(0x654321);
+        });
+    });
+
     test('pagination persists bot-owned pages and reaction navigation survives restart', async () => {
         service.client = { user: { id: 'bot1' } };
         const message = {
@@ -120,6 +135,7 @@ describe('rich-content persistence', () => {
             id: 'webhook1', name: 'News', token: 'never-store-this',
             send: jest.fn().mockResolvedValue({ id: 'message1' }),
             editMessage: jest.fn().mockResolvedValue({ id: 'message1' }),
+            deleteMessage: jest.fn().mockResolvedValue({}),
             delete: jest.fn().mockResolvedValue({})
         };
         const channel = {
@@ -135,5 +151,10 @@ describe('rich-content persistence', () => {
         await service.editWebhookMessage(guild, channel, 'message1', '{content: Updated}');
         expect(webhook.send).toHaveBeenCalledWith(expect.objectContaining({ content: 'Hello', allowedMentions: { parse: [], repliedUser: false } }));
         expect(webhook.editMessage).toHaveBeenCalledWith('message1', expect.objectContaining({ content: 'Updated' }));
+
+        webhook.send.mockResolvedValueOnce({ id: 'message2' });
+        jest.spyOn(automation, 'upsert').mockImplementationOnce(() => { throw new Error('disk full'); });
+        await expect(service.sendWebhook(guild, rule.key, '{content: Orphan}')).rejects.toThrow(/track/i);
+        expect(webhook.deleteMessage).toHaveBeenCalledWith('message2');
     });
 });

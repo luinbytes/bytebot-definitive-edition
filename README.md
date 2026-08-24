@@ -12,6 +12,7 @@ A highly modular, scalable, and future-proof Discord bot boilerplate built with 
 -   **Dynamic Testing**: Automated structural integrity audits and utility verification via Jest.
 -   **Hardened Security**: Built-in cooldowns, permission checks, role-based access control (RBAC), and DM-to-Guild protection.
 -   **Case-backed Moderation**: Action-specific Discord permissions, protected targets, setup-owned mute/jail roles, warning escalation, hardbans, history, recovery, and invoke templates under `/mod`.
+-   **Rich Content Platform**: Saved embeds, Components V2 layouts, custom responses, global tags, durable pagination, managed webhooks, and server theme colors.
 
 ## Project Structure
 

@@ -43,3 +43,18 @@ test('rich-content component and reaction events reach the shared service', asyn
     await require('../src/events/messageReactionAdd').execute(reaction, user);
     expect(handlePaginationReaction).toHaveBeenCalledWith(reaction, user);
 });
+
+test('/tag reset does not require a tag name lookup', async () => {
+    const resetTags = jest.fn().mockReturnValue(3);
+    const editReply = jest.fn();
+    await require('../src/commands/utility/tag').execute({
+        options: {
+            getSubcommand: () => 'reset', getString: () => null,
+            getBoolean: () => true
+        },
+        member: { permissions: { has: () => false } }, user: { id: 'user1' }, editReply
+    }, { richContentService: { resetTags } });
+
+    expect(resetTags).toHaveBeenCalledWith('user1');
+    expect(editReply).toHaveBeenCalledWith('Removed 3 tag(s).');
+});
