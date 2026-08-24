@@ -96,6 +96,13 @@ async function showCommandDetails(interaction, client, commandName) {
         });
     }
 
+    if (commandData.name === 'fun') {
+        embed.addFields({
+            name: 'Public parity and safety',
+            value: 'Snipe keeps at most 10 entries per kind/channel for 15 minutes and honors global self-protection. Roleplay exposes 40 provider-backed actions; `fuck`, `spank`, and `nutkick` are visibly policy-excluded. `howgay`, `pp`, `bitches`, `nword`, and `nwordlb` are policy-excluded. Image/media subjects remain mapped to the bounded #56 media seam.'
+        });
+    }
+
     return interaction.reply({
         embeds: [embed],
         flags: [MessageFlags.Ephemeral]
@@ -214,15 +221,12 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/server antiraid settings` • `/server antiraid module`\n' +
                     '`/server automod settings` • `/server automod filter`\n' +
                     '`/server permissions disable` • `/server permissions denyperm` • `/server permissions protect`\n' +
-                    '`/reactionrole add` • `/buttonrole add` • `/temprole add` • `/boosterrole create`\n' +
                     '`/ticket setup` • `/ticket panel manage` • `/ticket settings view`\n' +
                     '`/giveaway start` • `/giveaway edit prize` • `/counter add`\n' +
                     '`/economy balance` • `/economy game coinflip` • `/economy gang info` • `/economy lab status`\n' +
-                    '`/server backup create` • `/server customize preset` • `/server discovery publish`\n' +
-                    '`/server stats days:60`\n' +
-                    '`/mod user warn` • `/mod case view` • `/mod config setup`\n' +
-                    '`/mod template set` • `/game warthunder stats`\n' +
-                    '`/fun uwuify` • `/fun uwulock add`',
+                    '`/game warthunder stats`\n' +
+                    '`/fun uwuify` • `/fun uwulock add` • `/fun snipe protect`\n' +
+                    '`/fun roleplay action` • `/fun game tictactoe` • `/fun game blacktea`',
                 inline: false
             },
             {

@@ -26,7 +26,7 @@ Source: [Greed commands](https://greed.best/commands), researched 2026-08-23. Th
 | Moderation | 80 | #36, #37, #38 | `partial` |
 | Fun | 55 | #35, #54, #56 | `partial` |
 | Economy | 38 | #48, #49 | `partial` — core accounts, ledger, earnings, banking, jobs, shops, configuration, and administration are implemented; #49 owns games, gangs, laboratories, crime/robbery, and rankings |
-| Roleplay | 3 | #54 | `tracked` |
+| Roleplay | 3 | #54 | `complete` — 40 provider-backed actions plus three explicit policy exclusions are reconciled |
 | Security | 82 | #36, #39, #40 | `complete` — all mapped public protection surfaces are implemented |
 | LastFM | 65 | #57 | `tracked` |
 | Logs | 5 | #37, #39, #40, #50 | `partial` |
@@ -37,7 +37,7 @@ Source: [Greed commands](https://greed.best/commands), researched 2026-08-23. Th
 | Levels | 3 | #50 | `partial` |
 | Socials | 31 | #60, #61 | `tracked` |
 | Manipulation | 99 | #55, #56, #62 | `tracked` |
-| Snipe | 4 | #54 | `tracked` |
+| Snipe | 4 | #54 | `complete` — deleted/edit/reaction lookup, channel clearing, and universal self-protection are reconciled |
 | Unidentified remainder | 29 | #64 | `evidence-gap` — the public page does not name its missing bucket |
 | **Total** | **945** | #34–#64 | Mixed |
 
@@ -59,11 +59,11 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | `manipulation` | 3 | #56 | `tracked` |
 | `moderation` | 101 | #37, #38 | `partial` |
 | `music` | 9 | #58 | `tracked` |
-| `roleplay` | 1 | #54 | `tracked` |
+| `roleplay` | 1 | #54 | `complete` — all 43 pinned action subjects have implementation or terminal policy mappings |
 | `security` | 102 | #39, #40 | `complete` — all pinned public security families are reconciled |
 | `server` | 214 | #41, #43, #44, #45, #46, #47, #50 | `partial` |
 | `settings` | 42 | #36, #37, #41, #43, #54, #57, #58 | `partial` |
-| `snipe` | 5 | #54 | `tracked` |
+| `snipe` | 5 | #54 | `complete` — all five files are implemented with bounded privacy-minimizing retention |
 | `socials` | 11 | #60, #61 | `tracked` |
 | `utility` | 123 | #35, #42, #43, #46, #51, #52, #53, #55, #58, #60, #62 | `partial` |
 | `voice` | 33 | #59 | `partial` |
@@ -96,6 +96,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | Versioned guild backups with previewed merge/destructive restore, per-server bot profiles and presets, opt-in ByteBot discovery, hourly bumps, and 1–1095 day real-row server cards | #47 | Advances live Server/Information and pinned `server`/`information`; exact Greed discovery/card commands and font/effect values remain an explicit evidence gap. | `tests/guildBackupService.test.js`, `tests/serverPresentation.test.js`, `tests/statsCommand.test.js`, `tests/commandHubs.test.js`, `tests/databaseMigrations.test.js`, and `tests/schema.test.js` |
 | Guild/global accounts, wallet/bank, exact ledger and circulation, 1.5x daily/work earnings, anti-abuse guards, jobs, role shops, configuration, grants/removals, and confirmed reset/destroy/disable | #48 | Advances live and pinned Economy to `partial`; #49 owns every remaining game, lab, gang, crime/robbery, ladder, and leaderboard surface. | `tests/economyService.test.js`, `tests/economyCommand.test.js`, `tests/helpParity.test.js`, `tests/databaseMigrations.test.js`, and `tests/schema.test.js` |
 | Twelve wager games with durable interactive sessions, crime/robbery, race-safe gangs, passive-income laboratories, and committed guild rankings | #49 | Completes all 50 pinned Economy files. Public names, bounds, and errors match first-party evidence; unpublished odds/progression use the frozen ByteBot-owned rules contract. | `tests/economyProgression.test.js`, `tests/economyCommand.test.js`, `tests/helpParity.test.js`, `tests/interactionAcknowledgement.test.js`, `tests/databaseMigrations.test.js`, and `tests/schema.test.js` |
+| Bounded deleted/edit/reaction snipes and universal self-protection; 40 attributed roleplay actions with three terminal exclusions; RPS, tic-tac-toe, BlackTea, flags, WYR, IQ/color/roast, blunt, and vape subjects | #54 | Completes live and pinned Snipe/Roleplay; advances Fun and Settings while image/media subjects remain owned by #56. The slur leaderboard and targeted protected-character/adult meters are terminal policy exclusions. | `tests/funParity.test.js`, `tests/funParityCommands.test.js`, `tests/funGames.test.js`, `tests/funEventRouting.test.js`, `tests/helpParity.test.js`, `tests/databaseMigrations.test.js`, and `tests/schema.test.js` |
 
 ## Update rule
 

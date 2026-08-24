@@ -27,6 +27,9 @@ test('/bot help discovers every public Greed category without advertising unfini
     expect(parityField.value.length).toBeLessThanOrEqual(1024);
     expect(commonPaths.value).toContain('/fun uwuify');
     expect(commonPaths.value).toContain('/fun uwulock add');
+    expect(commonPaths.value).toContain('/fun snipe protect');
+    expect(commonPaths.value).toContain('/fun roleplay action');
+    expect(commonPaths.value).toContain('/fun game blacktea');
     expect(commonPaths.value).toContain('/server security antinuke-settings');
     expect(commonPaths.value).toContain('/server antiraid settings');
     expect(commonPaths.value).toContain('/server automod filter');
@@ -37,6 +40,21 @@ test('/bot help discovers every public Greed category without advertising unfini
     expect(commonPaths.value).toContain('/economy game coinflip');
     expect(parityField.value).toContain('/economy` Economy');
     expect(parityField.value).toContain('/ticket` Tickets');
+});
+
+test('/bot help records bounded snipe and terminal policy mappings', async () => {
+    const reply = jest.fn();
+    const fun = require('../src/commands/fun/fun');
+    fun.category = 'Fun';
+    await help.execute({ options: { getString: () => 'fun' }, reply }, {
+        commands: new Map([['fun', fun]])
+    });
+
+    const field = reply.mock.calls[0][0].embeds[0].data.fields
+        .find(item => item.name === 'Public parity and safety');
+    expect(field.value).toContain('10 entries');
+    expect(field.value).toContain('40 provider-backed');
+    expect(field.value).toContain('policy-excluded');
 });
 
 test('/bot help records the Greed bal compatibility mapping', async () => {
