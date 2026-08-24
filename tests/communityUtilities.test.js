@@ -199,19 +199,30 @@ describe('community utilities', () => {
             .toEqual({ message_id: 'message1', status: 'active' });
     });
 
-    test('expires interrupted pending publications on startup', async () => {
+    test('recovers interrupted publications without discarding unresolved attribution', async () => {
         service.setConfessionConfig('guild1', 'channel1');
         database.sqlite.prepare(`INSERT INTO confessions (guild_id, number, channel_id, author_id, content, created_at)
             VALUES ('guild1',1,'channel1','author1','private',1)`).run();
         database.sqlite.prepare("UPDATE confession_configs SET next_number = 2 WHERE guild_id = 'guild1'").run();
         database.sqlite.prepare(`INSERT INTO community_polls (guild_id, channel_id, creator_id, question, options_json, created_at)
             VALUES ('guild1','channel1','creator','Question?','[\"Yes\",\"No\"]',1)`).run();
+        database.sqlite.prepare(`INSERT INTO confessions (guild_id, number, channel_id, author_id, content, created_at)
+            VALUES ('guild1',2,'channel1','author2','unresolved',2)`).run();
+        database.sqlite.prepare("UPDATE confession_configs SET next_number = 3 WHERE guild_id = 'guild1'").run();
+        service.client = { guilds: { fetch: jest.fn().mockResolvedValue({ channels: { fetch: jest.fn().mockResolvedValue({ messages: { fetch: jest.fn()
+            .mockResolvedValue(new Map([
+                ['message1', { id: 'message1', components: [{ components: [{ customId: 'community:cf:r:1' }] }] }],
+                ['message2', { id: 'message2', components: [{ components: [{ customId: 'community:poll:1:0' }] }] }]
+            ])) } }) } }) } };
 
         await service.reconcile();
 
-        expect(database.sqlite.prepare("SELECT COUNT(*) count FROM confessions WHERE status = 'pending'").get().count).toBe(0);
-        expect(database.sqlite.prepare("SELECT COUNT(*) count FROM community_polls WHERE status = 'pending'").get().count).toBe(0);
-        expect(service.confessionConfig('guild1').next_number).toBe(1);
+        expect(database.sqlite.prepare('SELECT number, message_id, status FROM confessions ORDER BY number').all()).toEqual([
+            { number: 1, message_id: 'message1', status: 'published' },
+            { number: 2, message_id: null, status: 'pending' }
+        ]);
+        expect(database.sqlite.prepare('SELECT message_id, status FROM community_polls').get()).toEqual({ message_id: 'message2', status: 'active' });
+        expect(service.confessionConfig('guild1').next_number).toBe(3);
     });
 
     test('does not accept votes or render controls after a poll starts ending', async () => {

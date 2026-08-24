@@ -100,15 +100,32 @@ class CommunityUtilityService {
     }
 
     async reconcile() {
-        this.sqlite.transaction(() => {
-            this.sqlite.prepare("DELETE FROM community_polls WHERE status = 'pending'").run();
-            this.sqlite.prepare("DELETE FROM confessions WHERE status = 'pending'").run();
-            this.sqlite.prepare(`UPDATE confession_configs SET next_number = COALESCE(
-                (SELECT MAX(number) + 1 FROM confessions WHERE confessions.guild_id = confession_configs.guild_id), 1
-            ), updated_at = ?`).run(this.now());
-            this.sqlite.prepare("UPDATE community_polls SET status = 'active' WHERE status = 'ending'").run();
-        }).immediate();
+        this.sqlite.prepare("UPDATE community_polls SET status = 'active' WHERE status = 'ending'").run();
+        await this.reconcilePendingPublications();
         await this.runDuePolls();
+    }
+
+    async reconcilePendingPublications() {
+        if (!this.client) return;
+        const rows = [
+            ...this.sqlite.prepare("SELECT id, guild_id, channel_id, 'confession' kind FROM confessions WHERE status = 'pending'").all(),
+            ...this.sqlite.prepare("SELECT id, guild_id, channel_id, 'poll' kind FROM community_polls WHERE status = 'pending'").all()
+        ];
+        for (const row of rows) {
+            try {
+                const guild = await this.client.guilds.fetch(row.guild_id);
+                const channel = await guild.channels.fetch(row.channel_id);
+                const messages = channel?.messages && await channel.messages.fetch({ limit: 100 });
+                const prefix = row.kind === 'confession' ? `community:cf:r:${row.id}` : `community:poll:${row.id}:`;
+                const message = messages && [...messages.values()].find(candidate => candidate.components?.some(actionRow =>
+                    actionRow.components?.some(component => (component.customId || component.data?.custom_id || '').startsWith(prefix))));
+                if (!message) continue;
+                const table = row.kind === 'confession' ? 'confessions' : 'community_polls';
+                const status = row.kind === 'confession' ? 'published' : 'active';
+                this.sqlite.prepare(`UPDATE ${table} SET message_id = ?, status = ? WHERE id = ? AND status = 'pending'`)
+                    .run(message.id, status, row.id);
+            } catch { /* retain attribution and retry on the next startup */ }
+        }
     }
 
     confessionConfig(guildId) {
