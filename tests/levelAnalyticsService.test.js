@@ -248,9 +248,8 @@ describe('LevelAnalyticsService', () => {
         expect(database.sqlite.prepare(`
             SELECT base_multiplier FROM level_configs WHERE guild_id = 'guild1'
         `).get().base_multiplier).toBe(2.5);
-        expect(allowed.reply).toHaveBeenCalledWith(expect.objectContaining({
-            content: 'XP gain multiplier has been set to **2.5x**.'
-        }));
+        expect(allowed.reply.mock.calls[0][0].embeds[0].data.description)
+            .toBe('XP gain multiplier has been set to **2.5x**.');
     });
 
     test('/levels config switches persist explicit state instead of ambiguous toggles', async () => {
@@ -271,9 +270,8 @@ describe('LevelAnalyticsService', () => {
         expect(database.sqlite.prepare(`
             SELECT text_enabled FROM level_configs WHERE guild_id = 'guild1'
         `).get().text_enabled).toBe(0);
-        expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({
-            content: 'Text XP is now **disabled**.'
-        }));
+        expect(interaction.reply.mock.calls[0][0].embeds[0].data.description)
+            .toBe('Text XP is now **disabled**.');
     });
 
     test('/levels boost requires exactly one typed target and persists its multiplier', async () => {
@@ -375,7 +373,7 @@ describe('LevelAnalyticsService', () => {
         options.getString = () => 'text';
         options.getInteger = () => 1;
         await service.execute({ guildId: 'guild1', guild, user: { id: 'viewer' }, options, reply });
-        expect(reply.mock.calls[1][0].content).toContain('**300** text XP');
+        expect(reply.mock.calls[1][0].embeds[0].data.description).toContain('**300** text XP');
     });
 
     test('/levels reward enforces hierarchy and reconciles non-stacking roles', async () => {
@@ -510,9 +508,13 @@ describe('LevelAnalyticsService', () => {
         const customId = reply.mock.calls[1][0].components[0].components[0].data.custom_id;
         const confirmation = {
             customId, guildId: 'guild1', guild, user: { id: 'admin1' }, member: { permissions },
-            update: jest.fn(), isModalSubmit: () => false, isChannelSelectMenu: () => false
+            update: jest.fn(), deferUpdate: jest.fn(), editReply: jest.fn(),
+            isModalSubmit: () => false, isChannelSelectMenu: () => false
         };
         await service.handleInteraction(confirmation);
+        expect(confirmation.deferUpdate.mock.invocationCallOrder[0])
+            .toBeLessThan(guild.members.fetch.mock.invocationCallOrder[0]);
+        expect(confirmation.editReply).toHaveBeenCalled();
         expect(database.sqlite.prepare(`SELECT 1 FROM member_levels WHERE guild_id = 'guild1'`).get()).toBeUndefined();
         await expect(service.handleInteraction(confirmation)).rejects.toThrow('expired');
     });
@@ -527,7 +529,7 @@ describe('LevelAnalyticsService', () => {
                 getString: name => name === 'color' ? values.color : name === 'layout' ? values.layout : null,
                 getInteger: () => values.border, getAttachment: () => null, getUser: () => null
             },
-            reply: jest.fn()
+            reply: jest.fn(), deferReply: jest.fn(), editReply: jest.fn()
         };
         await service.execute(interaction);
         values.action = 'style'; values.color = null; values.layout = 'compact'; values.border = 9;
@@ -537,7 +539,7 @@ describe('LevelAnalyticsService', () => {
 
         expect(database.sqlite.prepare(`SELECT accent, layout, avatar_border FROM level_rank_cards WHERE user_id = 'user1'`).get())
             .toEqual({ accent: '#12ABEF', layout: 'compact', avatar_border: 9 });
-        const metadata = await require('sharp')(interaction.reply.mock.calls[2][0].files[0].attachment).metadata();
+        const metadata = await require('sharp')(interaction.editReply.mock.calls[0][0].files[0].attachment).metadata();
         expect(metadata).toEqual(expect.objectContaining({ format: 'png', width: 760, height: 220 }));
     });
 
@@ -563,13 +565,15 @@ describe('LevelAnalyticsService', () => {
             options: {
                 getSubcommandGroup: () => 'live', getSubcommand: () => 'text', getChannel: () => null
             },
-            reply: jest.fn()
+            reply: jest.fn(), deferReply: jest.fn(), editReply: jest.fn()
         };
         await service.execute(interaction);
         service.client = { guilds: { cache: new Map([['guild1', guild]]) } };
         await service.refreshLiveBoards();
 
         expect(send).toHaveBeenCalledTimes(2);
+        expect(interaction.deferReply.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]);
+        expect(interaction.editReply).toHaveBeenCalled();
         expect(send.mock.calls[0][0]).toEqual(expect.objectContaining({ enforceNonce: true, nonce: expect.any(String) }));
         expect(send.mock.calls[1][0].nonce).toBe(send.mock.calls[0][0].nonce);
         expect(database.sqlite.prepare(`SELECT message_id, revision FROM level_live_boards WHERE guild_id = 'guild1'`).get())

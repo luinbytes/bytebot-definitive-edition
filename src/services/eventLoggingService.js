@@ -1,9 +1,10 @@
 const crypto = require('crypto');
 const {
-    ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, EmbedBuilder,
+    ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder,
     MessageFlags, PermissionFlagsBits, StringSelectMenuBuilder
 } = require('discord.js');
 const config = require('../utils/config');
+const embeds = require('../utils/embeds');
 
 const MODULES = [
     'messages', 'members', 'moderation', 'server', 'voice', 'channels',
@@ -25,6 +26,10 @@ class EventLoggingService {
         const normalized = ALIASES[String(value || '').toLowerCase()];
         if (!normalized) throw new Error('Choose a valid logging module.');
         return normalized;
+    }
+
+    response(title, description, extra = {}) {
+        return { embeds: [embeds.brand(title, description)], allowedMentions: { parse: [] }, ...extra };
     }
 
     preflight(guild, channel) {
@@ -83,9 +88,9 @@ class EventLoggingService {
                     return `**${row.module}** → ${visible ? `<#${row.channel_id}>` : '*inaccessible channel*'}${row.color ? ` · ${row.color}` : ''}`;
                 }).join('\n')
                 : 'No event log destinations are configured.';
-            return interaction.reply({
-                content, flags: interaction.options.getBoolean('private') ? [MessageFlags.Ephemeral] : [], allowedMentions: { parse: [] }
-            });
+            return interaction.reply(this.response('Event Logs', content, {
+                flags: interaction.options.getBoolean('private') ? [MessageFlags.Ephemeral] : []
+            }));
         }
         if (action === 'add') {
             const channel = interaction.options.getChannel('channel');
@@ -93,16 +98,14 @@ class EventLoggingService {
             if (Boolean(channel) !== Boolean(module)) throw new Error('Choose both a channel and module, or leave both empty for interactive setup.');
             if (!channel) {
                 this.pending.set(`${interaction.guildId}:${interaction.user.id}`, { expiresAt: this.now() + 10 * 60 * 1000 });
-                return interaction.reply({
-                    content: 'Choose a log channel and event module.', components: this.selector(interaction.user.id),
-                    flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-                });
+                return interaction.reply(this.response('Add Event Log', 'Choose a log channel and event module.', {
+                    components: this.selector(interaction.user.id), flags: [MessageFlags.Ephemeral]
+                }));
             }
             this.add(interaction.guild, channel, module);
-            return interaction.reply({
-                content: `Added **${this.module(module)}** logs in <#${channel.id}>.`,
-                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-            });
+            return interaction.reply(this.response('Event Log Added', `Added **${this.module(module)}** logs in <#${channel.id}>.`, {
+                flags: [MessageFlags.Ephemeral]
+            }));
         }
         if (action === 'remove') {
             const channel = interaction.options.getChannel('channel');
@@ -123,23 +126,21 @@ class EventLoggingService {
                     guildId: interaction.guildId, actorId: interaction.user.id,
                     plan, expiresAt: this.now() + 10 * 60 * 1000
                 });
-                return interaction.reply({
-                    content: 'Remove all event log destinations from this server?',
+                return interaction.reply(this.response('Remove Event Logs', 'Remove all event log destinations from this server?', {
                     components: [new ActionRowBuilder().addComponents(
                         new ButtonBuilder().setCustomId(`eventlogs:confirm:${token}`).setLabel('Remove All Logs').setStyle(ButtonStyle.Danger),
                         new ButtonBuilder().setCustomId(`eventlogs:cancel:${token}`).setLabel('Cancel').setStyle(ButtonStyle.Secondary)
-                    )], flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-                });
+                    )], flags: [MessageFlags.Ephemeral]
+                }));
             }
             const clauses = ['guild_id = ?'];
             const values = [interaction.guildId];
             if (channel) { clauses.push('channel_id = ?'); values.push(channel.id); }
             if (rawModule) { clauses.push('module = ?'); values.push(this.module(rawModule)); }
             const removed = this.sqlite.prepare(`DELETE FROM event_log_channels WHERE ${clauses.join(' AND ')}`).run(...values).changes;
-            return interaction.reply({
-                content: `Removed **${removed}** event log destination${removed === 1 ? '' : 's'}.`,
-                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-            });
+            return interaction.reply(this.response('Event Logs Removed', `Removed **${removed}** event log destination${removed === 1 ? '' : 's'}.`, {
+                flags: [MessageFlags.Ephemeral]
+            }));
         }
         if (action === 'color') {
             const channel = interaction.options.getChannel('channel', true);
@@ -152,10 +153,9 @@ class EventLoggingService {
                 UPDATE event_log_channels SET color = ? WHERE guild_id = ? AND module = ? AND channel_id = ?
             `).run(color, interaction.guildId, module, channel.id).changes;
             if (!changed) throw new Error('That logging destination is not configured.');
-            return interaction.reply({
-                content: `Set **${module}** logs in <#${channel.id}> to **${color}**.`,
-                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-            });
+            return interaction.reply(this.response('Event Log Color', `Set **${module}** logs in <#${channel.id}> to **${color}**.`, {
+                flags: [MessageFlags.Ephemeral]
+            }));
         }
         if (action === 'ignore') {
             const member = interaction.options.getUser('member');
@@ -172,10 +172,9 @@ class EventLoggingService {
                 .run(interaction.guildId, type, target.id, this.now());
             const rows = this.sqlite.prepare(`SELECT target_type, target_id FROM event_log_ignores WHERE guild_id = ? ORDER BY target_type, target_id`)
                 .all(interaction.guildId);
-            return interaction.reply({
-                content: `${type === 'member' ? `<@${target.id}>` : `<#${target.id}>`} is ${exists ? 'no longer' : 'now'} ignored.\n${rows.length ? rows.map(row => row.target_type === 'member' ? `<@${row.target_id}>` : `<#${row.target_id}>`).join(', ') : '*None*'}`,
-                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-            });
+            return interaction.reply(this.response('Event Log Ignores', `${type === 'member' ? `<@${target.id}>` : `<#${target.id}>`} is ${exists ? 'no longer' : 'now'} ignored.\n${rows.length ? rows.map(row => row.target_type === 'member' ? `<@${row.target_id}>` : `<#${row.target_id}>`).join(', ') : '*None*'}`, {
+                flags: [MessageFlags.Ephemeral]
+            }));
         }
     }
 
@@ -196,7 +195,7 @@ class EventLoggingService {
                 `);
                 for (const row of confirmation.plan) remove.run(interaction.guildId, row.module, row.channel_id);
             })();
-            return interaction.update({ content: decision === 'confirm' ? 'Removed all event log destinations.' : 'Removal cancelled.', components: [], allowedMentions: { parse: [] } });
+            return interaction.update(this.response('Event Logs', decision === 'confirm' ? 'Removed all event log destinations.' : 'Removal cancelled.', { components: [] }));
         }
         const [, action, field, actorId] = interaction.customId.split(':');
         const key = `${interaction.guildId}:${interaction.user.id}`;
@@ -208,14 +207,12 @@ class EventLoggingService {
         if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) throw new Error('You need Manage Server.');
         if (field === 'channel') pending.channel = interaction.channels.first();
         else pending.module = this.module(interaction.values[0]);
-        if (!pending.channel || !pending.module) return interaction.update({
-            content: 'Choose a log channel and event module.', components: this.selector(actorId), allowedMentions: { parse: [] }
-        });
+        if (!pending.channel || !pending.module) return interaction.update(this.response(
+            'Add Event Log', 'Choose a log channel and event module.', { components: this.selector(actorId) }
+        ));
         this.add(interaction.guild, pending.channel, pending.module);
         this.pending.delete(key);
-        return interaction.update({
-            content: `Added **${pending.module}** logs in <#${pending.channel.id}>.`, components: [], allowedMentions: { parse: [] }
-        });
+        return interaction.update(this.response('Event Log Added', `Added **${pending.module}** logs in <#${pending.channel.id}>.`, { components: [] }));
     }
 
     async assertRbac(interaction, subcommand) {
@@ -275,7 +272,7 @@ class EventLoggingService {
                     .update(`${row.guild_id}:${row.event_key}:${row.channel_id}`)
                     .digest('hex').slice(0, 24);
                 await channel.send({
-                    embeds: [new EmbedBuilder().setColor(payload.color).setTitle(payload.title).setDescription(payload.description).setTimestamp()],
+                    embeds: [embeds.base(payload.title, payload.description).setColor(payload.color)],
                     allowedMentions: { parse: [] }, nonce, enforceNonce: true
                 });
                 this.sqlite.prepare(`UPDATE event_log_outbox SET status = 'sent' WHERE id = ?`).run(row.id);

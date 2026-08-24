@@ -6,6 +6,7 @@ const {
 } = require('discord.js');
 const { ServerPresentationService } = require('./serverPresentationService');
 const config = require('../utils/config');
+const embeds = require('../utils/embeds');
 
 const MAX_LEVEL = 999;
 
@@ -44,6 +45,30 @@ class LevelAnalyticsService {
         this.now = now;
         this.images = images || new ServerPresentationService({ sqlite });
         this.confirmations = new Map();
+    }
+
+    response(title, description, extra = {}) {
+        return { embeds: [embeds.brand(title, description)], allowedMentions: { parse: [] }, ...extra };
+    }
+
+    async acknowledge(interaction, flags = []) {
+        if (!interaction.deferReply || interaction.deferred || interaction.replied) return false;
+        await interaction.deferReply({ flags });
+        return true;
+    }
+
+    send(interaction, payload, acknowledged = false) {
+        return acknowledged ? interaction.editReply(payload) : interaction.reply(payload);
+    }
+
+    async acknowledgeUpdate(interaction) {
+        if (!interaction.deferUpdate || interaction.deferred || interaction.replied) return false;
+        await interaction.deferUpdate();
+        return true;
+    }
+
+    update(interaction, payload, acknowledged = false) {
+        return acknowledged ? interaction.editReply(payload) : interaction.update(payload);
     }
 
     recordMessage(message) {
@@ -537,10 +562,9 @@ class LevelAnalyticsService {
             ORDER BY ${column} DESC, xp DESC, user_id ASC LIMIT 10
         `).all(guildId);
         return {
-            content: rows.length
-                ? `**Live ${metric} XP leaderboard**\n${rows.map((row, index) => `**${index + 1}.** <@${row.user_id}> — **${row.score}** XP`).join('\n')}`
-                : `**Live ${metric} XP leaderboard**\nNo one has earned any XP yet.`,
-            allowedMentions: { parse: [] }
+            embeds: [embeds.brand(`Live ${metric} XP leaderboard`, rows.length
+                ? rows.map((row, index) => `**${index + 1}.** <@${row.user_id}> — **${row.score}** XP`).join('\n')
+                : 'No one has earned any XP yet.')], allowedMentions: { parse: [] }
         };
     }
 
@@ -712,7 +736,7 @@ class LevelAnalyticsService {
         const id = action => `levels:setup:${action}:${actorId}`;
         const back = new ButtonBuilder().setCustomId(id('main')).setLabel('Back').setStyle(ButtonStyle.Secondary);
         if (page === 'settings') return {
-            content: 'More Settings',
+            embeds: [embeds.brand('Level Setup', 'More Settings')],
             components: [
                 new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId(id('dm')).setLabel(`DM: ${config.dm_enabled ? 'ON' : 'OFF'}`).setStyle(ButtonStyle.Secondary),
@@ -730,7 +754,7 @@ class LevelAnalyticsService {
             ], allowedMentions: { parse: [] }
         };
         if (page === 'roles') return {
-            content: 'Level Roles',
+            embeds: [embeds.brand('Level Setup', 'Level Roles')],
             components: [new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(id('role-add')).setLabel('Add Reward').setStyle(ButtonStyle.Primary),
                 new ButtonBuilder().setCustomId(id('role-remove')).setLabel('Remove Reward').setStyle(ButtonStyle.Danger),
@@ -739,7 +763,7 @@ class LevelAnalyticsService {
             )], allowedMentions: { parse: [] }
         };
         return {
-            content: 'Text and voice XP can be configured independently. Changes save automatically.',
+            embeds: [embeds.brand('Level Setup', 'Text and voice XP can be configured independently. Changes save automatically.')],
             components: [
                 new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId(id('text')).setLabel(`Text: ${config.text_enabled ? 'ON' : 'OFF'}`).setStyle(ButtonStyle.Primary),
@@ -764,8 +788,9 @@ class LevelAnalyticsService {
                 || confirmation.guildId !== interaction.guildId || confirmation.actorId !== interaction.user.id) {
                 throw new Error('That confirmation has expired or is not yours.');
             }
+            const acknowledged = await this.acknowledgeUpdate(interaction);
             await this.assertRbac(interaction, 'reset', confirmation.scope === 'all' ? 'all' : 'user');
-            if (decision === 'cancel') return interaction.update({ content: 'Reset cancelled.', components: [], allowedMentions: { parse: [] } });
+            if (decision === 'cancel') return this.update(interaction, this.response('Level Reset', 'Reset cancelled.', { components: [] }), acknowledged);
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) throw new Error('You need Manage Server to reset XP.');
             this.sqlite.transaction(() => {
                 if (confirmation.scope === 'all') {
@@ -786,10 +811,8 @@ class LevelAnalyticsService {
                 ? await interaction.guild.members.fetch()
                 : [await interaction.guild.members.fetch(confirmation.userId).catch(() => null)];
             for (const member of members.values()) if (member && !member.user.bot) await this.reconcileMemberRoles(member);
-            return interaction.update({
-                content: confirmation.scope === 'all' ? 'All XP has been reset for this server' : `XP has been reset for <@${confirmation.userId}>`,
-                components: [], allowedMentions: { parse: [] }
-            });
+            return this.update(interaction, this.response('Level Reset', confirmation.scope === 'all'
+                ? 'All XP has been reset for this server' : `XP has been reset for <@${confirmation.userId}>`, { components: [] }), acknowledged);
         }
         const [, area, action, actorId] = interaction.customId.split(':');
         if (area !== 'setup' || actorId !== interaction.user.id || !interaction.guildId) {
@@ -852,7 +875,7 @@ class LevelAnalyticsService {
                         .run(interaction.guildId, level, role.id, this.now());
                 }
             }
-            return interaction.reply({ content: 'Level setup updated.', flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] } });
+            return interaction.reply(this.response('Level Setup', 'Level setup updated.', { flags: [MessageFlags.Ephemeral] }));
         }
         if (interaction.isChannelSelectMenu()) {
             const channel = interaction.channels.first();
@@ -893,9 +916,10 @@ class LevelAnalyticsService {
         }
         if (action === 'sync') {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('You need Manage Roles.');
+            const acknowledged = await this.acknowledgeUpdate(interaction);
             const members = await interaction.guild.members.fetch();
             for (const member of members.values()) if (!member.user.bot) await this.reconcileMemberRoles(member);
-            return interaction.update(this.setupPayload(interaction.guildId, actorId, 'roles'));
+            return this.update(interaction, this.setupPayload(interaction.guildId, actorId, 'roles'), acknowledged);
         }
         if (action === 'message-disable') {
             this.sqlite.prepare(`UPDATE level_configs SET message_enabled = 0, updated_at = ? WHERE guild_id = ?`)
@@ -903,7 +927,7 @@ class LevelAnalyticsService {
             return interaction.update(this.setupPayload(interaction.guildId, actorId, 'settings'));
         }
         if (action === 'reset') return this.beginReset(interaction, 'all');
-        if (action === 'cancel') return interaction.update({ content: 'Level setup closed.', components: [], allowedMentions: { parse: [] } });
+        if (action === 'cancel') return interaction.update(this.response('Level Setup', 'Level setup closed.', { components: [] }));
         return interaction.update(this.setupPayload(interaction.guildId, actorId, action));
     }
 
@@ -937,13 +961,12 @@ class LevelAnalyticsService {
         const warning = scope === 'all'
             ? '**WARNING:** This will delete **ALL** text and voice XP data for this server. This action **cannot be undone**.\n\nAre you sure you want to continue?'
             : `Reset all XP for <@${userId}>?`;
-        return interaction.reply({
-            content: warning,
+        return interaction.reply(this.response('Confirm Level Reset', warning, {
             components: [new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(`levels:confirm:${token}`).setLabel(scope === 'all' ? 'Yes, Reset All XP' : 'Confirm Reset').setStyle(ButtonStyle.Danger),
                 new ButtonBuilder().setCustomId(`levels:cancel:${token}`).setLabel('Cancel').setStyle(ButtonStyle.Secondary)
-            )], flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-        });
+            )], flags: [MessageFlags.Ephemeral]
+        }));
     }
 
     async execute(interaction) {
@@ -957,13 +980,14 @@ class LevelAnalyticsService {
             }
             const privateReply = interaction.options.getBoolean?.('private') ?? false;
             if (action === 'rank') {
+                const acknowledged = await this.acknowledge(interaction, privateReply ? [MessageFlags.Ephemeral] : []);
                 const user = interaction.options.getUser?.('member') || interaction.user;
                 const member = interaction.guild.members.cache.get(user.id)
                     || await interaction.guild.members.fetch(user.id).catch(() => null);
-                return interaction.reply({
+                return this.send(interaction, {
                     ...await this.rankCard(user, member, interaction.guild),
-                    flags: privateReply ? [MessageFlags.Ephemeral] : []
-                });
+                    ...(!acknowledged && { flags: privateReply ? [MessageFlags.Ephemeral] : [] })
+                }, acknowledged);
             }
             const page = interaction.options.getInteger?.('page') || 1;
             if (action === 'leaderboard') {
@@ -976,7 +1000,7 @@ class LevelAnalyticsService {
                 const content = rows.length
                     ? rows.map((row, index) => `**${(page - 1) * 10 + index + 1}.** <@${row.user_id}> — **${row.score}** ${metric} XP`).join('\n')
                     : 'No one has earned any XP yet.';
-                return interaction.reply({ content, flags: privateReply ? [MessageFlags.Ephemeral] : [], allowedMentions: { parse: [] } });
+                return interaction.reply(this.response('Level Leaderboard', content, { flags: privateReply ? [MessageFlags.Ephemeral] : [] }));
             }
             const rewards = this.sqlite.prepare(`
                 SELECT level, role_id FROM level_role_rewards WHERE guild_id = ?
@@ -985,7 +1009,7 @@ class LevelAnalyticsService {
             const content = rewards.length
                 ? rewards.map(reward => `Level **${reward.level}** — <@&${reward.role_id}>`).join('\n')
                 : 'No level role rewards have been configured.';
-            return interaction.reply({ content, flags: privateReply ? [MessageFlags.Ephemeral] : [], allowedMentions: { parse: [] } });
+            return interaction.reply(this.response('Level Roles', content, { flags: privateReply ? [MessageFlags.Ephemeral] : [] }));
         }
         if (!group && action === 'setup') {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
@@ -1016,11 +1040,9 @@ class LevelAnalyticsService {
                 const [column, label] = switches[action];
                 this.sqlite.prepare(`UPDATE level_configs SET ${column} = ?, updated_at = ? WHERE guild_id = ?`)
                     .run(enabled ? 1 : 0, now, interaction.guildId);
-                return interaction.reply({
-                    content: `${label} is now **${enabled ? 'enabled' : 'disabled'}**.`,
-                    flags: [MessageFlags.Ephemeral],
-                    allowedMentions: { parse: [] }
-                });
+                return interaction.reply(this.response('Level Configuration', `${label} is now **${enabled ? 'enabled' : 'disabled'}**.`, {
+                    flags: [MessageFlags.Ephemeral]
+                }));
             }
             if (action === 'channel') {
                 const channel = interaction.options.getChannel('channel', true);
@@ -1038,11 +1060,9 @@ class LevelAnalyticsService {
                         award_channel_id = excluded.award_channel_id,
                         updated_at = excluded.updated_at
                 `).run(interaction.guildId, channel.id, now);
-                return interaction.reply({
-                    content: `Level-up channel set to <#${channel.id}>.`,
-                    flags: [MessageFlags.Ephemeral],
-                    allowedMentions: { parse: [] }
-                });
+                return interaction.reply(this.response('Level Configuration', `Level-up channel set to <#${channel.id}>.`, {
+                    flags: [MessageFlags.Ephemeral]
+                }));
             }
             if (action === 'rate') {
                 const multiplier = interaction.options.getNumber('multiplier', true);
@@ -1057,11 +1077,9 @@ class LevelAnalyticsService {
                         base_multiplier = excluded.base_multiplier,
                         updated_at = excluded.updated_at
                 `).run(interaction.guildId, multiplier, now);
-                return interaction.reply({
-                    content: `XP gain multiplier has been set to **${multiplier}x**.`,
-                    flags: [MessageFlags.Ephemeral],
-                    allowedMentions: { parse: [] }
-                });
+                return interaction.reply(this.response('Level Configuration', `XP gain multiplier has been set to **${multiplier}x**.`, {
+                    flags: [MessageFlags.Ephemeral]
+                }));
             }
         }
         if (group === 'boost') {
@@ -1076,7 +1094,7 @@ class LevelAnalyticsService {
                 const content = rows.length
                     ? rows.map(row => `${row.target_type === 'role' ? `<@&${row.target_id}>` : `<#${row.target_id}>`} — **${row.multiplier}x**`).join('\n')
                     : 'No XP multipliers are configured.';
-                return interaction.reply({ content, flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] } });
+                return interaction.reply(this.response('XP Multipliers', content, { flags: [MessageFlags.Ephemeral] }));
             }
             const role = interaction.options.getRole('role');
             const channel = interaction.options.getChannel('channel');
@@ -1087,10 +1105,9 @@ class LevelAnalyticsService {
                 this.sqlite.prepare(`
                     DELETE FROM level_boosts WHERE guild_id = ? AND target_type = ? AND target_id = ?
                 `).run(interaction.guildId, type, target.id);
-                return interaction.reply({
-                    content: `Removed the XP multiplier from ${type === 'role' ? `<@&${target.id}>` : `<#${target.id}>`}.`,
-                    flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-                });
+                return interaction.reply(this.response('XP Multiplier Removed', `Removed the XP multiplier from ${type === 'role' ? `<@&${target.id}>` : `<#${target.id}>`}.`, {
+                    flags: [MessageFlags.Ephemeral]
+                }));
             }
             const multiplier = interaction.options.getNumber('multiplier', true);
             if (!Number.isFinite(multiplier) || multiplier < 0 || multiplier > 10) {
@@ -1101,10 +1118,9 @@ class LevelAnalyticsService {
                 VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(guild_id, target_type, target_id) DO UPDATE SET multiplier = excluded.multiplier
             `).run(interaction.guildId, type, target.id, multiplier, this.now());
-            return interaction.reply({
-                content: `Set ${type === 'role' ? `<@&${target.id}>` : `<#${target.id}>`} to **${multiplier}x** XP.`,
-                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-            });
+            return interaction.reply(this.response('XP Multiplier Set', `Set ${type === 'role' ? `<@&${target.id}>` : `<#${target.id}>`} to **${multiplier}x** XP.`, {
+                flags: [MessageFlags.Ephemeral]
+            }));
         }
         if (group === 'live') {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
@@ -1115,6 +1131,7 @@ class LevelAnalyticsService {
             if (!permissions.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks])) {
                 throw new Error('I need View Channel, Send Messages, and Embed Links there.');
             }
+            const acknowledged = await this.acknowledge(interaction, [MessageFlags.Ephemeral]);
             const payload = this.liveBoardPayload(interaction.guildId, action);
             const token = this.liveBoardToken(interaction.guildId, channel.id, action);
             this.sqlite.prepare(`
@@ -1138,10 +1155,9 @@ class LevelAnalyticsService {
                     message_id = excluded.message_id, revision = level_live_boards.revision + 1,
                     updated_at = excluded.updated_at
             `).run(interaction.guildId, channel.id, action, message.id, this.now());
-            return interaction.reply({
-                content: `Live ${action} XP leaderboard created in <#${channel.id}>.`,
-                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-            });
+            return this.send(interaction, this.response('Live Leaderboard', `Live ${action} XP leaderboard created in <#${channel.id}>.`, {
+                ...(!acknowledged && { flags: [MessageFlags.Ephemeral] })
+            }), acknowledged);
         }
         if (group === 'reward') {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)
@@ -1158,12 +1174,12 @@ class LevelAnalyticsService {
                     .run(interaction.guildId, this.now());
                 this.sqlite.prepare(`UPDATE level_configs SET stack_roles = ?, updated_at = ? WHERE guild_id = ?`)
                     .run(enabled ? 1 : 0, this.now(), interaction.guildId);
-                return interaction.reply({
-                    content: `Stacking of level roles has been **${enabled ? 'enabled' : 'disabled'}**.`,
-                    flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-                });
+                return interaction.reply(this.response('Level Roles', `Stacking of level roles has been **${enabled ? 'enabled' : 'disabled'}**.`, {
+                    flags: [MessageFlags.Ephemeral]
+                }));
             }
             if (action === 'sync') {
+                const acknowledged = await this.acknowledge(interaction, [MessageFlags.Ephemeral]);
                 const members = await interaction.guild.members.fetch();
                 let count = 0;
                 for (const member of members.values()) {
@@ -1172,10 +1188,9 @@ class LevelAnalyticsService {
                         count += 1;
                     }
                 }
-                return interaction.reply({
-                    content: `Synced level roles for **${count}** members.`,
-                    flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-                });
+                return this.send(interaction, this.response('Level Roles Synced', `Synced level roles for **${count}** members.`, {
+                    ...(!acknowledged && { flags: [MessageFlags.Ephemeral] })
+                }), acknowledged);
             }
             const role = interaction.options.getRole('role', true);
             const level = interaction.options.getInteger('level', true);
@@ -1196,21 +1211,20 @@ class LevelAnalyticsService {
                     VALUES (?, ?, ?, ?)
                     ON CONFLICT(guild_id, level) DO UPDATE SET role_id = excluded.role_id
                 `).run(interaction.guildId, level, role.id, this.now());
-                return interaction.reply({
-                    content: `Added <@&${role.id}> as reward for level **${level}**.`,
-                    flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-                });
+                return interaction.reply(this.response('Level Reward Added', `Added <@&${role.id}> as reward for level **${level}**.`, {
+                    flags: [MessageFlags.Ephemeral]
+                }));
             }
+            const acknowledged = await this.acknowledge(interaction, [MessageFlags.Ephemeral]);
             const configured = this.sqlite.prepare(`SELECT 1 FROM level_role_rewards WHERE guild_id = ? AND level = ? AND role_id = ?`)
                 .get(interaction.guildId, level, role.id);
             const affected = configured ? await this.removeRewardRole(interaction.guild, role.id) : [];
             this.sqlite.prepare(`DELETE FROM level_role_rewards WHERE guild_id = ? AND level = ? AND role_id = ?`)
                 .run(interaction.guildId, level, role.id);
             for (const member of affected) await this.reconcileMemberRoles(member);
-            return interaction.reply({
-                content: `Removed level role configuration for level **${level}**.`,
-                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-            });
+            return this.send(interaction, this.response('Level Reward Removed', `Removed level role configuration for level **${level}**.`, {
+                ...(!acknowledged && { flags: [MessageFlags.Ephemeral] })
+            }), acknowledged);
         }
         if (group === 'ignore') {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
@@ -1224,7 +1238,7 @@ class LevelAnalyticsService {
                 const content = rows.length
                     ? rows.map(row => row.target_type === 'role' ? `<@&${row.target_id}>` : `<#${row.target_id}>`).join('\n')
                     : 'No XP exclusions are configured.';
-                return interaction.reply({ content, flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] } });
+                return interaction.reply(this.response('XP Exclusions', content, { flags: [MessageFlags.Ephemeral] }));
             }
             const target = action === 'role'
                 ? interaction.options.getRole('role', true)
@@ -1243,10 +1257,9 @@ class LevelAnalyticsService {
                 `).run(interaction.guildId, action, target.id, this.now());
             }
             const mention = action === 'role' ? `<@&${target.id}>` : `<#${target.id}>`;
-            return interaction.reply({
-                content: `${mention} is ${existing ? 'no longer' : 'now'} ignored for XP.`,
-                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-            });
+            return interaction.reply(this.response('XP Exclusion Updated', `${mention} is ${existing ? 'no longer' : 'now'} ignored for XP.`, {
+                flags: [MessageFlags.Ephemeral]
+            }));
         }
         if (group === 'message') {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
@@ -1257,17 +1270,16 @@ class LevelAnalyticsService {
                 const content = !config?.message_enabled
                     ? 'Level up messages are currently **disabled** for this server.'
                     : `Current level up message:\n>>> ${config.award_message}`;
-                return interaction.reply({ content, flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] } });
+                return interaction.reply(this.response('Level-up Message', content, { flags: [MessageFlags.Ephemeral] }));
             }
             if (action === 'disable') {
                 this.sqlite.prepare(`INSERT OR IGNORE INTO level_configs (guild_id, updated_at) VALUES (?, ?)`)
                     .run(interaction.guildId, this.now());
                 this.sqlite.prepare(`UPDATE level_configs SET message_enabled = 0, updated_at = ? WHERE guild_id = ?`)
                     .run(this.now(), interaction.guildId);
-                return interaction.reply({
-                    content: 'Level up messages are currently **disabled** for this server.',
-                    flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-                });
+                return interaction.reply(this.response('Level-up Message', 'Level up messages are currently **disabled** for this server.', {
+                    flags: [MessageFlags.Ephemeral]
+                }));
             }
             const script = interaction.options.getString('script', true);
             if ([...script].length > 2000) throw new Error('Message must be 2000 characters or less.');
@@ -1282,20 +1294,20 @@ class LevelAnalyticsService {
                 ON CONFLICT(guild_id) DO UPDATE SET award_message = excluded.award_message,
                     message_enabled = 1, updated_at = excluded.updated_at
             `).run(interaction.guildId, script, this.now());
-            return interaction.reply({
-                content: 'Custom level up message has been set.',
-                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-            });
+            return interaction.reply(this.response('Level-up Message', 'Custom level up message has been set.', {
+                flags: [MessageFlags.Ephemeral]
+            }));
         }
         if (group === 'rankcard') {
             if (action === 'view') {
                 if (interaction.appPermissions && !interaction.appPermissions.has(PermissionFlagsBits.AttachFiles)) {
                     throw new Error('I need Attach Files to render rank cards.');
                 }
+                const acknowledged = await this.acknowledge(interaction, [MessageFlags.Ephemeral]);
                 const user = interaction.options.getUser('member') || interaction.user;
                 const member = interaction.guild.members.cache.get(user.id)
                     || await interaction.guild.members.fetch(user.id).catch(() => null);
-                return interaction.reply(await this.rankCard(user, member, interaction.guild));
+                return this.send(interaction, await this.rankCard(user, member, interaction.guild), acknowledged);
             }
             if (action === 'color') {
                 const input = interaction.options.getString('color', true);
@@ -1305,10 +1317,10 @@ class LevelAnalyticsService {
                     INSERT INTO level_rank_cards (user_id, accent, updated_at) VALUES (?, ?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET accent = excluded.accent, updated_at = excluded.updated_at
                 `).run(interaction.user.id, accent, this.now());
-                return interaction.reply({
-                    content: accent ? `Rank card accent set to **${accent}**.` : 'Rank card accent reset to the ByteBot default.',
-                    flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-                });
+                return interaction.reply(this.response('Rank Card Accent', accent
+                    ? `Rank card accent set to **${accent}**.` : 'Rank card accent reset to the ByteBot default.', {
+                    flags: [MessageFlags.Ephemeral]
+                }));
             }
             const attachment = interaction.options.getAttachment('background');
             const backgroundUrl = interaction.options.getString('background_url');
@@ -1321,6 +1333,9 @@ class LevelAnalyticsService {
             let background;
             let mime;
             const source = attachment || backgroundUrl;
+            const acknowledged = source
+                ? await this.acknowledge(interaction, [MessageFlags.Ephemeral])
+                : false;
             if (source) {
                 const url = new URL(typeof source === 'string' ? source : source.url);
                 if (url.protocol !== 'https:') throw new Error('Rank-card backgrounds must use HTTPS.');
@@ -1345,15 +1360,16 @@ class LevelAnalyticsService {
                 background ?? current?.background_data ?? null,
                 mime ?? current?.background_mime ?? null,
                 avatarBorder ?? current?.avatar_border ?? 4, this.now());
-            return interaction.reply({
-                content: 'Rank card style updated.', flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-            });
+            return this.send(interaction, this.response('Rank Card Style', 'Rank card style updated.', {
+                ...(!acknowledged && { flags: [MessageFlags.Ephemeral] })
+            }), acknowledged);
         }
         if (group === 'reset') {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
                 throw new Error('You need Manage Server to reset XP.');
             }
             if (action === 'all') return this.beginReset(interaction, 'all');
+            const acknowledged = await this.acknowledge(interaction, [MessageFlags.Ephemeral]);
             const user = interaction.options.getUser('member', true);
             this.sqlite.transaction(() => {
                 this.enqueueRoleReconcile(interaction.guildId, user.id);
@@ -1365,15 +1381,15 @@ class LevelAnalyticsService {
             const member = interaction.guild.members.cache.get(user.id)
                 || await interaction.guild.members.fetch(user.id).catch(() => null);
             if (member) await this.reconcileMemberRoles(member);
-            return interaction.reply({
-                content: `XP has been reset for <@${user.id}>`,
-                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
-            });
+            return this.send(interaction, this.response('Level Reset', `XP has been reset for <@${user.id}>`, {
+                ...(!acknowledged && { flags: [MessageFlags.Ephemeral] })
+            }), acknowledged);
         }
         if (group === 'admin') {
             if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
                 throw new Error('You need Manage Server to manage member XP.');
             }
+            const acknowledged = await this.acknowledge(interaction, [MessageFlags.Ephemeral]);
             const user = interaction.options.getUser('member', true);
             const now = this.now();
             this.sqlite.prepare(`
@@ -1425,11 +1441,9 @@ class LevelAnalyticsService {
                 ? await interaction.guild.members.fetch(user.id).catch(() => null)
                 : null;
             if (member) await this.reconcileMemberRoles(member);
-            return interaction.reply({
-                content,
-                flags: [MessageFlags.Ephemeral],
-                allowedMentions: { parse: [] }
-            });
+            return this.send(interaction, this.response('Member XP Updated', content, {
+                ...(!acknowledged && { flags: [MessageFlags.Ephemeral] })
+            }), acknowledged);
         }
         throw new Error('That levels action is not available yet.');
     }
