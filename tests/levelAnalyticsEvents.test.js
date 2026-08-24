@@ -21,6 +21,7 @@ const guildMemberRemove = require('../src/events/guildMemberRemove');
 describe('level analytics event adapters', () => {
     test('messageCreate records activity once and updates streaks only after commit', async () => {
         const recordMessage = jest.fn(() => ({ accepted: true, duplicate: false, xpAwarded: 20 }));
+        const announceLevel = jest.fn().mockResolvedValue(undefined);
         const recordCommittedActivity = jest.fn().mockResolvedValue(undefined);
         const recordActivity = jest.fn();
         const recordActiveHour = jest.fn().mockResolvedValue(undefined);
@@ -32,11 +33,12 @@ describe('level analytics event adapters', () => {
         };
 
         await messageCreate.execute(message, {
-            levelAnalyticsService: { recordMessage },
+            levelAnalyticsService: { recordMessage, announceLevel },
             activityStreakService: { recordCommittedActivity, recordActivity, recordActiveHour }
         });
 
         expect(recordMessage).toHaveBeenCalledWith(message);
+        expect(announceLevel).toHaveBeenCalledWith(message, expect.objectContaining({ accepted: true }));
         expect(recordCommittedActivity).toHaveBeenCalledWith('user1', 'guild1');
         expect(recordActivity).not.toHaveBeenCalled();
         expect(recordActiveHour).toHaveBeenCalledWith('user1', 'guild1', expect.any(Number));
