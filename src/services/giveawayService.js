@@ -652,6 +652,14 @@ class GiveawayService {
         }
     }
 
+    dueRerolls(limit = 25) {
+        return this.sqlite.prepare(`SELECT DISTINCT r.giveaway_id id FROM giveaway_rounds r
+            JOIN giveaways g ON g.id = r.giveaway_id
+            WHERE g.status = 'ended' AND r.round_number > 1 AND r.announced_at IS NULL
+              AND (r.delivery_lease_until IS NULL OR r.delivery_lease_until <= ?)
+            ORDER BY r.id LIMIT ?`).all(this.now(), limit);
+    }
+
     async reconcile() {
         if (!this.client) return { adopted: 0, lost: 0, resumed: 0 };
         let adopted = 0;
@@ -683,6 +691,11 @@ class GiveawayService {
                 resumed++;
             }
         }
+        for (const row of this.dueRerolls()) {
+            await this.rerollDiscordGiveaway(row.id, this.client.user.id)
+                .catch(error => logger.warn(`Giveaway ${row.id} reroll resume failed: ${error.message}`));
+            resumed++;
+        }
         return { adopted, lost, resumed };
     }
 
@@ -697,6 +710,10 @@ class GiveawayService {
                 ORDER BY ends_at LIMIT 25`).all(this.now(), this.now());
             for (const row of rows) await this.endDiscordGiveaway(row.id, this.client.user.id)
                 .catch(error => logger.warn(`Giveaway ${row.id} deadline failed: ${error.message}`));
+            for (const row of this.dueRerolls(Math.max(0, 25 - rows.length))) {
+                await this.rerollDiscordGiveaway(row.id, this.client.user.id)
+                    .catch(error => logger.warn(`Giveaway ${row.id} reroll deadline failed: ${error.message}`));
+            }
         } finally {
             this.running = false;
         }

@@ -205,10 +205,12 @@ describe('giveaway platform', () => {
         const pending = service.createReroll(giveaway.id, 'admin', [...members.values()]);
         database.sqlite.prepare('UPDATE giveaway_rounds SET delivery_lease_until = 0 WHERE id = ?').run(pending.round.id);
 
-        const resumed = await service.rerollDiscordGiveaway(giveaway.id, 'admin');
+        const result = await service.reconcile();
+        const resumed = database.sqlite.prepare('SELECT * FROM giveaway_rounds WHERE id = ?').get(pending.round.id);
 
-        expect(resumed.id).toBe(pending.round.id);
-        expect(resumed.winnerIds).not.toEqual(first.round.winnerIds);
+        expect(result.resumed).toBe(1);
+        expect(resumed.announced_at).toBe(1000);
+        expect(JSON.parse(resumed.winners_snapshot)).not.toEqual(first.round.winnerIds);
         expect(database.sqlite.prepare('SELECT COUNT(*) count FROM giveaway_rounds WHERE giveaway_id = ?').get(giveaway.id).count).toBe(2);
     });
 
