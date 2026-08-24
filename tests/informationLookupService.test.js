@@ -180,6 +180,107 @@ test('GitHub lookups distinguish missing, rate-limited, and invalid responses', 
     await expect(malformed.githubUser('octocat')).rejects.toThrow('invalid profile');
 });
 
+test('successful provider responses are cached briefly with a bounded lifetime', async () => {
+    let now = 1000;
+    const fetch = jest.fn().mockImplementation(async () => new Response(JSON.stringify({
+        login: 'octocat', id: 1, html_url: 'https://github.com/octocat',
+        avatar_url: 'https://avatars.githubusercontent.com/u/1', created_at: '2011-01-25T18:44:36Z',
+        public_repos: 1, public_gists: 0, followers: 1, following: 0
+    }), { headers: { 'content-type': 'application/json' } }));
+    const service = new InformationLookupService({ fetch, now: () => now, cacheTtl: 100 });
+
+    await service.githubUser('octocat');
+    await service.githubUser('octocat');
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    now = 1101;
+    await service.githubUser('octocat');
+    expect(fetch).toHaveBeenCalledTimes(2);
+});
+
+test('Roblox profile lookup resolves a username and returns bounded public profile fields', async () => {
+    const response = value => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
+    const fetch = jest.fn(async input => {
+        const url = new URL(input);
+        const route = `${url.hostname}${url.pathname}`;
+        const payloads = {
+            'users.roblox.com/v1/usernames/users': { data: [{ id: 156, name: 'builderman', displayName: 'builderman', requestedUsername: 'Builderman' }] },
+            'users.roblox.com/v1/users/156': { id: 156, name: 'builderman', displayName: 'builderman', description: 'Roblox founder', created: '2006-02-27T21:06:40Z', isBanned: false, hasVerifiedBadge: true },
+            'friends.roblox.com/v1/users/156/followers/count': { count: 1000 },
+            'friends.roblox.com/v1/users/156/followings/count': { count: 10 },
+            'friends.roblox.com/v1/users/156/friends/count': { count: 200 },
+            'presence.roblox.com/v1/presence/users': { userPresences: [{ userId: 156, userPresenceType: 2, lastLocation: 'Example game', lastOnline: '2026-08-25T00:00:00Z' }] },
+            'accountinformation.roblox.com/v1/users/156/roblox-badges': [{ id: 1, name: 'Administrator' }],
+            'users.roblox.com/v1/users/156/username-history': { data: [{ name: 'Builderman' }] },
+            'thumbnails.roblox.com/v1/users/avatar-headshot': { data: [{ targetId: 156, state: 'Completed', imageUrl: 'https://tr.rbxcdn.com/avatar.png' }] }
+        };
+        return response(payloads[route]);
+    });
+    const service = new InformationLookupService({ fetch });
+
+    await expect(service.robloxProfile('Builderman')).resolves.toEqual({
+        id: 156, username: 'builderman', displayName: 'builderman', description: 'Roblox founder',
+        createdAt: '2006-02-27T21:06:40Z', banned: false, verified: true,
+        followers: 1000, following: 10, friends: 200,
+        presence: { status: 'In Game', location: 'Example game', lastOnline: '2026-08-25T00:00:00Z' },
+        badges: ['Administrator'], nameHistory: ['Builderman'], avatar: 'https://tr.rbxcdn.com/avatar.png'
+    });
+    expect(fetch).toHaveBeenCalledTimes(9);
+});
+
+test('Roblox collection lookups resolve once and cap games, groups, and outfits', async () => {
+    const response = value => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
+    const fetch = jest.fn(async input => {
+        const url = new URL(input);
+        if (url.pathname === '/v1/usernames/users') {
+            return response({ data: [{ id: 156, name: 'builderman', displayName: 'builderman' }] });
+        }
+        if (url.hostname === 'games.roblox.com') return response({ data: [{
+            id: 10, name: 'Example game', description: 'A public game', rootPlace: { id: 20 },
+            created: '2020-01-01T00:00:00Z', updated: '2026-08-25T00:00:00Z', placeVisits: 30
+        }] });
+        if (url.hostname === 'groups.roblox.com') return response({ data: [{
+            group: { id: 40, name: 'Example group', memberCount: 50, isLocked: false },
+            role: { name: 'Member', rank: 1 }
+        }] });
+        return response({ data: [{ id: 60, name: 'Example outfit', isEditable: true, outfitType: 'Avatar' }] });
+    });
+    const service = new InformationLookupService({ fetch });
+
+    await expect(service.robloxGames('Builderman')).resolves.toEqual({ user: expect.objectContaining({ id: 156 }), games: [{
+        id: 10, name: 'Example game', description: 'A public game', placeId: 20,
+        url: 'https://www.roblox.com/games/20', createdAt: '2020-01-01T00:00:00Z',
+        updatedAt: '2026-08-25T00:00:00Z', visits: 30
+    }] });
+    await expect(service.robloxGroups('Builderman')).resolves.toEqual({ user: expect.objectContaining({ id: 156 }), groups: [{
+        id: 40, name: 'Example group', members: 50, locked: false, role: 'Member', rank: 1,
+        url: 'https://www.roblox.com/communities/40'
+    }] });
+    await expect(service.robloxOutfits('Builderman')).resolves.toEqual({ user: expect.objectContaining({ id: 156 }), outfits: [{
+        id: 60, name: 'Example outfit', editable: true, type: 'Avatar'
+    }] });
+    expect(fetch).toHaveBeenCalledTimes(4);
+});
+
+test('Roblox lookups distinguish not found, inaccessible, rate-limited, and malformed responses', async () => {
+    const response = (value, status = 200) => new Response(JSON.stringify(value), {
+        status, headers: { 'content-type': 'application/json' }
+    });
+    const resolvedUser = () => response({ data: [{ id: 156, name: 'builderman', displayName: 'builderman' }] });
+    const missing = new InformationLookupService({ fetch: jest.fn().mockResolvedValue(response({ data: [] })) });
+    const inaccessible = new InformationLookupService({ fetch: jest.fn()
+        .mockResolvedValueOnce(resolvedUser()).mockResolvedValueOnce(response({}, 400)) });
+    const limited = new InformationLookupService({ fetch: jest.fn()
+        .mockResolvedValueOnce(resolvedUser()).mockResolvedValueOnce(response({}, 429)) });
+    const malformed = new InformationLookupService({ fetch: jest.fn()
+        .mockResolvedValueOnce(resolvedUser()).mockResolvedValueOnce(response({ data: [{ id: 'bad' }] })) });
+
+    await expect(missing.robloxUser('Builderman')).rejects.toThrow('No Roblox user');
+    await expect(inaccessible.robloxGames('Builderman')).rejects.toThrow('not publicly accessible');
+    await expect(limited.robloxGroups('Builderman')).rejects.toThrow('rate limit');
+    await expect(malformed.robloxOutfits('Builderman')).rejects.toThrow('invalid outfits');
+});
+
 test('name history records only observed former names in the existing automation store', () => {
     const sqlite = new Database(':memory:');
     sqlite.exec(`CREATE TABLE automation_rules (

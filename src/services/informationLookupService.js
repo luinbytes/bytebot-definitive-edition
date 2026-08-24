@@ -12,6 +12,15 @@ function httpsUrl(value, hosts) {
     throw new UserFacingError('Lookup provider returned an invalid payload.');
 }
 
+function robloxImageUrl(value) {
+    try {
+        const url = new URL(value);
+        if (url.protocol === 'https:' && (url.hostname === 'rbxcdn.com' || url.hostname.endsWith('.rbxcdn.com'))
+            && !url.username && !url.password) return url.toString();
+    } catch { /* Invalid provider URL. */ }
+    throw new UserFacingError('Roblox returned an invalid profile.');
+}
+
 function evaluateExpression(input) {
     const expression = String(input || '').trim();
     if (!expression || expression.length > 500) throw new UserFacingError('Invalid expression.');
@@ -99,6 +108,19 @@ class InformationLookupService {
         this.translationKey = options.translationKey ?? process.env.LIBRETRANSLATE_API_KEY;
         this.sqlite = options.sqlite;
         this.randomUUID = options.randomUUID || crypto.randomUUID;
+        this.now = options.now || Date.now;
+        this.cacheTtl = options.cacheTtl ?? 60_000;
+        this.cache = new Map();
+    }
+
+    async cached(key, load) {
+        const hit = this.cache.get(key);
+        if (hit?.expiresAt > this.now()) return hit.value;
+        this.cache.delete(key);
+        const value = await load();
+        if (this.cache.size >= 100) this.cache.delete(this.cache.keys().next().value);
+        this.cache.set(key, { value, expiresAt: this.now() + this.cacheTtl });
+        return value;
     }
 
     async json(url, options = {}) {
@@ -116,6 +138,7 @@ class InformationLookupService {
                 || (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0');
             if (exhausted) throw new UserFacingError(errors.rateLimited || 'Lookup provider rate limit reached. Try again later.');
             if (response.status === 404 && errors.notFound) throw new UserFacingError(errors.notFound);
+            if (response.status === 400 && errors.badRequest) throw new UserFacingError(errors.badRequest);
             if ([401, 403].includes(response.status) && errors.inaccessible) throw new UserFacingError(errors.inaccessible);
             throw new UserFacingError(errors.failed || 'Lookup provider request failed.');
         }
@@ -215,14 +238,15 @@ class InformationLookupService {
     }
 
     async githubJson(path, errors) {
-        return this.json(new URL(path, 'https://api.github.com'), {
+        const url = new URL(path, 'https://api.github.com');
+        return this.cached(`github:${url}`, () => this.json(url, {
             headers: {
                 accept: 'application/vnd.github+json',
                 'x-github-api-version': '2022-11-28',
                 'user-agent': 'ByteBot'
             },
             errors
-        });
+        }));
     }
 
     async githubUser(input) {
@@ -323,6 +347,168 @@ class InformationLookupService {
         });
         if (!commits.length) throw new UserFacingError('No public commits found for that email.');
         return commits;
+    }
+
+    async robloxJson(url, options = {}) {
+        const key = `roblox:${options.method || 'GET'}:${url}:${options.body || ''}`;
+        return this.cached(key, () => this.json(url, {
+            ...options,
+            errors: {
+                notFound: 'That Roblox account or resource was not found.',
+                badRequest: 'That Roblox account or resource is not publicly accessible.',
+                inaccessible: 'That Roblox account or resource is not publicly accessible.',
+                rateLimited: 'Roblox rate limit reached. Try again later.',
+                failed: 'Failed to fetch Roblox user information. Please try again later.'
+            }
+        }));
+    }
+
+    async robloxUser(input) {
+        const username = String(input || '').trim();
+        if (!/^(?=.{3,20}$)(?!_)(?!.*_$)(?!.*_.*_)(?!\d+$)[a-z\d_]+$/i.test(username)) {
+            throw new UserFacingError('Please provide a valid Roblox username.');
+        }
+        const payload = await this.robloxJson(new URL('https://users.roblox.com/v1/usernames/users'), {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
+        });
+        const row = payload?.data?.[0];
+        if (!row) throw new UserFacingError('No Roblox user found with that name.');
+        if (!Number.isSafeInteger(row.id) || row.id <= 0 || typeof row.name !== 'string'
+            || typeof row.displayName !== 'string') throw new UserFacingError('Roblox returned an invalid profile.');
+        return { id: row.id, username: row.name, displayName: row.displayName };
+    }
+
+    async robloxProfile(input) {
+        const user = await this.robloxUser(input);
+        const id = user.id;
+        const count = kind => this.robloxJson(new URL(`https://friends.roblox.com/v1/users/${id}/${kind}/count`));
+        const [profile, followers, following, friends, presenceData, badgesData, historyData, thumbnailData] = await Promise.all([
+            this.robloxJson(new URL(`https://users.roblox.com/v1/users/${id}`)),
+            count('followers'),
+            count('followings'),
+            count('friends'),
+            this.robloxJson(new URL('https://presence.roblox.com/v1/presence/users'), {
+                method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ userIds: [id] })
+            }),
+            this.robloxJson(new URL(`https://accountinformation.roblox.com/v1/users/${id}/roblox-badges`)),
+            this.robloxJson(new URL(`https://users.roblox.com/v1/users/${id}/username-history?limit=10&sortOrder=Desc`)),
+            this.robloxJson(new URL(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${id}&size=420x420&format=Png&isCircular=false`))
+        ]);
+        const counts = [followers?.count, following?.count, friends?.count];
+        const presence = presenceData?.userPresences?.[0];
+        const badges = badgesData;
+        const history = historyData?.data;
+        const thumbnail = thumbnailData?.data?.[0];
+        if (profile?.id !== id || typeof profile.description !== 'string' || typeof profile.created !== 'string'
+            || !Number.isFinite(Date.parse(profile.created)) || typeof profile.isBanned !== 'boolean'
+            || typeof profile.hasVerifiedBadge !== 'boolean'
+            || counts.some(value => !Number.isSafeInteger(value) || value < 0)
+            || !Number.isInteger(presence?.userPresenceType) || presence.userPresenceType < 0 || presence.userPresenceType > 3
+            || presence.userId !== id || !Array.isArray(badges) || !Array.isArray(history)
+            || thumbnail?.targetId !== id || thumbnail.state !== 'Completed') {
+            throw new UserFacingError('Roblox returned an invalid profile.');
+        }
+        const badgeNames = badges.slice(0, 5).map(row => {
+            if (typeof row?.name !== 'string') throw new UserFacingError('Roblox returned an invalid profile.');
+            return row.name;
+        });
+        const names = history.slice(0, 5).map(row => {
+            if (typeof row?.name !== 'string') throw new UserFacingError('Roblox returned an invalid profile.');
+            return row.name;
+        });
+        return {
+            ...user,
+            description: profile.description,
+            createdAt: profile.created,
+            banned: profile.isBanned,
+            verified: profile.hasVerifiedBadge,
+            followers: followers.count,
+            following: following.count,
+            friends: friends.count,
+            presence: {
+                status: ['Offline', 'Online', 'In Game', 'In Studio'][presence.userPresenceType],
+                location: typeof presence.lastLocation === 'string' && presence.lastLocation ? presence.lastLocation : null,
+                lastOnline: typeof presence.lastOnline === 'string' && Number.isFinite(Date.parse(presence.lastOnline))
+                    ? presence.lastOnline : null
+            },
+            badges: badgeNames,
+            nameHistory: names,
+            avatar: robloxImageUrl(thumbnail.imageUrl)
+        };
+    }
+
+    async robloxGames(input) {
+        const user = await this.robloxUser(input);
+        const data = await this.robloxJson(new URL(
+            `https://games.roblox.com/v2/users/${user.id}/games?accessFilter=2&limit=10&sortOrder=Desc`
+        ));
+        if (!Array.isArray(data?.data)) throw new UserFacingError('Roblox returned an invalid games list.');
+        const games = data.data.slice(0, 5).map(row => {
+            const placeId = row?.rootPlace?.id;
+            if (!Number.isSafeInteger(row?.id) || !Number.isSafeInteger(placeId) || typeof row.name !== 'string'
+                || typeof row.description !== 'string' || !Number.isSafeInteger(row.placeVisits) || row.placeVisits < 0
+                || typeof row.created !== 'string' || !Number.isFinite(Date.parse(row.created))
+                || typeof row.updated !== 'string' || !Number.isFinite(Date.parse(row.updated))) {
+                throw new UserFacingError('Roblox returned an invalid games list.');
+            }
+            return {
+                id: row.id,
+                name: row.name,
+                description: row.description,
+                placeId,
+                url: `https://www.roblox.com/games/${placeId}`,
+                createdAt: row.created,
+                updatedAt: row.updated,
+                visits: row.placeVisits
+            };
+        });
+        if (!games.length) throw new UserFacingError('This Roblox user has no public games.');
+        return { user, games };
+    }
+
+    async robloxGroups(input) {
+        const user = await this.robloxUser(input);
+        const data = await this.robloxJson(new URL(`https://groups.roblox.com/v1/users/${user.id}/groups/roles`));
+        if (!Array.isArray(data?.data)) throw new UserFacingError('Roblox returned an invalid groups list.');
+        const groups = data.data.slice(0, 5).map(row => {
+            const group = row?.group;
+            const role = row?.role;
+            if (!Number.isSafeInteger(group?.id) || typeof group.name !== 'string'
+                || !Number.isSafeInteger(group.memberCount) || group.memberCount < 0 || typeof group.isLocked !== 'boolean'
+                || typeof role?.name !== 'string' || !Number.isSafeInteger(role.rank)) {
+                throw new UserFacingError('Roblox returned an invalid groups list.');
+            }
+            return {
+                id: group.id,
+                name: group.name,
+                members: group.memberCount,
+                locked: group.isLocked,
+                role: role.name,
+                rank: role.rank,
+                url: `https://www.roblox.com/communities/${group.id}`
+            };
+        });
+        if (!groups.length) throw new UserFacingError('This Roblox user is not in any groups.');
+        return { user, groups };
+    }
+
+    async robloxOutfits(input) {
+        const user = await this.robloxUser(input);
+        const data = await this.robloxJson(new URL(
+            `https://avatar.roblox.com/v2/avatar/users/${user.id}/outfits?itemsPerPage=5&page=1`
+        ));
+        if (!Array.isArray(data?.data)) throw new UserFacingError('Roblox returned an invalid outfits list.');
+        const outfits = data.data.slice(0, 5).map(row => {
+            if (!Number.isSafeInteger(row?.id) || typeof row.name !== 'string'
+                || typeof row.isEditable !== 'boolean' || typeof row.outfitType !== 'string') {
+                throw new UserFacingError('Roblox returned an invalid outfits list.');
+            }
+            return { id: row.id, name: row.name, editable: row.isEditable, type: row.outfitType };
+        });
+        if (!outfits.length) throw new UserFacingError('This Roblox user has no public outfits.');
+        return { user, outfits };
     }
 
     async weather(input) {

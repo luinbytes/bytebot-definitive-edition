@@ -200,11 +200,11 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/community` member progress, achievements, BytePods, and community features\n' +
                     '`/me` personal settings, reminders, bookmarks, birthdays, streaks\n' +
                     '`/server` setup, lifecycle messages, suggestions, starboard, achievements, security\n' +
-                    '`/lookup` calculations, translation, web images, weather, and definitions\n' +
+                    '`/lookup` calculations, translation, web images, weather, definitions, and GitHub\n' +
                     '`/pod` BytePod actions and settings\n' +
                     '`/mod` member actions, cases, invoke templates, setup, logs, and channel controls\n' +
                     '`/economy` balances, games, crime, gangs, labs, role shops, and administration\n' +
-                    '`/game` F1 and War Thunder\n' +
+                    '`/game` F1, War Thunder, and public Roblox lookups\n' +
                     '`/bot` help, health, deployment, and developer tools',
                 inline: false
             },
@@ -222,9 +222,9 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/giveaway start` • `/giveaway edit prize` • `/counter add`\n' +
                     '`/economy balance` • `/economy game coinflip` • `/economy gang info` • `/economy lab status`\n' +
                     '`/server backup create` • `/server customize preset` • `/server discovery publish`\n' +
-                    '`/server stats days:60` • `/server role info` • `/lookup weather`\n' +
+                    '`/server role info` • `/lookup weather` • `/lookup github user`\n' +
                     '`/mod user warn` • `/mod case view` • `/mod config setup`\n' +
-                    '`/mod template set` • `/game warthunder stats`\n' +
+                    '`/mod template set` • `/game roblox profile`\n' +
                     '`/fun uwuify` • `/fun uwulock add`',
                 inline: false
             },
@@ -233,6 +233,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                 value:
                     'Greed source categories route through ByteBot\'s existing hubs as features land:\n' +
                     '`/community` Levels, Socials • `/me` Information • `/lookup` Information, Utility\n' +
+                    '`/game` Games, Socials\n' +
                     '`/server` Auto, Logs, Security, Server, Settings • `/ticket` Tickets • `/mod` Moderation\n' +
                     '`/fun` Fun, Manipulation, Roleplay, Snipe • `/boosterrole` Boosters • `/economy` Economy\n' +
                     '`/music` Music\n' +

@@ -187,13 +187,73 @@ describe('Intent command hubs', () => {
         ]);
 
         expect(game.name).toBe('game');
-        expect(optionNames(game.options)).toEqual(['f1', 'warthunder']);
+        expect(optionNames(game.options)).toEqual(['f1', 'warthunder', 'roblox']);
         expect(optionNames(findOption(game, 'f1').options)).toEqual([
             'schedule',
             'standings',
             'circuit',
             'drivers'
         ]);
+        expect(optionNames(findOption(game, 'roblox').options)).toEqual([
+            'profile', 'games', 'groups', 'outfits'
+        ]);
+    });
+
+    test('game hub renders a public Roblox profile without entering an alias command', async () => {
+        const game = commandModule('src/commands/games/game.js');
+        const interaction = {
+            options: {
+                getSubcommandGroup: jest.fn().mockReturnValue('roblox'),
+                getSubcommand: jest.fn().mockReturnValue('profile'),
+                getString: jest.fn().mockReturnValue('Builderman')
+            },
+            editReply: jest.fn().mockResolvedValue()
+        };
+        const client = { informationLookupService: { robloxProfile: jest.fn().mockResolvedValue({
+            id: 156, username: 'builderman', displayName: 'builderman', description: 'Roblox founder',
+            createdAt: '2006-02-27T21:06:40Z', banned: false, verified: true,
+            followers: 1000, following: 10, friends: 200,
+            presence: { status: 'In Game', location: 'Example game', lastOnline: '2026-08-25T00:00:00Z' },
+            badges: ['Administrator'], nameHistory: ['Builderman'], avatar: 'https://tr.rbxcdn.com/avatar.png'
+        }) } };
+
+        await game.execute(interaction, client);
+
+        expect(client.informationLookupService.robloxProfile).toHaveBeenCalledWith('Builderman');
+        const embed = interaction.editReply.mock.calls[0][0].embeds[0].data;
+        expect(embed.url).toBe('https://www.roblox.com/users/156/profile');
+        expect(embed.fields).toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: 'Presence', value: expect.stringContaining('In Game') }),
+            expect.objectContaining({ name: 'Badges (1)', value: 'Administrator' })
+        ]));
+    });
+
+    test.each([
+        ['games', 'robloxGames', { user: { displayName: 'Builderman' }, games: [{
+            name: 'Game', url: 'https://www.roblox.com/games/20', visits: 30, description: 'Public'
+        }] }],
+        ['groups', 'robloxGroups', { user: { displayName: 'Builderman' }, groups: [{
+            name: 'Group', url: 'https://www.roblox.com/communities/40', role: 'Member', members: 50, locked: false
+        }] }],
+        ['outfits', 'robloxOutfits', { user: { displayName: 'Builderman' }, outfits: [{
+            id: 60, name: 'Outfit', type: 'Avatar', editable: true
+        }] }]
+    ])('game hub renders Roblox %s results from the matching provider adapter', async (action, method, result) => {
+        const game = commandModule('src/commands/games/game.js');
+        const interaction = {
+            options: {
+                getSubcommandGroup: jest.fn().mockReturnValue('roblox'),
+                getSubcommand: jest.fn().mockReturnValue(action),
+                getString: jest.fn().mockReturnValue('Builderman')
+            },
+            editReply: jest.fn().mockResolvedValue()
+        };
+        const client = { informationLookupService: { [method]: jest.fn().mockResolvedValue(result) } };
+
+        await game.execute(interaction, client);
+
+        expect(client.informationLookupService[method]).toHaveBeenCalledWith('Builderman');
+        expect(interaction.editReply.mock.calls[0][0].embeds[0].data.description).toBeTruthy();
     });
 
     test('moderation hub uses user, logs, and channel intent groups', () => {
