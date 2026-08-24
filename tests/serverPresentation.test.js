@@ -3,6 +3,8 @@ const os = require('os');
 const path = require('path');
 const http = require('http');
 
+const IMAGE_BUFFER = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlS4AAAAASUVORK5CYII=', 'base64');
+
 describe('server presentation', () => {
     let tempDir;
     let database;
@@ -21,8 +23,8 @@ describe('server presentation', () => {
             randomUUID: () => 'preset-1',
             fetch: jest.fn(async () => ({
                 ok: true,
-                headers: { get: name => name === 'content-type' ? 'image/png' : '4' },
-                arrayBuffer: async () => Uint8Array.from([1, 2, 3, 4]).buffer
+                headers: { get: name => name === 'content-type' ? 'image/png' : String(IMAGE_BUFFER.length) },
+                async *[Symbol.asyncIterator]() { yield IMAGE_BUFFER; }
             })),
             lookup: jest.fn(async () => [{ address: '93.184.216.34' }])
         });
@@ -44,7 +46,7 @@ describe('server presentation', () => {
         });
 
         expect(editMe).toHaveBeenCalledWith({
-            nick: 'Bytey', bio: 'Server helper', avatar: Buffer.from([1, 2, 3, 4]),
+            nick: 'Bytey', bio: 'Server helper', avatar: IMAGE_BUFFER,
             reason: 'ByteBot server customization'
         });
         await expect(service.customize(guild, { nickname: 'x'.repeat(33) })).rejects.toThrow('32');
@@ -56,7 +58,7 @@ describe('server presentation', () => {
         });
         await expect(service.image('http://[::ffff:127.0.0.1]/avatar.png')).rejects.toThrow('public address');
         await service.image('https://cdn.discordapp.com/avatar.png');
-        expect(service.fetch).toHaveBeenLastCalledWith(expect.any(URL), expect.objectContaining({
+        expect(service.media.fetch).toHaveBeenLastCalledWith(expect.any(URL), expect.objectContaining({
             address: '93.184.216.34', family: 4
         }));
     });
@@ -103,7 +105,7 @@ describe('server presentation', () => {
         }));
         await expect(service.applyPreset(guild, 'preset-1', false)).rejects.toThrow('confirmation');
         await service.applyPreset(guild, 'preset-1', true);
-        expect(editMe).toHaveBeenCalledWith(expect.objectContaining({ nick: 'Bytey', avatar: Buffer.from([1, 2, 3, 4]) }));
+        expect(editMe).toHaveBeenCalledWith(expect.objectContaining({ nick: 'Bytey', avatar: IMAGE_BUFFER }));
         expect(service.removePreset('guild1', 'preset-1')).toBe(true);
         expect(service.listPresets('guild1')).toEqual([]);
     });

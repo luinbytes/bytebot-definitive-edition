@@ -36,7 +36,7 @@ Source: [Greed commands](https://greed.best/commands), researched 2026-08-23. Th
 | Settings | 47 | #36, #37, #41, #43, #54, #57, #58 | `partial` |
 | Levels | 3 | #50 | `partial` |
 | Socials | 31 | #60, #61 | `tracked` |
-| Manipulation | 99 | #55, #56, #62 | `tracked` |
+| Manipulation | 99 | #55, #56, #62 | `partial` — shared bounded inputs and local transforms/effects/templates are implemented; exact provider assets/algorithms are terminally mapped, while OCR remains with #62 |
 | Snipe | 4 | #54 | `tracked` |
 | Unidentified remainder | 29 | #64 | `evidence-gap` — the public page does not name its missing bucket |
 | **Total** | **945** | #34–#64 | Mixed |
@@ -56,7 +56,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | `lastfm` | 22 | #57 | `tracked` |
 | `levels` | 8 | #50 | `partial` |
 | `logs` | 7 | #37, #39, #40, #50 | `partial` |
-| `manipulation` | 3 | #56 | `tracked` |
+| `manipulation` | 3 | #56 | `complete` — AlexFlipnote, Jeyy, and Popcat provider families are reconciled to local implementations, explicit blockers, or evidence gaps without proxying undocumented APIs |
 | `moderation` | 101 | #37, #38 | `partial` |
 | `music` | 9 | #58 | `tracked` |
 | `roleplay` | 1 | #54 | `tracked` |
@@ -96,6 +96,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | Versioned guild backups with previewed merge/destructive restore, per-server bot profiles and presets, opt-in ByteBot discovery, hourly bumps, and 1–1095 day real-row server cards | #47 | Advances live Server/Information and pinned `server`/`information`; exact Greed discovery/card commands and font/effect values remain an explicit evidence gap. | `tests/guildBackupService.test.js`, `tests/serverPresentation.test.js`, `tests/statsCommand.test.js`, `tests/commandHubs.test.js`, `tests/databaseMigrations.test.js`, and `tests/schema.test.js` |
 | Guild/global accounts, wallet/bank, exact ledger and circulation, 1.5x daily/work earnings, anti-abuse guards, jobs, role shops, configuration, grants/removals, and confirmed reset/destroy/disable | #48 | Advances live and pinned Economy to `partial`; #49 owns every remaining game, lab, gang, crime/robbery, ladder, and leaderboard surface. | `tests/economyService.test.js`, `tests/economyCommand.test.js`, `tests/helpParity.test.js`, `tests/databaseMigrations.test.js`, and `tests/schema.test.js` |
 | Twelve wager games with durable interactive sessions, crime/robbery, race-safe gangs, passive-income laboratories, and committed guild rankings | #49 | Completes all 50 pinned Economy files. Public names, bounds, and errors match first-party evidence; unpublished odds/progression use the frozen ByteBot-owned rules contract. | `tests/economyProgression.test.js`, `tests/economyCommand.test.js`, `tests/helpParity.test.js`, `tests/interactionAcknowledgement.test.js`, `tests/databaseMigrations.test.js`, and `tests/schema.test.js` |
+| Attachment/member/reply/URL/avatar resolution; pinned public-only downloads; image signatures and dimensions; a single fail-closed processor queue; `/image` resize, rotate, compress, conversion, 16 local effects, caption/compare layouts, and dominant color | #55, #56 | Completes pinned `manipulation` and advances live Manipulation/Fun/Utility. Named provider effects and templates without public algorithms or licensed assets have terminal blocker/evidence-gap mappings; OCR remains owned by #62. | `tests/mediaService.test.js`, `tests/imageManipulation.test.js`, `tests/helpParity.test.js`, and `tests/commands.test.js` |
 
 ## Update rule
 

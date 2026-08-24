@@ -1,47 +1,6 @@
-const dns = require('dns').promises;
-const net = require('net');
 const crypto = require('crypto');
-const http = require('http');
-const https = require('https');
 const { PermissionFlagsBits } = require('discord.js');
-
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-const IMAGE_TYPE = /^image\/(png|jpe?g|gif|webp)$/i;
-
-function privateAddress(address) {
-    address = address.replace(/^\[|\]$/g, '');
-    if (net.isIP(address) === 4) {
-        const [a, b] = address.split('.').map(Number);
-        return a === 0 || a === 10 || a === 127 || a >= 224
-            || (a === 100 && b >= 64 && b <= 127)
-            || (a === 169 && b === 254)
-            || (a === 172 && b >= 16 && b <= 31)
-            || (a === 192 && b === 168)
-            || (a === 198 && (b === 18 || b === 19));
-    }
-    const normalized = address.toLowerCase();
-    if (normalized.startsWith('::ffff:')) {
-        const suffix = normalized.slice(7);
-        if (suffix.includes('.')) return privateAddress(suffix);
-        const words = suffix.split(':').map(word => parseInt(word || '0', 16));
-        if (words.length === 2 && words.every(Number.isInteger)) {
-            return privateAddress(`${words[0] >> 8}.${words[0] & 255}.${words[1] >> 8}.${words[1] & 255}`);
-        }
-    }
-    return normalized === '::' || normalized === '::1' || normalized.startsWith('fc')
-        || normalized.startsWith('fd') || /^fe[89ab]/.test(normalized) || normalized.startsWith('ff');
-}
-
-function pinnedFetch(url, { address, family, signal }) {
-    const transport = url.protocol === 'https:' ? https : http;
-    return new Promise((resolve, reject) => {
-        const request = transport.get(url, {
-            signal,
-            lookup: (_hostname, _options, callback) => callback(null, address, family)
-        }, resolve);
-        request.on('error', reject);
-    });
-}
+const { MAX_IMAGE_BYTES, MediaService, pinnedFetch, privateAddress } = require('./mediaService');
 
 function rowToPreset(row) {
     if (!row) return null;
@@ -88,75 +47,13 @@ function inviteCode(value) {
 class ServerPresentationService {
     constructor(options) {
         this.sqlite = options.sqlite;
-        this.fetch = options.fetch || pinnedFetch;
-        this.lookup = options.lookup || ((hostname) => dns.lookup(hostname, { all: true, verbatim: true }));
+        this.media = options.media || new MediaService({ fetch: options.fetch, lookup: options.lookup });
         this.now = options.now || Date.now;
         this.randomUUID = options.randomUUID || crypto.randomUUID;
     }
 
     async image(input) {
-        const url = new URL(typeof input === 'string' ? input : input?.url);
-        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
-            throw new Error('Images must use a public HTTP or HTTPS URL.');
-        }
-        if (net.isIP(url.hostname.replace(/^\[|\]$/g, '')) && privateAddress(url.hostname)) {
-            throw new Error('Images must be hosted at a public address.');
-        }
-        if (input?.contentType && !IMAGE_TYPE.test(input.contentType)) throw new Error('Images must be PNG, JPG, GIF, or WebP.');
-        if (input?.size > MAX_IMAGE_BYTES) throw new Error('Images cannot exceed 8 MB.');
-        const addresses = await this.lookup(url.hostname);
-        const resolved = Array.isArray(addresses) ? addresses : [addresses];
-        if (!resolved.length || resolved.some(entry => privateAddress(entry.address || entry))) {
-            throw new Error('Images must be hosted at a public address.');
-        }
-        const destination = resolved[0];
-        const address = destination.address || destination;
-        const response = await this.fetch(url, {
-            address,
-            family: destination.family || net.isIP(address),
-            signal: typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
-                ? AbortSignal.timeout(10000)
-                : undefined
-        });
-        const status = response.status ?? response.statusCode;
-        if (response.ok === false || status < 200 || status >= 300) throw new Error('Image download failed.');
-        const header = name => response.headers.get?.(name) ?? response.headers[name];
-        const type = header('content-type')?.split(';')[0].trim();
-        const length = Number(header('content-length') || 0);
-        if (!IMAGE_TYPE.test(type || '')) throw new Error('Images must be PNG, JPG, GIF, or WebP.');
-        if (length > MAX_IMAGE_BYTES) throw new Error('Images cannot exceed 8 MB.');
-        if (response.body?.getReader) {
-            const reader = response.body.getReader();
-            const chunks = [];
-            let total = 0;
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                total += value.length;
-                if (total > MAX_IMAGE_BYTES) {
-                    await reader.cancel();
-                    throw new Error('Images cannot exceed 8 MB.');
-                }
-                chunks.push(Buffer.from(value));
-            }
-            return Buffer.concat(chunks, total);
-        }
-        if (response[Symbol.asyncIterator]) {
-            const chunks = [];
-            let total = 0;
-            for await (const chunk of response) {
-                total += chunk.length;
-                if (total > MAX_IMAGE_BYTES) {
-                    response.destroy();
-                    throw new Error('Images cannot exceed 8 MB.');
-                }
-                chunks.push(chunk);
-            }
-            return Buffer.concat(chunks, total);
-        }
-        const buffer = Buffer.from(await response.arrayBuffer());
-        if (buffer.length > MAX_IMAGE_BYTES) throw new Error('Images cannot exceed 8 MB.');
-        return buffer;
+        return (await this.media.image(input)).buffer;
     }
 
     async customize(guild, values) {
