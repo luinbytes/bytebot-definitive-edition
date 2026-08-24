@@ -572,6 +572,42 @@ class LevelAnalyticsService {
         return crypto.createHash('sha256').update(`${guildId}:${channelId}:${metric}`).digest('hex').slice(0, 24);
     }
 
+    async deliverLiveBoard(board, channel) {
+        const token = board.create_token || this.liveBoardToken(board.guild_id, board.channel_id, board.metric);
+        if (!board.create_token) this.sqlite.prepare(`
+            UPDATE level_live_boards SET create_token = ?
+            WHERE guild_id = ? AND channel_id = ? AND metric = ? AND create_token IS NULL
+        `).run(token, board.guild_id, board.channel_id, board.metric);
+        let message = null;
+        if (board.message_id) {
+            try {
+                message = await channel.messages.fetch(board.message_id);
+            } catch (error) {
+                if (error?.code !== 10008) throw error;
+            }
+        }
+        const payload = this.liveBoardPayload(board.guild_id, board.metric);
+        if (message) {
+            await message.edit(payload);
+        } else {
+            const now = this.now();
+            if (board.create_status === 'creating' && now - (board.create_started_at || 0) > 5 * 60 * 1000) {
+                throw new Error('board creation outcome is uncertain; administrator recovery is required');
+            }
+            if (board.create_status !== 'creating') this.sqlite.prepare(`
+                UPDATE level_live_boards SET create_status = 'creating', create_started_at = ?, updated_at = ?
+                WHERE guild_id = ? AND channel_id = ? AND metric = ? AND create_status = 'active'
+            `).run(now, now, board.guild_id, board.channel_id, board.metric);
+            message = await channel.send({ ...payload, nonce: token, enforceNonce: true });
+        }
+        this.sqlite.prepare(`
+            UPDATE level_live_boards SET message_id = ?, create_status = 'active', create_started_at = NULL,
+                revision = revision + 1, updated_at = ?
+            WHERE guild_id = ? AND channel_id = ? AND metric = ?
+        `).run(message.id, this.now(), board.guild_id, board.channel_id, board.metric);
+        return message;
+    }
+
     async refreshLiveBoards() {
         if (!this.client) return { updated: 0, failures: [] };
         let updated = 0;
@@ -582,21 +618,7 @@ class LevelAnalyticsService {
                 const channel = guild?.channels.cache.get(board.channel_id)
                     || await guild?.channels.fetch(board.channel_id).catch(() => null);
                 if (!channel?.send || !channel.messages?.fetch) throw new Error('channel unavailable');
-                const payload = this.liveBoardPayload(board.guild_id, board.metric);
-                const token = board.create_token || this.liveBoardToken(board.guild_id, board.channel_id, board.metric);
-                if (!board.create_token) this.sqlite.prepare(`
-                    UPDATE level_live_boards SET create_token = ?
-                    WHERE guild_id = ? AND channel_id = ? AND metric = ? AND create_token IS NULL
-                `).run(token, board.guild_id, board.channel_id, board.metric);
-                let message = board.message_id
-                    ? await channel.messages.fetch(board.message_id).catch(() => null)
-                    : null;
-                if (message) await message.edit(payload);
-                else message = await channel.send({ ...payload, nonce: token, enforceNonce: true });
-                this.sqlite.prepare(`
-                    UPDATE level_live_boards SET message_id = ?, revision = revision + 1, updated_at = ?
-                    WHERE guild_id = ? AND channel_id = ? AND metric = ?
-                `).run(message.id, this.now(), board.guild_id, board.channel_id, board.metric);
+                await this.deliverLiveBoard(board, channel);
                 updated += 1;
             } catch (error) {
                 failures.push({ guildId: board.guild_id, channelId: board.channel_id, metric: board.metric, error: error.message });
@@ -626,7 +648,8 @@ class LevelAnalyticsService {
             INSERT INTO level_role_jobs (guild_id, user_id, attempts, next_attempt_at, updated_at)
             VALUES (?, ?, 0, ?, ?)
             ON CONFLICT(guild_id, user_id) DO UPDATE SET
-                attempts = 0, next_attempt_at = excluded.next_attempt_at, updated_at = excluded.updated_at
+                attempts = 0, generation = level_role_jobs.generation + 1, claim_token = NULL,
+                next_attempt_at = excluded.next_attempt_at, updated_at = excluded.updated_at
         `).run(guildId, userId, now, now);
     }
 
@@ -638,21 +661,30 @@ class LevelAnalyticsService {
         `).all(this.now(), limit);
         const failures = [];
         for (const row of rows) {
+            const token = crypto.randomBytes(12).toString('hex');
+            const claimed = this.sqlite.prepare(`
+                UPDATE level_role_jobs SET claim_token = ?
+                WHERE guild_id = ? AND user_id = ? AND generation = ? AND claim_token IS NULL
+            `).run(token, row.guild_id, row.user_id, row.generation);
+            if (!claimed.changes) continue;
             try {
                 const guild = this.client.guilds.cache.get(row.guild_id);
                 if (!guild) throw new Error('guild unavailable');
                 const member = guild.members.cache.get(row.user_id)
                     || await guild.members.fetch(row.user_id).catch(() => null);
                 if (member) await this.reconcileMemberRoles(member);
-                this.sqlite.prepare(`DELETE FROM level_role_jobs WHERE guild_id = ? AND user_id = ?`)
-                    .run(row.guild_id, row.user_id);
+                this.sqlite.prepare(`
+                    DELETE FROM level_role_jobs
+                    WHERE guild_id = ? AND user_id = ? AND generation = ? AND claim_token = ?
+                `).run(row.guild_id, row.user_id, row.generation, token);
             } catch (error) {
                 const attempts = row.attempts + 1;
                 const retryAt = this.now() + Math.min(3_600_000, 1000 * 2 ** Math.min(attempts, 12));
                 this.sqlite.prepare(`
                     UPDATE level_role_jobs SET attempts = ?, next_attempt_at = ?, updated_at = ?
-                    WHERE guild_id = ? AND user_id = ?
-                `).run(attempts, retryAt, this.now(), row.guild_id, row.user_id);
+                        , claim_token = NULL
+                    WHERE guild_id = ? AND user_id = ? AND generation = ? AND claim_token = ?
+                `).run(attempts, retryAt, this.now(), row.guild_id, row.user_id, row.generation, token);
                 failures.push({ guildId: row.guild_id, userId: row.user_id, error: error.message });
             }
         }
@@ -1137,29 +1169,17 @@ class LevelAnalyticsService {
                 throw new Error('I need View Channel, Send Messages, and Embed Links there.');
             }
             const acknowledged = await this.acknowledge(interaction, [MessageFlags.Ephemeral]);
-            const payload = this.liveBoardPayload(interaction.guildId, action);
             const token = this.liveBoardToken(interaction.guildId, channel.id, action);
             this.sqlite.prepare(`
                 INSERT OR IGNORE INTO level_live_boards
-                    (guild_id, channel_id, metric, create_token, revision, updated_at)
-                VALUES (?, ?, ?, ?, 0, ?)
-            `).run(interaction.guildId, channel.id, action, token, this.now());
+                    (guild_id, channel_id, metric, create_token, create_status, create_started_at, revision, updated_at)
+                VALUES (?, ?, ?, ?, 'creating', ?, 0, ?)
+            `).run(interaction.guildId, channel.id, action, token, this.now(), this.now());
             const existing = this.sqlite.prepare(`
-                SELECT message_id, create_token FROM level_live_boards
+                SELECT * FROM level_live_boards
                 WHERE guild_id = ? AND channel_id = ? AND metric = ?
             `).get(interaction.guildId, channel.id, action);
-            let message = existing?.message_id
-                ? await channel.messages.fetch(existing.message_id).catch(() => null)
-                : null;
-            if (message) await message.edit(payload);
-            else message = await channel.send({ ...payload, nonce: existing.create_token || token, enforceNonce: true });
-            this.sqlite.prepare(`
-                INSERT INTO level_live_boards (guild_id, channel_id, metric, message_id, revision, updated_at)
-                VALUES (?, ?, ?, ?, 1, ?)
-                ON CONFLICT(guild_id, channel_id, metric) DO UPDATE SET
-                    message_id = excluded.message_id, revision = level_live_boards.revision + 1,
-                    updated_at = excluded.updated_at
-            `).run(interaction.guildId, channel.id, action, message.id, this.now());
+            await this.deliverLiveBoard(existing, channel);
             return this.send(interaction, this.response('Live Leaderboard', `Live ${action} XP leaderboard created in <#${channel.id}>.`, {
                 ...(!acknowledged && { flags: [MessageFlags.Ephemeral] })
             }), acknowledged);

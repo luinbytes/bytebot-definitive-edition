@@ -122,7 +122,7 @@ describe('EventLoggingService', () => {
         ]);
     });
 
-    test('startup safely retries an ambiguously claimed delivery with the stable nonce', async () => {
+    test('startup blocks ambiguously claimed deliveries instead of risking duplicates', async () => {
         const channel = { id: 'channel1', send: jest.fn().mockResolvedValue({}) };
         const server = guild([channel]);
         service.client.guilds.cache.set(server.id, server);
@@ -134,15 +134,61 @@ describe('EventLoggingService', () => {
         const EventLoggingService = require('../src/services/eventLoggingService');
         const recovered = new EventLoggingService({ sqlite: database.sqlite, client: service.client, now: () => now });
         await recovered.processOutbox();
-        expect(channel.send).toHaveBeenCalledWith(expect.objectContaining({
-            enforceNonce: true, nonce: expect.any(String)
-        }));
+        expect(channel.send).not.toHaveBeenCalled();
         expect(database.sqlite.prepare(`SELECT status FROM event_log_outbox WHERE event_key = 'event1'`).get())
-            .toEqual({ status: 'sent' });
+            .toEqual({ status: 'uncertain' });
+    });
+
+    test('startup never creates a fourth attempt for a delivery claimed on attempt three', () => {
+        database.sqlite.prepare(`
+            INSERT INTO event_log_outbox
+                (guild_id, event_key, channel_id, module, payload, attempts, next_attempt_at, status, created_at)
+            VALUES ('guild1', 'event3', 'channel1', 'messages', '{}', 3, 1, 'sending', 1)
+        `).run();
+        const EventLoggingService = require('../src/services/eventLoggingService');
+        new EventLoggingService({ sqlite: database.sqlite, client: service.client, now: () => now });
+
+        expect(database.sqlite.prepare(`SELECT status, attempts FROM event_log_outbox WHERE event_key = 'event3'`).get())
+            .toEqual({ status: 'failed', attempts: 3 });
+    });
+
+    test('startup retries work that crashed before the Discord send began', async () => {
+        const channel = { id: 'channel1', send: jest.fn().mockResolvedValue({}) };
+        const server = guild([channel]);
+        service.client.guilds.cache.set(server.id, server);
+        database.sqlite.prepare(`
+            INSERT INTO event_log_outbox
+                (guild_id, event_key, channel_id, module, payload, attempts, next_attempt_at, status, created_at)
+            VALUES ('guild1', 'event2', 'channel1', 'messages', '{"title":"Event","description":"Body","color":"#8A2BE2"}', 1, 1, 'claimed', 1)
+        `).run();
+        const EventLoggingService = require('../src/services/eventLoggingService');
+        const recovered = new EventLoggingService({ sqlite: database.sqlite, client: service.client, now: () => now });
+
+        await recovered.processOutbox();
+
+        expect(channel.send).toHaveBeenCalledTimes(1);
+        expect(database.sqlite.prepare(`SELECT status, attempts FROM event_log_outbox WHERE event_key = 'event2'`).get())
+            .toEqual({ status: 'sent', attempts: 2 });
+    });
+
+    test('an ambiguous send failure is held for administrator recovery', async () => {
+        const channel = { id: 'channel1', send: jest.fn().mockRejectedValue(new Error('connection reset')) };
+        const server = guild([channel]);
+        service.client.guilds.cache.set(server.id, server);
+        service.add(server, channel, 'messages');
+
+        await service.log(server, 'messages', 'message:uncertain', {});
+        now += 10_000;
+        await service.processOutbox();
+
+        expect(channel.send).toHaveBeenCalledTimes(1);
+        expect(database.sqlite.prepare(`SELECT status, attempts FROM event_log_outbox WHERE event_key = 'message:uncertain'`).get())
+            .toEqual({ status: 'uncertain', attempts: 1 });
     });
 
     test('failed deliveries stop after three exponential retry attempts', async () => {
-        const channel = { id: 'channel1', send: jest.fn().mockRejectedValue(new Error('no access')) };
+        const error = Object.assign(new Error('no access'), { status: 403 });
+        const channel = { id: 'channel1', send: jest.fn().mockRejectedValue(error) };
         const server = guild([channel]);
         service.client.guilds.cache.set(server.id, server);
         service.add(server, channel, 'messages');

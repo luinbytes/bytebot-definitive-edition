@@ -19,7 +19,12 @@ class EventLoggingService {
         this.now = now;
         this.pending = new Map();
         this.confirmations = new Map();
-        this.sqlite.prepare(`UPDATE event_log_outbox SET status = 'pending' WHERE status = 'sending'`).run();
+        this.sqlite.prepare(`UPDATE event_log_outbox SET status = 'pending' WHERE status = 'claimed'`).run();
+        this.sqlite.prepare(`
+            UPDATE event_log_outbox
+            SET status = CASE WHEN attempts >= 3 THEN 'failed' ELSE 'uncertain' END
+            WHERE status = 'sending'
+        `).run();
     }
 
     module(value) {
@@ -258,28 +263,47 @@ class EventLoggingService {
         `).all(this.now(), limit);
         for (const row of rows) {
             const claimed = this.sqlite.prepare(`
-                UPDATE event_log_outbox SET status = 'sending', attempts = attempts + 1
+                UPDATE event_log_outbox SET status = 'claimed', attempts = attempts + 1
                 WHERE id = ? AND status = 'pending'
             `).run(row.id);
             if (!claimed.changes) continue;
+            let channel;
+            let message;
             try {
                 const guild = this.client.guilds.cache.get(row.guild_id);
-                const channel = guild?.channels.cache.get(row.channel_id)
+                channel = guild?.channels.cache.get(row.channel_id)
                     || await guild?.channels.fetch(row.channel_id).catch(() => null);
                 if (!channel?.send) throw new Error('channel unavailable');
                 const payload = JSON.parse(row.payload);
                 const nonce = crypto.createHash('sha256')
                     .update(`${row.guild_id}:${row.event_key}:${row.channel_id}`)
                     .digest('hex').slice(0, 24);
-                await channel.send({
+                message = {
                     embeds: [embeds.base(payload.title, payload.description).setColor(payload.color)],
                     allowedMentions: { parse: [] }, nonce, enforceNonce: true
-                });
-                this.sqlite.prepare(`UPDATE event_log_outbox SET status = 'sent' WHERE id = ?`).run(row.id);
+                };
             } catch {
                 const attempts = row.attempts + 1;
                 this.sqlite.prepare(`UPDATE event_log_outbox SET attempts = ?, status = ?, next_attempt_at = ? WHERE id = ?`)
                     .run(attempts, attempts >= 3 ? 'failed' : 'pending', this.now() + 1000 * 2 ** (attempts - 1), row.id);
+                continue;
+            }
+            try {
+                const sending = this.sqlite.prepare(`
+                    UPDATE event_log_outbox SET status = 'sending' WHERE id = ? AND status = 'claimed'
+                `).run(row.id);
+                if (!sending.changes) continue;
+                await channel.send(message);
+                this.sqlite.prepare(`UPDATE event_log_outbox SET status = 'sent' WHERE id = ?`).run(row.id);
+            } catch (error) {
+                const attempts = row.attempts + 1;
+                const status = Number(error?.status || error?.httpStatus);
+                if (status >= 400 && status < 500) {
+                    this.sqlite.prepare(`UPDATE event_log_outbox SET attempts = ?, status = ?, next_attempt_at = ? WHERE id = ?`)
+                        .run(attempts, attempts >= 3 ? 'failed' : 'pending', this.now() + 1000 * 2 ** (attempts - 1), row.id);
+                } else {
+                    this.sqlite.prepare(`UPDATE event_log_outbox SET status = 'uncertain' WHERE id = ?`).run(row.id);
+                }
             }
         }
         return rows.length;

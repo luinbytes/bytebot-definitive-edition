@@ -1139,6 +1139,8 @@ const levelLiveBoards = sqliteTable('level_live_boards', {
     metric: text('metric').notNull(),
     messageId: text('message_id'),
     createToken: text('create_token'),
+    createStatus: text('create_status').default('active').notNull(),
+    createStartedAt: integer('create_started_at'),
     revision: integer('revision').default(0).notNull(),
     updatedAt: integer('updated_at').notNull()
 }, table => ({ pk: primaryKey({ columns: [table.guildId, table.channelId, table.metric] }) }));
@@ -1147,6 +1149,8 @@ const levelRoleJobs = sqliteTable('level_role_jobs', {
     guildId: text('guild_id').notNull(),
     userId: text('user_id').notNull(),
     attempts: integer('attempts').default(0).notNull(),
+    generation: integer('generation').default(1).notNull(),
+    claimToken: text('claim_token'),
     nextAttemptAt: integer('next_attempt_at').notNull(),
     updatedAt: integer('updated_at').notNull()
 }, table => ({

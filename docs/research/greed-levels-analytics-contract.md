@@ -409,8 +409,10 @@ accounting settles persisted eligible intervals before changing session state;
 replaying the same voice state cannot accrue the interval twice. Membership
 join/leave counters change only when the persisted presence state changes.
 A failed external Discord send never rolls back committed analytics; live-board
-rendering and role reconciliation are idempotent retry jobs that recheck the
-current bot permissions and role hierarchy on every attempt.
+role reconciliation is a generation-bound retry job that rechecks current bot
+permissions and role hierarchy on every attempt. Ambiguous log sends and live
+board creations are held for administrator recovery rather than resent after
+Discord's nonce window.
 
 Membership rows are snapshots of observed events, not a claim that Discord can
 provide historical joins. On first enable, the service records the current
@@ -524,8 +526,8 @@ Implementation is not complete until focused tests and review cover:
 | Event ingestion | Bot/DM/ignored filtering; one XP cooldown; voice mute/alone/minimum/session split; reaction add/remove/re-add placement transitions; stable message IDs and state-driven reaction/voice/member dedupe; duplicate/retry delivery produces one counter. Startup/enable baselines exclude bots, do not manufacture offline joins/leaves/voice time, and seed current eligible voice sessions at `now`. |
 | Persistence | Fresh and upgrade migrations preserve `member_levels`, existing `activity_logs`, existing `/stats` output, and giveaway eligibility. Upgrade tests prove existing XP/level are unchanged, automatic XP cannot lower the legacy level floor, and only explicit admin set/reset can replace it. Unique guild/user/date and guild/event keys reject cross-guild collisions; transactions do not partially award XP. |
 | Analytics | Exact daily sums for messages, reactions, voice minutes, joins, leaves, and snapshots; unavailable-history labels; 1/60/1,095 range boundaries; prune deletes only old daily rows and is resumable. |
-| Live boards | 5-minute scheduler, one board identity, actor/guild binding, stale/deleted-message recreation, deterministic pagination/ties, and no duplicate boards on retries. |
-| Logging | Union module choices and aliases; 15 distinct-channel cap; same-module fan-out and same-channel multi-module mappings; add/remove/view/color/typed-ignore responses; no-argument remove confirmation; one `(event, channel)` delivery under retries; inaccessible channel and missing audit-log handling. |
+| Live boards | 5-minute scheduler, one board identity, actor/guild binding, stale/deleted-message recreation, deterministic pagination/ties, no duplicate boards on retries, and administrator recovery instead of resending an expired ambiguous creation. |
+| Logging | Union module choices and aliases; 15 distinct-channel cap; same-module fan-out and same-channel multi-module mappings; add/remove/view/color/typed-ignore responses; no-argument remove confirmation; one `(event, channel)` delivery under definite retries, bounded attempt recovery after restart, and no retry of an ambiguous send; inaccessible channel and missing audit-log handling. |
 | RBAC and safety | Caller and bot permission checks are path-specific; role hierarchy is rechecked; all destructive actions require the exact confirmation; logs cannot recurse on bot messages or leak another guild's data. |
 | Runtime | Only after this contract is accepted: focused unit/integration checks, generated command inspection, and a user-approved Discord test-guild proof for level awards, analytics events, live boards, and logging delivery. |
 
@@ -534,7 +536,7 @@ Implementation is not complete until focused tests and review cover:
 | Contract surface | Canonical implementation | Focused evidence |
 | --- | --- | --- |
 | `/levels` registration and all member/config/live/boost/admin/reward/ignore/message/rankcard/reset/setup paths | `src/commands/utility/levels.js`, `src/services/levelAnalyticsService.js` | `tests/levelsAnalyticsCommands.test.js`, `tests/levelAnalyticsService.test.js` |
-| Lossless XP migration, daily analytics, idempotency, voice minimum/session carry, live boards, rank-card preferences, logging configuration/outbox | `drizzle/0027_level_tracks.sql`, `0028_levels_analytics_logging.sql`, `0029_activity_level_tracks.sql`, `0030_voice_session_minimums.sql`, `src/database/schema.js` | `tests/levelAnalyticsService.test.js`, `tests/databaseMigrations.test.js`, `tests/schema.test.js` |
+| Lossless XP migration, daily analytics, idempotency, voice minimum/session carry, live boards, rank-card preferences, logging configuration/outbox | `drizzle/0027_level_tracks.sql`, `0028_levels_analytics_logging.sql`, `0029_activity_level_tracks.sql`, `0030_voice_session_minimums.sql`, `0031_levels_delivery_reliability.sql`, `src/database/schema.js` | `tests/levelAnalyticsService.test.js`, `tests/databaseMigrations.test.js`, `tests/schema.test.js` |
 | `/analytics` and `/server stats` shared presentation and three-year retention | `src/commands/utility/analytics.js`, `src/commands/utility/stats.js`, `LevelAnalyticsService.pruneAnalytics` | `tests/statsCommand.test.js`, `tests/levelAnalyticsService.test.js` |
 | Twelve logging modules, 15-channel policy, typed ignores, color, fan-out, dedupe, and bounded retries | `src/services/eventLoggingService.js`, `src/events/eventLogging.js` | `tests/eventLoggingService.test.js` |
 | Path RBAC, real Discord permissions, actor-bound components, mention/image safety | command services plus `src/utils/permissions.js` and `src/services/serverPresentationService.js` | focused service tests and repository permission/security gates |

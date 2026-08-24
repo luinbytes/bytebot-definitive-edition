@@ -982,6 +982,8 @@ const expectedSchema = {
         metric: 'TEXT NOT NULL',
         message_id: 'TEXT',
         create_token: 'TEXT',
+        create_status: "TEXT DEFAULT 'active' NOT NULL",
+        create_started_at: 'INTEGER',
         revision: 'INTEGER DEFAULT 0 NOT NULL',
         updated_at: 'INTEGER NOT NULL'
     },
@@ -1034,6 +1036,8 @@ const expectedSchema = {
         guild_id: 'TEXT NOT NULL',
         user_id: 'TEXT NOT NULL',
         attempts: 'INTEGER DEFAULT 0 NOT NULL',
+        generation: 'INTEGER DEFAULT 1 NOT NULL',
+        claim_token: 'TEXT',
         next_attempt_at: 'INTEGER NOT NULL',
         updated_at: 'INTEGER NOT NULL'
     },

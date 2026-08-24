@@ -33,7 +33,8 @@ confirmations that expire after ten minutes. Level-up messages reuse the
 bounded rich-content renderer and suppress mentions. Rank-card background
 fetches reject private-network targets and enforce HTTPS, image types, input
 pixels, and a 5 MiB limit. Log delivery is mention-safe, deduplicated per
-event/channel, and stops after three bounded retries.
+event/channel, and stops after three bounded retries. A send whose outcome
+cannot be proven is held for administrator recovery instead of riskily resent.
 
 ## Persistence
 
@@ -41,5 +42,6 @@ Existing XP is migrated without lowering balances or levels. Text, voice,
 and manual adjustments remain separate while `member_levels` stays the
 canonical balance used by existing features. Startup records current member
 and voice state as a baseline without fabricating offline activity. Live
-boards recover after restarts or message deletion, and analytics retention
-never removes XP balances or level configuration.
+boards recover after restarts or message deletion within Discord's nonce
+window; an older ambiguous creation is held for administrator recovery.
+Analytics retention never removes XP balances or level configuration.

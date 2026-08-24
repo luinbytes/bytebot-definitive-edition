@@ -450,6 +450,43 @@ describe('LevelAnalyticsService', () => {
         expect(database.sqlite.prepare(`SELECT 1 FROM level_role_jobs`).get()).toBeUndefined();
     });
 
+    test('a finishing role worker cannot delete a newer reconciliation request', async () => {
+        database.sqlite.prepare(`INSERT INTO level_configs (guild_id, updated_at) VALUES ('guild1', 1)`).run();
+        database.sqlite.prepare(`
+            INSERT INTO level_role_rewards (guild_id, level, role_id, created_at)
+            VALUES ('guild1', 1, 'reward1', 1)
+        `).run();
+        database.sqlite.prepare(`
+            INSERT INTO member_levels
+                (guild_id, user_id, xp, level, text_xp, voice_xp, manual_adjustment,
+                 level_floor, message_count, voice_seconds, updated_at)
+            VALUES ('guild1', 'user1', 100, 1, 100, 0, 0, 0, 0, 0, 1)
+        `).run();
+        let finishAdd;
+        const add = jest.fn(() => new Promise(resolve => { finishAdd = resolve; }));
+        const highest = { comparePositionTo: () => 1 };
+        const member = { id: 'user1', user: { bot: false }, roles: { cache: new Map(), add, remove: jest.fn() } };
+        const guild = {
+            id: 'guild1', roles: { cache: new Map([['reward1', { id: 'reward1', managed: false }]]) },
+            members: {
+                me: { permissions: { has: () => true }, roles: { highest } },
+                cache: new Map([['user1', member]]), fetch: jest.fn()
+            }
+        };
+        member.guild = guild;
+        service.client = { guilds: { cache: new Map([['guild1', guild]]) } };
+        service.enqueueRoleReconcile('guild1', 'user1');
+
+        const processing = service.processRoleJobs();
+        await Promise.resolve();
+        service.enqueueRoleReconcile('guild1', 'user1');
+        finishAdd();
+        await processing;
+
+        expect(database.sqlite.prepare(`SELECT generation, claim_token FROM level_role_jobs`).get())
+            .toEqual({ generation: 2, claim_token: null });
+    });
+
     test('configured level-up scripts are validated and delivered only on a level increase', async () => {
         const payload = { content: '<@user1> reached 1', allowedMentions: { parse: [] } };
         const send = jest.fn();
@@ -613,6 +650,46 @@ describe('LevelAnalyticsService', () => {
         expect(send.mock.calls[1][0].nonce).toBe(send.mock.calls[0][0].nonce);
         expect(database.sqlite.prepare(`SELECT message_id, revision FROM level_live_boards WHERE guild_id = 'guild1'`).get())
             .toEqual({ message_id: 'board2', revision: 2 });
+    });
+
+    test('live boards do not resend after the nonce recovery window expires', async () => {
+        const send = jest.fn();
+        const channel = { id: 'channel1', send, messages: { fetch: jest.fn() } };
+        const guild = { id: 'guild1', channels: { cache: new Map([['channel1', channel]]), fetch: jest.fn() } };
+        database.sqlite.prepare(`
+            INSERT INTO level_live_boards
+                (guild_id, channel_id, metric, create_token, create_status, create_started_at, revision, updated_at)
+            VALUES ('guild1', 'channel1', 'text', 'token', 'creating', ?, 0, 1)
+        `).run(now - 5 * 60 * 1000 - 1);
+        service.client = { guilds: { cache: new Map([['guild1', guild]]) } };
+
+        const result = await service.refreshLiveBoards();
+
+        expect(result).toEqual(expect.objectContaining({ updated: 0, failures: [expect.objectContaining({
+            error: expect.stringContaining('administrator recovery')
+        })] }));
+        expect(send).not.toHaveBeenCalled();
+    });
+
+    test('a transient live-board fetch failure cannot create a duplicate message', async () => {
+        const send = jest.fn();
+        const channel = {
+            id: 'channel1', send,
+            messages: { fetch: jest.fn().mockRejectedValue(new Error('connection reset')) }
+        };
+        const guild = { id: 'guild1', channels: { cache: new Map([['channel1', channel]]), fetch: jest.fn() } };
+        database.sqlite.prepare(`
+            INSERT INTO level_live_boards
+                (guild_id, channel_id, message_id, metric, create_token, revision, updated_at)
+            VALUES ('guild1', 'channel1', 'board1', 'text', 'token', 1, 1)
+        `).run();
+        service.client = { guilds: { cache: new Map([['guild1', guild]]) } };
+
+        const result = await service.refreshLiveBoards();
+
+        expect(result.updated).toBe(0);
+        expect(result.failures).toHaveLength(1);
+        expect(send).not.toHaveBeenCalled();
     });
 
     test('voice accounting splits real seconds at UTC midnight', () => {
