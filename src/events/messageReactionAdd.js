@@ -53,6 +53,7 @@ module.exports = {
             if (client.roleAutomationService) {
                 await client.roleAutomationService.handleReaction(reaction, user, true);
             }
+            if (client.richContentService && await client.richContentService.handlePaginationReaction(reaction, user)) return;
 
             // Check suggestion votes
             if (reaction.emoji.name === '👍' || reaction.emoji.name === '👎') {
