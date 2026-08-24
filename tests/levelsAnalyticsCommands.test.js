@@ -4,6 +4,10 @@ function command(name) {
     return require(path.resolve(`src/commands/utility/${name}.js`)).data.toJSON();
 }
 
+function administrationCommand(name) {
+    return require(path.resolve(`src/commands/administration/${name}.js`)).data.toJSON();
+}
+
 function option(parent, name) {
     return parent.options.find(item => item.name === name);
 }
@@ -47,5 +51,18 @@ describe('levels and analytics command contract', () => {
         expect(option(analytics, 'metric').choices.map(choice => choice.value)).toEqual([
             'all', 'messages', 'reactions', 'voice', 'membership'
         ]);
+    });
+
+    test('/server exposes the shared analytics options and complete logging group', () => {
+        const server = administrationCommand('server');
+        const stats = option(server, 'stats');
+        const logs = option(server, 'logs');
+
+        expect(stats.options.map(item => item.name)).toEqual(['private', 'days', 'metric']);
+        expect(logs.options.map(item => item.name)).toEqual([
+            'add', 'view', 'remove', 'color', 'ignore', 'modlog', 'set'
+        ]);
+        expect(option(logs, 'ignore').options.map(item => item.name)).toEqual(['member', 'channel']);
+        expect(option(logs, 'set').options).toEqual(option(logs, 'modlog').options);
     });
 });

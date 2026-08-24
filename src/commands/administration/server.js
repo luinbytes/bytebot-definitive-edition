@@ -16,12 +16,16 @@ const { addPresentationGroups, executeCustomize, executeDiscovery } = require('.
 
 const MODULE_CHOICES = MODULES.map(value => ({ name: value, value }));
 const PUNISHMENT_CHOICES = PUNISHMENTS.map(value => ({ name: value, value }));
+const LOG_MODULE_CHOICES = [
+    'messages', 'members', 'moderation', 'server', 'voice', 'channels',
+    'roles', 'invites', 'emojis', 'stickers', 'integrations', 'soundboard'
+].map(value => ({ name: value, value }));
 
 const TARGETS = {
     info: { commandName: 'serverinfo', requirePath: 'src/commands/utility/serverinfo.js' },
     stats: { commandName: 'stats', requirePath: 'src/commands/utility/stats.js', subcommand: 'server' },
     config: { commandName: 'config', requirePath: 'src/commands/administration/config.js' },
-    logs: { commandName: 'config', requirePath: 'src/commands/administration/config.js', map: { set: 'logs' } },
+    logs: { commandName: 'config', requirePath: 'src/commands/administration/config.js', map: { set: 'logs', modlog: 'logs' } },
     starboard: { commandName: 'starboard', requirePath: 'src/commands/administration/starboard.js', map: { view: 'config' } },
     suggestion: { commandName: 'suggestion', requirePath: 'src/commands/administration/suggestion.js', map: { top: 'leaderboard' } },
     birthday: { commandName: 'birthday', requirePath: 'src/commands/utility/birthday.js' },
@@ -224,22 +228,60 @@ const serverBuilder = new SlashCommandBuilder()
             .setName('stats')
             .setDescription('View server statistics')
             .addBooleanOption(opt => opt.setName('private').setDescription('Show only to you'))
-            .addIntegerOption(opt => opt.setName('days').setDescription('Analytics range in days').setMinValue(1).setMaxValue(1095)))
+            .addIntegerOption(opt => opt.setName('days').setDescription('Analytics range in days').setMinValue(1).setMaxValue(1095))
+            .addStringOption(opt => opt.setName('metric').setDescription('Activity metric').addChoices(
+                { name: 'All activity', value: 'all' },
+                { name: 'Messages', value: 'messages' },
+                { name: 'Reactions', value: 'reactions' },
+                { name: 'Voice', value: 'voice' },
+                { name: 'Membership', value: 'membership' }
+            )))
         .addSubcommandGroup(group => group
             .setName('config')
             .setDescription('Server configuration')
             .addSubcommand(sub => sub.setName('view').setDescription('View server configuration')))
         .addSubcommandGroup(group => group
             .setName('logs')
-            .setDescription('Moderation log settings')
+            .setDescription('Server event and moderation logs')
+            .addSubcommand(sub => sub
+                .setName('add')
+                .setDescription('Add an event log destination')
+                .addChannelOption(opt => opt.setName('channel').setDescription('Log channel').addChannelTypes(ChannelType.GuildText))
+                .addStringOption(opt => opt.setName('module').setDescription('Event module').addChoices(...LOG_MODULE_CHOICES)))
+            .addSubcommand(sub => sub
+                .setName('view')
+                .setDescription('View event log destinations')
+                .addBooleanOption(opt => opt.setName('private').setDescription('Show only to you')))
+            .addSubcommand(sub => sub
+                .setName('remove')
+                .setDescription('Remove an event log destination')
+                .addChannelOption(opt => opt.setName('channel').setDescription('Log channel').addChannelTypes(ChannelType.GuildText))
+                .addStringOption(opt => opt.setName('module').setDescription('Event module').addChoices(...LOG_MODULE_CHOICES)))
+            .addSubcommand(sub => sub
+                .setName('color')
+                .setDescription('Set an event log color')
+                .addChannelOption(opt => opt.setName('channel').setDescription('Log channel').addChannelTypes(ChannelType.GuildText).setRequired(true))
+                .addStringOption(opt => opt.setName('module').setDescription('Event module').addChoices(...LOG_MODULE_CHOICES).setRequired(true))
+                .addStringOption(opt => opt.setName('hex').setDescription('Six-digit hex color').setMinLength(6).setMaxLength(7).setRequired(true)))
+            .addSubcommand(sub => sub
+                .setName('ignore')
+                .setDescription('Toggle a member or channel log exclusion')
+                .addUserOption(opt => opt.setName('member').setDescription('Member to ignore'))
+                .addChannelOption(opt => opt.setName('channel').setDescription('Channel to ignore')))
+            .addSubcommand(sub => sub
+                .setName('modlog')
+                .setDescription('Set the moderation log channel')
+                .addChannelOption(opt => opt
+                    .setName('channel')
+                    .setDescription('Log channel')
+                    .addChannelTypes(ChannelType.GuildText)))
             .addSubcommand(sub => sub
                 .setName('set')
                 .setDescription('Set the moderation log channel')
                 .addChannelOption(opt => opt
                     .setName('channel')
                     .setDescription('Log channel')
-                    .addChannelTypes(ChannelType.GuildText)
-                    .setRequired(true))))
+                    .addChannelTypes(ChannelType.GuildText))))
         .addSubcommandGroup(group => group
             .setName('starboard')
             .setDescription('Starboard system')
@@ -449,6 +491,11 @@ module.exports = {
     },
 
     async execute(interaction, client) {
+        if (interaction.options.getSubcommandGroup(false) === 'logs'
+            && !['set', 'modlog'].includes(interaction.options.getSubcommand())) {
+            if (!client.eventLoggingService) throw new Error('Event logging service is unavailable');
+            return client.eventLoggingService.execute(interaction);
+        }
         if (interaction.options.getSubcommandGroup(false) === 'backup') return executeBackup(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'customize') return executeCustomize(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'discovery') return executeDiscovery(interaction);
