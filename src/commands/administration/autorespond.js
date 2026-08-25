@@ -5,6 +5,7 @@ const { autoResponses } = require('../../database/schema');
 const { eq, and, count } = require('drizzle-orm');
 const config = require('../../utils/config');
 const { dbLog } = require('../../utils/dbLogger');
+const { MAX_AUTO_RESPONDERS } = require('../../services/autoResponderService');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -158,7 +159,7 @@ async function handleAdd(interaction, client) {
     const role = interaction.options.getRole('role');
     const cooldown = interaction.options.getInteger('cooldown') || 60;
 
-    // Check limit (50 per guild)
+    // Check the shared public limit.
     const countResult = await dbLog.select('autoResponses',
         () => db.select({ count: count() })
             .from(autoResponses)
@@ -167,11 +168,11 @@ async function handleAdd(interaction, client) {
         { guildId: interaction.guild.id, operation: 'count' }
     );
 
-    if (countResult.count >= 50) {
+    if (countResult.count >= MAX_AUTO_RESPONDERS) {
         return interaction.editReply({
             embeds: [embeds.error(
                 'Limit Reached',
-                'This server has reached the maximum of 50 auto-responses. Delete some with `/autorespond remove` first.'
+                `This server has reached the maximum of ${MAX_AUTO_RESPONDERS} auto-responses. Delete some with \`/autorespond remove\` first.`
             )],
             flags: [MessageFlags.Ephemeral]
         });
@@ -313,7 +314,7 @@ async function handleList(interaction) {
 
     const embed = embeds.brand(
         'Auto-Responses',
-        `This server has ${responses.length}/50 auto-responses.`
+        `This server has ${responses.length}/${MAX_AUTO_RESPONDERS} auto-responses.`
     );
 
     for (const response of responses.slice(0, 25)) {

@@ -2,6 +2,7 @@ const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags, ChannelType } = 
 const { and, count, eq } = require('drizzle-orm');
 const { db } = require('../../database');
 const { autoResponses } = require('../../database/schema');
+const { MAX_AUTO_RESPONDERS } = require('../../services/autoResponderService');
 
 const data = new SlashCommandBuilder().setName('autoresponder').setDescription('Greed-compatible automated responders')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).setDMPermission(false);
@@ -55,7 +56,7 @@ module.exports = {
         const guildId = interaction.guild.id;
         if (action === 'add') {
             const total = await db.select({ count: count() }).from(autoResponses).where(eq(autoResponses.guildId, guildId)).get();
-            if (total.count >= 1000) return interaction.editReply({ content: 'This server has reached the 1,000 auto-responder limit.', flags: [MessageFlags.Ephemeral] });
+            if (total.count >= MAX_AUTO_RESPONDERS) return interaction.editReply({ content: `This server has reached the ${MAX_AUTO_RESPONDERS} auto-responder limit.`, flags: [MessageFlags.Ephemeral] });
             if (await getResponder(guildId, interaction.options.getString('trigger'))) return interaction.editReply({ content: 'That trigger already has an auto-responder.', flags: [MessageFlags.Ephemeral] });
             const created = await db.insert(autoResponses).values({
                 guildId, trigger: interaction.options.getString('trigger'), response: interaction.options.getString('response'),

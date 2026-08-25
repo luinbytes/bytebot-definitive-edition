@@ -8,6 +8,7 @@ const {
     listUwuLockMembers,
     removeUwuLockState,
     setUwuLockState,
+    setUwuRoulette,
     uwuifyText
 } = require('../../utils/uwuLockUtil');
 const axios = require('axios');
@@ -122,7 +123,11 @@ module.exports = {
                         { name: 'Remove', value: 'remove' },
                         { name: 'List', value: 'list' }
                     ))
-                .addUserOption(opt => opt.setName('member').setDescription('Member for add or remove'))))
+                .addUserOption(opt => opt.setName('member').setDescription('Member for add or remove')))
+            .addSubcommand(sub => sub
+                .setName('roulette')
+                .setDescription('Set random UwU Lock chance; 0 disables it')
+                .addIntegerOption(opt => opt.setName('percentage').setDescription('Chance from 0 to 100 percent').setMinValue(0).setMaxValue(100).setRequired(true))))
         .addSubcommandGroup(group => group
             .setName('snipe')
             .setDescription('View or control recent message events')
@@ -530,6 +535,15 @@ async function handleUwuLock(interaction, subcommand) {
     });
     if (!permission.allowed) {
         return interaction.reply({ embeds: [permission.error], flags: [MessageFlags.Ephemeral] });
+    }
+
+    if (subcommand === 'roulette') {
+        const percentage = interaction.options.getInteger('percentage', true);
+        setUwuRoulette(interaction.guild.id, percentage);
+        return interaction.reply({
+            embeds: [embeds.success('UwU Roulette', percentage ? `Random UwU Lock set to ${percentage}%.` : 'Random UwU Lock disabled.')],
+            flags: [MessageFlags.Ephemeral]
+        });
     }
 
     const target = interaction.options.getUser('member');

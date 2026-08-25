@@ -491,6 +491,14 @@ const uwuLockMembers = sqliteTable('uwu_lock_members', {
     guildStateIdx: index('uwu_lock_members_guild_state_idx').on(table.guildId, table.state),
 }));
 
+const uwuRouletteConfigs = sqliteTable('uwu_roulette_configs', {
+    guildId: text('guild_id').primaryKey(),
+    percentage: integer('percentage').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+}, table => ({
+    percentageCheck: check('uwu_roulette_configs_percentage_check', sql`${table.percentage} BETWEEN 1 AND 100`),
+}));
+
 const bytepods = sqliteTable('bytepods', {
     channelId: text('channel_id').primaryKey(),
     guildId: text('guild_id').notNull(),
@@ -1934,6 +1942,7 @@ module.exports = {
     deniedRolePermissions,
     protectedTargets,
     uwuLockMembers,
+    uwuRouletteConfigs,
     bytepods,
     bytepodAutoWhitelist,
     bytepodUserSettings,

@@ -450,6 +450,11 @@ const expectedSchema = {
         user_id: 'TEXT NOT NULL',
         state: 'TEXT NOT NULL'
     },
+    uwu_roulette_configs: {
+        guild_id: 'TEXT PRIMARY KEY',
+        percentage: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
     bytepods: {
         channel_id: 'TEXT PRIMARY KEY',
         guild_id: 'TEXT NOT NULL',

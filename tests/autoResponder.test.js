@@ -12,6 +12,11 @@ describe('Auto-Responder System', () => {
     });
 
     describe('Service Structure', () => {
+        test('uses the current public 500-responder maximum', () => {
+            const AutoResponderService = require('../src/services/autoResponderService');
+            expect(AutoResponderService.MAX_AUTO_RESPONDERS).toBe(500);
+        });
+
         test('autoResponderService should be properly structured', () => {
             const AutoResponderService = require('../src/services/autoResponderService');
             const mockClient = {};

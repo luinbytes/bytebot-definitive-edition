@@ -5,6 +5,8 @@ const logger = require('../utils/logger');
 const { dbLog } = require('../utils/dbLogger');
 const { parseEmbedScript } = require('./lifecycleMessageService');
 
+const MAX_AUTO_RESPONDERS = 500;
+
 /**
  * Auto-Responder Service
  * Handles keyword-based automated responses to messages
@@ -252,3 +254,4 @@ class AutoResponderService {
 }
 
 module.exports = AutoResponderService;
+module.exports.MAX_AUTO_RESPONDERS = MAX_AUTO_RESPONDERS;

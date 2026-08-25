@@ -216,4 +216,19 @@ describe('UwU Lock message replay', () => {
         expect(webhook.send.mock.calls[0][0].threadId).toBe('thread1');
         expect(message.delete).toHaveBeenCalledTimes(1);
     });
+
+    test('roulette applies its percentage ceiling and throttles busy channels', async () => {
+        database.sqlite.prepare("DELETE FROM uwu_lock_members").run();
+        database.sqlite.prepare("INSERT INTO uwu_roulette_configs (guild_id, percentage, updated_at) VALUES ('guild1', 100, 1)").run();
+
+        const attempts = [];
+        for (let index = 0; index < 11; index++) {
+            const attempt = createMessage({ id: `message${index}` });
+            attempts.push(attempt);
+            await messageCreate.execute(attempt.message, {});
+        }
+
+        expect(attempts.filter(attempt => attempt.webhook.send.mock.calls.length).length).toBe(10);
+        expect(attempts[10].message.delete).not.toHaveBeenCalled();
+    });
 });

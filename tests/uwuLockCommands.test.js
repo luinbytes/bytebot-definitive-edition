@@ -3,7 +3,7 @@ const os = require('os');
 const path = require('path');
 const { Collection, PermissionFlagsBits } = require('discord.js');
 
-function interaction({ subcommand, action = null, member, hasManageGuild = true, roleIds = [] }) {
+function interaction({ subcommand, action = null, member, percentage = null, hasManageGuild = true, roleIds = [] }) {
     return {
         commandName: 'fun',
         guild: { id: 'guild1', ownerId: 'owner1' },
@@ -20,6 +20,7 @@ function interaction({ subcommand, action = null, member, hasManageGuild = true,
             getSubcommandGroup: jest.fn().mockReturnValue('uwulock'),
             getSubcommand: jest.fn().mockReturnValue(subcommand),
             getString: jest.fn(name => name === 'action' ? action : null),
+            getInteger: jest.fn(name => name === 'percentage' ? percentage : null),
             getUser: jest.fn(name => name === 'member' ? member : null)
         },
         reply: jest.fn()
@@ -87,6 +88,19 @@ describe('UwU Lock commands', () => {
         await fun.execute(interaction({ subcommand: 'remove', member: target }));
         await fun.execute(interaction({ subcommand: 'protect', action: 'remove', member: protectedMember }));
         expect(database.sqlite.prepare('SELECT COUNT(*) AS count FROM uwu_lock_members').get().count).toBe(0);
+    });
+
+    test('roulette uses the documented percentage setting and zero disables it', async () => {
+        expect(fun.data.toJSON().options.find(option => option.name === 'uwulock').options.map(option => option.name))
+            .toEqual(['add', 'remove', 'list', 'protect', 'roulette']);
+
+        await fun.execute(interaction({ subcommand: 'roulette', percentage: 25 }));
+        expect(database.sqlite.prepare('SELECT percentage FROM uwu_roulette_configs WHERE guild_id = ?').get('guild1'))
+            .toEqual({ percentage: 25 });
+
+        await fun.execute(interaction({ subcommand: 'roulette', percentage: 0 }));
+        expect(database.sqlite.prepare('SELECT percentage FROM uwu_roulette_configs WHERE guild_id = ?').get('guild1'))
+            .toBeUndefined();
     });
 
     test('/fun uwuify transforms supplied text without enabling mentions', async () => {
