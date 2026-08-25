@@ -14,6 +14,7 @@ const { addLifecycleGroups, executeLifecycle } = require('../../utils/lifecycleM
 const { addBackupGroup, executeBackup } = require('../../utils/serverBackupCommand');
 const { addPresentationGroups, executeCustomize, executeDiscovery } = require('../../utils/serverPresentationCommand');
 const { executeServerLookup } = require('../../utils/informationCommand');
+const { executeCommunityUtilityAdmin } = require('../../utils/communityUtilityCommand');
 
 const MODULE_CHOICES = MODULES.map(value => ({ name: value, value }));
 const PUNISHMENT_CHOICES = PUNISHMENTS.map(value => ({ name: value, value }));
@@ -490,10 +491,47 @@ const serverBuilder = new SlashCommandBuilder()
                 )).addChannelOption(opt => opt.setName('channel').setDescription('Log channel').addChannelTypes(ChannelType.GuildText))))
         .addSubcommandGroup(group => group
             .setName('community')
-            .setDescription('Community feature setup status')
+            .setDescription('Community feature controls')
             .addSubcommand(sub => sub
                 .setName('view')
-                .setDescription('View read-only community configuration status')));
+                .setDescription('View read-only community configuration status'))
+            .addSubcommand(sub => sub.setName('image-only').setDescription('Manage attachment-only messages in a channel')
+                .addStringOption(opt => opt.setName('action').setDescription('Action').setRequired(true).addChoices(
+                    { name: 'Enable', value: 'enable' }, { name: 'Disable', value: 'disable' }, { name: 'View', value: 'view' }
+                )).addChannelOption(opt => opt.setName('channel').setDescription('Channel; defaults to the current channel').addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)))
+            .addSubcommand(sub => sub.setName('pin').setDescription('Pin a same-server message')
+                .addStringOption(opt => opt.setName('message').setDescription('Message link or ID').setRequired(true)))
+            .addSubcommand(sub => sub.setName('unpin').setDescription('Unpin a same-server message')
+                .addStringOption(opt => opt.setName('message').setDescription('Message link or ID').setRequired(true))))
+        .addSubcommandGroup(group => group.setName('confessions').setDescription('Moderated anonymous confessions')
+            .addSubcommand(sub => sub.setName('view').setDescription('View confession configuration'))
+            .addSubcommand(sub => sub.setName('setup').setDescription('Enable confessions and publish a panel')
+                .addChannelOption(opt => opt.setName('channel').setDescription('Default confession channel').addChannelTypes(ChannelType.GuildText).setRequired(true)))
+            .addSubcommand(sub => sub.setName('remove').setDescription('Disable confession submissions')
+                .addBooleanOption(opt => opt.setName('confirm').setDescription('Confirm disabling confessions').setRequired(true)))
+            .addSubcommand(sub => sub.setName('category').setDescription('Manage confession category routing')
+                .addStringOption(opt => opt.setName('action').setDescription('Action').setRequired(true).addChoices(
+                    { name: 'Add', value: 'add' }, { name: 'Remove', value: 'remove' }, { name: 'List', value: 'list' }
+                )).addStringOption(opt => opt.setName('name').setDescription('Category name').setMaxLength(50))
+                .addChannelOption(opt => opt.setName('channel').setDescription('Category channel').addChannelTypes(ChannelType.GuildText)))
+            .addSubcommand(sub => sub.setName('blacklist').setDescription('Manage blocked confession phrases')
+                .addStringOption(opt => opt.setName('action').setDescription('Action').setRequired(true).addChoices(
+                    { name: 'Add', value: 'add' }, { name: 'Remove', value: 'remove' }, { name: 'List', value: 'list' }, { name: 'Clear', value: 'clear' }
+                )).addStringOption(opt => opt.setName('phrase').setDescription('Blocked phrase').setMaxLength(100)))
+            .addSubcommand(sub => sub.setName('emojis').setDescription('Manage confession vote emojis')
+                .addStringOption(opt => opt.setName('action').setDescription('Action').setRequired(true).addChoices(
+                    { name: 'Set', value: 'set' }, { name: 'Reset', value: 'reset' }, { name: 'View', value: 'view' }
+                )).addStringOption(opt => opt.setName('up').setDescription('Up emoji or none').setMaxLength(64))
+                .addStringOption(opt => opt.setName('down').setDescription('Down emoji or none').setMaxLength(64)))
+            .addSubcommand(sub => sub.setName('mute').setDescription('Mute the author of a confession')
+                .addIntegerOption(opt => opt.setName('number').setDescription('Confession number').setMinValue(1).setRequired(true))
+                .addStringOption(opt => opt.setName('reason').setDescription('Moderator reason').setMaxLength(500)))
+            .addSubcommand(sub => sub.setName('unmute').setDescription('Unmute confession authors')
+                .addIntegerOption(opt => opt.setName('number').setDescription('Confession number').setMinValue(1))
+                .addBooleanOption(opt => opt.setName('all').setDescription('Clear every confession mute')))
+            .addSubcommand(sub => sub.setName('report').setDescription('Reveal an author for moderation')
+                .addIntegerOption(opt => opt.setName('number').setDescription('Confession number').setMinValue(1).setRequired(true))
+                .addStringOption(opt => opt.setName('reason').setDescription('Lookup reason').setMinLength(1).setMaxLength(500).setRequired(true))));
 
 addAntiraidGroup(serverBuilder);
 addAutomodGroup(serverBuilder);
@@ -553,6 +591,10 @@ module.exports = {
         if (interaction.options.getSubcommandGroup(false) === 'security') return executeSecurity(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'antiraid') return executeAntiraid(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'automod') return executeAutomod(interaction);
+        if (interaction.options.getSubcommandGroup(false) === 'confessions'
+            || (interaction.options.getSubcommandGroup(false) === 'community' && interaction.options.getSubcommand() !== 'view')) {
+            return executeCommunityUtilityAdmin(interaction, client);
+        }
         if (['welcome', 'goodbye', 'boost', 'system'].includes(interaction.options.getSubcommandGroup(false))) return executeLifecycle(interaction);
         return executeAliasCommand(interaction, client, aliasFor(interaction));
     },

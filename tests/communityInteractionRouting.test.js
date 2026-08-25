@@ -78,6 +78,7 @@ function createInteraction({ id, type, customId, commandName, group, subcommand 
         },
         isAutocomplete: jest.fn(() => false),
         isButton: jest.fn(() => type === 'button'),
+        isStringSelectMenu: jest.fn(() => false),
         isAnySelectMenu: jest.fn(() => false),
         isModalSubmit: jest.fn(() => false),
         isUserContextMenuCommand: jest.fn(() => false),
