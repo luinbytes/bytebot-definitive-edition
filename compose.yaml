@@ -10,6 +10,8 @@ services:
     stop_grace_period: 15s
     volumes:
       - bytebot-data:/app/data
+      - bytebot-logs:/app/logs
 
 volumes:
   bytebot-data:
+  bytebot-logs:

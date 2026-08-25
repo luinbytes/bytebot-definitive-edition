@@ -20,9 +20,11 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
 COPY . .
-RUN mkdir -p /app/data && chown node:node /app/data
+RUN mkdir -p /app/data /app/logs \
+    && touch /app/.command-cache.json \
+    && chown -R node:node /app/data /app/logs /app/.command-cache.json
 
-VOLUME ["/app/data"]
+VOLUME ["/app/data", "/app/logs"]
 USER node
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=30s --timeout=3s --start-period=45s --retries=3 CMD ["node", "./scripts/healthcheck.js"]

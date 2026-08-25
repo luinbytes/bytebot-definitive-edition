@@ -59,10 +59,13 @@ test('production container starts the bot with hard small-VPS defaults', () => {
     expect(dockerfile).toContain('ENV NODE_OPTIONS=--max-old-space-size=640');
     expect(dockerfile).toContain('HEALTHCHECK');
     expect(dockerfile).toContain('USER node');
+    expect(dockerfile).toContain('touch /app/.command-cache.json');
+    expect(dockerfile).toContain('chown -R node:node /app/data /app/logs /app/.command-cache.json');
     expect(dockerfile).toContain('CMD ["npm", "start"]');
     expect(compose).toContain('cpus: 1.0');
     expect(compose).toContain('mem_limit: 1g');
     expect(compose).toContain('pids_limit: 128');
+    expect(compose).toContain('bytebot-logs:/app/logs');
 });
 
 test('/bot stats exposes cached helper readiness without spawning work', async () => {
