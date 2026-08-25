@@ -108,6 +108,7 @@ class LocalAiMediaService {
     }
 
     async ocr(input) {
+        if (this.closed) throw new UserFacingError('Local AI media tools are shutting down.');
         try {
             return await this.media.processImage(input, async (image, directory, signal) => {
                 if (this.closed) throw new Error('Local AI media tools are shutting down.');

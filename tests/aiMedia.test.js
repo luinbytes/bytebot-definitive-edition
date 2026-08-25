@@ -96,5 +96,10 @@ test('local AI media shutdown cancels active helpers and drains cleanup', async 
 
     await expect(service.close()).resolves.toBeUndefined();
     await expect(pending).rejects.toThrow('Failed to generate local synthetic speech.');
+    const processImage = jest.fn();
+    const closed = new LocalAiMediaService({ media: { processImage } });
+    await closed.close();
+    await expect(closed.ocr({})).rejects.toThrow('Local AI media tools are shutting down.');
+    expect(processImage).not.toHaveBeenCalled();
     fs.rmSync(directory, { recursive: true, force: true });
 });
