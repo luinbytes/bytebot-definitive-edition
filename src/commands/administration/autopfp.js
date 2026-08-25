@@ -11,10 +11,8 @@ module.exports = {
         .setDMPermission(false)
         .addSubcommand(sub => sub.setName('add').setDescription('Add an AutoPFP channel')
             .addChannelOption(opt => opt.setName('channel').setDescription('Posting channel').addChannelTypes(ChannelType.GuildText).setRequired(true))
-            .addStringOption(opt => opt.setName('categories').setDescription('Image category').setRequired(true).addChoices(
-                { name: 'Anime', value: 'anime' }, { name: 'Cats', value: 'cats' }, { name: 'Eboys', value: 'eboys' },
-                { name: 'Egirls', value: 'egirls' }, { name: 'Girls', value: 'girls' }, { name: 'Roadmen', value: 'roadmen' }
-            )))
+            .addStringOption(opt => opt.setName('categories')
+                .setDescription('Comma-separated: anime, cats, eboys, egirls, girls, roadmen').setRequired(true)))
         .addSubcommand(sub => sub.setName('interval').setDescription('Change a channel posting interval')
             .addChannelOption(opt => opt.setName('channel').setDescription('Configured channel').addChannelTypes(ChannelType.GuildText).setRequired(true))
             .addStringOption(opt => opt.setName('duration').setDescription('Between 2 minutes and 1 day').setRequired(true)))

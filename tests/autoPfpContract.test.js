@@ -8,8 +8,10 @@ describe('AutoPFP terminal provider contract', () => {
         expect(json.dm_permission).toBe(false);
         expect(json.default_member_permissions).toBe(PermissionFlagsBits.Administrator.toString());
         expect(json.options.map(option => option.name)).toEqual(['add', 'interval', 'test', 'list', 'remove']);
-        expect(json.options[0].options.find(option => option.name === 'categories').choices.map(choice => choice.value))
-            .toEqual(['anime', 'cats', 'eboys', 'egirls', 'girls', 'roadmen']);
+        const categories = json.options[0].options.find(option => option.name === 'categories');
+        expect(categories.choices).toBeUndefined();
+        ['anime', 'cats', 'eboys', 'egirls', 'girls', 'roadmen']
+            .forEach(category => expect(categories.description).toContain(category));
     });
 
     test('fails closed without creating configuration or a webhook', async () => {
