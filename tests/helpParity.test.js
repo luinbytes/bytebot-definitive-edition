@@ -27,6 +27,7 @@ test('/bot help discovers every public Greed category without advertising unfini
     expect(parityField.value.length).toBeLessThanOrEqual(1024);
     expect(commonPaths.value).toContain('/fun uwuify');
     expect(commonPaths.value).toContain('/fun uwulock add');
+    expect(commonPaths.value).toContain('/image effect apply');
     expect(commonPaths.value).toContain('/server security antinuke-settings');
     expect(commonPaths.value).toContain('/server antiraid settings');
     expect(commonPaths.value).toContain('/server automod filter');
@@ -44,6 +45,7 @@ test('/bot help discovers every public Greed category without advertising unfini
     expect(parityField.value).toContain('/repost` Socials, Utility');
     expect(parityField.value).toContain('/ai` Information, Utility');
     expect(parityField.value).toContain('/economy` Economy');
+    expect(parityField.value).toContain('/image` Manipulation');
     expect(parityField.value).toContain('/ticket` Tickets');
     expect(parityField.value).toContain('Provider-blocked');
     expect(parityField.value).toContain('Rolimons');

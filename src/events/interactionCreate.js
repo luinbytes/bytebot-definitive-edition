@@ -566,10 +566,18 @@ module.exports = {
         // 2. Bot Permission Verification (Only if in a guild)
         if (interaction.guild) {
             const botMember = interaction.guild.members.me;
-            if (!botMember.permissionsIn(interaction.channel).has([PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks])) {
+            const permissionNames = new Map([
+                [PermissionFlagsBits.SendMessages, 'Send Messages'],
+                [PermissionFlagsBits.EmbedLinks, 'Embed Links'],
+                [PermissionFlagsBits.AttachFiles, 'Attach Files']
+            ]);
+            const required = [PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, ...(command.botPermissions || [])];
+            const permissions = botMember.permissionsIn(interaction.channel);
+            const missing = required.filter(permission => !permissions.has(permission));
+            if (missing.length) {
                 try {
                     return await interaction.reply({
-                        content: '❌ I do not have permission to send embeds in this channel. Please ensure I have "Send Messages" and "Embed Links" permissions.',
+                        content: `❌ I need ${missing.map(permission => `"${permissionNames.get(permission) || permission}"`).join(', ')} in this channel.`,
                         flags: [MessageFlags.Ephemeral]
                     });
                 } catch (e) {

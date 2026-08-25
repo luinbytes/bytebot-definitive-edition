@@ -190,7 +190,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
         .setThumbnail(client.user.displayAvatarURL())
         .setDescription(
             '**Welcome to ByteBot!**\n\n' +
-            'Start with an intent hub: `/community`, `/me`, `/server`, `/lookup`, `/pod`, `/mod`, `/economy`, `/game`, `/fun`, or `/bot`.\n\n' +
+            'Start with an intent hub: `/community`, `/me`, `/server`, `/lookup`, `/pod`, `/mod`, `/economy`, `/game`, `/fun`, `/image`, or `/bot`.\n\n' +
             `📊 **${totalCommands}** commands • **${sortedCategories.length}** categories`
         )
         .addFields(
@@ -205,6 +205,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/mod` member actions, cases, invoke templates, setup, logs, and channel controls\n' +
                     '`/economy` balances, games, crime, gangs, labs, role shops, and administration\n' +
                     '`/game` F1, War Thunder, and public Roblox lookups\n' +
+                    '`/image` transforms, local effects, memes, and color inspection\n' +
                     '`/bot` help, health, deployment, and developer tools',
                 inline: false
             },
@@ -226,7 +227,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/analytics days:60` • `/levels rank` • `/server logs add`\n' +
                     '`/mod user warn` • `/mod case view` • `/mod config setup`\n' +
                     '`/mod template set` • `/game roblox profile`\n' +
-                    '`/fun uwuify` • `/fun uwulock add`',
+                    '`/fun uwuify` • `/fun uwulock add` • `/image effect apply`',
                 inline: false
             },
             {
@@ -243,7 +244,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/me` Information • `/lookup` Information, Utility • `/repost` Socials, Utility • `/ai` Information, Utility\n' +
                     '`/game` Games\n' +
                     '`/server` Auto, Logs, Security, Server, Settings • `/ticket` Tickets • `/mod` Moderation\n' +
-                    '`/fun` Fun, Manipulation, Roleplay, Snipe • `/boosterrole` Boosters • `/economy` Economy\n' +
+                    '`/fun` Fun, Roleplay, Snipe • `/image` Manipulation • `/boosterrole` Boosters • `/economy` Economy\n' +
                     '`/music` Music\n' +
                     '**Not yet available (planned):** LastFM, Voice\n' +
                     '**Provider-blocked:** AI chat/STT/generation, social feeds, Rolimons, Valorant, Minecraft, Spotify search, Reddit, YouTube downloads, X, TikTok, Instagram, Telegram, bio providers\n' +
