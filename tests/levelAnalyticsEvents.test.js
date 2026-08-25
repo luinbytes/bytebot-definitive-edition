@@ -9,7 +9,8 @@ jest.mock('../src/services/automodService', () => ({
     handleMemberUpdate: jest.fn().mockResolvedValue(undefined)
 }));
 jest.mock('../src/services/lifecycleMessageService', () => ({
-    sendLifecycleMessage: jest.fn().mockResolvedValue(undefined)
+    sendLifecycleMessage: jest.fn().mockResolvedValue(undefined),
+    sendJoinDm: jest.fn().mockResolvedValue(undefined)
 }));
 
 const messageCreate = require('../src/events/messageCreate');
