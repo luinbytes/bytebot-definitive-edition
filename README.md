@@ -1,6 +1,8 @@
 # ByteBot
 
-A highly modular, scalable, and future-proof Discord bot boilerplate built with Discord.js v14.
+A modular Discord.js v14 bot with public Greed-parity feature coverage, bounded self-hosted helpers, and explicit provider and runtime boundaries.
+
+`dev` is the integration and test branch for the cumulative parity build. `master` remains the stable release line.
 
 ## Core Features
 
@@ -11,6 +13,10 @@ A highly modular, scalable, and future-proof Discord bot boilerplate built with 
 -   **Persistence with Drizzle ORM**: Integrated SQLite database for guild settings and persistent data.
 -   **Dynamic Testing**: Automated structural integrity audits and utility verification via Jest.
 -   **Hardened Security**: Built-in cooldowns, permission checks, role-based access control (RBAC), and DM-to-Guild protection.
+-   **Moderation and Protection**: Case-backed moderation, AntiNuke, AntiRaid, AutoMod, honeypot boundaries, protected targets, warning escalation, recovery, and moderation logs.
+-   **Community and Lifecycle**: Welcome, goodbye, boost, Join DM, autoresponder, reaction-role, ticket, giveaway, confession, poll, thread, and server-automation workflows.
+-   **Economy and Games**: Guild wallets and ledgers, jobs, shops, games, gangs, laboratories, rankings, bounded fun games, snipe, and roleplay actions.
+-   **Voice and Social**: VoiceMaster channel management, Last.fm, self-hosted music, lawful GitHub/Roblox lookups, and canonical social-link reposting.
 -   **Case-backed Moderation**: Action-specific Discord permissions, protected targets, setup-owned mute/jail roles, warning escalation, hardbans, history, recovery, and invoke templates under `/mod`.
 -   **Rich Content Platform**: Saved embeds, Components V2 layouts, custom responses, global tags, durable pagination, managed webhooks, and server theme colors.
 -   **Server Portability and Presentation**: Versioned guild backups, per-server ByteBot profiles, opt-in discovery listings, and range-aware server cards under `/server`.
@@ -30,18 +36,30 @@ A highly modular, scalable, and future-proof Discord bot boilerplate built with 
     /administration # Server config & management
     /moderation     # Ban, kick, clear, warn, etc.
     /utility        # Info, ping, help
-    /fun            # Games and jokes
-    /games          # Game-specific integrations (e.g. War Thunder)
+    /fun            # Games, snipe, roleplay, and community utilities
+    /economy        # Wallets, jobs, games, gangs, and rankings
+    /music          # Self-hosted playback
+    /voice          # VoiceMaster channel management
+    /lastfm         # Last.fm account and listening tools
+    /games          # Public game lookups
+    /context-menus  # Context-menu commands
     /developer      # Restricted owner-only tools
   /events           # Event listeners (ready, interactionCreate, etc.)
   /handlers         # Dynamic resource loading logic
   /database         # Drizzle schema & SQLite initialization
-  /utils            # Logger, Embeds, Permissions, wtService
+  /services         # Feature services and provider boundaries
+  /workers          # Bounded background work
+  /components       # Buttons, modals, and select-menu handlers
+  /utils            # Logger, embeds, permissions, and shared helpers
   index.js          # Entry point & client initialization
 /tests              # Unit and integration tests
 config.json         # Branding global constants
 .env                # Secrets (DISCORD_TOKEN, CLIENT_ID, GUILD_ID)
 ```
+
+## Validation boundary
+
+The parity build has source, migration, test, dependency, and Compose-configuration evidence. A passing local suite does not prove a live Discord guild, voice UDP session, credentialed provider, Docker runtime, or production deployment. Those checks require the operator's test environment and remain separate from the source-reconciliation claims.
 
 ## Getting Started
 
