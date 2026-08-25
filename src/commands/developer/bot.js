@@ -80,13 +80,22 @@ module.exports = {
         if (subcommand === 'stats') {
             const uptimeSeconds = Math.floor(process.uptime());
             const memory = process.memoryUsage();
+            const health = client.helperHealth || {};
+            const state = value => value?.ready ? value.detail || 'ready' : 'unavailable';
+            const music = client.musicService
+                ? state(health.music)
+                : (client.musicConfigured ? 'unavailable' : 'disabled');
             const embed = embeds.brand('Bot Runtime Stats', 'Current process health')
                 .addFields(
                     { name: 'Uptime', value: `${Math.floor(uptimeSeconds / 3600)}h ${Math.floor((uptimeSeconds % 3600) / 60)}m`, inline: true },
                     { name: 'Guilds', value: `${client.guilds.cache.size}`, inline: true },
                     { name: 'Commands', value: `${client.commands.size}`, inline: true },
                     { name: 'Memory', value: `${Math.round(memory.rss / 1024 / 1024)} MB RSS`, inline: true },
-                    { name: 'Heartbeat', value: `${client.ws.ping}ms`, inline: true }
+                    { name: 'Heartbeat', value: `${client.ws.ping}ms`, inline: true },
+                    { name: 'Helpers', value: [
+                        `Sharp ${state(health.sharp)}`, `OCR ${state(health.tesseract)}`,
+                        `Speech ${state(health.espeak)}`, `Music ${music}`
+                    ].join(' • '), inline: false }
                 );
 
             return interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });

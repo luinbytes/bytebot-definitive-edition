@@ -63,7 +63,7 @@ describe('Grouped Slash Command Appearance', () => {
     test('utility commands with several actions are grouped by intent', () => {
         expectGroups('src/commands/utility/reminder.js', {
             create: ['me', 'here'],
-            manage: ['list', 'cancel']
+            manage: ['list', 'cancel', 'snooze']
         });
 
         expectGroups('src/commands/utility/bookmark.js', {

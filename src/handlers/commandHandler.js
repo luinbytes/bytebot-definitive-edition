@@ -24,7 +24,7 @@ module.exports = async (client) => {
             // Extract category from path (e.g., src/commands/utility/ping.js -> utility)
             const parts = file.split(/[\\/]/);
             const category = parts[parts.length - 2];
-            command.category = category.charAt(0).toUpperCase() + category.slice(1);
+            command.category = category === 'lastfm' ? 'LastFM' : category.charAt(0).toUpperCase() + category.slice(1);
 
             client.commands.set(command.data.name, command);
             if (shouldRegisterCommand(command)) {

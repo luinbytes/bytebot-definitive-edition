@@ -198,6 +198,21 @@ describe('UwU Lock message replay', () => {
         expect(webhook.send).toHaveBeenCalledTimes(1);
     });
 
+    test('concurrent first messages create only one channel webhook', async () => {
+        const first = createMessage({ id: 'message1' });
+        const second = createMessage({ id: 'message2' });
+        second.message.channel = first.message.channel;
+        second.message.channelId = first.message.channel.id;
+        first.message.channel.fetchWebhooks.mockResolvedValue(new Collection());
+        first.message.channel.createWebhook.mockResolvedValue(first.webhook);
+
+        await Promise.all([messageCreate.execute(first.message, {}), messageCreate.execute(second.message, {})]);
+
+        expect(first.message.channel.fetchWebhooks).toHaveBeenCalledTimes(1);
+        expect(first.message.channel.createWebhook).toHaveBeenCalledTimes(1);
+        expect(first.webhook.send).toHaveBeenCalledTimes(2);
+    });
+
     test('routes thread replays through the parent channel webhook', async () => {
         const { message, webhook } = createMessage();
         const parent = message.channel;
@@ -215,5 +230,20 @@ describe('UwU Lock message replay', () => {
         expect(parent.fetchWebhooks).toHaveBeenCalledTimes(1);
         expect(webhook.send.mock.calls[0][0].threadId).toBe('thread1');
         expect(message.delete).toHaveBeenCalledTimes(1);
+    });
+
+    test('roulette applies its percentage ceiling and throttles busy channels', async () => {
+        database.sqlite.prepare("DELETE FROM uwu_lock_members").run();
+        database.sqlite.prepare("INSERT INTO uwu_roulette_configs (guild_id, percentage, updated_at) VALUES ('guild1', 100, 1)").run();
+
+        const attempts = [];
+        for (let index = 0; index < 11; index++) {
+            const attempt = createMessage({ id: `message${index}` });
+            attempts.push(attempt);
+            await messageCreate.execute(attempt.message, {});
+        }
+
+        expect(attempts.filter(attempt => attempt.webhook.send.mock.calls.length).length).toBe(10);
+        expect(attempts[10].message.delete).not.toHaveBeenCalled();
     });
 });

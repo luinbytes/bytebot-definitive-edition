@@ -11,6 +11,48 @@ describe('Greed-compatible rich content', () => {
         expect(payload.allowedMentions).toEqual({ parse: [], repliedUser: false });
     });
 
+    test('renders AFK message, time, and mentioner variables safely', () => {
+        const { renderScript } = require('../src/services/richContentService');
+        const payload = renderScript('{content: {user.name}: {message} since {time}; asked by {mentioner.name}}', {
+            user: { username: 'Away' },
+            mentioner: { username: 'Asker}$v{embed}' },
+            message: 'Lunch',
+            time: 'a moment ago'
+        });
+
+        expect(payload.content).toBe('Away: Lunch since a moment ago; asked by Asker｝＄v｛embed｝');
+        expect(payload.allowedMentions).toEqual({ parse: [], repliedUser: false });
+    });
+
+    test('renders Greed lifecycle variables consistently in custom responses', () => {
+        const { renderScript } = require('../src/services/richContentService');
+        const member = {
+            id: '10', joinedTimestamp: 2, premiumSince: null, displayHexColor: '#123456',
+            user: { id: '10', username: 'Member', bot: false },
+            roles: { highest: { id: 'role1', name: 'Member', hexColor: '#123456' } }
+        };
+        member.user.createdAt = new Date('2020-01-01T00:00:00Z');
+        const guild = {
+            id: '20', name: 'Guild', memberCount: 1200, premiumTier: 0,
+            members: { cache: new Map([['older', { id: 'older', joinedTimestamp: 1 }], [member.id, member]]) }
+        };
+        const payload = renderScript(
+            '{content: {if {user.join_position} < 3}{lower(user.name)}|{user.bot}|{user.boost}|{user.top_role}|{user.color}|{user.join_position}|{guild.boost_tier}|{guild.count}|{channel.topic}|{user.created_at:R}{else}bad{/if}}',
+            { member, guild, channel: { id: '30' } }
+        );
+
+        expect(payload.content).toBe('member|No|No|Member|#123456|2|No Level|1,200|N/A|<t:1577836800:R>');
+        member.roles.highest = { id: guild.id, name: '@everyone' };
+        expect(renderScript('{content: {user.top_role}}', { member, guild }).content).toBe('N/A');
+    });
+
+    test('leaves AFK-only variables untouched outside an AFK context', () => {
+        const { renderScript } = require('../src/services/richContentService');
+
+        expect(renderScript('{content: {message} {mentioner.name} {time}}').content)
+            .toBe('{message} {mentioner.name} {time}');
+    });
+
     test('renders content-only scripts as message content rather than directive text', () => {
         const { renderScript } = require('../src/services/richContentService');
 
@@ -106,5 +148,28 @@ describe('Greed-compatible rich content', () => {
         expect(reply).not.toHaveProperty('content');
         expect(reply.files[0].name).toBe('saved.txt');
         expect(reply.files[0].attachment.toString()).toBe(source);
+    });
+
+    test('level messages expand bounded saved scripts and the documented context safely', () => {
+        const RichContentService = require('../src/services/richContentService');
+        const rules = [
+            { key: 'celebrate', config: JSON.stringify({ script: 'Congrats {user} at {level.current}! Next: {level.next_xp}' }) }
+        ];
+        const service = new RichContentService(null, {
+            list: (_guildId, kind) => kind === 'custom-script' ? rules : [],
+            get: (_guildId, _kind, name) => rules.find(rule => rule.key === name)
+        });
+        const payload = service.renderLevel('{content: {cscript:celebrate}}', {
+            member: { id: '10', user: { id: '10', username: 'Member' } },
+            guild: { id: '20', name: 'Guild', memberCount: 3 },
+            level: { current: 2, next: 3, rank: 1, xp: 450, nextXp: 900 }
+        });
+
+        expect(payload.content).toBe('Congrats <@10> at 2! Next: 900');
+        expect(payload.allowedMentions).toEqual({ parse: [], repliedUser: false });
+        rules[0].config = JSON.stringify({ script: '{cscript:celebrate}' });
+        expect(() => service.renderLevel('{cscript:celebrate}', {
+            member: { id: '10', user: { id: '10' } }, guild: { id: '20' }, level: { current: 1 }
+        })).toThrow(/cycle/i);
     });
 });

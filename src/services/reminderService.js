@@ -118,7 +118,8 @@ class ReminderService {
                     .set({ active: false })
                     .where(and(
                         eq(reminders.id, reminderId),
-                        eq(reminders.active, true)
+                        eq(reminders.active, true),
+                        lte(reminders.triggerAt, new Date())
                     ))
                     .returning()
                     .all(),
@@ -285,6 +286,28 @@ class ReminderService {
             logger.error(`Failed to cancel reminder ${reminderId}:`, error);
             throw error;
         }
+    }
+
+    async snoozeReminder(reminderId, userId, triggerAt) {
+        const result = await dbLog.update('reminders',
+            () => db.update(reminders)
+                .set({ triggerAt })
+                .where(and(
+                    eq(reminders.id, reminderId),
+                    eq(reminders.userId, userId),
+                    eq(reminders.active, true)
+                ))
+                .returning()
+                .all(),
+            { reminderId, userId, operation: 'snooze' }
+        );
+        if (!result.length) throw new Error('Reminder not found or already inactive');
+        if (this.activeTimers.has(reminderId)) clearTimeout(this.activeTimers.get(reminderId));
+        if (this.longDelayChecks.has(reminderId)) clearInterval(this.longDelayChecks.get(reminderId));
+        this.activeTimers.delete(reminderId);
+        this.longDelayChecks.delete(reminderId);
+        this.scheduleReminder(result[0]);
+        return result[0];
     }
 
     /**

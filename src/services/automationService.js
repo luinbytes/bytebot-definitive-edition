@@ -94,13 +94,24 @@ class AutomationService {
 
     upsert({ guildId, kind, key, config = {}, enabled = true, nextRunAt = null, createdBy }) {
         const now = Date.now();
-        return db.insert(automationRules).values({
-            guildId, kind, key, config: JSON.stringify(config), enabled, nextRunAt,
-            createdBy, createdAt: now, updatedAt: now
-        }).onConflictDoUpdate({
-            target: [automationRules.guildId, automationRules.kind, automationRules.key],
-            set: { config: JSON.stringify(config), enabled, nextRunAt, updatedAt: now }
-        }).returning().get();
+        const write = executor => executor.insert(automationRules).values({
+                guildId, kind, key, config: JSON.stringify(config), enabled, nextRunAt,
+                createdBy, createdAt: now, updatedAt: now
+            }).onConflictDoUpdate({
+                target: [automationRules.guildId, automationRules.kind, automationRules.key],
+                set: { config: JSON.stringify(config), enabled, nextRunAt, updatedAt: now }
+            }).returning().get();
+        if (kind !== 'autorole') return write(db);
+        return db.transaction(tx => {
+            const existing = tx.select({ id: automationRules.id }).from(automationRules).where(and(
+                eq(automationRules.guildId, guildId), eq(automationRules.kind, kind), eq(automationRules.key, key)
+            )).get();
+            const total = tx.select({ value: count() }).from(automationRules).where(and(
+                eq(automationRules.guildId, guildId), eq(automationRules.kind, kind)
+            )).get().value;
+            if (!existing && total >= 50) throw new Error('This server has reached the 50 autorole limit.');
+            return write(tx);
+        });
     }
 
     remove(guildId, kind, key) {

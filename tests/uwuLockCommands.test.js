@@ -3,7 +3,7 @@ const os = require('os');
 const path = require('path');
 const { Collection, PermissionFlagsBits } = require('discord.js');
 
-function interaction({ subcommand, action = null, member, hasManageGuild = true, roleIds = [] }) {
+function interaction({ subcommand, action = null, member, percentage = null, hasManageGuild = true, roleIds = [] }) {
     return {
         commandName: 'fun',
         guild: { id: 'guild1', ownerId: 'owner1' },
@@ -20,6 +20,7 @@ function interaction({ subcommand, action = null, member, hasManageGuild = true,
             getSubcommandGroup: jest.fn().mockReturnValue('uwulock'),
             getSubcommand: jest.fn().mockReturnValue(subcommand),
             getString: jest.fn(name => name === 'action' ? action : null),
+            getInteger: jest.fn(name => name === 'percentage' ? percentage : null),
             getUser: jest.fn(name => name === 'member' ? member : null)
         },
         reply: jest.fn()
@@ -87,6 +88,60 @@ describe('UwU Lock commands', () => {
         await fun.execute(interaction({ subcommand: 'remove', member: target }));
         await fun.execute(interaction({ subcommand: 'protect', action: 'remove', member: protectedMember }));
         expect(database.sqlite.prepare('SELECT COUNT(*) AS count FROM uwu_lock_members').get().count).toBe(0);
+    });
+
+    test('large member lists stay within Discord embed limits', async () => {
+        const insert = database.sqlite.prepare("INSERT INTO uwu_lock_members (guild_id, user_id, state) VALUES ('guild1', ?, 'target')");
+        database.sqlite.transaction(() => {
+            for (let index = 0; index < 600; index++) insert.run(String(index).padStart(20, '0'));
+        })();
+        const targetList = interaction({ subcommand: 'list' });
+
+        await fun.execute(targetList);
+
+        const description = targetList.reply.mock.calls[0][0].embeds[0].data.description;
+        expect(description.length).toBeLessThanOrEqual(4096);
+        expect(description).toMatch(/… \d+ more\.$/);
+    });
+
+    test('roulette uses the documented percentage setting and zero disables it', async () => {
+        expect(fun.data.toJSON().options.find(option => option.name === 'uwulock').options.map(option => option.name))
+            .toEqual(['add', 'remove', 'list', 'protect', 'roulette']);
+
+        await fun.execute(interaction({ subcommand: 'roulette', percentage: 25 }));
+        expect(database.sqlite.prepare('SELECT percentage FROM uwu_roulette_configs WHERE guild_id = ?').get('guild1'))
+            .toEqual({ percentage: 25 });
+
+        await fun.execute(interaction({ subcommand: 'roulette', percentage: 0 }));
+        expect(database.sqlite.prepare('SELECT percentage FROM uwu_roulette_configs WHERE guild_id = ?').get('guild1'))
+            .toBeUndefined();
+    });
+
+    test('guild removal purges UwU Lock targets and roulette configuration', async () => {
+        database.sqlite.prepare("INSERT INTO uwu_lock_members (guild_id, user_id, state) VALUES ('guild1', 'user1', 'target')").run();
+        database.sqlite.prepare("INSERT INTO uwu_roulette_configs (guild_id, percentage, updated_at) VALUES ('guild1', 25, 1)").run();
+
+        const client = {
+            giveawayService: { purgeGuild: jest.fn(() => { throw new Error('broken cleanup'); }) },
+            levelAnalyticsService: { purgeGuild: jest.fn() },
+            eventLoggingService: { purgeGuild: jest.fn() }
+        };
+        await require('../src/events/guildDelete').execute({ id: 'guild1', name: 'Guild', client });
+
+        expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM uwu_lock_members WHERE guild_id = 'guild1'").get().count).toBe(0);
+        expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM uwu_roulette_configs WHERE guild_id = 'guild1'").get().count).toBe(0);
+        expect(client.levelAnalyticsService.purgeGuild).toHaveBeenCalledWith('guild1');
+        expect(client.eventLoggingService.purgeGuild).toHaveBeenCalledWith('guild1');
+    });
+
+    test('guild removal directly purges level and log rows when services did not initialize', async () => {
+        database.sqlite.prepare("INSERT INTO level_configs (guild_id, updated_at) VALUES ('guild1', 1)").run();
+        database.sqlite.prepare("INSERT INTO event_log_channels (guild_id, module, channel_id, created_at) VALUES ('guild1', 'member', 'channel1', 1)").run();
+
+        await require('../src/events/guildDelete').execute({ id: 'guild1', name: 'Guild', client: {} });
+
+        expect(database.sqlite.prepare("SELECT COUNT(*) count FROM level_configs WHERE guild_id = 'guild1'").get().count).toBe(0);
+        expect(database.sqlite.prepare("SELECT COUNT(*) count FROM event_log_channels WHERE guild_id = 'guild1'").get().count).toBe(0);
     });
 
     test('/fun uwuify transforms supplied text without enabling mentions', async () => {

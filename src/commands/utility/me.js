@@ -1,5 +1,9 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { executeAliasCommand } = require('../../utils/commandAlias');
+const { executeMemberLookup } = require('../../utils/informationCommand');
+const { executePersonalUtility } = require('../../utils/personalUtilityCommand');
+
+const PERSONAL_GROUPS = new Set(['afk', 'timezone', 'diary']);
 
 const TARGETS = {
     avatar: { commandName: 'avatar', requirePath: 'src/commands/utility/avatar.js' },
@@ -66,6 +70,15 @@ module.exports = {
             .setName('info')
             .setDescription('View your profile or another user profile')
             .addUserOption(opt => opt.setName('user').setDescription('User to view')))
+        .addSubcommand(sub => sub.setName('banner').setDescription('View your banner or another user banner')
+            .addUserOption(opt => opt.setName('user').setDescription('User to view')))
+        .addSubcommand(sub => sub.setName('server-avatar').setDescription('View a member server avatar')
+            .addUserOption(opt => opt.setName('user').setDescription('Member to view')))
+        .addSubcommand(sub => sub.setName('server-banner').setDescription('View a member server banner')
+            .addUserOption(opt => opt.setName('user').setDescription('Member to view')))
+        .addSubcommandGroup(group => group.setName('name').setDescription('Recorded username history')
+            .addSubcommand(sub => sub.setName('history').setDescription('View recorded username history')
+                .addUserOption(opt => opt.setName('user').setDescription('User to view'))))
         .addSubcommandGroup(group => group
             .setName('settings')
             .setDescription('Manage personal settings')
@@ -110,7 +123,51 @@ module.exports = {
             .addSubcommand(sub => sub
                 .setName('cancel')
                 .setDescription('Cancel a reminder')
-                .addIntegerOption(opt => opt.setName('id').setDescription('Reminder ID').setRequired(true).setMinValue(1))))
+                .addIntegerOption(opt => opt.setName('id').setDescription('Reminder ID').setRequired(true).setMinValue(1)))
+            .addSubcommand(sub => sub
+                .setName('snooze')
+                .setDescription('Snooze an active reminder')
+                .addIntegerOption(opt => opt.setName('id').setDescription('Reminder ID').setRequired(true).setMinValue(1))
+                .addStringOption(opt => opt.setName('time').setDescription('New time until reminder').setRequired(true))))
+        .addSubcommandGroup(group => group
+            .setName('afk')
+            .setDescription('Manage your AFK status')
+            .addSubcommand(sub => sub
+                .setName('set')
+                .setDescription('Set your AFK status')
+                .addStringOption(opt => opt.setName('status').setDescription('Optional status').setMaxLength(25)))
+            .addSubcommand(sub => sub
+                .setName('embed')
+                .setDescription('Set a custom AFK response script')
+                .addStringOption(opt => opt.setName('script').setDescription('ByteBot embed or content script').setRequired(true).setMaxLength(2000)))
+            .addSubcommand(sub => sub.setName('reset').setDescription('Reset your custom AFK response')))
+        .addSubcommandGroup(group => group
+            .setName('timezone')
+            .setDescription('Manage your time zone')
+            .addSubcommand(sub => sub
+                .setName('view')
+                .setDescription('View a saved time zone')
+                .addUserOption(opt => opt.setName('user').setDescription('User to view')))
+            .addSubcommand(sub => sub
+                .setName('set')
+                .setDescription('Set your time zone')
+                .addStringOption(opt => opt.setName('timezone').setDescription('IANA zone, abbreviation, or supported city').setRequired(true).setMaxLength(100)))
+            .addSubcommand(sub => sub.setName('remove').setDescription('Remove your saved time zone')))
+        .addSubcommandGroup(group => group
+            .setName('diary')
+            .setDescription('Manage private diary entries')
+            .addSubcommand(sub => sub
+                .setName('create')
+                .setDescription('Create today\'s diary entry')
+                .addStringOption(opt => opt.setName('content').setDescription('Private diary content').setRequired(true).setMaxLength(2000)))
+            .addSubcommand(sub => sub
+                .setName('view')
+                .setDescription('View one diary entry page')
+                .addIntegerOption(opt => opt.setName('page').setDescription('Page number').setMinValue(1)))
+            .addSubcommand(sub => sub
+                .setName('delete')
+                .setDescription('Delete one diary entry')
+                .addIntegerOption(opt => opt.setName('id').setDescription('Diary entry ID').setRequired(true).setMinValue(1))))
         .addSubcommandGroup(group => group
             .setName('bookmark')
             .setDescription('Manage saved message bookmarks')
@@ -168,6 +225,12 @@ module.exports = {
                 .addBooleanOption(opt => opt.setName('private').setDescription('Show only to you')))),
 
     async execute(interaction, client) {
+        const currentGroup = group(interaction);
+        const action = interaction.options.getSubcommand(false);
+        if (currentGroup === 'name' || ['banner', 'server-avatar', 'server-banner'].includes(action)) {
+            return executeMemberLookup(interaction, client);
+        }
+        if (PERSONAL_GROUPS.has(currentGroup)) return executePersonalUtility(interaction);
         return executeAliasCommand(interaction, client, aliasFor(interaction));
     }
 };

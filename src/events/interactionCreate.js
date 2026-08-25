@@ -6,6 +6,7 @@ const { db } = require('../database/index');
 const { users, commandPermissions, customAchievements } = require('../database/schema');
 const { sql, eq, and } = require('drizzle-orm');
 const { dbLog } = require('../utils/dbLogger');
+const { publicErrorMessage } = require('../utils/errorHandlerUtil');
 
 // Track processed interactions to prevent duplicates
 const processedInteractions = new Set();
@@ -24,6 +25,50 @@ module.exports = {
             return;
         }
         processedInteractions.add(interaction.id);
+        if (interaction.isButton() && interaction.customId.startsWith('join_dm:info:')) {
+            const [, , guildId, recipientId] = interaction.customId.split(':');
+            if (interaction.user.id !== recipientId) {
+                return interaction.reply({ content: 'That Server Info button belongs to another member.', flags: [MessageFlags.Ephemeral] });
+            }
+            const guild = client.guilds.cache.get(guildId);
+            return interaction.reply({
+                embeds: [embeds.brand('Server Info', guild
+                    ? `**${guild.name}**\nServer ID: \`${guild.id}\`\nMembers: **${guild.memberCount.toLocaleString('en-US')}**`
+                    : 'That server is no longer available to ByteBot.')],
+                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+            });
+        }
+        if ((interaction.isButton() || interaction.isAnySelectMenu())
+            && interaction.customId.startsWith('eventlogs:')) {
+            if (!client.eventLoggingService) return interaction.reply({ content: 'Event logging is temporarily unavailable.', flags: [MessageFlags.Ephemeral] });
+            await client.eventLoggingService.handleInteraction(interaction);
+            return;
+        }
+        if ((interaction.isButton() || interaction.isAnySelectMenu() || interaction.isModalSubmit())
+            && interaction.customId.startsWith('levels:')) {
+            const command = client.commands.get('levels');
+            if (!command?.handleInteraction) return interaction.reply({ content: 'Level service is temporarily unavailable.', flags: [MessageFlags.Ephemeral] });
+            await command.handleInteraction(interaction, client);
+            return;
+        }
+        if (interaction.customId?.startsWith('community:')
+            && (interaction.isButton() || interaction.isStringSelectMenu?.() || interaction.isModalSubmit())) {
+            if (!client.communityUtilityService) {
+                return interaction.reply({ content: 'Community utilities are temporarily unavailable.', flags: [MessageFlags.Ephemeral] }).catch(() => null);
+            }
+            await client.communityUtilityService.handleInteraction(interaction);
+            return;
+        }
+        if (interaction.isButton() && interaction.customId?.startsWith('fun:')) {
+            if (!client.funService) {
+                return interaction.reply({
+                    embeds: [embeds.error('Game Unavailable', 'Fun games are temporarily unavailable.')],
+                    flags: [MessageFlags.Ephemeral]
+                }).catch(() => null);
+            }
+            await client.funService.handleInteraction(interaction);
+            return;
+        }
         if (interaction.customId?.startsWith('economy:')
             && (interaction.isButton() || interaction.isStringSelectMenu())) {
             if (!client.economyService) {
@@ -79,6 +124,44 @@ module.exports = {
                 await command.autocomplete(interaction, client);
             } catch (error) {
                 logger.error(`Autocomplete Error: ${error}`);
+            }
+            return;
+        }
+
+        if ((interaction.isButton() || interaction.isModalSubmit())
+            && interaction.customId.startsWith('voicemaster:')) {
+            if (!client.voiceMasterService) {
+                return interaction.reply({
+                    content: 'VoiceMaster is temporarily unavailable.',
+                    flags: [MessageFlags.Ephemeral]
+                }).catch(() => null);
+            }
+            try {
+                const command = client.commands.get('voicemaster');
+                const rawAction = interaction.customId.split(':')[2];
+                const action = rawAction === 'rename-submit' ? 'rename'
+                    : ['increase', 'decrease'].includes(rawAction) ? 'limit' : rawAction;
+                const permissionInteraction = new Proxy(interaction, {
+                    get(target, property) {
+                        if (property === 'commandName') return 'voicemaster';
+                        if (property === 'options') return {
+                            getSubcommandGroup: () => false,
+                            getSubcommand: () => action
+                        };
+                        return target[property];
+                    }
+                });
+                const { checkUserPermissions } = require('../utils/permissions');
+                const { allowed, error } = await checkUserPermissions(permissionInteraction, command);
+                if (!allowed) return interaction.reply({ embeds: [error], flags: [MessageFlags.Ephemeral] });
+                await client.voiceMasterService.handleInteraction(interaction);
+            } catch (error) {
+                logger.errorContext('VoiceMaster Interaction Error', error, {
+                    customId: interaction.customId, userId: interaction.user?.id, guildId: interaction.guildId
+                });
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({ content: 'That VoiceMaster action failed.', flags: [MessageFlags.Ephemeral] }).catch(() => null);
+                }
             }
             return;
         }
@@ -514,10 +597,21 @@ module.exports = {
         // 2. Bot Permission Verification (Only if in a guild)
         if (interaction.guild) {
             const botMember = interaction.guild.members.me;
-            if (!botMember.permissionsIn(interaction.channel).has([PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks])) {
+            const permissionNames = new Map([
+                [PermissionFlagsBits.SendMessages, 'Send Messages'],
+                [PermissionFlagsBits.EmbedLinks, 'Embed Links'],
+                [PermissionFlagsBits.AttachFiles, 'Attach Files']
+            ]);
+            const commandPermissions = typeof command.botPermissions === 'function'
+                ? command.botPermissions(interaction)
+                : (command.botPermissions || []);
+            const required = [PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, ...commandPermissions];
+            const permissions = botMember.permissionsIn(interaction.channel);
+            const missing = required.filter(permission => !permissions.has(permission));
+            if (missing.length) {
                 try {
                     return await interaction.reply({
-                        content: '❌ I do not have permission to send embeds in this channel. Please ensure I have "Send Messages" and "Embed Links" permissions.',
+                        content: `❌ I need ${missing.map(permission => `"${permissionNames.get(permission) || permission}"`).join(', ')} in this channel.`,
                         flags: [MessageFlags.Ephemeral]
                     });
                 } catch (e) {
@@ -569,6 +663,14 @@ module.exports = {
                     flags: [MessageFlags.Ephemeral]
                 });
             }
+        }
+
+        const throughput = client.commandRateLimiter?.consume(interaction.user.id, interaction.guildId);
+        if (throughput && !throughput.allowed) {
+            return interaction.reply({
+                embeds: [embeds.warn('Rate Limit', `The highest public command allowance was reached. Try again <t:${Math.ceil(throughput.retryAt / 1000)}:R>.`)],
+                flags: [MessageFlags.Ephemeral]
+            });
         }
 
         // --- AUTHORIZED EXECUTION START ---
@@ -665,13 +767,16 @@ module.exports = {
                 channelId: interaction.channelId
             });
 
-            const errorMessage = embeds.error('Critical Error', 'An unexpected error occurred while executing this command. The developers have been notified.');
+            const diagnostic = publicErrorMessage(error);
+            const errorMessage = diagnostic
+                ? embeds.error('Unable to Complete Request', diagnostic)
+                : embeds.error('Critical Error', 'An unexpected error occurred while executing this command. The developers have been notified.');
 
             try {
                 if (interaction.replied || interaction.deferred) {
-                    await interaction.followUp({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral] });
+                    await interaction.followUp({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] } });
                 } else {
-                    await interaction.reply({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral] });
+                    await interaction.reply({ embeds: [errorMessage], flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] } });
                 }
             } catch (replyError) {
                 // Interaction expired or already handled - log but don't crash

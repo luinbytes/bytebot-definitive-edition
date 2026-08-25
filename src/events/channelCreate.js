@@ -7,6 +7,7 @@ module.exports = {
     name: Events.ChannelCreate,
     async execute(channel) {
         if (!channel.guild) return;
+        channel.client.voiceMasterService?.handleChannelEvent(channel);
         try {
             const config = sqlite.prepare('SELECT * FROM moderation_config WHERE guild_id = ? AND setup_status = ?')
                 .get(channel.guild.id, 'ready');

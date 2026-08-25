@@ -13,15 +13,21 @@ const {
 const { addLifecycleGroups, executeLifecycle } = require('../../utils/lifecycleMessageCommand');
 const { addBackupGroup, executeBackup } = require('../../utils/serverBackupCommand');
 const { addPresentationGroups, executeCustomize, executeDiscovery } = require('../../utils/serverPresentationCommand');
+const { executeServerLookup } = require('../../utils/informationCommand');
+const { executeCommunityUtilityAdmin } = require('../../utils/communityUtilityCommand');
 
 const MODULE_CHOICES = MODULES.map(value => ({ name: value, value }));
 const PUNISHMENT_CHOICES = PUNISHMENTS.map(value => ({ name: value, value }));
+const LOG_MODULE_CHOICES = [
+    'messages', 'members', 'moderation', 'server', 'voice', 'channels',
+    'roles', 'invites', 'emojis', 'stickers', 'integrations', 'soundboard'
+].map(value => ({ name: value, value }));
 
 const TARGETS = {
     info: { commandName: 'serverinfo', requirePath: 'src/commands/utility/serverinfo.js' },
     stats: { commandName: 'stats', requirePath: 'src/commands/utility/stats.js', subcommand: 'server' },
     config: { commandName: 'config', requirePath: 'src/commands/administration/config.js' },
-    logs: { commandName: 'config', requirePath: 'src/commands/administration/config.js', map: { set: 'logs' } },
+    logs: { commandName: 'config', requirePath: 'src/commands/administration/config.js', map: { set: 'logs', modlog: 'logs' } },
     starboard: { commandName: 'starboard', requirePath: 'src/commands/administration/starboard.js', map: { view: 'config' } },
     suggestion: { commandName: 'suggestion', requirePath: 'src/commands/administration/suggestion.js', map: { top: 'leaderboard' } },
     birthday: { commandName: 'birthday', requirePath: 'src/commands/utility/birthday.js' },
@@ -219,27 +225,90 @@ const serverBuilder = new SlashCommandBuilder()
         .setName('server')
         .setDescription('Server information, setup, and community systems')
         .setDMPermission(false)
-        .addSubcommand(sub => sub.setName('info').setDescription('View server information'))
+        .addSubcommand(sub => sub.setName('info').setDescription('View server information')
+            .addStringOption(opt => opt.setName('server').setDescription('Server ID, invite, or vanity URL').setMaxLength(2048)))
         .addSubcommand(sub => sub
             .setName('stats')
             .setDescription('View server statistics')
             .addBooleanOption(opt => opt.setName('private').setDescription('Show only to you'))
-            .addIntegerOption(opt => opt.setName('days').setDescription('Analytics range in days').setMinValue(1).setMaxValue(1095)))
+            .addIntegerOption(opt => opt.setName('days').setDescription('Analytics range in days').setMinValue(1).setMaxValue(1095))
+            .addStringOption(opt => opt.setName('metric').setDescription('Activity metric').addChoices(
+                { name: 'All activity', value: 'all' },
+                { name: 'Messages', value: 'messages' },
+                { name: 'Reactions', value: 'reactions' },
+                { name: 'Voice', value: 'voice' },
+                { name: 'Membership', value: 'membership' }
+            )))
+        .addSubcommandGroup(group => group.setName('role').setDescription('Role information')
+            .addSubcommand(sub => sub.setName('info').setDescription('View role details')
+                .addRoleOption(opt => opt.setName('role').setDescription('Role to view')))
+            .addSubcommand(sub => sub.setName('members').setDescription('List members in a role')
+                .addRoleOption(opt => opt.setName('role').setDescription('Role to view'))))
+        .addSubcommandGroup(group => group.setName('invite').setDescription('Bot and server invite information')
+            .addSubcommand(sub => sub.setName('bot').setDescription('Invite ByteBot to a server'))
+            .addSubcommand(sub => sub.setName('info').setDescription('View Discord invite information')
+                .addStringOption(opt => opt.setName('invite').setDescription('Invite code or URL').setRequired(true).setMaxLength(2048))))
+        .addSubcommandGroup(group => group.setName('asset').setDescription('Server image assets')
+            .addSubcommand(sub => sub.setName('icon').setDescription('View a server icon')
+                .addStringOption(opt => opt.setName('server').setDescription('Server ID, invite, or vanity URL').setMaxLength(2048)))
+            .addSubcommand(sub => sub.setName('banner').setDescription('View a server banner')
+                .addStringOption(opt => opt.setName('server').setDescription('Server ID, invite, or vanity URL').setMaxLength(2048))))
         .addSubcommandGroup(group => group
             .setName('config')
             .setDescription('Server configuration')
             .addSubcommand(sub => sub.setName('view').setDescription('View server configuration')))
         .addSubcommandGroup(group => group
             .setName('logs')
-            .setDescription('Moderation log settings')
+            .setDescription('Server event and moderation logs')
+            .addSubcommand(sub => sub
+                .setName('add')
+                .setDescription('Add an event log destination')
+                .addChannelOption(opt => opt.setName('channel').setDescription('Log channel').addChannelTypes(ChannelType.GuildText))
+                .addStringOption(opt => opt.setName('module').setDescription('Event module').addChoices(...LOG_MODULE_CHOICES)))
+            .addSubcommand(sub => sub
+                .setName('view')
+                .setDescription('View event log destinations')
+                .addBooleanOption(opt => opt.setName('private').setDescription('Show only to you')))
+            .addSubcommand(sub => sub
+                .setName('remove')
+                .setDescription('Remove an event log destination')
+                .addChannelOption(opt => opt.setName('channel').setDescription('Log channel').addChannelTypes(ChannelType.GuildText))
+                .addStringOption(opt => opt.setName('module').setDescription('Event module').addChoices(...LOG_MODULE_CHOICES)))
+            .addSubcommand(sub => sub
+                .setName('color')
+                .setDescription('Set an event log color')
+                .addChannelOption(opt => opt.setName('channel').setDescription('Log channel').addChannelTypes(ChannelType.GuildText).setRequired(true))
+                .addStringOption(opt => opt.setName('module').setDescription('Event module').addChoices(...LOG_MODULE_CHOICES).setRequired(true))
+                .addStringOption(opt => opt.setName('hex').setDescription('Six-digit hex color').setMinLength(6).setMaxLength(7).setRequired(true)))
+            .addSubcommand(sub => sub
+                .setName('ignore')
+                .setDescription('Toggle a member or channel log exclusion')
+                .addUserOption(opt => opt.setName('member').setDescription('Member to ignore'))
+                .addChannelOption(opt => opt.setName('channel').setDescription('Channel to ignore')))
+            .addSubcommand(sub => sub
+                .setName('recover')
+                .setDescription('Resolve an uncertain event-log delivery')
+                .addStringOption(opt => opt.setName('action').setDescription('Recovery action').setRequired(true).addChoices(
+                    { name: 'List uncertain deliveries', value: 'list' },
+                    { name: 'Retry a delivery', value: 'retry' },
+                    { name: 'Abandon a delivery', value: 'abandon' }
+                ))
+                .addIntegerOption(opt => opt.setName('id').setDescription('Delivery ID').setMinValue(1))
+                .addBooleanOption(opt => opt.setName('confirm').setDescription('Confirm retry or abandon')))
+            .addSubcommand(sub => sub
+                .setName('modlog')
+                .setDescription('Set the moderation log channel')
+                .addChannelOption(opt => opt
+                    .setName('channel')
+                    .setDescription('Log channel')
+                    .addChannelTypes(ChannelType.GuildText)))
             .addSubcommand(sub => sub
                 .setName('set')
                 .setDescription('Set the moderation log channel')
                 .addChannelOption(opt => opt
                     .setName('channel')
                     .setDescription('Log channel')
-                    .addChannelTypes(ChannelType.GuildText)
-                    .setRequired(true))))
+                    .addChannelTypes(ChannelType.GuildText))))
         .addSubcommandGroup(group => group
             .setName('starboard')
             .setDescription('Starboard system')
@@ -316,6 +385,8 @@ const serverBuilder = new SlashCommandBuilder()
         .addSubcommandGroup(group => group
             .setName('permissions')
             .setDescription('Command access and protected targets')
+            .addSubcommand(sub => sub.setName('view').setDescription('View a member Discord permissions')
+                .addUserOption(opt => opt.setName('user').setDescription('Member to view')))
             .addSubcommand(sub => sub.setName('add').setDescription('Allow a role to use a command').addStringOption(opt => opt.setName('command').setDescription('Command path').setRequired(true).setAutocomplete(true)).addRoleOption(opt => opt.setName('role').setDescription('Allowed role').setRequired(true)))
             .addSubcommand(sub => sub.setName('remove').setDescription('Remove a command role').addStringOption(opt => opt.setName('command').setDescription('Command path').setRequired(true).setAutocomplete(true)).addRoleOption(opt => opt.setName('role').setDescription('Allowed role').setRequired(true)))
             .addSubcommand(sub => sub.setName('list').setDescription('List command role permissions'))
@@ -420,10 +491,47 @@ const serverBuilder = new SlashCommandBuilder()
                 )).addChannelOption(opt => opt.setName('channel').setDescription('Log channel').addChannelTypes(ChannelType.GuildText))))
         .addSubcommandGroup(group => group
             .setName('community')
-            .setDescription('Community feature setup status')
+            .setDescription('Community feature controls')
             .addSubcommand(sub => sub
                 .setName('view')
-                .setDescription('View read-only community configuration status')));
+                .setDescription('View read-only community configuration status'))
+            .addSubcommand(sub => sub.setName('image-only').setDescription('Manage attachment-only messages in a channel')
+                .addStringOption(opt => opt.setName('action').setDescription('Action').setRequired(true).addChoices(
+                    { name: 'Enable', value: 'enable' }, { name: 'Disable', value: 'disable' }, { name: 'View', value: 'view' }
+                )).addChannelOption(opt => opt.setName('channel').setDescription('Channel; defaults to the current channel').addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)))
+            .addSubcommand(sub => sub.setName('pin').setDescription('Pin a same-server message')
+                .addStringOption(opt => opt.setName('message').setDescription('Message link or ID').setRequired(true)))
+            .addSubcommand(sub => sub.setName('unpin').setDescription('Unpin a same-server message')
+                .addStringOption(opt => opt.setName('message').setDescription('Message link or ID').setRequired(true))))
+        .addSubcommandGroup(group => group.setName('confessions').setDescription('Moderated anonymous confessions')
+            .addSubcommand(sub => sub.setName('view').setDescription('View confession configuration'))
+            .addSubcommand(sub => sub.setName('setup').setDescription('Enable confessions and publish a panel')
+                .addChannelOption(opt => opt.setName('channel').setDescription('Default confession channel').addChannelTypes(ChannelType.GuildText).setRequired(true)))
+            .addSubcommand(sub => sub.setName('remove').setDescription('Disable confession submissions')
+                .addBooleanOption(opt => opt.setName('confirm').setDescription('Confirm disabling confessions').setRequired(true)))
+            .addSubcommand(sub => sub.setName('category').setDescription('Manage confession category routing')
+                .addStringOption(opt => opt.setName('action').setDescription('Action').setRequired(true).addChoices(
+                    { name: 'Add', value: 'add' }, { name: 'Remove', value: 'remove' }, { name: 'List', value: 'list' }
+                )).addStringOption(opt => opt.setName('name').setDescription('Category name').setMaxLength(50))
+                .addChannelOption(opt => opt.setName('channel').setDescription('Category channel').addChannelTypes(ChannelType.GuildText)))
+            .addSubcommand(sub => sub.setName('blacklist').setDescription('Manage blocked confession phrases')
+                .addStringOption(opt => opt.setName('action').setDescription('Action').setRequired(true).addChoices(
+                    { name: 'Add', value: 'add' }, { name: 'Remove', value: 'remove' }, { name: 'List', value: 'list' }, { name: 'Clear', value: 'clear' }
+                )).addStringOption(opt => opt.setName('phrase').setDescription('Blocked phrase').setMaxLength(100)))
+            .addSubcommand(sub => sub.setName('emojis').setDescription('Manage confession vote emojis')
+                .addStringOption(opt => opt.setName('action').setDescription('Action').setRequired(true).addChoices(
+                    { name: 'Set', value: 'set' }, { name: 'Reset', value: 'reset' }, { name: 'View', value: 'view' }
+                )).addStringOption(opt => opt.setName('up').setDescription('Up emoji or none').setMaxLength(64))
+                .addStringOption(opt => opt.setName('down').setDescription('Down emoji or none').setMaxLength(64)))
+            .addSubcommand(sub => sub.setName('mute').setDescription('Mute the author of a confession')
+                .addIntegerOption(opt => opt.setName('number').setDescription('Confession number').setMinValue(1).setRequired(true))
+                .addStringOption(opt => opt.setName('reason').setDescription('Moderator reason').setMaxLength(500)))
+            .addSubcommand(sub => sub.setName('unmute').setDescription('Unmute confession authors')
+                .addIntegerOption(opt => opt.setName('number').setDescription('Confession number').setMinValue(1))
+                .addBooleanOption(opt => opt.setName('all').setDescription('Clear every confession mute')))
+            .addSubcommand(sub => sub.setName('report').setDescription('Reveal an author for moderation')
+                .addIntegerOption(opt => opt.setName('number').setDescription('Confession number').setMinValue(1).setRequired(true))
+                .addStringOption(opt => opt.setName('reason').setDescription('Lookup reason').setMinLength(1).setMaxLength(500).setRequired(true))));
 
 addAntiraidGroup(serverBuilder);
 addAutomodGroup(serverBuilder);
@@ -449,13 +557,50 @@ module.exports = {
     },
 
     async execute(interaction, client) {
+        if (['role', 'invite', 'asset'].includes(interaction.options.getSubcommandGroup(false))
+            || (interaction.options.getSubcommandGroup(false) === 'permissions'
+                && interaction.options.getSubcommand(false) === 'view')) {
+            return executeServerLookup(interaction, client);
+        }
+        if (interaction.options.getSubcommandGroup(false) === 'logs'
+            && ['set', 'modlog'].includes(interaction.options.getSubcommand())) {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                throw new Error('You need Manage Server to configure moderation logs.');
+            }
+            const channel = interaction.options.getChannel('channel');
+            if (channel && !interaction.guild.members.me.permissionsIn(channel).has([
+                PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks
+            ])) throw new Error('I need View Channel, Send Messages, and Embed Links in that moderation log channel.');
+            if (channel) sqlite.prepare(`UPDATE guilds SET log_channel = ? WHERE id = ?`).run(channel.id, interaction.guildId);
+            const current = channel?.id || sqlite.prepare(`SELECT log_channel FROM guilds WHERE id = ?`).get(interaction.guildId)?.log_channel;
+            return interaction.reply({
+                embeds: [embeds.brand('Moderation Logs', current
+                    ? `Moderation log channel has been set to <#${current}>`
+                    : 'A moderation log channel has not been configured.')],
+                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+            });
+        }
+        if (interaction.options.getSubcommandGroup(false) === 'logs'
+            && !['set', 'modlog'].includes(interaction.options.getSubcommand())) {
+            if (!client.eventLoggingService) throw new Error('Event logging service is unavailable');
+            return client.eventLoggingService.execute(interaction);
+        }
         if (interaction.options.getSubcommandGroup(false) === 'backup') return executeBackup(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'customize') return executeCustomize(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'discovery') return executeDiscovery(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'security') return executeSecurity(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'antiraid') return executeAntiraid(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'automod') return executeAutomod(interaction);
+        if (interaction.options.getSubcommandGroup(false) === 'confessions'
+            || (interaction.options.getSubcommandGroup(false) === 'community' && interaction.options.getSubcommand() !== 'view')) {
+            return executeCommunityUtilityAdmin(interaction, client);
+        }
         if (['welcome', 'goodbye', 'boost', 'system'].includes(interaction.options.getSubcommandGroup(false))) return executeLifecycle(interaction);
         return executeAliasCommand(interaction, client, aliasFor(interaction));
+    },
+
+    async handleInteraction(interaction, client) {
+        if (!client.eventLoggingService) throw new Error('Event logging service is unavailable');
+        return client.eventLoggingService.handleInteraction(interaction);
     }
 };

@@ -2,25 +2,34 @@ const { Events } = require('discord.js');
 const logger = require('../utils/logger');
 const { handleMemberJoin } = require('../services/antiraidService');
 const { handleMemberUpdate: handleAutomodMemberUpdate } = require('../services/automodService');
-const { sendLifecycleMessage } = require('../services/lifecycleMessageService');
+const { sendJoinDm, sendLifecycleMessage } = require('../services/lifecycleMessageService');
 
 module.exports = {
     name: Events.GuildMemberAdd,
     async execute(member, client) {
         try {
+            await client?.levelAnalyticsService?.recordMembership(member, true);
+        } catch (error) {
+            logger.error(`Failed to record member join analytics for ${member.id}: ${error.message}`);
+        }
+        try {
             const incident = await handleMemberJoin(member);
-            if (incident?.status === 'punished') return;
+            if (incident) return;
+            let automodIncident;
             try {
-                await handleAutomodMemberUpdate({ displayName: null, nickname: null }, member);
+                automodIncident = await handleAutomodMemberUpdate({ displayName: null, nickname: null }, member);
             } catch (error) {
                 logger.error(`AutoMod nickname handler failed for joining member ${member.id}: ${error.message}`);
+                return;
             }
+            if (automodIncident && automodIncident.action !== 'delete') return;
             try {
                 await sendLifecycleMessage('welcome', member);
+                await sendJoinDm(member);
             } catch (error) {
                 logger.error(`Welcome delivery failed for joining member ${member.id}: ${error.message}`);
             }
-            if (client.automationService) await client.automationService.handleMemberAdd(member);
+            if (client?.automationService) await client.automationService.handleMemberAdd(member);
         } catch (error) {
             logger.error(`Failed to process member join in guild ${member.guild.id}:`, error);
         }

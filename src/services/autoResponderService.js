@@ -1,9 +1,24 @@
 const { db } = require('../database');
 const { autoResponses } = require('../database/schema');
-const { eq, and, sql } = require('drizzle-orm');
+const { eq, and, count, sql } = require('drizzle-orm');
 const logger = require('../utils/logger');
 const { dbLog } = require('../utils/dbLogger');
 const { parseEmbedScript } = require('./lifecycleMessageService');
+
+const MAX_AUTO_RESPONDERS = 500;
+
+function createAutoResponder(values) {
+    return db.transaction(tx => {
+        const total = tx.select({ count: count() }).from(autoResponses)
+            .where(eq(autoResponses.guildId, values.guildId)).get();
+        if (total.count >= MAX_AUTO_RESPONDERS) {
+            const error = new Error(`This server has reached the ${MAX_AUTO_RESPONDERS} auto-responder limit.`);
+            error.code = 'AUTO_RESPONDER_LIMIT';
+            throw error;
+        }
+        return tx.insert(autoResponses).values(values).returning().get();
+    });
+}
 
 /**
  * Auto-Responder Service
@@ -252,3 +267,5 @@ class AutoResponderService {
 }
 
 module.exports = AutoResponderService;
+module.exports.createAutoResponder = createAutoResponder;
+module.exports.MAX_AUTO_RESPONDERS = MAX_AUTO_RESPONDERS;

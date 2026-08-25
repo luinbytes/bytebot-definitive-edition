@@ -1,5 +1,5 @@
 const { sql } = require('drizzle-orm');
-const { sqliteTable, text, integer, real, index, uniqueIndex, unique, primaryKey, check } = require('drizzle-orm/sqlite-core');
+const { sqliteTable, text, integer, real, blob, index, uniqueIndex, unique, primaryKey, check } = require('drizzle-orm/sqlite-core');
 
 const guilds = sqliteTable('guilds', {
     id: text('id').primaryKey(),
@@ -15,6 +15,89 @@ const guilds = sqliteTable('guilds', {
     achievementsEnabled: integer('achievements_enabled', { mode: 'boolean' }).default(true), // Guild-level achievement toggle
 });
 
+const musicConfig = sqliteTable('music_config', {
+    guildId: text('guild_id').primaryKey(),
+    djRoleId: text('dj_role_id'),
+    autoplay: integer('autoplay', { mode: 'boolean' }).default(false).notNull(),
+});
+
+const voiceMasterConfigs = sqliteTable('voice_master_configs', {
+    guildId: text('guild_id').primaryKey(),
+    state: text('state').default('active').notNull(),
+    generation: integer('generation').default(0).notNull(),
+    categoryId: text('category_id'),
+    primaryChannelId: text('primary_channel_id'),
+    interfaceMessageId: text('interface_message_id'),
+    nameTemplate: text('name_template').default("{owner}'s channel").notNull(),
+    defaultRoleId: text('default_role_id'),
+    defaultBitrate: integer('default_bitrate'),
+    defaultRegion: text('default_region'),
+    sendInterface: integer('send_interface', { mode: 'boolean' }).default(true).notNull(),
+    temporaryEnabled: integer('temporary_enabled', { mode: 'boolean' }).default(true).notNull(),
+    joinRoleId: text('join_role_id'),
+    updatedAt: integer('updated_at').notNull(),
+}, table => ({
+    stateCheck: check('voice_master_configs_state_check', sql`${table.state} IN ('creating','active','resetting','failed')`),
+    templateCheck: check('voice_master_configs_template_check', sql`length(${table.nameTemplate}) BETWEEN 1 AND 32`),
+    bitrateCheck: check('voice_master_configs_bitrate_check', sql`${table.defaultBitrate} IS NULL OR ${table.defaultBitrate} >= 8000`),
+}));
+
+const voiceMasterSources = sqliteTable('voice_master_sources', {
+    channelId: text('channel_id').primaryKey(),
+    guildId: text('guild_id').notNull(),
+    categoryId: text('category_id'),
+    interfaceMessageId: text('interface_message_id'),
+    state: text('state').default('active').notNull(),
+    isPrimary: integer('is_primary', { mode: 'boolean' }).default(false).notNull(),
+    owned: integer('owned', { mode: 'boolean' }).default(false).notNull(),
+    createdAt: integer('created_at').notNull(),
+}, table => ({
+    stateCheck: check('voice_master_sources_state_check', sql`${table.state} IN ('pending','active','lost')`),
+    primaryUnique: uniqueIndex('voice_master_sources_primary_unique').on(table.guildId).where(sql`${table.isPrimary} = 1`),
+    guildIdx: index('voice_master_sources_guild_idx').on(table.guildId, table.channelId),
+}));
+
+const voiceMasterCreations = sqliteTable('voice_master_creations', {
+    guildId: text('guild_id').notNull(),
+    sourceChannelId: text('source_channel_id').notNull(),
+    memberId: text('member_id').notNull(),
+    channelId: text('channel_id'),
+    state: text('state').notNull(),
+    generation: integer('generation').default(0).notNull(),
+    error: text('error'),
+    updatedAt: integer('updated_at').notNull(),
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.sourceChannelId, table.memberId] }),
+    stateCheck: check('voice_master_creations_state_check', sql`${table.state} IN ('pending','deleting','active','failed')`),
+}));
+
+const voiceMasterAccess = sqliteTable('voice_master_access', {
+    guildId: text('guild_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    userId: text('user_id').notNull(),
+    effect: text('effect').notNull(),
+    state: text('state').default('active').notNull(),
+    generation: integer('generation').default(0).notNull(),
+    updatedAt: integer('updated_at').notNull(),
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.channelId, table.userId] }),
+    effectCheck: check('voice_master_access_effect_check', sql`${table.effect} IN ('permit','reject')`),
+    stateCheck: check('voice_master_access_state_check', sql`${table.state} IN ('pending','active')`),
+}));
+
+const voiceMasterJoinRoles = sqliteTable('voice_master_join_roles', {
+    guildId: text('guild_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    memberId: text('member_id').notNull(),
+    roleId: text('role_id').notNull(),
+    state: text('state').default('active').notNull(),
+    addedByBot: integer('added_by_bot', { mode: 'boolean' }).default(false).notNull(),
+    updatedAt: integer('updated_at').notNull(),
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.channelId, table.memberId] }),
+    stateCheck: check('voice_master_join_roles_state_check', sql`${table.state} IN ('pending','active')`),
+}));
+
 const lifecycleMessages = sqliteTable('lifecycle_messages', {
     guildId: text('guild_id').notNull(),
     type: text('type').notNull(),
@@ -27,6 +110,20 @@ const lifecycleMessages = sqliteTable('lifecycle_messages', {
 }, (table) => ({
     pk: primaryKey({ columns: [table.guildId, table.type] }),
 }));
+
+const lifecycleMessageChannels = sqliteTable('lifecycle_message_channels', {
+    guildId: text('guild_id').notNull(),
+    type: text('type').notNull(),
+    channelId: text('channel_id').notNull(),
+    template: text('template'),
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.type, table.channelId] }) }));
+
+const joinDmDeliveries = sqliteTable('join_dm_deliveries', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    sentAt: integer('sent_at').notNull(),
+}, table => ({ guildSentIdx: index('join_dm_deliveries_guild_sent_idx').on(table.guildId, table.sentAt) }));
 
 const users = sqliteTable('users', {
     id: text('id').primaryKey(),
@@ -408,6 +505,14 @@ const uwuLockMembers = sqliteTable('uwu_lock_members', {
     guildStateIdx: index('uwu_lock_members_guild_state_idx').on(table.guildId, table.state),
 }));
 
+const uwuRouletteConfigs = sqliteTable('uwu_roulette_configs', {
+    guildId: text('guild_id').primaryKey(),
+    percentage: integer('percentage').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+}, table => ({
+    percentageCheck: check('uwu_roulette_configs_percentage_check', sql`${table.percentage} BETWEEN 1 AND 100`),
+}));
+
 const bytepods = sqliteTable('bytepods', {
     channelId: text('channel_id').primaryKey(),
     guildId: text('guild_id').notNull(),
@@ -416,8 +521,17 @@ const bytepods = sqliteTable('bytepods', {
     ownerLeftAt: integer('owner_left_at'),      // Timestamp (ms) when owner left - null if owner present
     reclaimRequestPending: integer('reclaim_request_pending', { mode: 'boolean' }).default(false), // Prevents duplicate reclaim prompts
     panelMessageId: text('panel_message_id'), // Message ID of the active control panel (for cleanup)
+    sourceChannelId: text('source_channel_id'),
+    state: text('state').default('active').notNull(),
+    generation: integer('generation').default(0).notNull(),
+    cleanupAfter: integer('cleanup_after'),
+    botOwned: integer('bot_owned', { mode: 'boolean' }).default(true).notNull(),
+    pendingOwnerId: text('pending_owner_id'),
+    claimSnapshot: text('claim_snapshot'),
     createdAt: integer('created_at', { mode: 'timestamp' }).default(new Date()),
-});
+}, table => ({
+    guildStateIdx: index('bytepods_guild_state_idx').on(table.guildId, table.state),
+}));
 
 const bytepodAutoWhitelist = sqliteTable('bytepod_autowhitelist', {
     id: integer('id').primaryKey({ autoIncrement: true }),
@@ -689,6 +803,38 @@ const reminders = sqliteTable('reminders', {
     guildIdx: index('reminders_guild_idx').on(table.guildId, table.active)
 }));
 
+const personalSettings = sqliteTable('personal_settings', {
+    userId: text('user_id').primaryKey(),
+    timezone: text('timezone'),
+    afkTemplate: text('afk_template'),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    nonemptyCheck: check('personal_settings_nonempty_check', sql`${table.timezone} IS NOT NULL OR ${table.afkTemplate} IS NOT NULL`),
+    timezoneCheck: check('personal_settings_timezone_check', sql`${table.timezone} IS NULL OR length(${table.timezone}) BETWEEN 1 AND 100`),
+    templateCheck: check('personal_settings_template_check', sql`${table.afkTemplate} IS NULL OR length(${table.afkTemplate}) BETWEEN 1 AND 2000`)
+}));
+
+const afkStatuses = sqliteTable('afk_statuses', {
+    userId: text('user_id').primaryKey(),
+    status: text('status').notNull(),
+    setAt: integer('set_at').notNull()
+}, table => ({
+    statusCheck: check('afk_statuses_status_check', sql`length(${table.status}) BETWEEN 1 AND 25`)
+}));
+
+const diaryEntries = sqliteTable('diary_entries', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: text('user_id').notNull(),
+    entryDate: text('entry_date').notNull(),
+    content: text('content').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({
+    userDateUnique: unique('diary_entries_user_date_unique').on(table.userId, table.entryDate),
+    userDateIdx: index('diary_entries_user_date_idx').on(table.userId, table.entryDate),
+    dateCheck: check('diary_entries_date_check', sql`${table.entryDate} GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'`),
+    contentCheck: check('diary_entries_content_check', sql`length(${table.content}) BETWEEN 1 AND 2000`)
+}));
+
 // Suggestions configuration (per-guild)
 const suggestionConfig = sqliteTable('suggestion_config', {
     guildId: text('guild_id').primaryKey(),
@@ -774,6 +920,8 @@ const activityLogs = sqliteTable('activity_logs', {
     activityDate: text('activity_date').notNull(), // YYYY-MM-DD format
     messageCount: integer('message_count').default(0).notNull(),
     voiceMinutes: integer('voice_minutes').default(0).notNull(),
+    textXpAwarded: integer('text_xp_awarded').default(0).notNull(),
+    voiceSeconds: integer('voice_seconds').default(0).notNull(),
     commandsRun: integer('commands_run').default(0).notNull(),
     reactionsGiven: integer('reactions_given').default(0).notNull(), // Track reactions given
     channelsJoined: integer('channels_joined').default(0).notNull(), // Track unique voice channels joined
@@ -1071,8 +1219,191 @@ const memberLevels = sqliteTable('member_levels', {
     userId: text('user_id').notNull(),
     xp: integer('xp').default(0).notNull(),
     level: integer('level').default(0).notNull(),
+    textXp: integer('text_xp').default(0).notNull(),
+    voiceXp: integer('voice_xp').default(0).notNull(),
+    manualAdjustment: integer('manual_adjustment').default(0).notNull(),
+    levelFloor: integer('level_floor').default(0).notNull(),
+    messageCount: integer('message_count').default(0).notNull(),
+    voiceSeconds: integer('voice_seconds').default(0).notNull(),
+    lastTextXpAt: integer('last_text_xp_at'),
     updatedAt: integer('updated_at').notNull()
 }, table => ({ pk: primaryKey({ columns: [table.guildId, table.userId] }) }));
+
+const levelConfigs = sqliteTable('level_configs', {
+    guildId: text('guild_id').primaryKey(),
+    textEnabled: integer('text_enabled', { mode: 'boolean' }).default(true).notNull(),
+    voiceEnabled: integer('voice_enabled', { mode: 'boolean' }).default(true).notNull(),
+    awardChannelId: text('award_channel_id'),
+    awardMessage: text('award_message'),
+    messageEnabled: integer('message_enabled', { mode: 'boolean' }).default(false).notNull(),
+    dmEnabled: integer('dm_enabled', { mode: 'boolean' }).default(false).notNull(),
+    antiafkEnabled: integer('antiafk_enabled', { mode: 'boolean' }).default(true).notNull(),
+    textCooldownSeconds: integer('text_cooldown_seconds').default(60).notNull(),
+    voiceXpPerMinute: integer('voice_xp_per_minute').default(5).notNull(),
+    voiceMinSeconds: integer('voice_min_seconds').default(60).notNull(),
+    voiceSessionXpCap: integer('voice_session_xp_cap').default(3600).notNull(),
+    baseMultiplier: real('base_multiplier').default(1).notNull(),
+    stackRoles: integer('stack_roles', { mode: 'boolean' }).default(false).notNull(),
+    baselineAt: integer('baseline_at'),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    rateCheck: check('level_configs_rate_check', sql`${table.baseMultiplier} BETWEEN 0 AND 10`)
+}));
+
+const levelRoleRewards = sqliteTable('level_role_rewards', {
+    guildId: text('guild_id').notNull(),
+    level: integer('level').notNull(),
+    roleId: text('role_id').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.level] }),
+    roleUnique: unique().on(table.guildId, table.roleId),
+    levelCheck: check('level_role_rewards_level_check', sql`${table.level} BETWEEN 1 AND 999`)
+}));
+
+const levelIgnores = sqliteTable('level_ignores', {
+    guildId: text('guild_id').notNull(),
+    targetType: text('target_type').notNull(),
+    targetId: text('target_id').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.targetType, table.targetId] }) }));
+
+const levelBoosts = sqliteTable('level_boosts', {
+    guildId: text('guild_id').notNull(),
+    targetType: text('target_type').notNull(),
+    targetId: text('target_id').notNull(),
+    multiplier: real('multiplier').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.targetType, table.targetId] }),
+    multiplierCheck: check('level_boosts_multiplier_check', sql`${table.multiplier} BETWEEN 0 AND 10`)
+}));
+
+const levelLiveBoards = sqliteTable('level_live_boards', {
+    guildId: text('guild_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    metric: text('metric').notNull(),
+    messageId: text('message_id'),
+    createToken: text('create_token'),
+    createStatus: text('create_status').default('active').notNull(),
+    createStartedAt: integer('create_started_at'),
+    revision: integer('revision').default(0).notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.channelId, table.metric] }) }));
+
+const levelRoleJobs = sqliteTable('level_role_jobs', {
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    attempts: integer('attempts').default(0).notNull(),
+    generation: integer('generation').default(1).notNull(),
+    claimToken: text('claim_token'),
+    claimExpiresAt: integer('claim_expires_at'),
+    nextAttemptAt: integer('next_attempt_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.userId] }),
+    dueIdx: index('level_role_jobs_due_idx').on(table.nextAttemptAt)
+}));
+
+const levelRankCards = sqliteTable('level_rank_cards', {
+    userId: text('user_id').primaryKey(),
+    accent: text('accent'),
+    layout: text('layout').default('classic').notNull(),
+    backgroundData: blob('background_data', { mode: 'buffer' }),
+    backgroundMime: text('background_mime'),
+    avatarBorder: integer('avatar_border').default(4).notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    layoutCheck: check('level_rank_cards_layout_check', sql`${table.layout} IN ('classic','compact')`),
+    borderCheck: check('level_rank_cards_border_check', sql`${table.avatarBorder} BETWEEN 0 AND 20`)
+}));
+
+const serverDailyMetrics = sqliteTable('server_daily_metrics', {
+    guildId: text('guild_id').notNull(),
+    activityDate: text('activity_date').notNull(),
+    messageCount: integer('message_count').default(0).notNull(),
+    reactionCount: integer('reaction_count').default(0).notNull(),
+    voiceSeconds: integer('voice_seconds').default(0).notNull(),
+    joins: integer('joins').default(0).notNull(),
+    leaves: integer('leaves').default(0).notNull(),
+    memberCount: integer('member_count'),
+    baselineAt: integer('baseline_at'),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.activityDate] }),
+    dateIdx: index('server_daily_metrics_date_idx').on(table.activityDate)
+}));
+
+const analyticsEvents = sqliteTable('analytics_events', {
+    guildId: text('guild_id').notNull(),
+    eventType: text('event_type').notNull(),
+    eventId: text('event_id').notNull(),
+    occurredAt: integer('occurred_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.eventType, table.eventId] }),
+    occurredIdx: index('analytics_events_occurred_idx').on(table.occurredAt)
+}));
+
+const reactionPlacements = sqliteTable('reaction_placements', {
+    guildId: text('guild_id').notNull(),
+    messageId: text('message_id').notNull(),
+    userId: text('user_id').notNull(),
+    emoji: text('emoji').notNull(),
+    addedAt: integer('added_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.messageId, table.userId, table.emoji] }) }));
+
+const levelVoiceSessions = sqliteTable('level_voice_sessions', {
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    eligibleSince: integer('eligible_since'),
+    lastObservedAt: integer('last_observed_at').notNull(),
+    remainderSeconds: integer('remainder_seconds').default(0).notNull(),
+    awardedXp: integer('awarded_xp').default(0).notNull(),
+    eligibleSeconds: integer('eligible_seconds').default(0).notNull(),
+    xpSecondsConsumed: integer('xp_seconds_consumed').default(0).notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.userId] }) }));
+
+const memberPresence = sqliteTable('member_presence', {
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    present: integer('present', { mode: 'boolean' }).notNull(),
+    lastObservedAt: integer('last_observed_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.userId] }) }));
+
+const eventLogChannels = sqliteTable('event_log_channels', {
+    guildId: text('guild_id').notNull(),
+    module: text('module').notNull(),
+    channelId: text('channel_id').notNull(),
+    color: text('color'),
+    createdAt: integer('created_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.module, table.channelId] }),
+    channelIdx: index('event_log_channels_guild_channel_idx').on(table.guildId, table.channelId)
+}));
+
+const eventLogIgnores = sqliteTable('event_log_ignores', {
+    guildId: text('guild_id').notNull(),
+    targetType: text('target_type').notNull(),
+    targetId: text('target_id').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.targetType, table.targetId] }) }));
+
+const eventLogOutbox = sqliteTable('event_log_outbox', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    eventKey: text('event_key').notNull(),
+    channelId: text('channel_id').notNull(),
+    module: text('module').notNull(),
+    payload: text('payload').notNull(),
+    attempts: integer('attempts').default(0).notNull(),
+    nextAttemptAt: integer('next_attempt_at').notNull(),
+    status: text('status').default('pending').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({
+    deliveryUnique: unique().on(table.guildId, table.eventKey, table.channelId),
+    dueIdx: index('event_log_outbox_due_idx').on(table.status, table.nextAttemptAt)
+}));
 
 const giveaways = sqliteTable('giveaways', {
     id: integer('id').primaryKey({ autoIncrement: true }),
@@ -1411,9 +1742,185 @@ const economyLabOperations = sqliteTable('economy_lab_operations', {
     amountCheck: check('economy_lab_operations_amount_check', sql`${table.inputAmount} >= 0 AND ${table.resultAmount} >= 0`)
 }));
 
+const confessionConfigs = sqliteTable('confession_configs', {
+    guildId: text('guild_id').primaryKey(),
+    channelId: text('channel_id').notNull(),
+    panelMessageId: text('panel_message_id'),
+    upEmoji: text('up_emoji').default('👍').notNull(),
+    downEmoji: text('down_emoji').default('👎').notNull(),
+    nextNumber: integer('next_number').default(1).notNull(),
+    enabled: integer('enabled', { mode: 'boolean' }).default(true).notNull(),
+    updatedAt: integer('updated_at').notNull()
+});
+
+const confessionCategories = sqliteTable('confession_categories', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    name: text('name').notNull(),
+    nameKey: text('name_key').notNull(),
+    channelId: text('channel_id').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({ guildNameUnique: unique().on(table.guildId, table.nameKey) }));
+
+const confessionBlacklist = sqliteTable('confession_blacklist', {
+    guildId: text('guild_id').notNull(),
+    phrase: text('phrase').notNull(),
+    phraseKey: text('phrase_key').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.phraseKey] }) }));
+
+const confessionMutes = sqliteTable('confession_mutes', {
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    mutedBy: text('muted_by').notNull(),
+    reason: text('reason'),
+    createdAt: integer('created_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.userId] }) }));
+
+const confessions = sqliteTable('confessions', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    number: integer('number').notNull(),
+    categoryId: integer('category_id').references(() => confessionCategories.id, { onDelete: 'set null' }),
+    channelId: text('channel_id').notNull(),
+    messageId: text('message_id'),
+    authorId: text('author_id').notNull(),
+    content: text('content').notNull(),
+    status: text('status').default('pending').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({
+    guildNumberUnique: unique().on(table.guildId, table.number),
+    authorCreatedIdx: index('confessions_author_created_idx').on(table.guildId, table.authorId, table.createdAt),
+    statusCheck: check('confessions_status_check', sql`${table.status} IN ('pending','published','failed')`)
+}));
+
+const confessionReplies = sqliteTable('confession_replies', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    confessionId: integer('confession_id').notNull().references(() => confessions.id, { onDelete: 'cascade' }),
+    replierId: text('replier_id').notNull(),
+    content: text('content').notNull(),
+    delivered: integer('delivered', { mode: 'boolean' }).default(false).notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({ confessionCreatedIdx: index('confession_replies_created_idx').on(table.confessionId, table.createdAt) }));
+
+const communityPolls = sqliteTable('community_polls', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    messageId: text('message_id'),
+    creatorId: text('creator_id').notNull(),
+    question: text('question').notNull(),
+    optionsJson: text('options_json').notNull(),
+    status: text('status').default('pending').notNull(),
+    endsAt: integer('ends_at'),
+    createdAt: integer('created_at').notNull(),
+    endedAt: integer('ended_at')
+}, table => ({
+    messageUnique: unique().on(table.guildId, table.messageId),
+    dueIdx: index('community_polls_due_idx').on(table.status, table.endsAt),
+    statusCheck: check('community_polls_status_check', sql`${table.status} IN ('pending','active','ending','ended','failed')`)
+}));
+
+const communityPollVotes = sqliteTable('community_poll_votes', {
+    pollId: integer('poll_id').notNull().references(() => communityPolls.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull(),
+    optionIndex: integer('option_index').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.pollId, table.userId] }),
+    optionCheck: check('community_poll_votes_option_check', sql`${table.optionIndex} BETWEEN 0 AND 9`)
+}));
+
+const imageOnlyChannels = sqliteTable('image_only_channels', {
+    guildId: text('guild_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.channelId] }) }));
+const snipeProtections = sqliteTable('snipe_protections', {
+    userId: text('user_id').primaryKey(),
+    updatedAt: integer('updated_at').notNull()
+});
+
+const roleplayDisabled = sqliteTable('roleplay_disabled', {
+    guildId: text('guild_id').notNull(),
+    action: text('action').notNull(),
+    updatedBy: text('updated_by').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.action] })
+}));
+
+const roleplayCounts = sqliteTable('roleplay_counts', {
+    guildId: text('guild_id').notNull(),
+    actorId: text('actor_id').notNull(),
+    targetId: text('target_id').notNull(),
+    action: text('action').notNull(),
+    count: integer('count').default(0).notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.actorId, table.targetId, table.action] })
+}));
+
+const funBlunts = sqliteTable('fun_blunts', {
+    userId: text('user_id').primaryKey(),
+    sparkedAt: integer('sparked_at'),
+    lastSparkedAt: integer('last_sparked_at'),
+    taps: integer('taps').default(0).notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    tapsCheck: check('fun_blunts_taps_check', sql`${table.taps} >= 0`)
+}));
+
+const funVapes = sqliteTable('fun_vapes', {
+    guildId: text('guild_id').primaryKey(),
+    holderId: text('holder_id').notNull(),
+    flavor: text('flavor').default('mint').notNull(),
+    hits: integer('hits').default(0).notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    hitsCheck: check('fun_vapes_hits_check', sql`${table.hits} >= 0`)
+}));
+const lastfmAccounts = sqliteTable('lastfm_accounts', {
+    userId: text('user_id').primaryKey(),
+    username: text('username').notNull(),
+    sessionKey: text('session_key'),
+    presentation: text('presentation'),
+    reactions: text('reactions'),
+    commandAlias: text('command_alias'),
+    linkedAt: integer('linked_at').notNull(),
+    refreshedAt: integer('refreshed_at').notNull()
+}, table => ({ usernameIdx: index('lastfm_accounts_username_idx').on(table.username) }));
+
+const lastfmArtists = sqliteTable('lastfm_artists', {
+    userId: text('user_id').notNull().references(() => lastfmAccounts.userId, { onDelete: 'cascade' }),
+    artist: text('artist').notNull(),
+    playcount: integer('playcount').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.userId, table.artist] }),
+    countCheck: check('lastfm_artists_playcount_check', sql`${table.playcount} >= 0`),
+    playsIdx: index('lastfm_artists_plays_idx').on(table.artist, table.playcount)
+}));
+
+const lastfmOauthStates = sqliteTable('lastfm_oauth_states', {
+    state: text('state').primaryKey(),
+    userId: text('user_id').notNull(),
+    expiresAt: integer('expires_at').notNull()
+}, table => ({ expiresIdx: index('lastfm_oauth_states_expiry_idx').on(table.expiresAt) }));
+
 module.exports = {
     guilds,
+    musicConfig,
+    voiceMasterConfigs,
+    voiceMasterSources,
+    voiceMasterCreations,
+    voiceMasterAccess,
+    voiceMasterJoinRoles,
     lifecycleMessages,
+    lifecycleMessageChannels,
+    joinDmDeliveries,
     users,
     moderationLogs,
     moderationCases,
@@ -1451,6 +1958,7 @@ module.exports = {
     deniedRolePermissions,
     protectedTargets,
     uwuLockMembers,
+    uwuRouletteConfigs,
     bytepods,
     bytepodAutoWhitelist,
     bytepodUserSettings,
@@ -1470,6 +1978,9 @@ module.exports = {
     honeypotExemptRoles,
     honeypotIncidents,
     reminders,
+    personalSettings,
+    afkStatuses,
+    diaryEntries,
     suggestionConfig,
     suggestions,
     activityStreaks,
@@ -1499,6 +2010,21 @@ module.exports = {
     giveawayBlacklist,
     giveawayRoleLimits,
     memberLevels,
+    levelConfigs,
+    levelRoleRewards,
+    levelIgnores,
+    levelBoosts,
+    levelLiveBoards,
+    levelRoleJobs,
+    levelRankCards,
+    serverDailyMetrics,
+    analyticsEvents,
+    reactionPlacements,
+    levelVoiceSessions,
+    memberPresence,
+    eventLogChannels,
+    eventLogIgnores,
+    eventLogOutbox,
     giveaways,
     giveawayEntries,
     giveawayRounds,
@@ -1522,5 +2048,22 @@ module.exports = {
     economyGangMembers,
     economyGangInvites,
     economyLabs,
-    economyLabOperations
+    economyLabOperations,
+    confessionConfigs,
+    confessionCategories,
+    confessionBlacklist,
+    confessionMutes,
+    confessions,
+    confessionReplies,
+    communityPolls,
+    communityPollVotes,
+    imageOnlyChannels,
+    snipeProtections,
+    roleplayDisabled,
+    roleplayCounts,
+    funBlunts,
+    funVapes,
+    lastfmAccounts,
+    lastfmArtists,
+    lastfmOauthStates
 };

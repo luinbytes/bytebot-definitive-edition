@@ -29,6 +29,7 @@ describe('Reminder System', () => {
             expect(typeof service.scheduleReminder).toBe('function');
             expect(typeof service.fireReminder).toBe('function');
             expect(typeof service.cancelReminder).toBe('function');
+            expect(typeof service.snoozeReminder).toBe('function');
         });
 
         test('should handle cleanup correctly', () => {
@@ -152,7 +153,7 @@ describe('Reminder Command', () => {
 
         expect(groups.map(opt => opt.name)).toEqual(['create', 'manage']);
         expect(findGroup(reminderCmd, 'create').options.map(opt => opt.name)).toEqual(['me', 'here']);
-        expect(findGroup(reminderCmd, 'manage').options.map(opt => opt.name)).toEqual(['list', 'cancel']);
+        expect(findGroup(reminderCmd, 'manage').options.map(opt => opt.name)).toEqual(['list', 'cancel', 'snooze']);
     });
 
     test('/reminder me should require time and message', () => {

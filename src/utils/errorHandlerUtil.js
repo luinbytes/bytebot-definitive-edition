@@ -7,6 +7,12 @@ const logger = require('./logger');
 const embeds = require('./embeds');
 const crypto = require('crypto');
 
+class UserFacingError extends Error { }
+
+function publicErrorMessage(error) {
+    return error instanceof UserFacingError ? error.message : null;
+}
+
 /**
  * Generate unique error ID for tracking
  * @returns {string} - 8-character hex ID
@@ -119,9 +125,11 @@ async function safeReply(interaction, replyOptions) {
 }
 
 module.exports = {
+    UserFacingError,
     handleCommandError,
     handleDMError,
     handleDiscordAPIError,
     generateErrorId,
+    publicErrorMessage,
     safeReply,
 };

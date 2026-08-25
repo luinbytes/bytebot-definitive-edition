@@ -3,11 +3,11 @@ const { db } = require('../database/index');
 const { guilds } = require('../database/schema');
 const logger = require('../utils/logger');
 const { dbLog } = require('../utils/dbLogger');
+const { runGuildLifecycle } = require('../utils/guildLifecycle');
 
-module.exports = {
-    name: Events.GuildCreate,
-    async execute(guild) {
+async function handleGuildCreate(guild) {
         logger.info(`Joined new guild: ${guild.name} (ID: ${guild.id})`);
+        guild.client.musicService?.reactivateGuild(guild.id);
 
         try {
             await dbLog.insert('guilds',
@@ -22,5 +22,9 @@ module.exports = {
         } catch (error) {
             logger.error(`Failed to register guild ${guild.id}: ${error}`);
         }
-    },
+}
+
+module.exports = {
+    name: Events.GuildCreate,
+    execute: guild => runGuildLifecycle(guild.id, () => handleGuildCreate(guild)),
 };

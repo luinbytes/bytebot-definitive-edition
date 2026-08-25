@@ -145,6 +145,11 @@ const expectedSchema = {
         voice_hub_category_id: 'TEXT',
         achievements_enabled: 'INTEGER DEFAULT 1'
     },
+    music_config: {
+        guild_id: 'TEXT PRIMARY KEY',
+        dj_role_id: 'TEXT',
+        autoplay: 'INTEGER DEFAULT 0 NOT NULL'
+    },
     lifecycle_messages: {
         guild_id: 'TEXT NOT NULL',
         type: 'TEXT NOT NULL',
@@ -154,6 +159,18 @@ const expectedSchema = {
         format: "TEXT DEFAULT 'embed' NOT NULL",
         delete_after_seconds: 'INTEGER',
         updated_at: 'INTEGER NOT NULL'
+    },
+    lifecycle_message_channels: {
+        guild_id: 'TEXT NOT NULL',
+        type: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        template: 'TEXT'
+    },
+    join_dm_deliveries: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        sent_at: 'INTEGER NOT NULL'
     },
     users: {
         id: 'TEXT PRIMARY KEY',
@@ -445,6 +462,11 @@ const expectedSchema = {
         user_id: 'TEXT NOT NULL',
         state: 'TEXT NOT NULL'
     },
+    uwu_roulette_configs: {
+        guild_id: 'TEXT PRIMARY KEY',
+        percentage: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
     bytepods: {
         channel_id: 'TEXT PRIMARY KEY',
         guild_id: 'TEXT NOT NULL',
@@ -453,7 +475,68 @@ const expectedSchema = {
         owner_left_at: 'INTEGER',
         reclaim_request_pending: 'INTEGER DEFAULT 0',
         panel_message_id: 'TEXT',
+        source_channel_id: 'TEXT',
+        state: "TEXT DEFAULT 'active' NOT NULL",
+        generation: 'INTEGER DEFAULT 0 NOT NULL',
+        cleanup_after: 'INTEGER',
+        bot_owned: 'INTEGER DEFAULT 1 NOT NULL',
+        pending_owner_id: 'TEXT',
+        claim_snapshot: 'TEXT',
         created_at: 'INTEGER'
+    },
+    voice_master_configs: {
+        guild_id: 'TEXT PRIMARY KEY',
+        state: "TEXT DEFAULT 'active' NOT NULL",
+        generation: 'INTEGER DEFAULT 0 NOT NULL',
+        category_id: 'TEXT',
+        primary_channel_id: 'TEXT',
+        interface_message_id: 'TEXT',
+        name_template: "TEXT DEFAULT '{owner}''s channel' NOT NULL",
+        default_role_id: 'TEXT',
+        default_bitrate: 'INTEGER',
+        default_region: 'TEXT',
+        send_interface: 'INTEGER DEFAULT 1 NOT NULL',
+        temporary_enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        join_role_id: 'TEXT',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    voice_master_sources: {
+        channel_id: 'TEXT PRIMARY KEY',
+        guild_id: 'TEXT NOT NULL',
+        category_id: 'TEXT',
+        interface_message_id: 'TEXT',
+        state: "TEXT DEFAULT 'active' NOT NULL",
+        is_primary: 'INTEGER DEFAULT 0 NOT NULL',
+        owned: 'INTEGER DEFAULT 0 NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    voice_master_creations: {
+        guild_id: 'TEXT NOT NULL',
+        source_channel_id: 'TEXT NOT NULL',
+        member_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT',
+        state: 'TEXT NOT NULL',
+        generation: 'INTEGER DEFAULT 0 NOT NULL',
+        error: 'TEXT',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    voice_master_access: {
+        guild_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        effect: 'TEXT NOT NULL',
+        state: "TEXT DEFAULT 'active' NOT NULL",
+        generation: 'INTEGER DEFAULT 0 NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    voice_master_join_roles: {
+        guild_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        member_id: 'TEXT NOT NULL',
+        role_id: 'TEXT NOT NULL',
+        state: "TEXT DEFAULT 'active' NOT NULL",
+        added_by_bot: 'INTEGER DEFAULT 0 NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
     },
     bytepod_autowhitelist: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
@@ -639,6 +722,24 @@ const expectedSchema = {
         created_at: 'INTEGER NOT NULL',
         active: 'INTEGER DEFAULT 1 NOT NULL'
     },
+    personal_settings: {
+        user_id: 'TEXT PRIMARY KEY',
+        timezone: 'TEXT',
+        afk_template: 'TEXT',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    afk_statuses: {
+        user_id: 'TEXT PRIMARY KEY',
+        status: 'TEXT NOT NULL',
+        set_at: 'INTEGER NOT NULL'
+    },
+    diary_entries: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        user_id: 'TEXT NOT NULL',
+        entry_date: 'TEXT NOT NULL',
+        content: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
     suggestion_config: {
         guild_id: 'TEXT PRIMARY KEY',
         channel_id: 'TEXT NOT NULL',
@@ -692,6 +793,8 @@ const expectedSchema = {
         activity_date: 'TEXT NOT NULL',
         message_count: 'INTEGER DEFAULT 0 NOT NULL',
         voice_minutes: 'INTEGER DEFAULT 0 NOT NULL',
+        text_xp_awarded: 'INTEGER DEFAULT 0 NOT NULL',
+        voice_seconds: 'INTEGER DEFAULT 0 NOT NULL',
         commands_run: 'INTEGER DEFAULT 0 NOT NULL',
         reactions_given: 'INTEGER DEFAULT 0 NOT NULL',
         channels_joined: 'INTEGER DEFAULT 0 NOT NULL',
@@ -928,7 +1031,148 @@ const expectedSchema = {
         user_id: 'TEXT NOT NULL',
         xp: 'INTEGER DEFAULT 0 NOT NULL',
         level: 'INTEGER DEFAULT 0 NOT NULL',
+        text_xp: 'INTEGER DEFAULT 0 NOT NULL',
+        voice_xp: 'INTEGER DEFAULT 0 NOT NULL',
+        manual_adjustment: 'INTEGER DEFAULT 0 NOT NULL',
+        level_floor: 'INTEGER DEFAULT 0 NOT NULL',
+        message_count: 'INTEGER DEFAULT 0 NOT NULL',
+        voice_seconds: 'INTEGER DEFAULT 0 NOT NULL',
+        last_text_xp_at: 'INTEGER',
         updated_at: 'INTEGER NOT NULL'
+    },
+    level_configs: {
+        guild_id: 'TEXT PRIMARY KEY',
+        text_enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        voice_enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        award_channel_id: 'TEXT',
+        award_message: 'TEXT',
+        message_enabled: 'INTEGER DEFAULT 0 NOT NULL',
+        dm_enabled: 'INTEGER DEFAULT 0 NOT NULL',
+        antiafk_enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        text_cooldown_seconds: 'INTEGER DEFAULT 60 NOT NULL',
+        voice_xp_per_minute: 'INTEGER DEFAULT 5 NOT NULL',
+        voice_min_seconds: 'INTEGER DEFAULT 60 NOT NULL',
+        voice_session_xp_cap: 'INTEGER DEFAULT 3600 NOT NULL',
+        base_multiplier: 'REAL DEFAULT 1 NOT NULL',
+        stack_roles: 'INTEGER DEFAULT 0 NOT NULL',
+        baseline_at: 'INTEGER',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    level_role_rewards: {
+        guild_id: 'TEXT NOT NULL',
+        level: 'INTEGER NOT NULL',
+        role_id: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    level_ignores: {
+        guild_id: 'TEXT NOT NULL',
+        target_type: 'TEXT NOT NULL',
+        target_id: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    level_boosts: {
+        guild_id: 'TEXT NOT NULL',
+        target_type: 'TEXT NOT NULL',
+        target_id: 'TEXT NOT NULL',
+        multiplier: 'REAL NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    level_live_boards: {
+        guild_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        metric: 'TEXT NOT NULL',
+        message_id: 'TEXT',
+        create_token: 'TEXT',
+        create_status: "TEXT DEFAULT 'active' NOT NULL",
+        create_started_at: 'INTEGER',
+        revision: 'INTEGER DEFAULT 0 NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    level_rank_cards: {
+        user_id: 'TEXT PRIMARY KEY',
+        accent: 'TEXT',
+        layout: "TEXT DEFAULT 'classic' NOT NULL",
+        background_data: 'BLOB',
+        background_mime: 'TEXT',
+        avatar_border: 'INTEGER DEFAULT 4 NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    server_daily_metrics: {
+        guild_id: 'TEXT NOT NULL',
+        activity_date: 'TEXT NOT NULL',
+        message_count: 'INTEGER DEFAULT 0 NOT NULL',
+        reaction_count: 'INTEGER DEFAULT 0 NOT NULL',
+        voice_seconds: 'INTEGER DEFAULT 0 NOT NULL',
+        joins: 'INTEGER DEFAULT 0 NOT NULL',
+        leaves: 'INTEGER DEFAULT 0 NOT NULL',
+        member_count: 'INTEGER',
+        baseline_at: 'INTEGER',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    analytics_events: {
+        guild_id: 'TEXT NOT NULL',
+        event_type: 'TEXT NOT NULL',
+        event_id: 'TEXT NOT NULL',
+        occurred_at: 'INTEGER NOT NULL'
+    },
+    reaction_placements: {
+        guild_id: 'TEXT NOT NULL',
+        message_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        emoji: 'TEXT NOT NULL',
+        added_at: 'INTEGER NOT NULL'
+    },
+    level_voice_sessions: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        eligible_since: 'INTEGER',
+        last_observed_at: 'INTEGER NOT NULL',
+        remainder_seconds: 'INTEGER DEFAULT 0 NOT NULL',
+        awarded_xp: 'INTEGER DEFAULT 0 NOT NULL',
+        eligible_seconds: 'INTEGER DEFAULT 0 NOT NULL',
+        xp_seconds_consumed: 'INTEGER DEFAULT 0 NOT NULL'
+    },
+    level_role_jobs: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        attempts: 'INTEGER DEFAULT 0 NOT NULL',
+        generation: 'INTEGER DEFAULT 1 NOT NULL',
+        claim_token: 'TEXT',
+        claim_expires_at: 'INTEGER',
+        next_attempt_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    member_presence: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        present: 'INTEGER NOT NULL',
+        last_observed_at: 'INTEGER NOT NULL'
+    },
+    event_log_channels: {
+        guild_id: 'TEXT NOT NULL',
+        module: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        color: 'TEXT',
+        created_at: 'INTEGER NOT NULL'
+    },
+    event_log_ignores: {
+        guild_id: 'TEXT NOT NULL',
+        target_type: 'TEXT NOT NULL',
+        target_id: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    event_log_outbox: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        event_key: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        module: 'TEXT NOT NULL',
+        payload: 'TEXT NOT NULL',
+        attempts: 'INTEGER DEFAULT 0 NOT NULL',
+        next_attempt_at: 'INTEGER NOT NULL',
+        status: "TEXT DEFAULT 'pending' NOT NULL",
+        created_at: 'INTEGER NOT NULL'
     },
     giveaways: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
@@ -1192,6 +1436,136 @@ const expectedSchema = {
         result_amount: 'INTEGER DEFAULT 0 NOT NULL',
         result_json: 'TEXT NOT NULL',
         created_at: 'INTEGER NOT NULL'
+    },
+    confession_configs: {
+        guild_id: 'TEXT PRIMARY KEY',
+        channel_id: 'TEXT NOT NULL',
+        panel_message_id: 'TEXT',
+        up_emoji: "TEXT DEFAULT '👍' NOT NULL",
+        down_emoji: "TEXT DEFAULT '👎' NOT NULL",
+        next_number: 'INTEGER DEFAULT 1 NOT NULL',
+        enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    confession_categories: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        name: 'TEXT NOT NULL',
+        name_key: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    confession_blacklist: {
+        guild_id: 'TEXT NOT NULL',
+        phrase: 'TEXT NOT NULL',
+        phrase_key: 'TEXT NOT NULL',
+        created_by: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    confession_mutes: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        muted_by: 'TEXT NOT NULL',
+        reason: 'TEXT',
+        created_at: 'INTEGER NOT NULL'
+    },
+    confessions: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        number: 'INTEGER NOT NULL',
+        category_id: 'INTEGER',
+        channel_id: 'TEXT NOT NULL',
+        message_id: 'TEXT',
+        author_id: 'TEXT NOT NULL',
+        content: 'TEXT NOT NULL',
+        status: "TEXT DEFAULT 'pending' NOT NULL",
+        created_at: 'INTEGER NOT NULL'
+    },
+    confession_replies: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        confession_id: 'INTEGER NOT NULL',
+        replier_id: 'TEXT NOT NULL',
+        content: 'TEXT NOT NULL',
+        delivered: 'INTEGER DEFAULT 0 NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    community_polls: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        message_id: 'TEXT',
+        creator_id: 'TEXT NOT NULL',
+        question: 'TEXT NOT NULL',
+        options_json: 'TEXT NOT NULL',
+        status: "TEXT DEFAULT 'pending' NOT NULL",
+        ends_at: 'INTEGER',
+        created_at: 'INTEGER NOT NULL',
+        ended_at: 'INTEGER'
+    },
+    community_poll_votes: {
+        poll_id: 'INTEGER NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        option_index: 'INTEGER NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    image_only_channels: {
+        guild_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        created_by: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    snipe_protections: {
+        user_id: 'TEXT PRIMARY KEY',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    roleplay_disabled: {
+        guild_id: 'TEXT NOT NULL',
+        action: 'TEXT NOT NULL',
+        updated_by: 'TEXT NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    roleplay_counts: {
+        guild_id: 'TEXT NOT NULL',
+        actor_id: 'TEXT NOT NULL',
+        target_id: 'TEXT NOT NULL',
+        action: 'TEXT NOT NULL',
+        count: 'INTEGER DEFAULT 0 NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    fun_blunts: {
+        user_id: 'TEXT PRIMARY KEY',
+        sparked_at: 'INTEGER',
+        last_sparked_at: 'INTEGER',
+        taps: 'INTEGER DEFAULT 0 NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    fun_vapes: {
+        guild_id: 'TEXT PRIMARY KEY',
+        holder_id: 'TEXT NOT NULL',
+        flavor: "TEXT DEFAULT 'mint' NOT NULL",
+        hits: 'INTEGER DEFAULT 0 NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    lastfm_accounts: {
+        user_id: 'TEXT PRIMARY KEY',
+        username: 'TEXT NOT NULL',
+        session_key: 'TEXT',
+        presentation: 'TEXT',
+        reactions: 'TEXT',
+        command_alias: 'TEXT',
+        linked_at: 'INTEGER NOT NULL',
+        refreshed_at: 'INTEGER NOT NULL'
+    },
+    lastfm_artists: {
+        user_id: 'TEXT NOT NULL',
+        artist: 'TEXT NOT NULL',
+        playcount: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    lastfm_oauth_states: {
+        state: 'TEXT PRIMARY KEY',
+        user_id: 'TEXT NOT NULL',
+        expires_at: 'INTEGER NOT NULL'
     }
 };
 
@@ -1231,8 +1605,28 @@ const compatibilityUniqueKeys = {
     giveaway_blacklist: ['guild_id', 'role_id'],
     giveaway_role_limits: ['guild_id', 'role_id'],
     member_levels: ['guild_id', 'user_id'],
+    level_role_rewards: ['guild_id', 'level'],
+    level_ignores: ['guild_id', 'target_type', 'target_id'],
+    level_boosts: ['guild_id', 'target_type', 'target_id'],
+    level_live_boards: ['guild_id', 'channel_id', 'metric'],
+    server_daily_metrics: ['guild_id', 'activity_date'],
+    analytics_events: ['guild_id', 'event_type', 'event_id'],
+    reaction_placements: ['guild_id', 'message_id', 'user_id', 'emoji'],
+    level_voice_sessions: ['guild_id', 'user_id'],
+    level_role_jobs: ['guild_id', 'user_id'],
+    member_presence: ['guild_id', 'user_id'],
+    event_log_channels: ['guild_id', 'module', 'channel_id'],
+    event_log_ignores: ['guild_id', 'target_type', 'target_id'],
+    event_log_outbox: ['guild_id', 'event_key', 'channel_id'],
     giveaway_entries: ['giveaway_id', 'user_id'],
     giveaway_rounds: ['giveaway_id', 'round_number'],
+    confession_categories: ['guild_id', 'name_key'],
+    confession_blacklist: ['guild_id', 'phrase_key'],
+    confession_mutes: ['guild_id', 'user_id'],
+    confessions: ['guild_id', 'number'],
+    community_polls: ['guild_id', 'message_id'],
+    community_poll_votes: ['poll_id', 'user_id'],
+    image_only_channels: ['guild_id', 'channel_id'],
     guild_backups: ['guild_id', 'creator_id', 'name'],
     customization_presets: ['guild_id', 'name'],
     economy_scope_totals: ['scope_type', 'scope_id'],
@@ -1243,7 +1637,10 @@ const compatibilityUniqueKeys = {
     economy_jobs: ['guild_id', 'name'],
     economy_shop_items: ['guild_id', 'role_id'],
     economy_gang_members: ['guild_id', 'user_id'],
-    economy_labs: ['guild_id', 'user_id']
+    economy_labs: ['guild_id', 'user_id'],
+    roleplay_disabled: ['guild_id', 'action'],
+    roleplay_counts: ['guild_id', 'actor_id', 'target_id', 'action'],
+    lastfm_artists: ['user_id', 'artist']
 };
 
 function hasUniqueKey(tableName, columns) {
@@ -1435,6 +1832,11 @@ function validateAndFixSchema() {
         sqlite.exec('CREATE INDEX IF NOT EXISTS tickets_inactivity_deadline_idx ON tickets (inactivity_deadline, status)');
     }
     if (tableExists('ticket_actions')) sqlite.exec('CREATE INDEX IF NOT EXISTS ticket_actions_ticket_idx ON ticket_actions (ticket_id, id)');
+    if (tableExists('bytepods')) sqlite.exec('CREATE INDEX IF NOT EXISTS bytepods_guild_state_idx ON bytepods (guild_id, state)');
+    if (tableExists('diary_entries')) {
+        sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS diary_entries_user_date_unique ON diary_entries (user_id, entry_date)');
+        sqlite.exec('CREATE INDEX IF NOT EXISTS diary_entries_user_date_idx ON diary_entries (user_id, entry_date)');
+    }
 
     return fixes;
 }

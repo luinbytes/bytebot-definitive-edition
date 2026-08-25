@@ -12,6 +12,7 @@ const ACTIONS = ['delete', 'timeout', 'warn', 'kick', 'ban', 'jail', 'strip', 's
 const RULE_LIMITS = { keyword: 1000, regex: 10, blacklist: 1000, allowlink: 100, allowword: 100 };
 const WINDOW_KEY_LIMIT = 10000;
 const REGEX_QUEUE_LIMIT = 100;
+const REGEX_VALIDATION_TIMEOUT_MS = 1000;
 const spamWindows = new Map();
 const repetitionWindows = new Map();
 let regexWorker;
@@ -81,7 +82,7 @@ async function addRegex(guildId, name, pattern) {
     if (!name || String(name).length > 32) throw new Error('Regex names must be 1-32 characters.');
     const normalized = normalizedRule('regex', pattern);
     try { new RegExp(normalized, 'iu'); } catch (error) { throw new Error(`Invalid regex: ${error.message}`); }
-    const probe = await testRegex(normalized, '', 100);
+    const probe = await testRegex(normalized, '', REGEX_VALIDATION_TIMEOUT_MS);
     if (probe.timedOut || probe.error) throw new Error('Regex could not be evaluated safely.');
     return addRule(guildId, 'regex', normalized, name);
 }

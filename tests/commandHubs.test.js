@@ -29,6 +29,9 @@ describe('Intent command hubs', () => {
             'info',
             'settings',
             'reminder',
+            'afk',
+            'timezone',
+            'diary',
             'bookmark',
             'birthday',
             'streak',
@@ -44,8 +47,12 @@ describe('Intent command hubs', () => {
         expect(optionNames(findOption(command, 'reminder').options)).toEqual([
             'add',
             'list',
-            'cancel'
+            'cancel',
+            'snooze'
         ]);
+        expect(optionNames(findOption(command, 'afk').options)).toEqual(['set', 'embed', 'reset']);
+        expect(optionNames(findOption(command, 'timezone').options)).toEqual(['view', 'set', 'remove']);
+        expect(optionNames(findOption(command, 'diary').options)).toEqual(['create', 'view', 'delete']);
         expect(optionNames(findOption(command, 'bookmark').options)).toEqual([
             'list',
             'search',
@@ -57,6 +64,7 @@ describe('Intent command hubs', () => {
 
     test('server hub groups admin and community systems by intent', () => {
         const command = commandJson('src/commands/administration/server.js');
+        const thread = commandJson('src/commands/administration/thread.js');
 
         expect(command.name).toBe('server');
         expect(command.dm_permission).toBe(false);
@@ -105,6 +113,7 @@ describe('Intent command hubs', () => {
             'publish', 'list', 'view', 'bump', 'remove'
         ]);
         expect(optionNames(findOption(command, 'permissions').options)).toEqual([
+            'view',
             'add',
             'remove',
             'list',
@@ -140,7 +149,13 @@ describe('Intent command hubs', () => {
         ]);
         expect(optionNames(findOption(command, 'achievement').options.find(option => option.name === 'enable').options)).toEqual([]);
         expect(optionNames(findOption(command, 'achievement').options.find(option => option.name === 'disable').options)).toEqual([]);
-        expect(optionNames(findOption(command, 'community').options)).toEqual(['view']);
+        expect(optionNames(findOption(command, 'community').options)).toEqual(['view', 'image-only', 'pin', 'unpin']);
+        expect(optionNames(findOption(command, 'confessions').options)).toEqual([
+            'view', 'setup', 'remove', 'category', 'blacklist', 'emojis', 'mute', 'unmute', 'report'
+        ]);
+        expect(optionNames(thread.options)).toEqual([
+            'add', 'remove', 'rename', 'slowmode', 'lock', 'unlock', 'archive', 'unarchive', 'solved', 'delete'
+        ]);
         expect(optionNames(findOption(command, 'security').options)).toEqual([
             'antinuke-settings',
             'antinuke-toggle',
@@ -186,13 +201,106 @@ describe('Intent command hubs', () => {
         ]);
 
         expect(game.name).toBe('game');
-        expect(optionNames(game.options)).toEqual(['f1', 'warthunder']);
+        expect(commandModule('src/commands/games/game.js').sourceCategories).toEqual(['Games']);
+        expect(optionNames(game.options)).toEqual(['f1', 'warthunder', 'roblox']);
         expect(optionNames(findOption(game, 'f1').options)).toEqual([
             'schedule',
             'standings',
             'circuit',
             'drivers'
         ]);
+        const roblox = findOption(game, 'roblox');
+        expect(roblox.description).toBe('Look up a user on Roblox');
+        expect(roblox.options[0].description).toBe('Look up a user on Roblox');
+        expect(optionNames(roblox.options)).toEqual([
+            'profile', 'games', 'groups', 'outfits'
+        ]);
+    });
+
+    test('game hub renders a public Roblox profile without entering an alias command', async () => {
+        const game = commandModule('src/commands/games/game.js');
+        const interaction = {
+            options: {
+                getSubcommandGroup: jest.fn().mockReturnValue('roblox'),
+                getSubcommand: jest.fn().mockReturnValue('profile'),
+                getString: jest.fn().mockReturnValue('Builderman')
+            },
+            editReply: jest.fn().mockResolvedValue()
+        };
+        const client = { informationLookupService: { robloxProfile: jest.fn().mockResolvedValue({
+            id: 156, username: 'builderman', displayName: 'builderman', description: 'Roblox founder',
+            createdAt: '2006-02-27T21:06:40Z', banned: false, verified: true,
+            followers: 1000, following: 10, friends: 200,
+            presence: { status: 'In Game', location: 'Example game', lastOnline: '2026-08-25T00:00:00Z' },
+            badgeCount: 1, badges: ['Administrator'], nameHistory: ['Builderman'], avatar: 'https://tr.rbxcdn.com/avatar.png'
+        }) } };
+
+        await game.execute(interaction, client);
+
+        expect(client.informationLookupService.robloxProfile).toHaveBeenCalledWith('Builderman');
+        const embed = interaction.editReply.mock.calls[0][0].embeds[0].data;
+        expect(embed.url).toBe('https://www.roblox.com/users/156/profile');
+        expect(embed.fields).toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: 'Presence (In Game)' }),
+            expect.objectContaining({ name: 'Location', value: 'Example game' }),
+            expect.objectContaining({ name: 'Badges (1)', value: 'Administrator' })
+        ]));
+    });
+
+    test.each([
+        ['games', 'robloxGames', { user: { displayName: 'Builderman' }, games: [{
+            name: 'Game', url: 'https://www.roblox.com/games/20', visits: 30, description: 'Public'
+        }] }],
+        ['groups', 'robloxGroups', { user: { displayName: 'Builderman' }, groups: [{
+            name: 'Group', url: 'https://www.roblox.com/communities/40', role: 'Member', members: 50, locked: false
+        }] }],
+        ['outfits', 'robloxOutfits', { user: { displayName: 'Builderman' }, outfits: [{
+            id: 60, name: 'Outfit', type: 'Avatar', editable: true
+        }] }]
+    ])('game hub renders Roblox %s results from the matching provider adapter', async (action, method, result) => {
+        const game = commandModule('src/commands/games/game.js');
+        const interaction = {
+            options: {
+                getSubcommandGroup: jest.fn().mockReturnValue('roblox'),
+                getSubcommand: jest.fn().mockReturnValue(action),
+                getString: jest.fn().mockReturnValue('Builderman')
+            },
+            editReply: jest.fn().mockResolvedValue()
+        };
+        const client = { informationLookupService: { [method]: jest.fn().mockResolvedValue(result) } };
+
+        await game.execute(interaction, client);
+
+        expect(client.informationLookupService[method]).toHaveBeenCalledWith('Builderman');
+        expect(interaction.editReply.mock.calls[0][0].embeds[0].data.description).toBeTruthy();
+    });
+
+    test('Roblox profile rendering stays within Discord aggregate embed limits', async () => {
+        const game = commandModule('src/commands/games/game.js');
+        const interaction = {
+            options: {
+                getSubcommandGroup: jest.fn().mockReturnValue('roblox'),
+                getSubcommand: jest.fn().mockReturnValue('profile'),
+                getString: jest.fn().mockReturnValue('Builderman')
+            },
+            editReply: jest.fn().mockResolvedValue()
+        };
+        const client = { informationLookupService: { robloxProfile: jest.fn().mockResolvedValue({
+            id: 156, username: 'builderman', displayName: 'builderman', description: 'd'.repeat(10_000),
+            createdAt: '2006-02-27T21:06:40Z', banned: false, verified: true,
+            followers: 1, following: 2, friends: 3,
+            presence: { status: 'Online', location: 'l'.repeat(10_000), lastOnline: null },
+            badgeCount: 5, badges: ['b'.repeat(2_000)], nameHistory: ['n'.repeat(2_000)],
+            avatar: 'https://tr.rbxcdn.com/avatar.png'
+        }) } };
+
+        await game.execute(interaction, client);
+
+        const embed = interaction.editReply.mock.calls[0][0].embeds[0].data;
+        const characters = (embed.title?.length || 0) + (embed.description?.length || 0)
+            + (embed.footer?.text?.length || 0)
+            + embed.fields.reduce((total, field) => total + field.name.length + field.value.length, 0);
+        expect(characters).toBeLessThanOrEqual(6000);
     });
 
     test('moderation hub uses user, logs, and channel intent groups', () => {
@@ -301,10 +409,11 @@ describe('Intent command hubs', () => {
         const protect = findOption(uwuLock, 'protect');
 
         expect(optionNames(command.options)).toEqual([
-            '8ball', 'coin', 'dice', 'joke', 'uwuify', 'uwulock'
+            '8ball', 'coin', 'dice', 'joke', 'uwuify', 'choose', 'random-member', 'quote', 'poll', 'uwulock',
+            'snipe', 'roleplay', 'game', 'meter', 'blunt', 'vape', 'roast', 'randomhex'
         ]);
         expect(uwuLock.description).toContain('Manage Server');
-        expect(optionNames(uwuLock.options)).toEqual(['add', 'remove', 'list', 'protect']);
+        expect(optionNames(uwuLock.options)).toEqual(['add', 'remove', 'list', 'protect', 'roulette']);
         expect(optionNames(protect.options)).toEqual(['action', 'member']);
         expect(findOption(protect, 'action').choices.map(choice => choice.value)).toEqual([
             'add', 'remove', 'list'

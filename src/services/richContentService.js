@@ -7,12 +7,14 @@ const crypto = require('crypto');
 const { and, eq } = require('drizzle-orm');
 const { db } = require('../database');
 const { automationRules } = require('../database/schema');
-const { parseEmbedScript } = require('./lifecycleMessageService');
+const { parseEmbedScript, renderTemplate } = require('./lifecycleMessageService');
 
 const SAFE_MENTIONS = { parse: [], repliedUser: false };
 
-function renderVariables(script, { user, member, guild, channel } = {}) {
+function renderVariables(script, context = {}) {
+    const { user, member, guild, channel, mentioner, message, time, variables = {} } = context;
     const subject = member?.user || user || member;
+    const mentionerAvatar = mentioner?.displayAvatarURL?.() || mentioner?.avatarURL?.() || '';
     const avatar = subject?.displayAvatarURL?.() || subject?.avatarURL?.() || '';
     const values = {
         user: subject?.username || '',
@@ -23,20 +25,36 @@ function renderVariables(script, { user, member, guild, channel } = {}) {
         'user.banner': subject?.bannerURL?.() || '',
         'user.tag': subject?.tag || subject?.username || '',
         'user.created_at': subject?.createdAt?.toISOString?.() || '',
-        'user.bot': String(Boolean(subject?.bot)),
+        'user.bot': subject?.bot ? 'Yes' : 'No',
+        'user.display_name': member?.displayName || subject?.displayName || subject?.username || '',
+        'user.top_role': member?.roles?.highest?.id && member.roles.highest.id !== guild?.id
+            ? member.roles.highest.name : 'N/A',
+        'user.color': member?.roles?.highest?.hexColor || member?.displayHexColor || 'N/A',
         'member.display_name': member?.displayName || subject?.displayName || subject?.username || '',
         'member.nick': member?.nickname || '',
         'member.roles': member?.roles?.cache?.filter?.(role => role.id !== guild?.id).map?.(role => `<@&${role.id}>`).join(', ') || '',
-        'member.boost': String(Boolean(member?.premiumSince)),
+        'member.boost': member?.premiumSince ? 'Yes' : 'No',
+        'user.boost': member?.premiumSince ? 'Yes' : 'No',
         'guild.id': guild?.id || '',
         'guild.name': guild?.name || '',
         'guild.count': String(guild?.memberCount || 0),
+        'guild.member_count': String(guild?.memberCount || 0),
+        'guild.boost_count': String(guild?.premiumSubscriptionCount || 0),
+        'guild.boost_tier': guild?.premiumTier ? String(guild.premiumTier) : 'No Level',
         'guild.owner': guild?.ownerId ? `<@${guild.ownerId}>` : '',
         'guild.icon': guild?.iconURL?.() || '',
         'channel.id': channel?.id || '',
         'channel.name': channel?.name || '',
         'channel.mention': channel?.id ? `<#${channel.id}>` : '',
-        'channel.topic': channel?.topic || ''
+        'channel.topic': channel?.topic || 'N/A',
+        ...(message === undefined ? {} : { message }),
+        ...(time === undefined ? {} : { time }),
+        ...(mentioner ? {
+            mentioner: mentioner.username || '',
+            'mentioner.name': mentioner.username || '',
+            'mentioner.avatar': mentionerAvatar
+        } : {}),
+        ...variables
     };
     return String(script).replace(/\{([a-z]+(?:\.[a-z_]+)?)\}/g,
         (token, name) => Object.hasOwn(values, name)
@@ -139,7 +157,8 @@ function buttonFor(value, context) {
         danger: ButtonStyle.Danger, red: ButtonStyle.Danger
     }[String(options.style || 'secondary').toLowerCase()];
     if (!style) throw new Error(`Unknown button style: ${options.style}`);
-    return button.setStyle(style).setCustomId(`rich:custom:${custom}`)
+    const guild = context?.customButtonGuildId ? `${context.customButtonGuildId}:` : '';
+    return button.setStyle(style).setCustomId(`rich:custom:${guild}${custom}`)
         .setDisabled(parts.includes('disabled') || !context?.customScripts?.has(custom));
 }
 
@@ -289,7 +308,13 @@ function renderLegacy(script, context) {
 }
 
 function renderScript(script, context) {
-    const rendered = renderVariables(script, context);
+    const subject = context?.member || context?.user;
+    const lifecycleMember = context?.guild && subject
+        ? (subject.guild ? subject : { ...subject, id: subject.id || context.user?.id,
+            user: subject.user || context.user || subject, guild: context.guild })
+        : null;
+    const source = lifecycleMember ? renderTemplate(script, lifecycleMember, context.channel, context.variables) : script;
+    const rendered = renderVariables(source, context);
     if (/^\s*\{cv2(?::)?\}/i.test(rendered)) return renderComponents(rendered, context);
     if (/\{embed\}/i.test(rendered)) validateLegacy(rendered);
     let payload;
@@ -317,6 +342,28 @@ function normalizedName(name) {
         throw new Error('Names must be 1-32 letters, digits, underscores, or hyphens.');
     }
     return normalized;
+}
+
+function expandCustomScripts(source, lookup) {
+    let references = 0;
+    const expand = (value, stack = [], depth = 0) => String(value).replace(
+        /\{cscript:([a-z0-9][a-z0-9_-]{0,31})\}/gi,
+        (_token, rawName) => {
+            references += 1;
+            if (references > 20) throw new Error('Level-up scripts can reference at most 20 custom scripts.');
+            if (depth >= 5) throw new Error('Custom script expansion exceeds five nested levels.');
+            const name = normalizedName(rawName);
+            if (stack.includes(name)) throw new Error(`Custom script cycle detected at ${name}.`);
+            const rule = lookup(name);
+            if (!rule) throw new Error(`Custom script ${name} was not found.`);
+            const expanded = expand(configOf(rule).script || '', [...stack, name], depth + 1);
+            if (expanded.length > 32000) throw new Error('Expanded level-up script exceeds 32000 characters.');
+            return expanded;
+        }
+    );
+    const result = expand(source);
+    if (result.length > 32000) throw new Error('Expanded level-up script exceeds 32000 characters.');
+    return result;
 }
 
 function configOf(rule) {
@@ -362,6 +409,8 @@ class RichContentService {
         this.client = client;
         this.automation = automation;
         this.paginationLocks = new Map();
+        this.customButtonCooldowns = new Map();
+        this.customButtonMemberMisses = new Map();
     }
 
     render(script, context = {}) {
@@ -369,6 +418,30 @@ class RichContentService {
         return renderScript(script, { ...context,
             customScripts: guildId ? this.customNames(guildId) : new Set(),
             embedColors: guildId ? this.getEmbedColors(guildId) : {}
+        });
+    }
+
+    expandCustom(script, guildId) {
+        return expandCustomScripts(script, name => this.getCustom(guildId, name));
+    }
+
+    renderLevel(script, context = {}) {
+        const guildId = context.guild?.id;
+        if (!guildId) throw new Error('Level-up scripts require a server context.');
+        const level = context.level || {};
+        const memberId = context.member?.id || context.member?.user?.id || context.user?.id;
+        const expanded = expandCustomScripts(script, name => this.getCustom(guildId, name));
+        return this.render(expanded, {
+            ...context,
+            variables: {
+                user: memberId ? `<@${memberId}>` : '',
+                level: String(level.current ?? ''),
+                'level.current': String(level.current ?? ''),
+                'level.next': String(level.next ?? ''),
+                'level.rank': String(level.rank ?? ''),
+                'level.xp': String(level.xp ?? ''),
+                'level.next_xp': String(level.nextXp ?? '')
+            }
         });
     }
 
@@ -497,18 +570,44 @@ class RichContentService {
     }
 
     async handleCustomButton(interaction) {
-        const name = interaction.customId.slice('rich:custom:'.length);
-        const rule = this.getCustom(interaction.guildId, name);
+        const parts = interaction.customId.slice('rich:custom:'.length).split(':');
+        const boundGuildId = parts.length === 2 ? parts.shift() : interaction.guildId;
+        const name = parts[0];
+        const cooldownKey = `${boundGuildId}:${interaction.user.id}`;
+        const now = Date.now();
+        if ((this.customButtonCooldowns.get(cooldownKey) || 0) > now - 2000) {
+            return interaction.reply({ content: 'Please wait before using that custom response again.', flags: MessageFlags.Ephemeral });
+        }
+        if (!this.customButtonCooldowns.has(cooldownKey) && this.customButtonCooldowns.size >= 10000) {
+            this.customButtonCooldowns.delete(this.customButtonCooldowns.keys().next().value);
+        }
+        this.customButtonCooldowns.set(cooldownKey, now);
+        const rule = this.getCustom(boundGuildId, name);
         if (!rule) {
             return interaction.reply({ content: 'That custom response is no longer available.', flags: MessageFlags.Ephemeral });
         }
+        const guild = interaction.guild || this.client.guilds.cache.get(boundGuildId);
+        const memberKey = `${boundGuildId}:${interaction.user.id}`;
+        let member = interaction.member || guild?.members?.cache?.get(interaction.user.id) || null;
+        if (!member && guild?.members?.fetch && (this.customButtonMemberMisses.get(memberKey) || 0) <= now - 30000) {
+            member = await guild.members.fetch(interaction.user.id).catch(() => null);
+            if (!member) {
+                if (!this.customButtonMemberMisses.has(memberKey) && this.customButtonMemberMisses.size >= 10000) {
+                    this.customButtonMemberMisses.delete(this.customButtonMemberMisses.keys().next().value);
+                }
+                this.customButtonMemberMisses.set(memberKey, now);
+            }
+        }
         const payload = this.render(configOf(rule).script, {
-            user: interaction.user, member: interaction.member, guild: interaction.guild,
-            channel: interaction.channel
+            user: interaction.user, member, guild,
+            channel: interaction.channel, customButtonGuildId: boundGuildId
         });
+        if (!String(payload.content || '').trim() && !payload.embeds?.length && !payload.components?.length) {
+            return interaction.reply({ content: 'That custom response rendered no content.', flags: MessageFlags.Ephemeral });
+        }
         payload.flags = (payload.flags || 0) | MessageFlags.Ephemeral;
         await interaction.reply(payload);
-        this.useCustom(interaction.guildId, name);
+        this.useCustom(boundGuildId, name);
         return true;
     }
 
@@ -856,6 +955,7 @@ module.exports.renderScript = renderScript;
 module.exports.renderVariables = renderVariables;
 module.exports.SAFE_MENTIONS = SAFE_MENTIONS;
 module.exports.normalizedName = normalizedName;
+module.exports.expandCustomScripts = expandCustomScripts;
 module.exports.configOf = configOf;
 module.exports.messageToScript = messageToScript;
 module.exports.sourceReply = sourceReply;

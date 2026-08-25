@@ -7,7 +7,10 @@ const categoryMetadata = {
     'Utility': { icon: '🔧', description: 'Useful tools and information commands.' },
     'Fun': { icon: '🎉', description: 'Games and entertainment for everyone.' },
     'Games': { icon: '🎮', description: 'Game-specific statistics and tools.' },
+    'Music': { icon: '🎵', description: 'Self-hosted voice playback and DJ controls.' },
+    'Voice': { icon: '🔊', description: 'Temporary voice channels and owner controls.' },
     'Economy': { icon: '🪙', description: 'Earn, bank, spend, and manage virtual currency.' },
+    'LastFM': { icon: '🎵', description: 'Last.fm listening, charts, collages, and community.' },
     'Developer': { icon: '💻', description: 'Specialized tools for bot developers.' },
 };
 
@@ -96,6 +99,13 @@ async function showCommandDetails(interaction, client, commandName) {
         });
     }
 
+    if (commandData.name === 'fun') {
+        embed.addFields({
+            name: 'Public parity and safety',
+            value: 'Snipe keeps at most 10 entries per kind/channel for 15 minutes and honors global self-protection. Roleplay exposes 40 provider-backed actions; `fuck`, `spank`, and `nutkick` are visibly policy-excluded. `howgay`, `pp`, `bitches`, `nword`, and `nwordlb` are policy-excluded. Image/media subjects remain mapped to the bounded #56 media seam.'
+        });
+    }
+
     return interaction.reply({
         embeds: [embed],
         flags: [MessageFlags.Ephemeral]
@@ -117,7 +127,7 @@ async function showHelpPage(interaction, client, pageNumber) {
     });
 
     // Sort categories in a specific order
-    const categoryOrder = ['Administration', 'Moderation', 'Utility', 'Fun', 'Games', 'Economy', 'Developer'];
+    const categoryOrder = ['Administration', 'Moderation', 'Utility', 'Fun', 'Games', 'Music', 'Voice', 'Economy', 'LastFM', 'Developer'];
     const sortedCategories = Object.keys(categories).sort((a, b) => {
         return categoryOrder.indexOf(a) - categoryOrder.indexOf(b);
     });
@@ -188,7 +198,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
         .setThumbnail(client.user.displayAvatarURL())
         .setDescription(
             '**Welcome to ByteBot!**\n\n' +
-            'Start with an intent hub: `/community`, `/me`, `/server`, `/pod`, `/mod`, `/economy`, `/game`, `/fun`, or `/bot`.\n\n' +
+            'Start with an intent hub: `/community`, `/me`, `/server`, `/lookup`, `/pod`, `/mod`, `/economy`, `/lastfm`, `/game`, `/fun`, `/image`, or `/bot`.\n\n' +
             `📊 **${totalCommands}** commands • **${sortedCategories.length}** categories`
         )
         .addFields(
@@ -198,10 +208,13 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/community` member progress, achievements, BytePods, and community features\n' +
                     '`/me` personal settings, reminders, bookmarks, birthdays, streaks\n' +
                     '`/server` setup, lifecycle messages, suggestions, starboard, achievements, security\n' +
+                    '`/lookup` calculations, translation, web images, weather, definitions, and GitHub\n' +
                     '`/pod` BytePod actions and settings\n' +
                     '`/mod` member actions, cases, invoke templates, setup, logs, and channel controls\n' +
                     '`/economy` balances, games, crime, gangs, labs, role shops, and administration\n' +
-                    '`/game` F1 and War Thunder\n' +
+                    '`/game` F1, War Thunder, and public Roblox lookups\n' +
+                    '`/lastfm` listening, charts, collages, library tools, and community rankings\n' +
+                    '`/image` transforms, local effects, memes, and color inspection\n' +
                     '`/bot` help, health, deployment, and developer tools',
                 inline: false
             },
@@ -214,26 +227,44 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/server antiraid settings` • `/server antiraid module`\n' +
                     '`/server automod settings` • `/server automod filter`\n' +
                     '`/server permissions disable` • `/server permissions denyperm` • `/server permissions protect`\n' +
-                    '`/reactionrole add` • `/buttonrole add` • `/temprole add` • `/boosterrole create`\n' +
                     '`/ticket setup` • `/ticket panel manage` • `/ticket settings view`\n' +
                     '`/giveaway start` • `/giveaway edit prize` • `/counter add`\n' +
                     '`/economy balance` • `/economy game coinflip` • `/economy gang info` • `/economy lab status`\n' +
+                    '`/lastfm now` • `/lastfm charts collage` • `/lastfm community taste`\n' +
+                    '`/game warthunder stats`\n' +
+                    '`/fun uwuify` • `/fun uwulock add` • `/fun snipe protect` • `/fun roleplay action`\n' +
+                    '`/fun game tictactoe` • `/fun game blacktea` • `/image effect apply`',
+                inline: false
+            },
+            {
+                name: 'More Common Paths',
+                value:
+                    '`/reactionrole add` • `/buttonrole add` • `/temprole add` • `/boosterrole create`\n' +
                     '`/server backup create` • `/server customize preset` • `/server discovery publish`\n' +
-                    '`/server stats days:60`\n' +
-                    '`/mod user warn` • `/mod case view` • `/mod config setup`\n' +
-                    '`/mod template set` • `/game warthunder stats`\n' +
-                    '`/fun uwuify` • `/fun uwulock add`',
+                    '`/server stats days:60` • `/mod user warn` • `/mod case view` • `/mod config setup`\n' +
+                    '`/mod template set` • `/server role info` • `/server logs add`\n' +
+                    '`/lookup weather` • `/lookup github user` • `/game roblox profile`\n' +
+                    '`/repost` • `/ai ocr` • `/ai tts`',
+                inline: false
+            },
+            {
+                name: 'Greed Text Aliases',
+                value: '`level`, `rank`, `xp`, `lvl` → `/levels rank` • `levels lb`, `levels top` → `/levels leaderboard`\n' +
+                    '`rankcard`, `rc` → `/levels rankcard view` • `rankcard colour`, `rankcard accent` → `/levels rankcard color`',
                 inline: false
             },
             {
                 name: 'Public Parity Map',
                 value:
                     'Greed source categories route through ByteBot\'s existing hubs as features land:\n' +
-                    '`/community` Levels, Socials • `/me` Information, Utility\n' +
+                    '`/levels` Levels • `/community` Socials • `/analytics` Analytics\n' +
+                    '`/me` Information • `/lookup` Information, Utility • `/repost` Socials, Utility • `/ai` Information, Utility\n' +
+                    '`/game` Games\n' +
                     '`/server` Auto, Logs, Security, Server, Settings • `/ticket` Tickets • `/mod` Moderation\n' +
-                    '`/fun` Fun, Manipulation, Roleplay, Snipe • `/boosterrole` Boosters • `/economy` Economy\n' +
-                    '**Not yet available (planned):** LastFM, Voice\n' +
-                    '**Registry-only evidence gaps:** Developer, Music',
+                    '`/fun` Fun, Roleplay, Snipe • `/image` Manipulation • `/boosterrole` Boosters • `/economy` Economy • `/lastfm` LastFM\n' +
+                    '`/music` Music • `/voicemaster` Voice\n' +
+                    '**Provider-blocked:** AI chat/STT/generation, persistent social feeds/downloads/provider-backed behavior, Rolimons, Valorant, Minecraft, Spotify search, Reddit, YouTube downloads, Telegram, bio providers\n' +
+                    '**Registry-only evidence gaps:** Developer',
                 inline: false
             }
         );

@@ -4,10 +4,12 @@ const logger = require('../utils/logger');
 const { glob } = require('glob');
 const embeds = require('../utils/embeds');
 
-function execute(event, client, args) {
+function execute(event, client, args, eventName = event.name) {
     const resource = args.find(arg => arg?.guildId || arg?.guild?.id || arg?.message?.guild?.id);
     const guildId = resource?.guildId || resource?.guild?.id || resource?.message?.guild?.id;
-    return embeds.withGuild(client, guildId, () => event.execute(...args, client));
+    return embeds.withGuild(client, guildId, () => event.names
+        ? event.execute(eventName, ...args, client)
+        : event.execute(...args, client));
 }
 
 module.exports = async (client) => {
@@ -19,10 +21,12 @@ module.exports = async (client) => {
         const filePath = path.resolve(file);
         const event = require(filePath);
 
-        if (event.once) {
-            client.once(event.name, (...args) => execute(event, client, args));
-        } else {
-            client.on(event.name, (...args) => execute(event, client, args));
+        for (const name of event.names || [event.name]) {
+            if (event.once) {
+                client.once(name, (...args) => execute(event, client, args, name));
+            } else {
+                client.on(name, (...args) => execute(event, client, args, name));
+            }
         }
     }
 

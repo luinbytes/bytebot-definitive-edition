@@ -18,6 +18,8 @@ module.exports = {
             // Ignore DMs
             if (!message.guild) return;
 
+            client.levelAnalyticsService?.clearReactionPlacements(message);
+
             // Check starboard
             if (client.starboardService) {
                 await client.starboardService.handleReactionRemoveAll(message, reactions);

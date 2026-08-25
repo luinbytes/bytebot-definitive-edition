@@ -1,7 +1,7 @@
 const { Events, ChannelType, PermissionFlagsBits } = require('discord.js');
 const { db } = require('../database');
 const { guilds, bytepods, bytepodAutoWhitelist, bytepodUserSettings, bytepodActiveSessions, bytepodVoiceStats, bytepodSessionHistory } = require('../database/schema');
-const { eq, and } = require('drizzle-orm');
+const { eq, and, isNull } = require('drizzle-orm');
 const logger = require('../utils/logger');
 const embeds = require('../utils/embeds');
 const { checkBotPermissions } = require('../utils/permissionCheck');
@@ -83,7 +83,7 @@ async function finalizeVoiceSession(session, client) {
 
     // Track activity streak (convert seconds to minutes)
     const durationMinutes = Math.floor(durationSeconds / 60);
-    if (durationMinutes > 0 && client.activityStreakService) {
+    if (durationMinutes > 0 && client.activityStreakService && !client.levelAnalyticsService) {
         try {
             await client.activityStreakService.recordActivity(
                 session.userId,
@@ -306,7 +306,29 @@ module.exports = {
         const member = newState.member;
         const guild = newState.guild;
 
+        newState.client.musicService?.handleVoiceStateUpdate(oldState, newState);
+        await newState.client.voiceMasterService?.handleVoiceState(oldState, newState).catch(error => {
+            logger.errorContext('VoiceMaster voice-state failure', error, {
+                guildId: guild?.id, userId: member?.id,
+                oldChannelId: oldState.channelId, newChannelId: newState.channelId
+            });
+        });
+
         if (member.user.bot) return;
+
+        try {
+            const activity = await newState.client.levelAnalyticsService?.reconcileVoiceState(oldState, newState);
+            for (const userId of activity?.roleReconcileUserIds || []) {
+                const member = newState.guild.members.cache.get(userId)
+                    || await newState.guild.members.fetch(userId).catch(() => null);
+                if (member) await newState.client.levelAnalyticsService.reconcileMemberRoles(member);
+            }
+            if (activity?.settledSeconds > 0) {
+                await newState.client.activityStreakService?.recordCommittedActivity(member.id, guild.id);
+            }
+        } catch (error) {
+            logger.error(`Level voice analytics failed for ${member.id}: ${error.message}`);
+        }
 
         // DB Fetch
         const guildData = await dbLog.select('guilds',
@@ -380,7 +402,8 @@ module.exports = {
                 const existingOwnedPod = await dbLog.select('bytepods',
                     () => db.select().from(bytepods).where(and(
                         eq(bytepods.ownerId, member.id),
-                        eq(bytepods.guildId, guild.id)
+                        eq(bytepods.guildId, guild.id),
+                        isNull(bytepods.sourceChannelId)
                     )).get(),
                     { userId: member.id, guildId: guild.id, operation: 'existingOwnedPodCheck' }
                 );
@@ -572,7 +595,10 @@ module.exports = {
             }
 
             const podData = await dbLog.select('bytepods',
-                () => db.select().from(bytepods).where(eq(bytepods.channelId, joinedChannelId)).get(),
+                () => db.select().from(bytepods).where(and(
+                    eq(bytepods.channelId, joinedChannelId),
+                    isNull(bytepods.sourceChannelId)
+                )).get(),
                 { podId: joinedChannelId, guildId: guild.id }
             );
 
@@ -755,7 +781,10 @@ module.exports = {
 
             // Check if it's a BytePod
             const podData = await dbLog.select('bytepods',
-                () => db.select().from(bytepods).where(eq(bytepods.channelId, leftChannelId)).get(),
+                () => db.select().from(bytepods).where(and(
+                    eq(bytepods.channelId, leftChannelId),
+                    isNull(bytepods.sourceChannelId)
+                )).get(),
                 { podId: leftChannelId, guildId: guild.id }
             );
 

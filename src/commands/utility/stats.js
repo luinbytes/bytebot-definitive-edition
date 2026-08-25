@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, ChannelType, MessageFlags } = require('discord.js');
 const { db } = require('../../database');
-const { activityLogs, moderationCases, bytepods, bytepodVoiceStats } = require('../../database/schema');
-const { and, desc, eq, gte, sql } = require('drizzle-orm');
+const { activityLogs, moderationCases, bytepods, bytepodVoiceStats, serverDailyMetrics } = require('../../database/schema');
+const { and, asc, desc, eq, gte, sql } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
 
@@ -39,7 +39,9 @@ module.exports = {
                     .setMaxValue(1095))),
 
     async execute(interaction) {
-        const subcommand = interaction.options.getSubcommand();
+        const subcommand = interaction.commandName === 'analytics'
+            ? 'server'
+            : interaction.options.getSubcommand();
 
         if (subcommand === 'server') {
             // Manual defer with ephemeral control
@@ -54,6 +56,9 @@ module.exports = {
 
             const guild = interaction.guild;
             const days = interaction.options.getInteger('days') || 60;
+            if (!Number.isInteger(days) || days < 1 || days > 1095) throw new Error('Analytics range must be between 1 and 1095 days.');
+            const metric = interaction.options.getString?.('metric') || 'all';
+            if (!['all', 'messages', 'reactions', 'voice', 'membership'].includes(metric)) throw new Error('Unknown analytics metric.');
             const since = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
 
             // --- Gather Discord Data ---
@@ -80,19 +85,36 @@ module.exports = {
             const totalCommands = commandStats?.totalCommands || 0;
             const uniqueUsers = commandStats?.uniqueUsers || 0;
             const rangeStats = await db.select({
-                messages: sql`COALESCE(SUM(${activityLogs.messageCount}), 0)`,
-                reactions: sql`COALESCE(SUM(${activityLogs.reactionsGiven}), 0)`,
-                voiceMinutes: sql`COALESCE(SUM(${activityLogs.voiceMinutes}), 0)`,
-                commands: sql`COALESCE(SUM(${activityLogs.commandsRun}), 0)`
-            }).from(activityLogs).where(and(
-                eq(activityLogs.guildId, guild.id),
-                gte(activityLogs.activityDate, since)
+                messages: sql`COALESCE(SUM(${serverDailyMetrics.messageCount}), 0)`,
+                reactions: sql`COALESCE(SUM(${serverDailyMetrics.reactionCount}), 0)`,
+                voiceSeconds: sql`COALESCE(SUM(${serverDailyMetrics.voiceSeconds}), 0)`,
+                joins: sql`COALESCE(SUM(${serverDailyMetrics.joins}), 0)`,
+                leaves: sql`COALESCE(SUM(${serverDailyMetrics.leaves}), 0)`
+            }).from(serverDailyMetrics).where(and(
+                eq(serverDailyMetrics.guildId, guild.id),
+                gte(serverDailyMetrics.activityDate, since)
             )).get();
-            const activityCoverage = await db.select({
-                firstDate: sql`MIN(${activityLogs.activityDate})`
-            }).from(activityLogs).where(eq(activityLogs.guildId, guild.id)).get();
+            const daily = await db.select().from(serverDailyMetrics).where(and(
+                eq(serverDailyMetrics.guildId, guild.id), gte(serverDailyMetrics.activityDate, since)
+            )).orderBy(asc(serverDailyMetrics.activityDate));
+            const commandRange = await db.select({
+                commands: sql`COALESCE(SUM(${activityLogs.commandsRun}), 0)`
+            }).from(activityLogs).where(and(eq(activityLogs.guildId, guild.id), gte(activityLogs.activityDate, since))).get();
+            const activityCoverage = await db.select({ firstDate: sql`MIN(${serverDailyMetrics.activityDate})` })
+                .from(serverDailyMetrics).where(eq(serverDailyMetrics.guildId, guild.id)).get();
+            const baselineCoverage = await db.select({ baselineAt: sql`MIN(${serverDailyMetrics.baselineAt})` })
+                .from(serverDailyMetrics).where(eq(serverDailyMetrics.guildId, guild.id)).get();
             const coverage = !activityCoverage?.firstDate ? ' · no stored activity'
                 : activityCoverage.firstDate > since ? ` · stored since ${activityCoverage.firstDate}` : '';
+            const latestSnapshot = [...daily].reverse().find(row => row.memberCount != null)?.memberCount;
+            const metricValue = row => ({
+                messages: row.messageCount,
+                reactions: row.reactionCount,
+                voice: Math.floor(row.voiceSeconds / 60),
+                membership: row.joins - row.leaves,
+                all: row.messageCount + row.reactionCount + Math.floor(row.voiceSeconds / 60)
+            })[metric];
+            const trend = daily.slice(-14).map(row => `${row.activityDate}: ${metricValue(row).toLocaleString()}`).join('\n') || 'No stored activity in this range.';
 
             // Moderation actions count
             const modStats = await db.select({
@@ -128,7 +150,7 @@ module.exports = {
             }
 
             // --- Build Embed ---
-            const embed = embeds.brand(`📊 ${guild.name} Statistics`, 'Comprehensive server analytics and bot activity.')
+            const embed = embeds.brand(`📊 ${guild.name} Statistics`, `${days}-day persisted server analytics · ${metric}`)
                 .setThumbnail(guild.iconURL({ dynamic: true, size: 256 }))
                 .addFields(
                     // Row 1: Members & Channels
@@ -151,7 +173,18 @@ module.exports = {
                     { name: 'Mod Actions', value: `${totalModActions}`, inline: true },
                     { name: 'Active BytePods', value: `${activePodCount}`, inline: true },
 
-                    { name: `Last ${days} Days${coverage}`, value: `${Number(rangeStats?.messages || 0).toLocaleString()} messages · ${Number(rangeStats?.reactions || 0).toLocaleString()} reactions · ${Number(rangeStats?.voiceMinutes || 0).toLocaleString()} voice minutes · ${Number(rangeStats?.commands || 0).toLocaleString()} commands`, inline: false },
+                    ...(metric === 'all' || metric === 'messages' ? [{ name: 'Messages', value: Number(rangeStats?.messages || 0).toLocaleString(), inline: true }] : []),
+                    ...(metric === 'all' || metric === 'reactions' ? [{ name: 'Reactions', value: Number(rangeStats?.reactions || 0).toLocaleString(), inline: true }] : []),
+                    ...(metric === 'all' || metric === 'voice' ? [{ name: 'Voice', value: `${Math.floor(Number(rangeStats?.voiceSeconds || 0) / 60).toLocaleString()} minutes`, inline: true }] : []),
+                    ...(metric === 'all' || metric === 'membership' ? [{
+                        name: 'Membership',
+                        value: baselineCoverage?.baselineAt == null
+                            ? 'History unavailable before the first reliable baseline.'
+                            : `${new Date(Number(baselineCoverage.baselineAt)).toISOString().slice(0, 10) > since ? `History unavailable before ${new Date(Number(baselineCoverage.baselineAt)).toISOString().slice(0, 10)} · ` : ''}${Number(rangeStats.joins).toLocaleString()} joins · ${Number(rangeStats.leaves).toLocaleString()} leaves · ${Number(rangeStats.joins - rangeStats.leaves).toLocaleString()} net · ${Number(latestSnapshot ?? totalMembers).toLocaleString()} latest`,
+                        inline: false
+                    }] : []),
+                    { name: `Last ${days} Days${coverage}`, value: `${Number(commandRange?.commands || 0).toLocaleString()} commands`, inline: false },
+                    { name: `Daily ${metric} trend`, value: trend.slice(0, 1024), inline: false },
 
                     // Row 5: Voice Leaderboard
                     { name: 'Top Voice Users', value: topVoiceText, inline: false }

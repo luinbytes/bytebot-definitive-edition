@@ -5,6 +5,11 @@ const { sendLifecycleMessage } = require('../services/lifecycleMessageService');
 module.exports = {
     name: Events.GuildMemberRemove,
     async execute(member, client) {
+        try {
+            await client?.levelAnalyticsService?.recordMembership(member, false);
+        } catch (error) {
+            logger.error(`Failed to record member leave analytics for ${member.id}: ${error.message}`);
+        }
         if (client?.roleAutomationService) {
             try {
                 await client.roleAutomationService.cleanupBooster(member);

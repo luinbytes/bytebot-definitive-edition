@@ -4,6 +4,7 @@ const { handleHoneypotMessage } = require('../utils/honeypotUtil');
 const { handleUwuLockMessage } = require('../utils/uwuLockUtil');
 const { handleMassMention } = require('../services/antiraidService');
 const { handleMessage: handleAutomodMessage } = require('../services/automodService');
+const { clearAfk, handleAfkMessage } = require('../services/personalUtilityService');
 
 module.exports = {
     name: Events.MessageCreate,
@@ -19,6 +20,10 @@ module.exports = {
 
         // Guild only (auto-responder doesn't work in DMs)
         if (!message.guild) return;
+
+        let clearedAfk;
+        try { clearedAfk = await clearAfk(message.author.id); }
+        catch (error) { logger.error('AFK clear error:', error); }
 
         try {
             if (await handleHoneypotMessage(message)) return;
@@ -38,10 +43,32 @@ module.exports = {
             logger.error('AutoMod message handler error:', error);
         }
 
+        if (client.communityUtilityService) {
+            try {
+                if (await client.communityUtilityService.handleMessage(message)) return;
+            } catch (error) {
+                logger.error('Image-only handler error:', error);
+            }
+        }
+
         try {
             if (await handleUwuLockMessage(message)) return;
         } catch (error) {
             logger.error('UwU Lock handler error:', error);
+        }
+
+        try {
+            await handleAfkMessage(message, clearedAfk);
+        } catch (error) {
+            logger.error('AFK handler error:', error);
+        }
+
+        if (client.funService) {
+            try {
+                if (await client.funService.handleMessage(message)) return;
+            } catch (error) {
+                logger.error('Fun game message handler error:', error);
+            }
         }
 
         // Auto-responder check
@@ -70,24 +97,51 @@ module.exports = {
             }
         }
 
+        let levelActivity;
+        let levelTrackingFailed = false;
+        if (client.levelAnalyticsService) {
+            try {
+                levelActivity = await client.levelAnalyticsService.recordMessage(message);
+            } catch (error) {
+                levelTrackingFailed = true;
+                logger.error('Level analytics tracking error:', error);
+            }
+            if (!levelTrackingFailed && levelActivity?.roleReconcile) {
+                await client.levelAnalyticsService.reconcileMemberRoles(message.member)
+                    .catch(error => logger.error('Level role reconciliation error:', error));
+            }
+            if (!levelTrackingFailed) {
+                await client.levelAnalyticsService.announceLevel(message, levelActivity)
+                    .catch(error => logger.error('Level-up message delivery error:', error));
+            }
+        }
+
         // Activity streak tracking
         if (client.activityStreakService) {
             try {
-                // Record message activity
-                await client.activityStreakService.recordActivity(
-                    message.author.id,
-                    message.guild.id,
-                    'message',
-                    1
-                );
+                if (levelActivity?.accepted) {
+                    await client.activityStreakService.recordCommittedActivity(
+                        message.author.id,
+                        message.guild.id
+                    );
+                } else if (!client.levelAnalyticsService || levelTrackingFailed) {
+                    await client.activityStreakService.recordActivity(
+                        message.author.id,
+                        message.guild.id,
+                        'message',
+                        1
+                    );
+                }
 
                 // Track active hour for time-based achievements
-                const hour = new Date().getUTCHours();
-                await client.activityStreakService.recordActiveHour(
-                    message.author.id,
-                    message.guild.id,
-                    hour
-                );
+                if (levelActivity?.accepted || !client.levelAnalyticsService || levelTrackingFailed) {
+                    const hour = new Date().getUTCHours();
+                    await client.activityStreakService.recordActiveHour(
+                        message.author.id,
+                        message.guild.id,
+                        hour
+                    );
+                }
             } catch (error) {
                 logger.error('Activity streak tracking error:', error);
                 // Don't crash on tracking errors, just log

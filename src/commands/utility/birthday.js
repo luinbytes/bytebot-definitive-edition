@@ -418,27 +418,34 @@ module.exports = {
      * @returns {Object} - { valid: boolean, month?: number, day?: number, error?: string }
      */
     parseBirthday(input) {
-        // Validate format: MM-DD
-        const regex = /^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$/;
-
-        if (!regex.test(input)) {
+        const monthNames = ['january', 'february', 'march', 'april', 'may', 'june',
+            'july', 'august', 'september', 'october', 'november', 'december'];
+        const value = String(input || '').trim().toLowerCase().replace(/(\d)(st|nd|rd|th)\b/g, '$1');
+        const numeric = value.match(/^(\d{1,2})[-/](\d{1,2})$/);
+        const named = value.match(/^([a-z]+)\s+(\d{1,2})$/);
+        let month;
+        let day;
+        if (numeric) {
+            month = Number(numeric[1]);
+            day = Number(numeric[2]);
+        } else if (named && named[1].length >= 3) {
+            month = monthNames.findIndex(name => name === named[1] || name.startsWith(named[1])) + 1;
+            day = Number(named[2]);
+        }
+        if (!month || month > 12 || !day || day > 31) {
             return {
                 valid: false,
-                error: 'Invalid format. Use MM-DD (e.g., 03-15 for March 15th, 12-25 for December 25th)'
+                error: 'Use MM-DD, M/D, or a month name and day (for example: 03-15, 3/15, or March 15th).'
             };
         }
-
-        const [month, day] = input.split('-').map(Number);
 
         // Validate day for month
         const daysInMonth = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
         if (day > daysInMonth[month - 1]) {
-            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-                'July', 'August', 'September', 'October', 'November', 'December'];
             return {
                 valid: false,
-                error: `${monthNames[month - 1]} only has ${daysInMonth[month - 1]} days.`
+                error: `${monthNames[month - 1][0].toUpperCase()}${monthNames[month - 1].slice(1)} only has ${daysInMonth[month - 1]} days.`
             };
         }
 

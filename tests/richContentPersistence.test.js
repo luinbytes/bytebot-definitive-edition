@@ -78,6 +78,65 @@ describe('rich-content persistence', () => {
         expect(JSON.parse(service.getCustom('guild1', 'rules').config).useCount).toBe(1);
     });
 
+    test('guild-bound custom buttons resolve from direct messages', async () => {
+        const fetched = { id: 'user1', guild: null, user: { id: 'user1', username: 'Ada' } };
+        const fetch = jest.fn().mockResolvedValue(fetched);
+        const guild = { id: 'guild1', name: 'Guild', members: { cache: new Map(), fetch } };
+        fetched.guild = guild;
+        service.client = { guilds: { cache: new Map([[guild.id, guild]]) } };
+        await service.saveCustom(guild.id, 'admin1', 'rules', '{content: Bound {guild.name}}');
+        const interaction = {
+            customId: 'rich:custom:guild1:rules', guildId: null, guild: null, channel: { id: 'dm1' },
+            user: { id: 'user1', username: 'Ada' }, reply: jest.fn().mockResolvedValue({})
+        };
+
+        await service.handleCustomButton(interaction);
+
+        expect(interaction.reply.mock.calls[0][0].content).toBe('Bound Guild');
+        expect(JSON.parse(service.getCustom(guild.id, 'rules').config).useCount).toBe(1);
+
+        const repeated = { ...interaction, reply: jest.fn() };
+        await service.handleCustomButton(repeated);
+        expect(repeated.reply.mock.calls[0][0].content).toContain('Please wait');
+        expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    test('guild-bound custom buttons bound member lookup bursts and cache misses', async () => {
+        const fetch = jest.fn().mockResolvedValue(null);
+        const guild = { id: 'guild1', members: { cache: new Map(), fetch } };
+        service.client = { guilds: { cache: new Map([[guild.id, guild]]) } };
+        await service.saveCustom(guild.id, 'admin1', 'one', '{content: One}');
+        await service.saveCustom(guild.id, 'admin1', 'two', '{content: Two}');
+        const now = jest.spyOn(Date, 'now').mockReturnValue(100000);
+        const interaction = name => ({
+            customId: `rich:custom:guild1:${name}`, guildId: null, guild: null, channel: { id: 'dm1' },
+            user: { id: 'former', username: 'Former' }, reply: jest.fn().mockResolvedValue({})
+        });
+
+        await service.handleCustomButton(interaction('one'));
+        const blocked = interaction('two');
+        await service.handleCustomButton(blocked);
+        expect(blocked.reply.mock.calls[0][0].content).toContain('Please wait');
+        now.mockReturnValue(102001);
+        await service.handleCustomButton(interaction('two'));
+
+        expect(fetch).toHaveBeenCalledTimes(1);
+        now.mockRestore();
+    });
+
+    test('custom buttons reject empty rendered scripts without counting a use', async () => {
+        await service.saveCustom('guild1', 'admin1', 'empty', '{if {user.bot}}never{/if}');
+        const interaction = {
+            customId: 'rich:custom:empty', guildId: 'guild1', guild: { id: 'guild1' }, channel: { id: 'channel1' },
+            user: { id: 'user1', username: 'Ada', bot: false }, reply: jest.fn().mockResolvedValue({})
+        };
+
+        await service.handleCustomButton(interaction);
+
+        expect(interaction.reply.mock.calls[0][0].content).toContain('rendered no content');
+        expect(JSON.parse(service.getCustom('guild1', 'empty').config).useCount).toBe(0);
+    });
+
     test('saved embeds follow their owner and publishing enforces the highest public cap', async () => {
         await service.saveEmbed('user1', 'Welcome', '{embed}$v{title: Hello}');
         expect(JSON.parse(service.getEmbed('user1', 'welcome').config).script).toContain('Hello');

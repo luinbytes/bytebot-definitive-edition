@@ -1,0 +1,19 @@
+services:
+  bytebot:
+    build: .
+    env_file: ${BYTEBOT_ENV_FILE:-.env}
+    environment:
+      DATABASE_URL: /app/data/sqlite.db
+    restart: unless-stopped
+    init: true
+    cpus: 1.0
+    mem_limit: 1g
+    pids_limit: 128
+    stop_grace_period: 15s
+    volumes:
+      - bytebot-data:/app/data
+      - bytebot-logs:/app/logs
+
+volumes:
+  bytebot-data:
+  bytebot-logs:

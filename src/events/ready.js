@@ -2,7 +2,7 @@ const { Events, ActivityType } = require('discord.js');
 const logger = require('../utils/logger');
 const { db } = require('../database');
 const { bytepodActiveSessions, bytepodVoiceStats, bytepods } = require('../database/schema');
-const { eq, and } = require('drizzle-orm');
+const { eq, and, isNull } = require('drizzle-orm');
 const { dbLog } = require('../utils/dbLogger');
 const { scheduleOwnershipTransfer } = require('./voiceStateUpdate');
 const { reconcileForcedNicknamesWithRetry } = require('../services/roleModerationService');
@@ -96,7 +96,7 @@ async function finalizeStaleSession(session, client) {
 
     // Track activity streak (convert seconds to minutes)
     const durationMinutes = Math.floor(durationSeconds / 60);
-    if (durationMinutes > 0 && client?.activityStreakService) {
+    if (durationMinutes > 0 && client?.activityStreakService && !client.levelAnalyticsService) {
         try {
             await client.activityStreakService.recordActivity(
                 session.userId,
@@ -120,6 +120,21 @@ module.exports = {
     async execute(client) {
         logger.success(`Ready! Logged in as ${client.user.tag}`);
         logger.info(`Bot is active in ${client.guilds.cache.size} guilds.`);
+
+        try {
+            const { VoiceMasterService } = require('../services/voiceMasterService');
+            const { sqlite } = require('../database');
+            client.voiceMasterService = new VoiceMasterService({ client, sqlite });
+            const recovery = await client.voiceMasterService.reconcile();
+            client.voiceMasterService.startCleanup();
+            if (recovery.active || recovery.deleted || recovery.lost || recovery.ambiguous) {
+                logger.info(`VoiceMaster recovery: ${recovery.active} active, ${recovery.deleted} deleted, ${recovery.lost} lost, ${recovery.ambiguous} ambiguous`);
+            }
+            recovery.failures.forEach(failure => logger.warn(`VoiceMaster recovery failed for ${failure.channelId}: ${failure.error}`));
+            logger.success('VoiceMaster service initialized');
+        } catch (error) {
+            logger.error(`Failed to initialize VoiceMaster service: ${error.message}`);
+        }
 
         await recoverAntinuke(client);
 
@@ -154,6 +169,57 @@ module.exports = {
             logger.success('Achievement role cleanup scheduled');
         } catch (e) {
             logger.error(`Failed to initialize activity streak service: ${e}`);
+        }
+
+        try {
+            const LevelAnalyticsService = require('../services/levelAnalyticsService');
+            const { sqlite } = require('../database');
+            client.levelAnalyticsService = new LevelAnalyticsService({
+                sqlite, client, imageQueue: client.imageProcessingQueue
+            });
+            const recovery = await client.levelAnalyticsService.reconcileStartup(client);
+            recovery.failures.forEach(failure => logger.error(
+                `Level analytics baseline failed for ${failure.guildId}: ${failure.error}`
+            ));
+            const boards = await client.levelAnalyticsService.refreshLiveBoards();
+            boards.failures.forEach(failure => logger.error(
+                `Live level board recovery failed for ${failure.guildId}/${failure.channelId}/${failure.metric}: ${failure.error}`
+            ));
+            const liveBoardTimer = setInterval(() => client.levelAnalyticsService.refreshLiveBoards()
+                .then(result => result.failures.forEach(failure => logger.error(
+                    `Live level board refresh failed for ${failure.guildId}/${failure.channelId}/${failure.metric}: ${failure.error}`
+                )))
+                .catch(error => logger.error(`Live level board refresh failed: ${error.message}`)), 5 * 60 * 1000);
+            liveBoardTimer.unref?.();
+            await client.levelAnalyticsService.processRoleJobs();
+            const roleJobTimer = setInterval(() => client.levelAnalyticsService.processRoleJobs()
+                .catch(error => logger.error(`Level role reconciliation retry failed: ${error.message}`)), 30 * 1000);
+            roleJobTimer.unref?.();
+            const prune = () => {
+                const removed = client.levelAnalyticsService.pruneAnalytics();
+                if (removed.daily || removed.activity || removed.dedupe || removed.reactions) logger.info(
+                    `Analytics retention pruned ${removed.daily} daily, ${removed.activity} member, ${removed.dedupe} dedupe, and ${removed.reactions} reaction rows`
+                );
+            };
+            prune();
+            const analyticsPruneTimer = setInterval(prune, 24 * 60 * 60 * 1000);
+            analyticsPruneTimer.unref?.();
+            logger.success('Level analytics service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize level analytics service: ${e}`);
+        }
+
+        try {
+            const EventLoggingService = require('../services/eventLoggingService');
+            const { sqlite } = require('../database');
+            client.eventLoggingService = new EventLoggingService({ sqlite, client });
+            await client.eventLoggingService.processOutbox();
+            const eventLogTimer = setInterval(() => client.eventLoggingService.processOutbox()
+                .catch(error => logger.error(`Event log delivery retry failed: ${error.message}`)), 1000);
+            eventLogTimer.unref?.();
+            logger.success('Event logging service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize event logging service: ${e}`);
         }
 
         // --- Validate Active BytePod Sessions (Restart Resilience) ---
@@ -215,7 +281,7 @@ module.exports = {
         // --- Validate BytePod Channels (Cleanup orphans & empty pods) ---
         try {
             const allPods = await dbLog.select('bytepods',
-                () => db.select().from(bytepods),
+                () => db.select().from(bytepods).where(isNull(bytepods.sourceChannelId)),
                 { operation: 'startupCleanup' }
             );
             let deleted = 0;
@@ -327,6 +393,16 @@ module.exports = {
         }
 
         try {
+            const { CommunityUtilityService } = require('../services/communityUtilityService');
+            client.communityUtilityService = new CommunityUtilityService(client);
+            await client.communityUtilityService.reconcile();
+            client.communityUtilityService.start();
+            logger.success('Community utility service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize community utility service: ${e}`);
+        }
+
+        try {
             const { EconomyService } = require('../services/economyService');
             const { sqlite } = require('../database');
             client.economyService = new EconomyService({ client, sqlite });
@@ -337,6 +413,44 @@ module.exports = {
             logger.success('Economy service initialized');
         } catch (e) {
             logger.error(`Failed to initialize economy service: ${e}`);
+        }
+
+        if (process.env.MUSIC_LIBRARY_PATH) {
+            try {
+                const { MusicLibrary, MusicService } = require('../services/musicService');
+                const { db } = require('../database');
+                MusicService.checkRuntime();
+                client.musicService = new MusicService({
+                    library: new MusicLibrary(process.env.MUSIC_LIBRARY_PATH), db
+                });
+                logger.success('Music service initialized');
+            } catch (e) {
+                client.musicUnavailableReason = e.message;
+                logger.error(`Failed to initialize music service: ${e.message}`);
+            }
+        } else {
+            logger.info('Music service disabled: MUSIC_LIBRARY_PATH is not configured');
+        }
+
+        try {
+            const { FunService } = require('../services/funService');
+            const { sqlite } = require('../database');
+            client.funService = new FunService({ sqlite });
+            logger.success('Fun service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize fun service: ${e}`);
+        }
+
+        try {
+            const { sqlite } = require('../database');
+            const { LastfmService } = require('../services/lastfmService');
+            const { LastfmOAuthServer } = require('../services/lastfmOAuthServer');
+            client.lastfmService = new LastfmService({ sqlite, queue: client.imageProcessingQueue });
+            client.lastfmOAuthServer = new LastfmOAuthServer(client.lastfmService);
+            const oauth = await client.lastfmOAuthServer.start();
+            logger.success(`Last.fm service initialized${oauth ? ' with OAuth callback' : ' in read-only mode'}`);
+        } catch (e) {
+            logger.error(`Failed to initialize Last.fm service: ${e}`);
         }
 
         try {

@@ -1,13 +1,34 @@
 const { MessageType, PermissionFlagsBits } = require('discord.js');
+const { randomInt } = require('crypto');
 const { and, eq } = require('drizzle-orm');
 const { db } = require('../database');
-const { uwuLockMembers } = require('../database/schema');
+const { uwuLockMembers, uwuRouletteConfigs } = require('../database/schema');
 const logger = require('./logger');
 
 const FUNCTIONAL_TOKEN = /```[\s\S]*?```|`[^`\n]*`|https?:\/\/\S+|<[^>\n]+>/g;
 const WEBHOOK_NAME = 'ByteBot UwU Lock';
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_ATTACHMENTS = 10;
+const ROULETTE_WINDOW_MS = 10_000;
+const MAX_ROULETTE_REPLAYS = 10;
+const rouletteWindows = new Map();
+const webhookRequests = new Map();
+
+function getReplayWebhook(channel, botId) {
+    let request = webhookRequests.get(channel.id);
+    if (!request) {
+        request = channel.fetchWebhooks().then(webhooks =>
+            Array.from(webhooks.values()).find(item =>
+                item.owner?.id === botId && item.name === WEBHOOK_NAME
+            ) || channel.createWebhook({ name: WEBHOOK_NAME, reason: 'UwU Lock message replay' })
+        );
+        webhookRequests.set(channel.id, request);
+        request.finally(() => {
+            if (webhookRequests.get(channel.id) === request) webhookRequests.delete(channel.id);
+        }).catch(() => {});
+    }
+    return request;
+}
 
 function uwuifyText(text) {
     const input = String(text ?? '');
@@ -62,10 +83,40 @@ function listUwuLockMembers(guildId, state) {
         .all();
 }
 
+function setUwuRoulette(guildId, percentage) {
+    if (!Number.isInteger(percentage) || percentage < 0 || percentage > 100) {
+        throw new Error('UwU Roulette percentage must be an integer from 0 to 100.');
+    }
+    if (percentage === 0) return db.delete(uwuRouletteConfigs).where(eq(uwuRouletteConfigs.guildId, guildId)).run();
+    return db.insert(uwuRouletteConfigs).values({ guildId, percentage, updatedAt: Date.now() }).onConflictDoUpdate({
+        target: uwuRouletteConfigs.guildId,
+        set: { percentage, updatedAt: Date.now() }
+    }).run();
+}
+
+function rouletteSelected(message) {
+    const config = db.select().from(uwuRouletteConfigs)
+        .where(eq(uwuRouletteConfigs.guildId, message.guild.id)).get();
+    if (!config) return false;
+
+    const key = `${message.guild.id}:${message.channelId || message.channel.id}`;
+    const now = Date.now();
+    let window = rouletteWindows.get(key);
+    if (!window || now - window.startedAt >= ROULETTE_WINDOW_MS) window = { startedAt: now, replays: 0 };
+    if (window.replays >= MAX_ROULETTE_REPLAYS || randomInt(100) >= config.percentage) return false;
+    window.replays += 1;
+    if (!rouletteWindows.has(key) && rouletteWindows.size >= 1000) {
+        rouletteWindows.delete(rouletteWindows.keys().next().value);
+    }
+    rouletteWindows.set(key, window);
+    return true;
+}
+
 async function handleUwuLockMessage(message) {
     if (!message.guild || message.author?.bot || message.webhookId || message.system) return false;
     if (message.author.id === message.guild.ownerId || message.author.id === message.client.user.id) return false;
-    if (getUwuLockState(message.guild.id, message.author.id)?.state !== 'target') return false;
+    const state = getUwuLockState(message.guild.id, message.author.id)?.state;
+    if (state === 'protected') return false;
     if (message.type !== MessageType.Default || message.reference || message.poll) return false;
     if (message.components?.length || message.stickers?.size) return false;
 
@@ -82,16 +133,11 @@ async function handleUwuLockMessage(message) {
     if (!webhookChannel || !message.deletable) return false;
     if (!sourcePermissions?.has(PermissionFlagsBits.ManageMessages)) return false;
     if (!webhookPermissions?.has(PermissionFlagsBits.ManageWebhooks)) return false;
+    if (state !== 'target' && !rouletteSelected(message)) return false;
 
     let replay;
     try {
-        const webhooks = await webhookChannel.fetchWebhooks();
-        const webhook = Array.from(webhooks.values()).find(item =>
-            item.owner?.id === message.client.user.id && item.name === WEBHOOK_NAME
-        ) || await webhookChannel.createWebhook({
-            name: WEBHOOK_NAME,
-            reason: 'UwU Lock message replay'
-        });
+        const webhook = await getReplayWebhook(webhookChannel, message.client.user.id);
         const payload = {
             content: uwuifyText(message.content),
             username: (message.member?.displayName || message.author.username).slice(0, 80),
@@ -141,5 +187,6 @@ module.exports = {
     listUwuLockMembers,
     removeUwuLockState,
     setUwuLockState,
+    setUwuRoulette,
     uwuifyText
 };

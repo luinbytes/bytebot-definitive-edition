@@ -2,6 +2,7 @@ const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags, ChannelType } = 
 const { and, count, eq } = require('drizzle-orm');
 const { db } = require('../../database');
 const { autoResponses } = require('../../database/schema');
+const { createAutoResponder } = require('../../services/autoResponderService');
 
 const data = new SlashCommandBuilder().setName('autoresponder').setDescription('Greed-compatible automated responders')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).setDMPermission(false);
@@ -54,16 +55,20 @@ module.exports = {
         const action = interaction.options.getSubcommand();
         const guildId = interaction.guild.id;
         if (action === 'add') {
-            const total = await db.select({ count: count() }).from(autoResponses).where(eq(autoResponses.guildId, guildId)).get();
-            if (total.count >= 1000) return interaction.editReply({ content: 'This server has reached the 1,000 auto-responder limit.', flags: [MessageFlags.Ephemeral] });
             if (await getResponder(guildId, interaction.options.getString('trigger'))) return interaction.editReply({ content: 'That trigger already has an auto-responder.', flags: [MessageFlags.Ephemeral] });
-            const created = await db.insert(autoResponses).values({
-                guildId, trigger: interaction.options.getString('trigger'), response: interaction.options.getString('response'),
-                creatorId: interaction.user.id, matchType: interaction.options.getBoolean('strict') ? 'exact' : 'contains',
-                reply: interaction.options.getBoolean('reply') || false, deleteTrigger: interaction.options.getBoolean('delete') || false,
-                selfDestructSeconds: interaction.options.getInteger('self_destruct'), mentionPolicy: interaction.options.getString('mentions') || 'none',
-                enabled: true, cooldown: 60, useCount: 0, createdAt: new Date()
-            }).returning().get();
+            let created;
+            try {
+                created = createAutoResponder({
+                    guildId, trigger: interaction.options.getString('trigger'), response: interaction.options.getString('response'),
+                    creatorId: interaction.user.id, matchType: interaction.options.getBoolean('strict') ? 'exact' : 'contains',
+                    reply: interaction.options.getBoolean('reply') || false, deleteTrigger: interaction.options.getBoolean('delete') || false,
+                    selfDestructSeconds: interaction.options.getInteger('self_destruct'), mentionPolicy: interaction.options.getString('mentions') || 'none',
+                    enabled: true, cooldown: 60, useCount: 0, createdAt: new Date()
+                });
+            } catch (error) {
+                if (error.code === 'AUTO_RESPONDER_LIMIT') return interaction.editReply({ content: error.message, flags: [MessageFlags.Ephemeral] });
+                throw error;
+            }
             client.autoResponderService.invalidateCache(guildId);
             return interaction.editReply({ content: `Auto-responder #${created.id} created.`, flags: [MessageFlags.Ephemeral] });
         }

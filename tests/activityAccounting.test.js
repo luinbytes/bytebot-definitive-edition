@@ -35,6 +35,8 @@ describe('activity accounting', () => {
             activity_date TEXT NOT NULL,
             message_count INTEGER DEFAULT 0 NOT NULL,
             voice_minutes INTEGER DEFAULT 0 NOT NULL,
+            text_xp_awarded INTEGER DEFAULT 0 NOT NULL,
+            voice_seconds INTEGER DEFAULT 0 NOT NULL,
             commands_run INTEGER DEFAULT 0 NOT NULL,
             reactions_given INTEGER DEFAULT 0 NOT NULL,
             channels_joined INTEGER DEFAULT 0 NOT NULL,
