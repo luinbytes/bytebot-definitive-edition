@@ -57,7 +57,9 @@ module.exports = {
         const limit = Math.min(interaction.attachmentSizeLimit || MAX_OUTPUT_BYTES, MAX_OUTPUT_BYTES);
         const group = interaction.options.getSubcommandGroup();
         const action = interaction.options.getSubcommand();
-        const service = client.imageManipulationService || (client.imageManipulationService = new ImageManipulationService());
+        const service = client.imageManipulationService || (client.imageManipulationService = new ImageManipulationService({
+            queue: client.imageProcessingQueue
+        }));
         let result;
 
         if (group === 'transform') {

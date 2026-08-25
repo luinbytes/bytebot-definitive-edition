@@ -81,7 +81,10 @@ module.exports = {
             const uptimeSeconds = Math.floor(process.uptime());
             const memory = process.memoryUsage();
             const health = client.helperHealth || {};
-            const state = value => value?.ready ? 'ready' : 'unavailable';
+            const state = value => value?.ready ? value.detail || 'ready' : 'unavailable';
+            const music = client.musicService
+                ? state(health.music)
+                : (client.musicConfigured ? 'unavailable' : 'disabled');
             const embed = embeds.brand('Bot Runtime Stats', 'Current process health')
                 .addFields(
                     { name: 'Uptime', value: `${Math.floor(uptimeSeconds / 3600)}h ${Math.floor((uptimeSeconds % 3600) / 60)}m`, inline: true },
@@ -91,7 +94,7 @@ module.exports = {
                     { name: 'Heartbeat', value: `${client.ws.ping}ms`, inline: true },
                     { name: 'Helpers', value: [
                         `Sharp ${state(health.sharp)}`, `OCR ${state(health.tesseract)}`,
-                        `Speech ${state(health.espeak)}`, `Music ${client.musicService ? state(health.music) : 'disabled'}`
+                        `Speech ${state(health.espeak)}`, `Music ${music}`
                     ].join(' • '), inline: false }
                 );
 

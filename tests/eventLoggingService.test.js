@@ -139,7 +139,7 @@ describe('EventLoggingService', () => {
         database.sqlite.prepare(`
             INSERT INTO event_log_outbox
                 (guild_id, event_key, channel_id, module, payload, attempts, next_attempt_at, status, created_at)
-            VALUES ('guild1', 'event1', 'channel1', 'messages', '{"title":"Event","description":"Body","color":"#8A2BE2"}', 1, 1, 'sending', 1)
+            VALUES ('guild1', 'event1', 'channel1', 'messages', '{"title":"Event","description":"Body","color":"#8A2BE2"}', 1, 1, 'sending', ${now})
         `).run();
         const EventLoggingService = require('../src/services/eventLoggingService');
         const recovered = new EventLoggingService({ sqlite: database.sqlite, client: service.client, now: () => now });
@@ -153,7 +153,7 @@ describe('EventLoggingService', () => {
         database.sqlite.prepare(`
             INSERT INTO event_log_outbox
                 (guild_id, event_key, channel_id, module, payload, attempts, next_attempt_at, status, created_at)
-            VALUES ('guild1', 'event3', 'channel1', 'messages', '{}', 3, 1, 'sending', 1)
+            VALUES ('guild1', 'event3', 'channel1', 'messages', '{}', 3, 1, 'sending', ${now})
         `).run();
         const EventLoggingService = require('../src/services/eventLoggingService');
         new EventLoggingService({ sqlite: database.sqlite, client: service.client, now: () => now });
@@ -169,7 +169,7 @@ describe('EventLoggingService', () => {
         database.sqlite.prepare(`
             INSERT INTO event_log_outbox
                 (guild_id, event_key, channel_id, module, payload, attempts, next_attempt_at, status, created_at)
-            VALUES ('guild1', 'event2', 'channel1', 'messages', '{"title":"Event","description":"Body","color":"#8A2BE2"}', 1, 1, 'claimed', 1)
+            VALUES ('guild1', 'event2', 'channel1', 'messages', '{"title":"Event","description":"Body","color":"#8A2BE2"}', 1, 1, 'claimed', ${now})
         `).run();
         const EventLoggingService = require('../src/services/eventLoggingService');
         const recovered = new EventLoggingService({ sqlite: database.sqlite, client: service.client, now: () => now });
@@ -235,5 +235,20 @@ describe('EventLoggingService', () => {
         expect(channel.send).toHaveBeenCalledTimes(3);
         expect(database.sqlite.prepare(`SELECT status, attempts FROM event_log_outbox WHERE event_key = 'message:retry'`).get())
             .toEqual({ status: 'failed', attempts: 3 });
+    });
+
+    test('outbox retention removes terminal and stale uncertain deliveries', () => {
+        const insert = database.sqlite.prepare(`
+            INSERT INTO event_log_outbox
+                (guild_id, event_key, channel_id, module, payload, attempts, next_attempt_at, status, created_at)
+            VALUES ('guild1', ?, 'channel1', 'messages', '{}', 1, 1, ?, ?)
+        `);
+        insert.run('old-sent', 'sent', now - 31 * 86400000);
+        insert.run('old-uncertain', 'uncertain', now - 31 * 86400000);
+        insert.run('recoverable', 'uncertain', now);
+
+        expect(service.pruneOutbox()).toBe(2);
+        expect(database.sqlite.prepare(`SELECT event_key FROM event_log_outbox ORDER BY event_key`).all())
+            .toEqual([{ event_key: 'recoverable' }]);
     });
 });

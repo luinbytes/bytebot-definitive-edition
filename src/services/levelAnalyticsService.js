@@ -1,9 +1,10 @@
 const crypto = require('crypto');
-const sharp = require('sharp');
+const sharp = require('../utils/sharp');
 const {
     ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder,
     MessageFlags, ModalBuilder, PermissionFlagsBits, TextInputBuilder, TextInputStyle
 } = require('discord.js');
+const { ProcessingQueue } = require('./mediaService');
 const { ServerPresentationService } = require('./serverPresentationService');
 const config = require('../utils/config');
 const embeds = require('../utils/embeds');
@@ -39,11 +40,12 @@ function utcSegments(start, seconds) {
 }
 
 class LevelAnalyticsService {
-    constructor({ sqlite, client = null, images = null, now = Date.now }) {
+    constructor({ sqlite, client = null, images = null, imageQueue = null, now = Date.now }) {
         this.sqlite = sqlite;
         this.client = client;
         this.now = now;
         this.images = images || new ServerPresentationService({ sqlite });
+        this.imageQueue = imageQueue || new ProcessingQueue();
         this.confirmations = new Map();
         this.processingRoleJobs = false;
     }
@@ -548,9 +550,6 @@ class LevelAnalyticsService {
         const nextXp = row.level >= MAX_LEVEL ? row.xp : 100 * (row.level + 1) ** 2;
         const previousXp = 100 * row.level ** 2;
         const progress = nextXp === previousXp ? 1 : Math.max(0, Math.min(1, (row.xp - previousXp) / (nextXp - previousXp)));
-        let image = prefs.background_data
-            ? sharp(prefs.background_data, { limitInputPixels: 40_000_000 }).resize(width, height, { fit: 'cover' })
-            : sharp({ create: { width, height, channels: 4, background: '#17191f' } });
         const avatarSize = prefs.layout === 'compact' ? 130 : 170;
         const avatarX = 35;
         const avatarY = Math.floor((height - avatarSize) / 2);
@@ -569,13 +568,20 @@ class LevelAnalyticsService {
         </svg>`);
         const composites = [{ input: overlay }];
         const avatarUrl = user.displayAvatarURL?.({ extension: 'png', size: 256 });
-        if (avatarUrl) {
-            const avatar = await this.images.image(avatarUrl);
-            const mask = Buffer.from(`<svg width="${avatarSize}" height="${avatarSize}"><circle cx="${avatarSize / 2}" cy="${avatarSize / 2}" r="${avatarSize / 2}" fill="white"/></svg>`);
-            const rounded = await sharp(avatar).resize(avatarSize, avatarSize).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
-            composites.unshift({ input: rounded, left: avatarX, top: avatarY });
-        }
-        const png = await image.composite(composites).png().toBuffer();
+        const avatar = avatarUrl ? await this.images.image(avatarUrl) : null;
+        const png = await this.imageQueue.run(async (_directory, signal) => {
+            signal.throwIfAborted();
+            const image = prefs.background_data
+                ? sharp(prefs.background_data, { limitInputPixels: 40_000_000 }).resize(width, height, { fit: 'cover' })
+                : sharp({ create: { width, height, channels: 4, background: '#17191f' } });
+            if (avatar) {
+                const mask = Buffer.from(`<svg width="${avatarSize}" height="${avatarSize}"><circle cx="${avatarSize / 2}" cy="${avatarSize / 2}" r="${avatarSize / 2}" fill="white"/></svg>`);
+                const rounded = await sharp(avatar).resize(avatarSize, avatarSize).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
+                composites.unshift({ input: rounded, left: avatarX, top: avatarY });
+            }
+            signal.throwIfAborted();
+            return image.composite(composites).png().toBuffer();
+        });
         return { files: [new AttachmentBuilder(png, { name: `rank-${user.id}.png` })], allowedMentions: { parse: [] } };
     }
 
@@ -672,8 +678,17 @@ class LevelAnalyticsService {
             )`).run(cutoffDate, limit).changes,
             dedupe: this.sqlite.prepare(`DELETE FROM analytics_events WHERE rowid IN (
                 SELECT rowid FROM analytics_events WHERE occurred_at < ? LIMIT ?
+            )`).run(cutoffAt, limit).changes,
+            reactions: this.sqlite.prepare(`DELETE FROM reaction_placements WHERE rowid IN (
+                SELECT rowid FROM reaction_placements WHERE added_at < ? LIMIT ?
             )`).run(cutoffAt, limit).changes
         }))();
+    }
+
+    clearReactionPlacements(message) {
+        if (!message?.guild?.id || !message.id) return 0;
+        return this.sqlite.prepare(`DELETE FROM reaction_placements WHERE guild_id = ? AND message_id = ?`)
+            .run(message.guild.id, message.id).changes;
     }
 
     enqueueRoleReconcile(guildId, userId, now = this.now()) {
@@ -861,6 +876,9 @@ class LevelAnalyticsService {
     }
 
     async handleInteraction(interaction) {
+        for (const [key, value] of this.confirmations) {
+            if (value.expiresAt < this.now()) this.confirmations.delete(key);
+        }
         if (interaction.customId.startsWith('levels:confirm:') || interaction.customId.startsWith('levels:cancel:')) {
             const [, decision, token] = interaction.customId.split(':');
             const confirmation = this.confirmations.get(token);
@@ -1466,7 +1484,7 @@ class LevelAnalyticsService {
                 if (attachment?.size > 5 * 1024 * 1024) throw new Error('Rank-card backgrounds cannot exceed 5 MiB.');
                 background = await this.images.image(source);
                 if (background.length > 5 * 1024 * 1024) throw new Error('Rank-card backgrounds cannot exceed 5 MiB.');
-                const metadata = await sharp(background, { limitInputPixels: 40_000_000 }).metadata();
+                const metadata = await this.imageQueue.run(() => sharp(background, { limitInputPixels: 40_000_000 }).metadata());
                 mime = `image/${metadata.format === 'jpeg' ? 'jpeg' : metadata.format}`;
             }
             const current = this.sqlite.prepare(`SELECT * FROM level_rank_cards WHERE user_id = ?`).get(interaction.user.id);

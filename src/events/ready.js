@@ -174,7 +174,9 @@ module.exports = {
         try {
             const LevelAnalyticsService = require('../services/levelAnalyticsService');
             const { sqlite } = require('../database');
-            client.levelAnalyticsService = new LevelAnalyticsService({ sqlite, client });
+            client.levelAnalyticsService = new LevelAnalyticsService({
+                sqlite, client, imageQueue: client.imageProcessingQueue
+            });
             const recovery = await client.levelAnalyticsService.reconcileStartup(client);
             recovery.failures.forEach(failure => logger.error(
                 `Level analytics baseline failed for ${failure.guildId}: ${failure.error}`
@@ -195,8 +197,8 @@ module.exports = {
             roleJobTimer.unref?.();
             const prune = () => {
                 const removed = client.levelAnalyticsService.pruneAnalytics();
-                if (removed.daily || removed.activity || removed.dedupe) logger.info(
-                    `Analytics retention pruned ${removed.daily} daily, ${removed.activity} member, and ${removed.dedupe} dedupe rows`
+                if (removed.daily || removed.activity || removed.dedupe || removed.reactions) logger.info(
+                    `Analytics retention pruned ${removed.daily} daily, ${removed.activity} member, ${removed.dedupe} dedupe, and ${removed.reactions} reaction rows`
                 );
             };
             prune();
@@ -413,6 +415,7 @@ module.exports = {
                 });
                 logger.success('Music service initialized');
             } catch (e) {
+                client.musicUnavailableReason = e.message;
                 logger.error(`Failed to initialize music service: ${e.message}`);
             }
         } else {

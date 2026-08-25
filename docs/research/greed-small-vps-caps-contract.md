@@ -56,7 +56,7 @@ preserve the cumulative package/dependency union and current help/ledger text.
 
 | Helper | Idle/start | Bound and failure | Shutdown/health |
 | --- | --- | --- | --- |
-| Sharp | Loaded in-process only when image/rank paths initialize; cache off, concurrency one | One shared media queue, 16 MP input, 30-second job, bounded output | Queue cleanup; module/load status shown in `/bot stats` |
+| Sharp | Loaded in-process only when image/rank paths initialize; cache off, concurrency one | One shared Sharp queue for image and rank-card work, 16 MP input, 30-second job, bounded output | Queue cleanup; module/load status shown in `/bot stats` |
 | Tesseract | No daemon; one child for accepted OCR work | 8 MiB image, 64 KiB output/logs, 30-second queue deadline | Process group terminated on abort/shutdown; version probe shown in `/bot stats` |
 | eSpeak NG | No daemon; one child for accepted TTS work | 2,000 input characters, 8 MiB structurally valid WAV, 64 KiB logs | Process group terminated on abort/shutdown; version probe shown in `/bot stats` |
 | FFmpeg/FFprobe | Music is disabled until `MUSIC_LIBRARY_PATH` is configured; startup probes are five seconds | One FFmpeg per active guild, 25-track queue, 10-minute/64 MiB track bounds; FFprobe output 64 KiB | Stop/idle/guild removal/shutdown kill processes; readiness shown in `/bot stats` |

@@ -7,8 +7,20 @@ const config = require('./config');
 
 // Ensure logs directory exists
 const logDir = path.join(process.cwd(), config.logging?.logDirectory || 'logs');
+const MAX_LOG_BYTES = 10 * 1024 * 1024;
 if (config.logging?.file && !fs.existsSync(logDir)) {
     fs.mkdirSync(logDir, { recursive: true });
+}
+if (config.logging?.file) {
+    try {
+        const cutoff = Date.now() - 14 * 86400000;
+        for (const file of fs.readdirSync(logDir)) {
+            const filename = path.join(logDir, file);
+            if (/^bytebot-\d{4}-\d{2}-\d{2}\.log$/.test(file) && fs.statSync(filename).mtimeMs < cutoff) {
+                fs.unlinkSync(filename);
+            }
+        }
+    } catch (error) { console.error('Failed to prune log files:', error.message); }
 }
 
 function timestamp() {
@@ -33,7 +45,11 @@ function writeToFile(level, message, module = null) {
         const moduleTag = module ? `[${module}]` : '';
         const logLine = `[${timeStr}] [${level}] ${moduleTag}${moduleTag ? ' ' : ''}${message}\n`;
 
-        fs.appendFileSync(getLogFileName(), logLine, 'utf8');
+        const filename = getLogFileName();
+        const size = fs.existsSync(filename) ? fs.statSync(filename).size : 0;
+        if (size + Buffer.byteLength(logLine) <= MAX_LOG_BYTES) {
+            fs.appendFileSync(filename, logLine, 'utf8');
+        }
     } catch (error) {
         // Fail silently to avoid recursive logging errors
         console.error('Failed to write to log file:', error.message);

@@ -2,6 +2,8 @@ services:
   bytebot:
     build: .
     env_file: ${BYTEBOT_ENV_FILE:-.env}
+    environment:
+      DATABASE_URL: /app/data/sqlite.db
     restart: unless-stopped
     init: true
     cpus: 1.0

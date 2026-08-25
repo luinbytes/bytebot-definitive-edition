@@ -1,4 +1,4 @@
-const sharp = require('sharp');
+const sharp = require('../utils/sharp');
 const { MAX_IMAGE_PIXELS, MediaService } = require('./mediaService');
 
 const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
@@ -8,9 +8,6 @@ const EFFECTS = new Set([
     'normalize', 'pixelate', 'saturate', 'sepia', 'sharpen', 'shear',
     'stretch', 'threshold', 'tint'
 ]);
-
-sharp.cache(false);
-sharp.concurrency(1);
 
 function outputLimit(value) {
     if (!Number.isFinite(value) || value <= 0) throw new Error('Image output limit must be positive.');

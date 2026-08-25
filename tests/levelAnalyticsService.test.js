@@ -111,6 +111,8 @@ describe('LevelAnalyticsService', () => {
         expect(database.sqlite.prepare(`
             SELECT reaction_count FROM server_daily_metrics WHERE guild_id = 'guild1'
         `).get().reaction_count).toBe(2);
+        expect(service.clearReactionPlacements(reaction.message)).toBe(1);
+        expect(service.recordReactionChange(reaction, user, true)).toEqual({ accepted: true, counted: true });
     });
 
     test('membership counters change only when persisted presence changes', () => {
@@ -817,7 +819,7 @@ describe('LevelAnalyticsService', () => {
         database.sqlite.prepare(`UPDATE activity_logs SET activity_date = '2020-01-01'`).run();
         database.sqlite.prepare(`UPDATE analytics_events SET occurred_at = 1`).run();
 
-        expect(service.pruneAnalytics()).toEqual({ daily: 1, activity: 1, dedupe: 1 });
+        expect(service.pruneAnalytics()).toEqual({ daily: 1, activity: 1, dedupe: 1, reactions: 0 });
         expect(database.sqlite.prepare(`SELECT xp FROM member_levels WHERE guild_id = 'guild1'`).get().xp).toBe(20);
     });
 });

@@ -3,6 +3,11 @@
 .agents
 .codex
 .env*
+.npmrc
+config.local.json
+logs
+*.log
+.command-cache.json
 node_modules
 *.db
 *.sqlite

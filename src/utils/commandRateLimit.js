@@ -6,15 +6,8 @@ class CommandRateLimiter {
         this.lastSweep = now();
     }
 
-    take(windows, key, limit, duration, now) {
-        const recent = (windows.get(key) || []).filter(timestamp => timestamp > now - duration);
-        if (recent.length >= limit) {
-            windows.set(key, recent);
-            return recent[0] + duration;
-        }
-        recent.push(now);
-        windows.set(key, recent);
-        return null;
+    recent(windows, key, duration, now) {
+        return (windows.get(key) || []).filter(timestamp => timestamp > now - duration);
     }
 
     consume(userId, guildId) {
@@ -27,12 +20,17 @@ class CommandRateLimiter {
             }
             this.lastSweep = now;
         }
-        const userRetry = this.take(this.users, userId, 15, 5000, now);
-        if (userRetry) return { allowed: false, retryAt: userRetry };
-        const guildRetry = guildId ? this.take(this.guilds, guildId, 60, 10000, now) : null;
-        return guildRetry
-            ? { allowed: false, retryAt: guildRetry }
-            : { allowed: true, retryAt: null };
+        const user = this.recent(this.users, userId, 5000, now);
+        const guild = guildId ? this.recent(this.guilds, guildId, 10000, now) : null;
+        if (user.length >= 15) return { allowed: false, retryAt: user[0] + 5000 };
+        if (guild?.length >= 60) return { allowed: false, retryAt: guild[0] + 10000 };
+        user.push(now);
+        this.users.set(userId, user);
+        if (guild) {
+            guild.push(now);
+            this.guilds.set(guildId, guild);
+        }
+        return { allowed: true, retryAt: null };
     }
 }
 

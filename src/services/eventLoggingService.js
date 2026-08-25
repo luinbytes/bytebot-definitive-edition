@@ -25,6 +25,18 @@ class EventLoggingService {
             SET status = CASE WHEN attempts >= 3 THEN 'failed' ELSE 'uncertain' END
             WHERE status = 'sending'
         `).run();
+        this.pruneOutbox();
+    }
+
+    pruneOutbox(limit = 1000) {
+        const terminalCutoff = this.now() - 30 * 86400000;
+        const uncertainCutoff = this.now() - 30 * 86400000;
+        return this.sqlite.prepare(`DELETE FROM event_log_outbox WHERE id IN (
+            SELECT id FROM event_log_outbox
+            WHERE (status IN ('sent', 'failed') AND created_at < ?)
+               OR (status = 'uncertain' AND created_at < ?)
+            ORDER BY id LIMIT ?
+        )`).run(terminalCutoff, uncertainCutoff, limit).changes;
     }
 
     module(value) {
@@ -213,6 +225,9 @@ class EventLoggingService {
     }
 
     async handleInteraction(interaction) {
+        const now = this.now();
+        for (const [key, value] of this.pending) if (value.expiresAt < now) this.pending.delete(key);
+        for (const [key, value] of this.confirmations) if (value.expiresAt < now) this.confirmations.delete(key);
         if (interaction.customId.startsWith('eventlogs:confirm:') || interaction.customId.startsWith('eventlogs:cancel:')) {
             const [, decision, token] = interaction.customId.split(':');
             const confirmation = this.confirmations.get(token);
@@ -234,7 +249,7 @@ class EventLoggingService {
         const [, action, field, actorId] = interaction.customId.split(':');
         const key = `${interaction.guildId}:${interaction.user.id}`;
         const pending = this.pending.get(key);
-        if (action !== 'add' || actorId !== interaction.user.id || !pending || pending.expiresAt < this.now()) {
+        if (action !== 'add' || actorId !== interaction.user.id || !pending) {
             throw new Error('That event-log setup has expired or is not yours.');
         }
         await this.assertRbac(interaction, 'add');
@@ -271,6 +286,7 @@ class EventLoggingService {
         `).get(guild.id, actorId, channelId);
         if (ignored) return 0;
         const now = this.now();
+        this.pruneOutbox();
         const rows = this.sqlite.prepare(`SELECT channel_id, color FROM event_log_channels WHERE guild_id = ? AND module = ?`)
             .all(guild.id, module);
         for (const row of rows) this.sqlite.prepare(`

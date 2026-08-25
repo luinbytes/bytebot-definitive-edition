@@ -1,4 +1,6 @@
 const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 
 function executableHealth(executable, args, run) {
     const result = run(executable, args, {
@@ -21,7 +23,9 @@ function inspectHelpers(options = {}) {
     const resolve = options.resolve || require.resolve;
     let sharp;
     try {
-        const version = options.sharpVersion ? options.sharpVersion() : require('sharp').versions.sharp;
+        const version = options.sharpVersion
+            ? options.sharpVersion()
+            : JSON.parse(fs.readFileSync(path.join(path.dirname(resolve('sharp')), '..', 'package.json'))).version;
         sharp = { ready: true, detail: version };
     } catch (error) {
         sharp = { ready: false, detail: error.code || error.message };

@@ -18,6 +18,9 @@ test('highest public command throughput applies without entitlement state', () =
         expect(limiter.consume(`guild-user-${index}`, 'busy-guild').allowed).toBe(true);
     }
     expect(limiter.consume('guild-user-last', 'busy-guild').allowed).toBe(false);
+    for (let index = 0; index < 15; index += 1) {
+        expect(limiter.consume('guild-user-last', `open-guild-${index}`).allowed).toBe(true);
+    }
     now += 10001;
     expect(limiter.consume('guild-user-last', 'busy-guild')).toEqual({ allowed: true, retryAt: null });
 });
@@ -56,16 +59,31 @@ test('runtime heartbeat reports fresh, stale, and cleaned-up state', () => {
 test('production container starts the bot with hard small-VPS defaults', () => {
     const dockerfile = fs.readFileSync(path.join(__dirname, '..', 'Dockerfile'), 'utf8');
     const compose = fs.readFileSync(path.join(__dirname, '..', 'compose.yaml'), 'utf8');
+    const dockerignore = fs.readFileSync(path.join(__dirname, '..', '.dockerignore'), 'utf8');
+    const logger = fs.readFileSync(path.join(__dirname, '..', 'src/utils/logger.js'), 'utf8');
     expect(dockerfile).toContain('ENV NODE_OPTIONS=--max-old-space-size=640');
     expect(dockerfile).toContain('HEALTHCHECK');
     expect(dockerfile).toContain('USER node');
     expect(dockerfile).toContain('touch /app/.command-cache.json');
     expect(dockerfile).toContain('chown -R node:node /app/data /app/logs /app/.command-cache.json');
     expect(dockerfile).toContain('CMD ["npm", "start"]');
+    expect(compose).toContain('DATABASE_URL: /app/data/sqlite.db');
     expect(compose).toContain('cpus: 1.0');
     expect(compose).toContain('mem_limit: 1g');
     expect(compose).toContain('pids_limit: 128');
     expect(compose).toContain('bytebot-logs:/app/logs');
+    expect(dockerignore).toContain('.npmrc');
+    expect(dockerignore).toContain('config.local.json');
+    expect(logger).toContain('MAX_LOG_BYTES = 10 * 1024 * 1024');
+    expect(logger).toContain('14 * 86400000');
+});
+
+test('heartbeat starts before Discord login and Sharp stays lazy', () => {
+    const index = fs.readFileSync(path.join(__dirname, '..', 'src/index.js'), 'utf8');
+    expect(index.indexOf('startHeartbeat()')).toBeLessThan(index.indexOf('client.login'));
+    jest.resetModules();
+    require('../src/services/imageManipulationService');
+    expect(Object.keys(require.cache).some(filename => filename.includes('/sharp/dist/index.'))).toBe(false);
 });
 
 test('/bot stats exposes cached helper readiness without spawning work', async () => {
@@ -76,10 +94,10 @@ test('/bot stats exposes cached helper readiness without spawning work', async (
     }, {
         guilds: { cache: { size: 2 } }, commands: { size: 45 }, ws: { ping: 12 },
         helperHealth: {
-            sharp: { ready: true }, tesseract: { ready: true }, espeak: { ready: false },
+            sharp: { ready: true, detail: '0.35.3' }, tesseract: { ready: true, detail: 'tesseract 5.3.0' }, espeak: { ready: false },
             music: { ready: true }
         }, musicService: null
     });
     const field = reply.mock.calls[0][0].embeds[0].data.fields.find(item => item.name === 'Helpers');
-    expect(field.value).toBe('Sharp ready • OCR ready • Speech unavailable • Music disabled');
+    expect(field.value).toBe('Sharp 0.35.3 • OCR tesseract 5.3.0 • Speech unavailable • Music disabled');
 });
