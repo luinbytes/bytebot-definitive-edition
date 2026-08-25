@@ -21,14 +21,14 @@ describe('VoiceMaster public command', () => {
         expect(command.permissions).toEqual([]);
     });
 
-    test('groups secondary Premium actions without losing their public names', () => {
+    test('groups secondary actions without losing their public names', () => {
         const secondary = option(json, 'secondary');
         expect(secondary.options.map(item => item.name)).toEqual(['add', 'remove', 'list', 'category']);
         expect(secondary.options.map(item => item.description)).toEqual([
-            'Add a secondary join-to-create channel (Premium)',
-            'Remove a secondary join-to-create channel (Premium)',
-            'List all secondary join-to-create channels (Premium)',
-            'Set the category for a secondary join-to-create channel (Premium)'
+            'Add a secondary join-to-create channel',
+            'Remove a secondary join-to-create channel',
+            'List all secondary join-to-create channels',
+            'Set the category for a secondary join-to-create channel'
         ]);
         expect(option(option(secondary, 'add'), 'channel').required).toBe(true);
         expect(option(option(secondary, 'category'), 'category').required).toBe(true);
