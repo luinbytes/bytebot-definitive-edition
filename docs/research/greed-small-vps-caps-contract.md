@@ -30,6 +30,7 @@ bounds remain mandatory.
 | Log channels | 15 | Integrate #50's transactional 15-distinct-channel cap. |
 | Autoroles | 50 | Enforce per guild across member and bot autoroles without reducing existing entries. |
 | Reaction roles | 500 | Already transactionally enforced by `RoleAutomationService`. |
+| Autoresponders | 500 | One shared cap is enforced by both registered administration paths. |
 | Autopfp channels | 15 | The public subject remains a #64 evidence/provider reconciliation item; no absent feature is invented here. |
 | Analytics retention | 3 years | Integrate #50's 1,095-day retention and query maximum. |
 | User extras | highest/current premium behavior | Existing snipe protection, rank styling, purge filters, and 1.5x economy earnings remain available without Greed entitlement checks. |
@@ -42,15 +43,9 @@ gates.
 
 ## Required cumulative head
 
-The packaging branch starts at PR #93 and already contains #55, #58, #61, and
-#62. Issues #42 and #43 are merged. Before implementation claims are made it
-must also integrate:
-
-- PR #81 / `feature/levels-analytics` for #50; and
-- PR #87 / `feature/image-effects` for #56.
-
-Both are reviewed feature branches, not new #63 implementation. Conflicts must
-preserve the cumulative package/dependency union and current help/ledger text.
+PR #94's exact head contains the reviewed #50 and #56 branches, including the
+resource/cancellation fixes required by this contract. The final #64 branch
+must preserve that ancestry while integrating the remaining frozen slices.
 
 ## Helper inventory and lifecycle
 
@@ -101,7 +96,7 @@ After this contract commit, implementation may merge the two required reviewed
 branches and begin tests. Required automated proof is:
 
 1. exact user/guild throughput boundaries and bounded in-memory cleanup;
-2. transactional 50-autorole enforcement and existing 500-reaction-role proof;
+2. transactional 50-autorole, 500-autoresponder, and existing 500-reaction-role proof;
 3. 15 log-channel and 1,095-day analytics checks from #50;
 4. helper status with timeout/failure cases and no shell execution;
 5. heartbeat freshness/staleness and shutdown cleanup;
