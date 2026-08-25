@@ -413,7 +413,7 @@ describe('Intent command hubs', () => {
             'snipe', 'roleplay', 'game', 'meter', 'blunt', 'vape', 'roast', 'randomhex'
         ]);
         expect(uwuLock.description).toContain('Manage Server');
-        expect(optionNames(uwuLock.options)).toEqual(['add', 'remove', 'list', 'protect']);
+        expect(optionNames(uwuLock.options)).toEqual(['add', 'remove', 'list', 'protect', 'roulette']);
         expect(optionNames(protect.options)).toEqual(['action', 'member']);
         expect(findOption(protect, 'action').choices.map(choice => choice.value)).toEqual([
             'add', 'remove', 'list'

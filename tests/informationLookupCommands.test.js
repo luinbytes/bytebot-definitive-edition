@@ -93,7 +93,7 @@ test('/me and /server place identity lookups in the existing intent hubs', () =>
     expect(serverOptions.invite.options.map(option => option.name)).toEqual(['bot', 'info']);
     expect(serverOptions.asset.options.map(option => option.name)).toEqual(['icon', 'banner']);
     expect(serverOptions.permissions.options.map(option => option.name)).toContain('view');
-    expect(server.options).toHaveLength(24);
+    expect(server.options).toHaveLength(25);
 });
 
 test('username updates record history only in shared guilds', async () => {
