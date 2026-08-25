@@ -58,3 +58,18 @@ test('/tag reset does not require a tag name lookup', async () => {
     expect(resetTags).toHaveBeenCalledWith('user1');
     expect(editReply).toHaveBeenCalledWith('Removed 3 tag(s).');
 });
+
+test('/custom list shows source previews and use counts', async () => {
+    const editReply = jest.fn().mockResolvedValue({});
+    await require('../src/commands/administration/custom').execute({
+        guildId: 'guild1', user: { id: 'admin1' },
+        options: { getSubcommand: () => 'list', getString: () => null }, editReply
+    }, { richContentService: { listCustom: () => [
+        { key: 'rules', config: JSON.stringify({ script: '{content: Be kind}', useCount: 12 }) },
+        { key: 'faq', config: JSON.stringify({ script: '{embed}$v{title: Answers}', useCount: 3 }) }
+    ] } });
+
+    const description = editReply.mock.calls[0][0].embeds[0].data.description;
+    expect(description).toContain('`rules`** — 12 uses\n{content: Be kind}');
+    expect(description).toContain('`faq`** — 3 uses\n{embed}$v{title: Answers}');
+});

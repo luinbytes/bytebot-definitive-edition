@@ -180,7 +180,14 @@ async function executeLifecycle(interaction) {
         }
         if (subcommand === 'view' || subcommand === 'settings') return interaction.editReply({ embeds: [settingsEmbed(type, lifecycle.getConfig(interaction.guild.id, type))] });
         if (subcommand === 'variables') {
-            return interaction.editReply({ embeds: [embeds.brand('Lifecycle Variables', '`{user}` `{username}` `{displayname}` `{server}` `{memberCount}` `{memberNumber}` `{joinedAt}` `{createdAt}` `{accountAgeDays}` `{boostCount}` `{boostLevel}`\nGreed aliases such as `{user.name}`, `{user.mention}`, and `{guild.name}` are also supported.')] });
+            const variables = lifecycle.supportedVariables();
+            const group = (title, names) => `**${title}**\n${names.map(name => `\`{${name}}\``).join(' ')}`;
+            return interaction.editReply({ embeds: [embeds.brand('Lifecycle Variables', [
+                group('User and member', variables.filter(name => name === 'user' || name.startsWith('user.'))),
+                group('Server', variables.filter(name => name === 'guild' || name.startsWith('guild.'))),
+                group('Channel', variables.filter(name => name === 'channel' || name.startsWith('channel.'))),
+                group('Compatibility aliases', variables.filter(name => !name.includes('.') && !['user', 'guild', 'channel'].includes(name)))
+            ].join('\n\n'))] });
         }
         if (subcommand === 'test' || subcommand === 'preview') {
             const result = await lifecycle.sendLifecycleMessage(type, interaction.member, { test: true });

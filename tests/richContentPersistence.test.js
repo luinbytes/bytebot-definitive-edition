@@ -124,6 +124,19 @@ describe('rich-content persistence', () => {
         now.mockRestore();
     });
 
+    test('custom buttons reject empty rendered scripts without counting a use', async () => {
+        await service.saveCustom('guild1', 'admin1', 'empty', '{if {user.bot}}never{/if}');
+        const interaction = {
+            customId: 'rich:custom:empty', guildId: 'guild1', guild: { id: 'guild1' }, channel: { id: 'channel1' },
+            user: { id: 'user1', username: 'Ada', bot: false }, reply: jest.fn().mockResolvedValue({})
+        };
+
+        await service.handleCustomButton(interaction);
+
+        expect(interaction.reply.mock.calls[0][0].content).toContain('rendered no content');
+        expect(JSON.parse(service.getCustom('guild1', 'empty').config).useCount).toBe(0);
+    });
+
     test('saved embeds follow their owner and publishing enforces the highest public cap', async () => {
         await service.saveEmbed('user1', 'Welcome', '{embed}$v{title: Hello}');
         expect(JSON.parse(service.getEmbed('user1', 'welcome').config).script).toContain('Hello');

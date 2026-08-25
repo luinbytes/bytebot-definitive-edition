@@ -304,6 +304,22 @@ describe('lifecycle messaging', () => {
         expect(groups.system).toEqual(['channel', 'welcome', 'boost', 'sticker']);
     });
 
+    test('variables response exposes every accepted lifecycle variable', async () => {
+        const command = require('../src/utils/lifecycleMessageCommand');
+        const { value: server } = guild();
+        const interaction = {
+            guild: server, user: { id: 'admin1' }, member: { permissions: { has: jest.fn().mockReturnValue(true) } },
+            options: { getSubcommandGroup: () => 'welcome', getSubcommand: () => 'variables' },
+            deferReply: jest.fn(), editReply: jest.fn(), reply: jest.fn()
+        };
+
+        await command.executeLifecycle(interaction);
+
+        const description = interaction.editReply.mock.calls[0][0].embeds[0].data.description;
+        for (const name of lifecycle.supportedVariables()) expect(description).toContain(`{${name}}`);
+        expect(description.length).toBeLessThanOrEqual(4096);
+    });
+
     test('pinned channel setup activates delivery and message requires setup', async () => {
         const command = require('../src/utils/lifecycleMessageCommand');
         const { value: server, channel } = guild();

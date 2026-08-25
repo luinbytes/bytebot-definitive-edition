@@ -602,6 +602,9 @@ class RichContentService {
             user: interaction.user, member, guild,
             channel: interaction.channel, customButtonGuildId: boundGuildId
         });
+        if (!String(payload.content || '').trim() && !payload.embeds?.length && !payload.components?.length) {
+            return interaction.reply({ content: 'That custom response rendered no content.', flags: MessageFlags.Ephemeral });
+        }
         payload.flags = (payload.flags || 0) | MessageFlags.Ephemeral;
         await interaction.reply(payload);
         this.useCustom(boundGuildId, name);

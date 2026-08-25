@@ -100,6 +100,10 @@ function valuesFor(member, channel = null, includeJoinPosition = false) {
     };
 }
 
+function supportedVariables() {
+    return Object.keys(valuesFor({ id: '0', guild: { name: '', memberCount: 0 }, user: { username: '', createdAt: new Date(0) } })).sort();
+}
+
 function variableNames(template) {
     return [...String(template).matchAll(/\{\{?([A-Za-z][\w.]*)\}\}?/g)]
         .map(match => match[1])
@@ -498,7 +502,7 @@ function isNewBoost(oldMember, newMember) {
 }
 
 module.exports = {
-    TYPES, DEFAULTS, validateTemplate, renderTemplate, parseEmbedScript, getConfig, setConfig, resetConfig,
+    TYPES, DEFAULTS, supportedVariables, validateTemplate, renderTemplate, parseEmbedScript, getConfig, setConfig, resetConfig,
     addLifecycleChannel, listLifecycleChannels, lifecycleChannelUsesCustomTemplate, removeLifecycleChannel, migrateLegacyWelcome,
     setLifecycleChannelTemplate, purgeLifecycleRuntime, sendJoinDm, sendLifecycleMessage, isNewBoost
 };
