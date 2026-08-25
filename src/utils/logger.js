@@ -11,7 +11,8 @@ const MAX_LOG_BYTES = 10 * 1024 * 1024;
 if (config.logging?.file && !fs.existsSync(logDir)) {
     fs.mkdirSync(logDir, { recursive: true });
 }
-if (config.logging?.file) {
+function pruneLogs() {
+    if (!config.logging?.file) return;
     try {
         const cutoff = Date.now() - 14 * 86400000;
         for (const file of fs.readdirSync(logDir)) {
@@ -22,6 +23,9 @@ if (config.logging?.file) {
         }
     } catch (error) { console.error('Failed to prune log files:', error.message); }
 }
+pruneLogs();
+const logPruneTimer = setInterval(pruneLogs, 86400000);
+logPruneTimer.unref?.();
 
 function timestamp() {
     return new Date().toLocaleString();

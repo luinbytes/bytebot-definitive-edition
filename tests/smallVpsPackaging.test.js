@@ -74,6 +74,8 @@ test('production container starts the bot with hard small-VPS defaults', () => {
     expect(compose).toContain('bytebot-logs:/app/logs');
     expect(dockerignore).toContain('.npmrc');
     expect(dockerignore).toContain('config.local.json');
+    expect(dockerignore).toContain('*.db-wal');
+    expect(dockerignore).toContain('*.db-shm');
     expect(logger).toContain('MAX_LOG_BYTES = 10 * 1024 * 1024');
     expect(logger).toContain('14 * 86400000');
 });
@@ -81,6 +83,7 @@ test('production container starts the bot with hard small-VPS defaults', () => {
 test('heartbeat starts before Discord login and Sharp stays lazy', () => {
     const index = fs.readFileSync(path.join(__dirname, '..', 'src/index.js'), 'utf8');
     expect(index.indexOf('startHeartbeat()')).toBeLessThan(index.indexOf('client.login'));
+    expect(index).toContain('process.exit(1)');
     jest.resetModules();
     require('../src/services/imageManipulationService');
     expect(Object.keys(require.cache).some(filename => filename.includes('/sharp/dist/index.'))).toBe(false);

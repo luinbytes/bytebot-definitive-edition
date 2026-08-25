@@ -19,6 +19,9 @@ class EventLoggingService {
         this.now = now;
         this.pending = new Map();
         this.confirmations = new Map();
+        this.interactiveTimer = setInterval(() => this.pruneInteractiveState(), 60000);
+        this.interactiveTimer.unref?.();
+        this.lastOutboxPrune = 0;
         this.sqlite.prepare(`UPDATE event_log_outbox SET status = 'pending' WHERE status = 'claimed'`).run();
         this.sqlite.prepare(`
             UPDATE event_log_outbox
@@ -31,12 +34,32 @@ class EventLoggingService {
     pruneOutbox(limit = 1000) {
         const terminalCutoff = this.now() - 30 * 86400000;
         const uncertainCutoff = this.now() - 30 * 86400000;
-        return this.sqlite.prepare(`DELETE FROM event_log_outbox WHERE id IN (
+        const statement = this.sqlite.prepare(`DELETE FROM event_log_outbox WHERE id IN (
             SELECT id FROM event_log_outbox
             WHERE (status IN ('sent', 'failed') AND created_at < ?)
                OR (status = 'uncertain' AND created_at < ?)
             ORDER BY id LIMIT ?
-        )`).run(terminalCutoff, uncertainCutoff, limit).changes;
+        )`);
+        let total = 0;
+        let removed;
+        do {
+            removed = statement.run(terminalCutoff, uncertainCutoff, limit).changes;
+            total += removed;
+        } while (removed === limit);
+        this.lastOutboxPrune = this.now();
+        return total;
+    }
+
+    pruneInteractiveState() {
+        const now = this.now();
+        for (const [key, value] of this.pending) if (value.expiresAt < now) this.pending.delete(key);
+        for (const [key, value] of this.confirmations) if (value.expiresAt < now) this.confirmations.delete(key);
+    }
+
+    cleanup() {
+        clearInterval(this.interactiveTimer);
+        this.pending.clear();
+        this.confirmations.clear();
     }
 
     module(value) {
@@ -225,9 +248,7 @@ class EventLoggingService {
     }
 
     async handleInteraction(interaction) {
-        const now = this.now();
-        for (const [key, value] of this.pending) if (value.expiresAt < now) this.pending.delete(key);
-        for (const [key, value] of this.confirmations) if (value.expiresAt < now) this.confirmations.delete(key);
+        this.pruneInteractiveState();
         if (interaction.customId.startsWith('eventlogs:confirm:') || interaction.customId.startsWith('eventlogs:cancel:')) {
             const [, decision, token] = interaction.customId.split(':');
             const confirmation = this.confirmations.get(token);
@@ -302,6 +323,7 @@ class EventLoggingService {
     }
 
     async processOutbox(limit = 50) {
+        if (this.now() - this.lastOutboxPrune >= 3600000) this.pruneOutbox();
         const rows = this.sqlite.prepare(`
             SELECT * FROM event_log_outbox WHERE status = 'pending' AND next_attempt_at <= ?
             ORDER BY id LIMIT ?

@@ -4,7 +4,7 @@ const {
     ActionRowBuilder, AttachmentBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder,
     MessageFlags, ModalBuilder, PermissionFlagsBits, TextInputBuilder, TextInputStyle
 } = require('discord.js');
-const { ProcessingQueue } = require('./mediaService');
+const { MAX_IMAGE_PIXELS, ProcessingQueue } = require('./mediaService');
 const { ServerPresentationService } = require('./serverPresentationService');
 const config = require('../utils/config');
 const embeds = require('../utils/embeds');
@@ -21,6 +21,17 @@ function roleIds(member) {
 
 function xml(value) {
     return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[char]);
+}
+
+async function sharpCall(pipeline, operation, signal) {
+    signal.throwIfAborted();
+    const abort = () => pipeline.destroy(new Error('Image processing cancelled.'));
+    signal.addEventListener('abort', abort, { once: true });
+    try {
+        return await pipeline[operation]();
+    } finally {
+        signal.removeEventListener('abort', abort);
+    }
 }
 
 function utcSegments(start, seconds) {
@@ -47,11 +58,24 @@ class LevelAnalyticsService {
         this.images = images || new ServerPresentationService({ sqlite });
         this.imageQueue = imageQueue || new ProcessingQueue();
         this.confirmations = new Map();
+        this.confirmationTimer = setInterval(() => this.pruneConfirmations(), 60000);
+        this.confirmationTimer.unref?.();
         this.processingRoleJobs = false;
     }
 
     response(title, description, extra = {}) {
         return { embeds: [embeds.brand(title, description)], allowedMentions: { parse: [] }, ...extra };
+    }
+
+    pruneConfirmations() {
+        for (const [key, value] of this.confirmations) {
+            if (value.expiresAt < this.now()) this.confirmations.delete(key);
+        }
+    }
+
+    cleanup() {
+        clearInterval(this.confirmationTimer);
+        this.confirmations.clear();
     }
 
     assertRoleMutationAuthority(interaction) {
@@ -572,15 +596,16 @@ class LevelAnalyticsService {
         const png = await this.imageQueue.run(async (_directory, signal) => {
             signal.throwIfAborted();
             const image = prefs.background_data
-                ? sharp(prefs.background_data, { limitInputPixels: 40_000_000 }).resize(width, height, { fit: 'cover' })
+                ? sharp(prefs.background_data, { limitInputPixels: MAX_IMAGE_PIXELS }).resize(width, height, { fit: 'cover' })
                 : sharp({ create: { width, height, channels: 4, background: '#17191f' } });
             if (avatar) {
                 const mask = Buffer.from(`<svg width="${avatarSize}" height="${avatarSize}"><circle cx="${avatarSize / 2}" cy="${avatarSize / 2}" r="${avatarSize / 2}" fill="white"/></svg>`);
-                const rounded = await sharp(avatar).resize(avatarSize, avatarSize).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
+                const rounded = await sharpCall(sharp(avatar).resize(avatarSize, avatarSize)
+                    .composite([{ input: mask, blend: 'dest-in' }]).png(), 'toBuffer', signal);
                 composites.unshift({ input: rounded, left: avatarX, top: avatarY });
             }
             signal.throwIfAborted();
-            return image.composite(composites).png().toBuffer();
+            return sharpCall(image.composite(composites).png(), 'toBuffer', signal);
         });
         return { files: [new AttachmentBuilder(png, { name: `rank-${user.id}.png` })], allowedMentions: { parse: [] } };
     }
@@ -876,9 +901,7 @@ class LevelAnalyticsService {
     }
 
     async handleInteraction(interaction) {
-        for (const [key, value] of this.confirmations) {
-            if (value.expiresAt < this.now()) this.confirmations.delete(key);
-        }
+        this.pruneConfirmations();
         if (interaction.customId.startsWith('levels:confirm:') || interaction.customId.startsWith('levels:cancel:')) {
             const [, decision, token] = interaction.customId.split(':');
             const confirmation = this.confirmations.get(token);
@@ -1484,7 +1507,9 @@ class LevelAnalyticsService {
                 if (attachment?.size > 5 * 1024 * 1024) throw new Error('Rank-card backgrounds cannot exceed 5 MiB.');
                 background = await this.images.image(source);
                 if (background.length > 5 * 1024 * 1024) throw new Error('Rank-card backgrounds cannot exceed 5 MiB.');
-                const metadata = await this.imageQueue.run(() => sharp(background, { limitInputPixels: 40_000_000 }).metadata());
+                const metadata = await this.imageQueue.run((_directory, signal) => sharpCall(
+                    sharp(background, { limitInputPixels: MAX_IMAGE_PIXELS }), 'metadata', signal
+                ));
                 mime = `image/${metadata.format === 'jpeg' ? 'jpeg' : metadata.format}`;
             }
             const current = this.sqlite.prepare(`SELECT * FROM level_rank_cards WHERE user_id = ?`).get(interaction.user.id);

@@ -10,6 +10,11 @@ logs
 .command-cache.json
 node_modules
 *.db
+*.db-wal
+*.db-shm
+*.db.bak
 *.sqlite
+*.sqlite-wal
+*.sqlite-shm
 *.sqlt
 eee.zip

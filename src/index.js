@@ -77,8 +77,11 @@ const shutdown = async (signal) => {
         client.giveawayService?.cleanup?.();
         client.ticketService?.cleanup?.();
         client.voiceMasterService?.cleanup?.();
+        client.eventLoggingService?.cleanup?.();
+        client.levelAnalyticsService?.cleanup?.();
         await client.musicService?.cleanup?.();
         await client.aiMediaService?.close?.();
+        await client.imageProcessingQueue?.close?.();
         await require('./services/automodService').cleanup();
         require('./services/antiraidService').clearWindows();
         if (client.starboardService && client.starboardService.cleanup) {
@@ -117,5 +120,8 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
         await client.login(process.env.DISCORD_TOKEN);
     } catch (error) {
         logger.error(`Initialization Error: ${error}`);
+        stopHeartbeat();
+        client.destroy();
+        process.exit(1);
     }
 })();

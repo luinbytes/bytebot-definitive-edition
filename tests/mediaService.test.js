@@ -189,4 +189,21 @@ describe('media service', () => {
         expect(observedSignal.aborted).toBe(true);
         await new Promise(resolve => setTimeout(resolve, 150));
     });
+
+    test('close aborts active work and drains the queue', async () => {
+        const { ProcessingQueue } = require('../src/services/mediaService');
+        const queue = new ProcessingQueue(1);
+        let started;
+        const ready = new Promise(resolve => { started = resolve; });
+        const task = queue.run((_directory, signal) => new Promise((_resolve, reject) => {
+            started();
+            signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        }));
+        await ready;
+
+        const rejected = expect(task).rejects.toThrow('closed');
+        await expect(queue.close()).resolves.toBeUndefined();
+        await rejected;
+        await expect(queue.run(() => {})).rejects.toThrow('closed');
+    });
 });

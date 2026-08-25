@@ -301,6 +301,7 @@ class ProcessingQueue {
         this.failed = null;
         this.waiting = new Set();
         this.tail = Promise.resolve();
+        this.controller = null;
     }
 
     run(task) {
@@ -326,6 +327,7 @@ class ProcessingQueue {
             if (this.failed) return fail(this.failed);
             const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'bytebot-media-'));
             const controller = new AbortController();
+            this.controller = controller;
             const timeout = setTimeout(() => {
                 controller.abort();
                 this.failed = new Error('Media worker is unavailable after a processing timeout; restart ByteBot.');
@@ -340,6 +342,7 @@ class ProcessingQueue {
                 error = taskError;
             } finally {
                 clearTimeout(timeout);
+                if (this.controller === controller) this.controller = null;
                 await fs.rm(directory, { recursive: true, force: true });
             }
             if (!settled) {
@@ -355,6 +358,13 @@ class ProcessingQueue {
         });
         this.tail = completion.catch(() => {});
         return result;
+    }
+
+    async close() {
+        this.failed ||= new Error('Media processing queue is closed.');
+        this.controller?.abort();
+        for (const reject of this.waiting) reject(this.failed);
+        await this.tail;
     }
 }
 
