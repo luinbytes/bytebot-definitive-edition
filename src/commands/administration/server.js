@@ -17,12 +17,16 @@ const { executeServerLookup } = require('../../utils/informationCommand');
 
 const MODULE_CHOICES = MODULES.map(value => ({ name: value, value }));
 const PUNISHMENT_CHOICES = PUNISHMENTS.map(value => ({ name: value, value }));
+const LOG_MODULE_CHOICES = [
+    'messages', 'members', 'moderation', 'server', 'voice', 'channels',
+    'roles', 'invites', 'emojis', 'stickers', 'integrations', 'soundboard'
+].map(value => ({ name: value, value }));
 
 const TARGETS = {
     info: { commandName: 'serverinfo', requirePath: 'src/commands/utility/serverinfo.js' },
     stats: { commandName: 'stats', requirePath: 'src/commands/utility/stats.js', subcommand: 'server' },
     config: { commandName: 'config', requirePath: 'src/commands/administration/config.js' },
-    logs: { commandName: 'config', requirePath: 'src/commands/administration/config.js', map: { set: 'logs' } },
+    logs: { commandName: 'config', requirePath: 'src/commands/administration/config.js', map: { set: 'logs', modlog: 'logs' } },
     starboard: { commandName: 'starboard', requirePath: 'src/commands/administration/starboard.js', map: { view: 'config' } },
     suggestion: { commandName: 'suggestion', requirePath: 'src/commands/administration/suggestion.js', map: { top: 'leaderboard' } },
     birthday: { commandName: 'birthday', requirePath: 'src/commands/utility/birthday.js' },
@@ -226,7 +230,14 @@ const serverBuilder = new SlashCommandBuilder()
             .setName('stats')
             .setDescription('View server statistics')
             .addBooleanOption(opt => opt.setName('private').setDescription('Show only to you'))
-            .addIntegerOption(opt => opt.setName('days').setDescription('Analytics range in days').setMinValue(1).setMaxValue(1095)))
+            .addIntegerOption(opt => opt.setName('days').setDescription('Analytics range in days').setMinValue(1).setMaxValue(1095))
+            .addStringOption(opt => opt.setName('metric').setDescription('Activity metric').addChoices(
+                { name: 'All activity', value: 'all' },
+                { name: 'Messages', value: 'messages' },
+                { name: 'Reactions', value: 'reactions' },
+                { name: 'Voice', value: 'voice' },
+                { name: 'Membership', value: 'membership' }
+            )))
         .addSubcommandGroup(group => group.setName('role').setDescription('Role information')
             .addSubcommand(sub => sub.setName('info').setDescription('View role details')
                 .addRoleOption(opt => opt.setName('role').setDescription('Role to view')))
@@ -247,15 +258,56 @@ const serverBuilder = new SlashCommandBuilder()
             .addSubcommand(sub => sub.setName('view').setDescription('View server configuration')))
         .addSubcommandGroup(group => group
             .setName('logs')
-            .setDescription('Moderation log settings')
+            .setDescription('Server event and moderation logs')
+            .addSubcommand(sub => sub
+                .setName('add')
+                .setDescription('Add an event log destination')
+                .addChannelOption(opt => opt.setName('channel').setDescription('Log channel').addChannelTypes(ChannelType.GuildText))
+                .addStringOption(opt => opt.setName('module').setDescription('Event module').addChoices(...LOG_MODULE_CHOICES)))
+            .addSubcommand(sub => sub
+                .setName('view')
+                .setDescription('View event log destinations')
+                .addBooleanOption(opt => opt.setName('private').setDescription('Show only to you')))
+            .addSubcommand(sub => sub
+                .setName('remove')
+                .setDescription('Remove an event log destination')
+                .addChannelOption(opt => opt.setName('channel').setDescription('Log channel').addChannelTypes(ChannelType.GuildText))
+                .addStringOption(opt => opt.setName('module').setDescription('Event module').addChoices(...LOG_MODULE_CHOICES)))
+            .addSubcommand(sub => sub
+                .setName('color')
+                .setDescription('Set an event log color')
+                .addChannelOption(opt => opt.setName('channel').setDescription('Log channel').addChannelTypes(ChannelType.GuildText).setRequired(true))
+                .addStringOption(opt => opt.setName('module').setDescription('Event module').addChoices(...LOG_MODULE_CHOICES).setRequired(true))
+                .addStringOption(opt => opt.setName('hex').setDescription('Six-digit hex color').setMinLength(6).setMaxLength(7).setRequired(true)))
+            .addSubcommand(sub => sub
+                .setName('ignore')
+                .setDescription('Toggle a member or channel log exclusion')
+                .addUserOption(opt => opt.setName('member').setDescription('Member to ignore'))
+                .addChannelOption(opt => opt.setName('channel').setDescription('Channel to ignore')))
+            .addSubcommand(sub => sub
+                .setName('recover')
+                .setDescription('Resolve an uncertain event-log delivery')
+                .addStringOption(opt => opt.setName('action').setDescription('Recovery action').setRequired(true).addChoices(
+                    { name: 'List uncertain deliveries', value: 'list' },
+                    { name: 'Retry a delivery', value: 'retry' },
+                    { name: 'Abandon a delivery', value: 'abandon' }
+                ))
+                .addIntegerOption(opt => opt.setName('id').setDescription('Delivery ID').setMinValue(1))
+                .addBooleanOption(opt => opt.setName('confirm').setDescription('Confirm retry or abandon')))
+            .addSubcommand(sub => sub
+                .setName('modlog')
+                .setDescription('Set the moderation log channel')
+                .addChannelOption(opt => opt
+                    .setName('channel')
+                    .setDescription('Log channel')
+                    .addChannelTypes(ChannelType.GuildText)))
             .addSubcommand(sub => sub
                 .setName('set')
                 .setDescription('Set the moderation log channel')
                 .addChannelOption(opt => opt
                     .setName('channel')
                     .setDescription('Log channel')
-                    .addChannelTypes(ChannelType.GuildText)
-                    .setRequired(true))))
+                    .addChannelTypes(ChannelType.GuildText))))
         .addSubcommandGroup(group => group
             .setName('starboard')
             .setDescription('Starboard system')
@@ -472,6 +524,29 @@ module.exports = {
                 && interaction.options.getSubcommand(false) === 'view')) {
             return executeServerLookup(interaction, client);
         }
+        if (interaction.options.getSubcommandGroup(false) === 'logs'
+            && ['set', 'modlog'].includes(interaction.options.getSubcommand())) {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                throw new Error('You need Manage Server to configure moderation logs.');
+            }
+            const channel = interaction.options.getChannel('channel');
+            if (channel && !interaction.guild.members.me.permissionsIn(channel).has([
+                PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks
+            ])) throw new Error('I need View Channel, Send Messages, and Embed Links in that moderation log channel.');
+            if (channel) sqlite.prepare(`UPDATE guilds SET log_channel = ? WHERE id = ?`).run(channel.id, interaction.guildId);
+            const current = channel?.id || sqlite.prepare(`SELECT log_channel FROM guilds WHERE id = ?`).get(interaction.guildId)?.log_channel;
+            return interaction.reply({
+                embeds: [embeds.brand('Moderation Logs', current
+                    ? `Moderation log channel has been set to <#${current}>`
+                    : 'A moderation log channel has not been configured.')],
+                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+            });
+        }
+        if (interaction.options.getSubcommandGroup(false) === 'logs'
+            && !['set', 'modlog'].includes(interaction.options.getSubcommand())) {
+            if (!client.eventLoggingService) throw new Error('Event logging service is unavailable');
+            return client.eventLoggingService.execute(interaction);
+        }
         if (interaction.options.getSubcommandGroup(false) === 'backup') return executeBackup(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'customize') return executeCustomize(interaction);
         if (interaction.options.getSubcommandGroup(false) === 'discovery') return executeDiscovery(interaction);
@@ -480,5 +555,10 @@ module.exports = {
         if (interaction.options.getSubcommandGroup(false) === 'automod') return executeAutomod(interaction);
         if (['welcome', 'goodbye', 'boost', 'system'].includes(interaction.options.getSubcommandGroup(false))) return executeLifecycle(interaction);
         return executeAliasCommand(interaction, client, aliasFor(interaction));
+    },
+
+    async handleInteraction(interaction, client) {
+        if (!client.eventLoggingService) throw new Error('Event logging service is unavailable');
+        return client.eventLoggingService.handleInteraction(interaction);
     }
 };

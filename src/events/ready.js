@@ -96,7 +96,7 @@ async function finalizeStaleSession(session, client) {
 
     // Track activity streak (convert seconds to minutes)
     const durationMinutes = Math.floor(durationSeconds / 60);
-    if (durationMinutes > 0 && client?.activityStreakService) {
+    if (durationMinutes > 0 && client?.activityStreakService && !client.levelAnalyticsService) {
         try {
             await client.activityStreakService.recordActivity(
                 session.userId,
@@ -169,6 +169,55 @@ module.exports = {
             logger.success('Achievement role cleanup scheduled');
         } catch (e) {
             logger.error(`Failed to initialize activity streak service: ${e}`);
+        }
+
+        try {
+            const LevelAnalyticsService = require('../services/levelAnalyticsService');
+            const { sqlite } = require('../database');
+            client.levelAnalyticsService = new LevelAnalyticsService({ sqlite, client });
+            const recovery = await client.levelAnalyticsService.reconcileStartup(client);
+            recovery.failures.forEach(failure => logger.error(
+                `Level analytics baseline failed for ${failure.guildId}: ${failure.error}`
+            ));
+            const boards = await client.levelAnalyticsService.refreshLiveBoards();
+            boards.failures.forEach(failure => logger.error(
+                `Live level board recovery failed for ${failure.guildId}/${failure.channelId}/${failure.metric}: ${failure.error}`
+            ));
+            const liveBoardTimer = setInterval(() => client.levelAnalyticsService.refreshLiveBoards()
+                .then(result => result.failures.forEach(failure => logger.error(
+                    `Live level board refresh failed for ${failure.guildId}/${failure.channelId}/${failure.metric}: ${failure.error}`
+                )))
+                .catch(error => logger.error(`Live level board refresh failed: ${error.message}`)), 5 * 60 * 1000);
+            liveBoardTimer.unref?.();
+            await client.levelAnalyticsService.processRoleJobs();
+            const roleJobTimer = setInterval(() => client.levelAnalyticsService.processRoleJobs()
+                .catch(error => logger.error(`Level role reconciliation retry failed: ${error.message}`)), 30 * 1000);
+            roleJobTimer.unref?.();
+            const prune = () => {
+                const removed = client.levelAnalyticsService.pruneAnalytics();
+                if (removed.daily || removed.activity || removed.dedupe) logger.info(
+                    `Analytics retention pruned ${removed.daily} daily, ${removed.activity} member, and ${removed.dedupe} dedupe rows`
+                );
+            };
+            prune();
+            const analyticsPruneTimer = setInterval(prune, 24 * 60 * 60 * 1000);
+            analyticsPruneTimer.unref?.();
+            logger.success('Level analytics service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize level analytics service: ${e}`);
+        }
+
+        try {
+            const EventLoggingService = require('../services/eventLoggingService');
+            const { sqlite } = require('../database');
+            client.eventLoggingService = new EventLoggingService({ sqlite, client });
+            await client.eventLoggingService.processOutbox();
+            const eventLogTimer = setInterval(() => client.eventLoggingService.processOutbox()
+                .catch(error => logger.error(`Event log delivery retry failed: ${error.message}`)), 1000);
+            eventLogTimer.unref?.();
+            logger.success('Event logging service initialized');
+        } catch (e) {
+            logger.error(`Failed to initialize event logging service: ${e}`);
         }
 
         // --- Validate Active BytePod Sessions (Restart Resilience) ---

@@ -11,7 +11,7 @@ const { parseEmbedScript } = require('./lifecycleMessageService');
 
 const SAFE_MENTIONS = { parse: [], repliedUser: false };
 
-function renderVariables(script, { user, member, guild, channel } = {}) {
+function renderVariables(script, { user, member, guild, channel, variables = {} } = {}) {
     const subject = member?.user || user || member;
     const avatar = subject?.displayAvatarURL?.() || subject?.avatarURL?.() || '';
     const values = {
@@ -24,6 +24,9 @@ function renderVariables(script, { user, member, guild, channel } = {}) {
         'user.tag': subject?.tag || subject?.username || '',
         'user.created_at': subject?.createdAt?.toISOString?.() || '',
         'user.bot': String(Boolean(subject?.bot)),
+        'user.display_name': member?.displayName || subject?.displayName || subject?.username || '',
+        'user.top_role': member?.roles?.highest?.id ? `<@&${member.roles.highest.id}>` : '',
+        'user.color': member?.displayHexColor || '',
         'member.display_name': member?.displayName || subject?.displayName || subject?.username || '',
         'member.nick': member?.nickname || '',
         'member.roles': member?.roles?.cache?.filter?.(role => role.id !== guild?.id).map?.(role => `<@&${role.id}>`).join(', ') || '',
@@ -31,12 +34,16 @@ function renderVariables(script, { user, member, guild, channel } = {}) {
         'guild.id': guild?.id || '',
         'guild.name': guild?.name || '',
         'guild.count': String(guild?.memberCount || 0),
+        'guild.member_count': String(guild?.memberCount || 0),
+        'guild.boost_count': String(guild?.premiumSubscriptionCount || 0),
+        'guild.boost_tier': String(guild?.premiumTier || 0),
         'guild.owner': guild?.ownerId ? `<@${guild.ownerId}>` : '',
         'guild.icon': guild?.iconURL?.() || '',
         'channel.id': channel?.id || '',
         'channel.name': channel?.name || '',
         'channel.mention': channel?.id ? `<#${channel.id}>` : '',
-        'channel.topic': channel?.topic || ''
+        'channel.topic': channel?.topic || '',
+        ...variables
     };
     return String(script).replace(/\{([a-z]+(?:\.[a-z_]+)?)\}/g,
         (token, name) => Object.hasOwn(values, name)
@@ -319,6 +326,28 @@ function normalizedName(name) {
     return normalized;
 }
 
+function expandCustomScripts(source, lookup) {
+    let references = 0;
+    const expand = (value, stack = [], depth = 0) => String(value).replace(
+        /\{cscript:([a-z0-9][a-z0-9_-]{0,31})\}/gi,
+        (_token, rawName) => {
+            references += 1;
+            if (references > 20) throw new Error('Level-up scripts can reference at most 20 custom scripts.');
+            if (depth >= 5) throw new Error('Custom script expansion exceeds five nested levels.');
+            const name = normalizedName(rawName);
+            if (stack.includes(name)) throw new Error(`Custom script cycle detected at ${name}.`);
+            const rule = lookup(name);
+            if (!rule) throw new Error(`Custom script ${name} was not found.`);
+            const expanded = expand(configOf(rule).script || '', [...stack, name], depth + 1);
+            if (expanded.length > 32000) throw new Error('Expanded level-up script exceeds 32000 characters.');
+            return expanded;
+        }
+    );
+    const result = expand(source);
+    if (result.length > 32000) throw new Error('Expanded level-up script exceeds 32000 characters.');
+    return result;
+}
+
 function configOf(rule) {
     try { return JSON.parse(rule?.config || '{}'); } catch { return {}; }
 }
@@ -369,6 +398,26 @@ class RichContentService {
         return renderScript(script, { ...context,
             customScripts: guildId ? this.customNames(guildId) : new Set(),
             embedColors: guildId ? this.getEmbedColors(guildId) : {}
+        });
+    }
+
+    renderLevel(script, context = {}) {
+        const guildId = context.guild?.id;
+        if (!guildId) throw new Error('Level-up scripts require a server context.');
+        const level = context.level || {};
+        const memberId = context.member?.id || context.member?.user?.id || context.user?.id;
+        const expanded = expandCustomScripts(script, name => this.getCustom(guildId, name));
+        return this.render(expanded, {
+            ...context,
+            variables: {
+                user: memberId ? `<@${memberId}>` : '',
+                level: String(level.current ?? ''),
+                'level.current': String(level.current ?? ''),
+                'level.next': String(level.next ?? ''),
+                'level.rank': String(level.rank ?? ''),
+                'level.xp': String(level.xp ?? ''),
+                'level.next_xp': String(level.nextXp ?? '')
+            }
         });
     }
 
@@ -856,6 +905,7 @@ module.exports.renderScript = renderScript;
 module.exports.renderVariables = renderVariables;
 module.exports.SAFE_MENTIONS = SAFE_MENTIONS;
 module.exports.normalizedName = normalizedName;
+module.exports.expandCustomScripts = expandCustomScripts;
 module.exports.configOf = configOf;
 module.exports.messageToScript = messageToScript;
 module.exports.sourceReply = sourceReply;

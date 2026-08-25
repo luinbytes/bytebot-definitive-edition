@@ -204,6 +204,41 @@
       "when": 1787616000000,
       "tag": "0028_voice_master",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1787695200000,
+      "tag": "0029_level_tracks",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1787698800000,
+      "tag": "0030_levels_analytics_logging",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1787702400000,
+      "tag": "0031_activity_level_tracks",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1787706000000,
+      "tag": "0032_voice_session_minimums",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1787709600000,
+      "tag": "0033_levels_delivery_reliability",
+      "breakpoints": true
     }
   ]
 }

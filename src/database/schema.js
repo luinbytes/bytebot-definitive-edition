@@ -1,5 +1,5 @@
 const { sql } = require('drizzle-orm');
-const { sqliteTable, text, integer, real, index, uniqueIndex, unique, primaryKey, check } = require('drizzle-orm/sqlite-core');
+const { sqliteTable, text, integer, real, blob, index, uniqueIndex, unique, primaryKey, check } = require('drizzle-orm/sqlite-core');
 
 const guilds = sqliteTable('guilds', {
     id: text('id').primaryKey(),
@@ -866,6 +866,8 @@ const activityLogs = sqliteTable('activity_logs', {
     activityDate: text('activity_date').notNull(), // YYYY-MM-DD format
     messageCount: integer('message_count').default(0).notNull(),
     voiceMinutes: integer('voice_minutes').default(0).notNull(),
+    textXpAwarded: integer('text_xp_awarded').default(0).notNull(),
+    voiceSeconds: integer('voice_seconds').default(0).notNull(),
     commandsRun: integer('commands_run').default(0).notNull(),
     reactionsGiven: integer('reactions_given').default(0).notNull(), // Track reactions given
     channelsJoined: integer('channels_joined').default(0).notNull(), // Track unique voice channels joined
@@ -1163,8 +1165,191 @@ const memberLevels = sqliteTable('member_levels', {
     userId: text('user_id').notNull(),
     xp: integer('xp').default(0).notNull(),
     level: integer('level').default(0).notNull(),
+    textXp: integer('text_xp').default(0).notNull(),
+    voiceXp: integer('voice_xp').default(0).notNull(),
+    manualAdjustment: integer('manual_adjustment').default(0).notNull(),
+    levelFloor: integer('level_floor').default(0).notNull(),
+    messageCount: integer('message_count').default(0).notNull(),
+    voiceSeconds: integer('voice_seconds').default(0).notNull(),
+    lastTextXpAt: integer('last_text_xp_at'),
     updatedAt: integer('updated_at').notNull()
 }, table => ({ pk: primaryKey({ columns: [table.guildId, table.userId] }) }));
+
+const levelConfigs = sqliteTable('level_configs', {
+    guildId: text('guild_id').primaryKey(),
+    textEnabled: integer('text_enabled', { mode: 'boolean' }).default(true).notNull(),
+    voiceEnabled: integer('voice_enabled', { mode: 'boolean' }).default(true).notNull(),
+    awardChannelId: text('award_channel_id'),
+    awardMessage: text('award_message'),
+    messageEnabled: integer('message_enabled', { mode: 'boolean' }).default(false).notNull(),
+    dmEnabled: integer('dm_enabled', { mode: 'boolean' }).default(false).notNull(),
+    antiafkEnabled: integer('antiafk_enabled', { mode: 'boolean' }).default(true).notNull(),
+    textCooldownSeconds: integer('text_cooldown_seconds').default(60).notNull(),
+    voiceXpPerMinute: integer('voice_xp_per_minute').default(5).notNull(),
+    voiceMinSeconds: integer('voice_min_seconds').default(60).notNull(),
+    voiceSessionXpCap: integer('voice_session_xp_cap').default(3600).notNull(),
+    baseMultiplier: real('base_multiplier').default(1).notNull(),
+    stackRoles: integer('stack_roles', { mode: 'boolean' }).default(false).notNull(),
+    baselineAt: integer('baseline_at'),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    rateCheck: check('level_configs_rate_check', sql`${table.baseMultiplier} BETWEEN 0 AND 10`)
+}));
+
+const levelRoleRewards = sqliteTable('level_role_rewards', {
+    guildId: text('guild_id').notNull(),
+    level: integer('level').notNull(),
+    roleId: text('role_id').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.level] }),
+    roleUnique: unique().on(table.guildId, table.roleId),
+    levelCheck: check('level_role_rewards_level_check', sql`${table.level} BETWEEN 1 AND 999`)
+}));
+
+const levelIgnores = sqliteTable('level_ignores', {
+    guildId: text('guild_id').notNull(),
+    targetType: text('target_type').notNull(),
+    targetId: text('target_id').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.targetType, table.targetId] }) }));
+
+const levelBoosts = sqliteTable('level_boosts', {
+    guildId: text('guild_id').notNull(),
+    targetType: text('target_type').notNull(),
+    targetId: text('target_id').notNull(),
+    multiplier: real('multiplier').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.targetType, table.targetId] }),
+    multiplierCheck: check('level_boosts_multiplier_check', sql`${table.multiplier} BETWEEN 0 AND 10`)
+}));
+
+const levelLiveBoards = sqliteTable('level_live_boards', {
+    guildId: text('guild_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    metric: text('metric').notNull(),
+    messageId: text('message_id'),
+    createToken: text('create_token'),
+    createStatus: text('create_status').default('active').notNull(),
+    createStartedAt: integer('create_started_at'),
+    revision: integer('revision').default(0).notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.channelId, table.metric] }) }));
+
+const levelRoleJobs = sqliteTable('level_role_jobs', {
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    attempts: integer('attempts').default(0).notNull(),
+    generation: integer('generation').default(1).notNull(),
+    claimToken: text('claim_token'),
+    claimExpiresAt: integer('claim_expires_at'),
+    nextAttemptAt: integer('next_attempt_at').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.userId] }),
+    dueIdx: index('level_role_jobs_due_idx').on(table.nextAttemptAt)
+}));
+
+const levelRankCards = sqliteTable('level_rank_cards', {
+    userId: text('user_id').primaryKey(),
+    accent: text('accent'),
+    layout: text('layout').default('classic').notNull(),
+    backgroundData: blob('background_data', { mode: 'buffer' }),
+    backgroundMime: text('background_mime'),
+    avatarBorder: integer('avatar_border').default(4).notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    layoutCheck: check('level_rank_cards_layout_check', sql`${table.layout} IN ('classic','compact')`),
+    borderCheck: check('level_rank_cards_border_check', sql`${table.avatarBorder} BETWEEN 0 AND 20`)
+}));
+
+const serverDailyMetrics = sqliteTable('server_daily_metrics', {
+    guildId: text('guild_id').notNull(),
+    activityDate: text('activity_date').notNull(),
+    messageCount: integer('message_count').default(0).notNull(),
+    reactionCount: integer('reaction_count').default(0).notNull(),
+    voiceSeconds: integer('voice_seconds').default(0).notNull(),
+    joins: integer('joins').default(0).notNull(),
+    leaves: integer('leaves').default(0).notNull(),
+    memberCount: integer('member_count'),
+    baselineAt: integer('baseline_at'),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.activityDate] }),
+    dateIdx: index('server_daily_metrics_date_idx').on(table.activityDate)
+}));
+
+const analyticsEvents = sqliteTable('analytics_events', {
+    guildId: text('guild_id').notNull(),
+    eventType: text('event_type').notNull(),
+    eventId: text('event_id').notNull(),
+    occurredAt: integer('occurred_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.eventType, table.eventId] }),
+    occurredIdx: index('analytics_events_occurred_idx').on(table.occurredAt)
+}));
+
+const reactionPlacements = sqliteTable('reaction_placements', {
+    guildId: text('guild_id').notNull(),
+    messageId: text('message_id').notNull(),
+    userId: text('user_id').notNull(),
+    emoji: text('emoji').notNull(),
+    addedAt: integer('added_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.messageId, table.userId, table.emoji] }) }));
+
+const levelVoiceSessions = sqliteTable('level_voice_sessions', {
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    eligibleSince: integer('eligible_since'),
+    lastObservedAt: integer('last_observed_at').notNull(),
+    remainderSeconds: integer('remainder_seconds').default(0).notNull(),
+    awardedXp: integer('awarded_xp').default(0).notNull(),
+    eligibleSeconds: integer('eligible_seconds').default(0).notNull(),
+    xpSecondsConsumed: integer('xp_seconds_consumed').default(0).notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.userId] }) }));
+
+const memberPresence = sqliteTable('member_presence', {
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    present: integer('present', { mode: 'boolean' }).notNull(),
+    lastObservedAt: integer('last_observed_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.userId] }) }));
+
+const eventLogChannels = sqliteTable('event_log_channels', {
+    guildId: text('guild_id').notNull(),
+    module: text('module').notNull(),
+    channelId: text('channel_id').notNull(),
+    color: text('color'),
+    createdAt: integer('created_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.guildId, table.module, table.channelId] }),
+    channelIdx: index('event_log_channels_guild_channel_idx').on(table.guildId, table.channelId)
+}));
+
+const eventLogIgnores = sqliteTable('event_log_ignores', {
+    guildId: text('guild_id').notNull(),
+    targetType: text('target_type').notNull(),
+    targetId: text('target_id').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.targetType, table.targetId] }) }));
+
+const eventLogOutbox = sqliteTable('event_log_outbox', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    eventKey: text('event_key').notNull(),
+    channelId: text('channel_id').notNull(),
+    module: text('module').notNull(),
+    payload: text('payload').notNull(),
+    attempts: integer('attempts').default(0).notNull(),
+    nextAttemptAt: integer('next_attempt_at').notNull(),
+    status: text('status').default('pending').notNull(),
+    createdAt: integer('created_at').notNull()
+}, table => ({
+    deliveryUnique: unique().on(table.guildId, table.eventKey, table.channelId),
+    dueIdx: index('event_log_outbox_due_idx').on(table.status, table.nextAttemptAt)
+}));
 
 const giveaways = sqliteTable('giveaways', {
     id: integer('id').primaryKey({ autoIncrement: true }),
@@ -1597,6 +1782,21 @@ module.exports = {
     giveawayBlacklist,
     giveawayRoleLimits,
     memberLevels,
+    levelConfigs,
+    levelRoleRewards,
+    levelIgnores,
+    levelBoosts,
+    levelLiveBoards,
+    levelRoleJobs,
+    levelRankCards,
+    serverDailyMetrics,
+    analyticsEvents,
+    reactionPlacements,
+    levelVoiceSessions,
+    memberPresence,
+    eventLogChannels,
+    eventLogIgnores,
+    eventLogOutbox,
     giveaways,
     giveawayEntries,
     giveawayRounds,

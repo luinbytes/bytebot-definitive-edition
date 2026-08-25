@@ -758,6 +758,8 @@ const expectedSchema = {
         activity_date: 'TEXT NOT NULL',
         message_count: 'INTEGER DEFAULT 0 NOT NULL',
         voice_minutes: 'INTEGER DEFAULT 0 NOT NULL',
+        text_xp_awarded: 'INTEGER DEFAULT 0 NOT NULL',
+        voice_seconds: 'INTEGER DEFAULT 0 NOT NULL',
         commands_run: 'INTEGER DEFAULT 0 NOT NULL',
         reactions_given: 'INTEGER DEFAULT 0 NOT NULL',
         channels_joined: 'INTEGER DEFAULT 0 NOT NULL',
@@ -994,7 +996,148 @@ const expectedSchema = {
         user_id: 'TEXT NOT NULL',
         xp: 'INTEGER DEFAULT 0 NOT NULL',
         level: 'INTEGER DEFAULT 0 NOT NULL',
+        text_xp: 'INTEGER DEFAULT 0 NOT NULL',
+        voice_xp: 'INTEGER DEFAULT 0 NOT NULL',
+        manual_adjustment: 'INTEGER DEFAULT 0 NOT NULL',
+        level_floor: 'INTEGER DEFAULT 0 NOT NULL',
+        message_count: 'INTEGER DEFAULT 0 NOT NULL',
+        voice_seconds: 'INTEGER DEFAULT 0 NOT NULL',
+        last_text_xp_at: 'INTEGER',
         updated_at: 'INTEGER NOT NULL'
+    },
+    level_configs: {
+        guild_id: 'TEXT PRIMARY KEY',
+        text_enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        voice_enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        award_channel_id: 'TEXT',
+        award_message: 'TEXT',
+        message_enabled: 'INTEGER DEFAULT 0 NOT NULL',
+        dm_enabled: 'INTEGER DEFAULT 0 NOT NULL',
+        antiafk_enabled: 'INTEGER DEFAULT 1 NOT NULL',
+        text_cooldown_seconds: 'INTEGER DEFAULT 60 NOT NULL',
+        voice_xp_per_minute: 'INTEGER DEFAULT 5 NOT NULL',
+        voice_min_seconds: 'INTEGER DEFAULT 60 NOT NULL',
+        voice_session_xp_cap: 'INTEGER DEFAULT 3600 NOT NULL',
+        base_multiplier: 'REAL DEFAULT 1 NOT NULL',
+        stack_roles: 'INTEGER DEFAULT 0 NOT NULL',
+        baseline_at: 'INTEGER',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    level_role_rewards: {
+        guild_id: 'TEXT NOT NULL',
+        level: 'INTEGER NOT NULL',
+        role_id: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    level_ignores: {
+        guild_id: 'TEXT NOT NULL',
+        target_type: 'TEXT NOT NULL',
+        target_id: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    level_boosts: {
+        guild_id: 'TEXT NOT NULL',
+        target_type: 'TEXT NOT NULL',
+        target_id: 'TEXT NOT NULL',
+        multiplier: 'REAL NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    level_live_boards: {
+        guild_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        metric: 'TEXT NOT NULL',
+        message_id: 'TEXT',
+        create_token: 'TEXT',
+        create_status: "TEXT DEFAULT 'active' NOT NULL",
+        create_started_at: 'INTEGER',
+        revision: 'INTEGER DEFAULT 0 NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    level_rank_cards: {
+        user_id: 'TEXT PRIMARY KEY',
+        accent: 'TEXT',
+        layout: "TEXT DEFAULT 'classic' NOT NULL",
+        background_data: 'BLOB',
+        background_mime: 'TEXT',
+        avatar_border: 'INTEGER DEFAULT 4 NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    server_daily_metrics: {
+        guild_id: 'TEXT NOT NULL',
+        activity_date: 'TEXT NOT NULL',
+        message_count: 'INTEGER DEFAULT 0 NOT NULL',
+        reaction_count: 'INTEGER DEFAULT 0 NOT NULL',
+        voice_seconds: 'INTEGER DEFAULT 0 NOT NULL',
+        joins: 'INTEGER DEFAULT 0 NOT NULL',
+        leaves: 'INTEGER DEFAULT 0 NOT NULL',
+        member_count: 'INTEGER',
+        baseline_at: 'INTEGER',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    analytics_events: {
+        guild_id: 'TEXT NOT NULL',
+        event_type: 'TEXT NOT NULL',
+        event_id: 'TEXT NOT NULL',
+        occurred_at: 'INTEGER NOT NULL'
+    },
+    reaction_placements: {
+        guild_id: 'TEXT NOT NULL',
+        message_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        emoji: 'TEXT NOT NULL',
+        added_at: 'INTEGER NOT NULL'
+    },
+    level_voice_sessions: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        eligible_since: 'INTEGER',
+        last_observed_at: 'INTEGER NOT NULL',
+        remainder_seconds: 'INTEGER DEFAULT 0 NOT NULL',
+        awarded_xp: 'INTEGER DEFAULT 0 NOT NULL',
+        eligible_seconds: 'INTEGER DEFAULT 0 NOT NULL',
+        xp_seconds_consumed: 'INTEGER DEFAULT 0 NOT NULL'
+    },
+    level_role_jobs: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        attempts: 'INTEGER DEFAULT 0 NOT NULL',
+        generation: 'INTEGER DEFAULT 1 NOT NULL',
+        claim_token: 'TEXT',
+        claim_expires_at: 'INTEGER',
+        next_attempt_at: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    member_presence: {
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        present: 'INTEGER NOT NULL',
+        last_observed_at: 'INTEGER NOT NULL'
+    },
+    event_log_channels: {
+        guild_id: 'TEXT NOT NULL',
+        module: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        color: 'TEXT',
+        created_at: 'INTEGER NOT NULL'
+    },
+    event_log_ignores: {
+        guild_id: 'TEXT NOT NULL',
+        target_type: 'TEXT NOT NULL',
+        target_id: 'TEXT NOT NULL',
+        created_at: 'INTEGER NOT NULL'
+    },
+    event_log_outbox: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        event_key: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL',
+        module: 'TEXT NOT NULL',
+        payload: 'TEXT NOT NULL',
+        attempts: 'INTEGER DEFAULT 0 NOT NULL',
+        next_attempt_at: 'INTEGER NOT NULL',
+        status: "TEXT DEFAULT 'pending' NOT NULL",
+        created_at: 'INTEGER NOT NULL'
     },
     giveaways: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
@@ -1297,6 +1440,19 @@ const compatibilityUniqueKeys = {
     giveaway_blacklist: ['guild_id', 'role_id'],
     giveaway_role_limits: ['guild_id', 'role_id'],
     member_levels: ['guild_id', 'user_id'],
+    level_role_rewards: ['guild_id', 'level'],
+    level_ignores: ['guild_id', 'target_type', 'target_id'],
+    level_boosts: ['guild_id', 'target_type', 'target_id'],
+    level_live_boards: ['guild_id', 'channel_id', 'metric'],
+    server_daily_metrics: ['guild_id', 'activity_date'],
+    analytics_events: ['guild_id', 'event_type', 'event_id'],
+    reaction_placements: ['guild_id', 'message_id', 'user_id', 'emoji'],
+    level_voice_sessions: ['guild_id', 'user_id'],
+    level_role_jobs: ['guild_id', 'user_id'],
+    member_presence: ['guild_id', 'user_id'],
+    event_log_channels: ['guild_id', 'module', 'channel_id'],
+    event_log_ignores: ['guild_id', 'target_type', 'target_id'],
+    event_log_outbox: ['guild_id', 'event_key', 'channel_id'],
     giveaway_entries: ['giveaway_id', 'user_id'],
     giveaway_rounds: ['giveaway_id', 'round_number'],
     guild_backups: ['guild_id', 'creator_id', 'name'],

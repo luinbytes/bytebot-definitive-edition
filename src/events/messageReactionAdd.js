@@ -33,16 +33,27 @@ module.exports = {
             // Ignore DMs
             if (!reaction.message.guild) return;
 
+            let reactionActivity;
+            let trackingFailed = false;
+            if (client.levelAnalyticsService) {
+                try {
+                    reactionActivity = await client.levelAnalyticsService.recordReactionChange(reaction, user, true);
+                } catch (trackError) {
+                    trackingFailed = true;
+                    logger.debug('Failed to track reaction analytics:', trackError);
+                }
+            }
+
             // Track reaction for achievements
             if (client.activityStreakService) {
                 try {
-                    await client.activityStreakService.recordReaction(
-                        user.id,
-                        reaction.message.guild.id
-                    );
+                    if (reactionActivity?.counted) {
+                        await client.activityStreakService.recordCommittedActivity(user.id, reaction.message.guild.id);
+                    } else if (!client.levelAnalyticsService || trackingFailed) {
+                        await client.activityStreakService.recordReaction(user.id, reaction.message.guild.id);
+                    }
                 } catch (trackError) {
                     logger.debug('Failed to track reaction for achievements:', trackError);
-                    // Don't crash on tracking errors, just log
                 }
             }
 

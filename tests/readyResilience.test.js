@@ -79,7 +79,7 @@ describe('ready event recovery', () => {
         );
     });
 
-    test('records recovered voice time while finalizing a stale session', async () => {
+    test('does not count bot-offline voice time while finalizing a stale session', async () => {
         const startedAt = Date.now() - 120000;
         mockDbLog.select.mockImplementation(async (table) => {
             if (table === 'bytepodActiveSessions') {
@@ -95,7 +95,7 @@ describe('ready event recovery', () => {
 
         await ready.execute(client);
 
-        expect(mockRecordActivity).toHaveBeenCalledWith('user-1', 'guild-1', 'voice', 2);
+        expect(mockRecordActivity).not.toHaveBeenCalled();
     });
 
     test('resumes a pending BytePod ownership transfer', async () => {

@@ -107,4 +107,27 @@ describe('Greed-compatible rich content', () => {
         expect(reply.files[0].name).toBe('saved.txt');
         expect(reply.files[0].attachment.toString()).toBe(source);
     });
+
+    test('level messages expand bounded saved scripts and the documented context safely', () => {
+        const RichContentService = require('../src/services/richContentService');
+        const rules = [
+            { key: 'celebrate', config: JSON.stringify({ script: 'Congrats {user} at {level.current}! Next: {level.next_xp}' }) }
+        ];
+        const service = new RichContentService(null, {
+            list: (_guildId, kind) => kind === 'custom-script' ? rules : [],
+            get: (_guildId, _kind, name) => rules.find(rule => rule.key === name)
+        });
+        const payload = service.renderLevel('{content: {cscript:celebrate}}', {
+            member: { id: '10', user: { id: '10', username: 'Member' } },
+            guild: { id: '20', name: 'Guild', memberCount: 3 },
+            level: { current: 2, next: 3, rank: 1, xp: 450, nextXp: 900 }
+        });
+
+        expect(payload.content).toBe('Congrats <@10> at 2! Next: 900');
+        expect(payload.allowedMentions).toEqual({ parse: [], repliedUser: false });
+        rules[0].config = JSON.stringify({ script: '{cscript:celebrate}' });
+        expect(() => service.renderLevel('{cscript:celebrate}', {
+            member: { id: '10', user: { id: '10' } }, guild: { id: '20' }, level: { current: 1 }
+        })).toThrow(/cycle/i);
+    });
 });

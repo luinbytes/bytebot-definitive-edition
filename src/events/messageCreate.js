@@ -70,24 +70,51 @@ module.exports = {
             }
         }
 
+        let levelActivity;
+        let levelTrackingFailed = false;
+        if (client.levelAnalyticsService) {
+            try {
+                levelActivity = await client.levelAnalyticsService.recordMessage(message);
+            } catch (error) {
+                levelTrackingFailed = true;
+                logger.error('Level analytics tracking error:', error);
+            }
+            if (!levelTrackingFailed && levelActivity?.roleReconcile) {
+                await client.levelAnalyticsService.reconcileMemberRoles(message.member)
+                    .catch(error => logger.error('Level role reconciliation error:', error));
+            }
+            if (!levelTrackingFailed) {
+                await client.levelAnalyticsService.announceLevel(message, levelActivity)
+                    .catch(error => logger.error('Level-up message delivery error:', error));
+            }
+        }
+
         // Activity streak tracking
         if (client.activityStreakService) {
             try {
-                // Record message activity
-                await client.activityStreakService.recordActivity(
-                    message.author.id,
-                    message.guild.id,
-                    'message',
-                    1
-                );
+                if (levelActivity?.accepted) {
+                    await client.activityStreakService.recordCommittedActivity(
+                        message.author.id,
+                        message.guild.id
+                    );
+                } else if (!client.levelAnalyticsService || levelTrackingFailed) {
+                    await client.activityStreakService.recordActivity(
+                        message.author.id,
+                        message.guild.id,
+                        'message',
+                        1
+                    );
+                }
 
                 // Track active hour for time-based achievements
-                const hour = new Date().getUTCHours();
-                await client.activityStreakService.recordActiveHour(
-                    message.author.id,
-                    message.guild.id,
-                    hour
-                );
+                if (levelActivity?.accepted || !client.levelAnalyticsService || levelTrackingFailed) {
+                    const hour = new Date().getUTCHours();
+                    await client.activityStreakService.recordActiveHour(
+                        message.author.id,
+                        message.guild.id,
+                        hour
+                    );
+                }
             } catch (error) {
                 logger.error('Activity streak tracking error:', error);
                 // Don't crash on tracking errors, just log

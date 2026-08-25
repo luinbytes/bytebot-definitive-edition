@@ -16,8 +16,7 @@ describe('Event Structural Integrity', () => {
         eventFiles.forEach((file) => {
             const event = require(path.resolve(file));
 
-            // Check for 'name' property
-            expect(event).toHaveProperty('name');
+            expect(event.name || event.names?.length).toBeTruthy();
 
             // Check for 'execute' function
             expect(event).toHaveProperty('execute');

@@ -33,6 +33,10 @@ module.exports = {
             // Ignore DMs
             if (!reaction.message.guild) return;
 
+            if (client.levelAnalyticsService) {
+                await client.levelAnalyticsService.recordReactionChange(reaction, user, false);
+            }
+
             // Check starboard
             if (client.starboardService) {
                 await client.starboardService.handleReactionRemove(reaction, user);

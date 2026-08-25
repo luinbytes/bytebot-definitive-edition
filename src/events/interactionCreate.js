@@ -25,6 +25,19 @@ module.exports = {
             return;
         }
         processedInteractions.add(interaction.id);
+        if ((interaction.isButton() || interaction.isAnySelectMenu())
+            && interaction.customId.startsWith('eventlogs:')) {
+            if (!client.eventLoggingService) return interaction.reply({ content: 'Event logging is temporarily unavailable.', flags: [MessageFlags.Ephemeral] });
+            await client.eventLoggingService.handleInteraction(interaction);
+            return;
+        }
+        if ((interaction.isButton() || interaction.isAnySelectMenu() || interaction.isModalSubmit())
+            && interaction.customId.startsWith('levels:')) {
+            const command = client.commands.get('levels');
+            if (!command?.handleInteraction) return interaction.reply({ content: 'Level service is temporarily unavailable.', flags: [MessageFlags.Ephemeral] });
+            await command.handleInteraction(interaction, client);
+            return;
+        }
         if (interaction.customId?.startsWith('economy:')
             && (interaction.isButton() || interaction.isStringSelectMenu())) {
             if (!client.economyService) {
