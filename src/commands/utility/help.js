@@ -10,6 +10,7 @@ const categoryMetadata = {
     'Music': { icon: '🎵', description: 'Self-hosted voice playback and DJ controls.' },
     'Voice': { icon: '🔊', description: 'Temporary voice channels and owner controls.' },
     'Economy': { icon: '🪙', description: 'Earn, bank, spend, and manage virtual currency.' },
+    'LastFM': { icon: '🎵', description: 'Last.fm listening, charts, collages, and community.' },
     'Developer': { icon: '💻', description: 'Specialized tools for bot developers.' },
 };
 
@@ -126,7 +127,7 @@ async function showHelpPage(interaction, client, pageNumber) {
     });
 
     // Sort categories in a specific order
-    const categoryOrder = ['Administration', 'Moderation', 'Utility', 'Fun', 'Games', 'Music', 'Voice', 'Economy', 'Developer'];
+    const categoryOrder = ['Administration', 'Moderation', 'Utility', 'Fun', 'Games', 'Music', 'Voice', 'Economy', 'LastFM', 'Developer'];
     const sortedCategories = Object.keys(categories).sort((a, b) => {
         return categoryOrder.indexOf(a) - categoryOrder.indexOf(b);
     });
@@ -197,7 +198,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
         .setThumbnail(client.user.displayAvatarURL())
         .setDescription(
             '**Welcome to ByteBot!**\n\n' +
-            'Start with an intent hub: `/community`, `/me`, `/server`, `/lookup`, `/pod`, `/mod`, `/economy`, `/game`, `/fun`, `/image`, or `/bot`.\n\n' +
+            'Start with an intent hub: `/community`, `/me`, `/server`, `/lookup`, `/pod`, `/mod`, `/economy`, `/lastfm`, `/game`, `/fun`, `/image`, or `/bot`.\n\n' +
             `📊 **${totalCommands}** commands • **${sortedCategories.length}** categories`
         )
         .addFields(
@@ -212,6 +213,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/mod` member actions, cases, invoke templates, setup, logs, and channel controls\n' +
                     '`/economy` balances, games, crime, gangs, labs, role shops, and administration\n' +
                     '`/game` F1, War Thunder, and public Roblox lookups\n' +
+                    '`/lastfm` listening, charts, collages, library tools, and community rankings\n' +
                     '`/image` transforms, local effects, memes, and color inspection\n' +
                     '`/bot` help, health, deployment, and developer tools',
                 inline: false
@@ -228,6 +230,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/ticket setup` • `/ticket panel manage` • `/ticket settings view`\n' +
                     '`/giveaway start` • `/giveaway edit prize` • `/counter add`\n' +
                     '`/economy balance` • `/economy game coinflip` • `/economy gang info` • `/economy lab status`\n' +
+                    '`/lastfm now` • `/lastfm charts collage` • `/lastfm community taste`\n' +
                     '`/game warthunder stats`\n' +
                     '`/fun uwuify` • `/fun uwulock add` • `/fun snipe protect` • `/fun roleplay action`\n' +
                     '`/fun game tictactoe` • `/fun game blacktea` • `/image effect apply`',
@@ -258,9 +261,9 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/me` Information • `/lookup` Information, Utility • `/repost` Socials, Utility • `/ai` Information, Utility\n' +
                     '`/game` Games\n' +
                     '`/server` Auto, Logs, Security, Server, Settings • `/ticket` Tickets • `/mod` Moderation\n' +
-                    '`/fun` Fun, Roleplay, Snipe • `/image` Manipulation • `/boosterrole` Boosters • `/economy` Economy\n' +
+                    '`/fun` Fun, Roleplay, Snipe • `/image` Manipulation • `/boosterrole` Boosters • `/economy` Economy • `/lastfm` LastFM\n' +
                     '`/music` Music\n' +
-                    '**Not yet available (planned):** LastFM, Voice\n' +
+                    '**Not yet available (planned):** Voice\n' +
                     '**Provider-blocked:** AI chat/STT/generation, social feeds, Rolimons, Valorant, Minecraft, Spotify search, Reddit, YouTube downloads, X, TikTok, Instagram, Telegram, bio providers\n' +
                     '**Registry-only evidence gaps:** Developer',
                 inline: false

@@ -1528,6 +1528,27 @@ const expectedSchema = {
         flavor: "TEXT DEFAULT 'mint' NOT NULL",
         hits: 'INTEGER DEFAULT 0 NOT NULL',
         updated_at: 'INTEGER NOT NULL'
+    },
+    lastfm_accounts: {
+        user_id: 'TEXT PRIMARY KEY',
+        username: 'TEXT NOT NULL',
+        session_key: 'TEXT',
+        presentation: 'TEXT',
+        reactions: 'TEXT',
+        command_alias: 'TEXT',
+        linked_at: 'INTEGER NOT NULL',
+        refreshed_at: 'INTEGER NOT NULL'
+    },
+    lastfm_artists: {
+        user_id: 'TEXT NOT NULL',
+        artist: 'TEXT NOT NULL',
+        playcount: 'INTEGER NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    lastfm_oauth_states: {
+        state: 'TEXT PRIMARY KEY',
+        user_id: 'TEXT NOT NULL',
+        expires_at: 'INTEGER NOT NULL'
     }
 };
 
@@ -1601,7 +1622,8 @@ const compatibilityUniqueKeys = {
     economy_gang_members: ['guild_id', 'user_id'],
     economy_labs: ['guild_id', 'user_id'],
     roleplay_disabled: ['guild_id', 'action'],
-    roleplay_counts: ['guild_id', 'actor_id', 'target_id', 'action']
+    roleplay_counts: ['guild_id', 'actor_id', 'target_id', 'action'],
+    lastfm_artists: ['user_id', 'artist']
 };
 
 function hasUniqueKey(tableName, columns) {

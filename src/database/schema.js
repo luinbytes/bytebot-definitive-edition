@@ -1860,6 +1860,33 @@ const funVapes = sqliteTable('fun_vapes', {
 }, table => ({
     hitsCheck: check('fun_vapes_hits_check', sql`${table.hits} >= 0`)
 }));
+const lastfmAccounts = sqliteTable('lastfm_accounts', {
+    userId: text('user_id').primaryKey(),
+    username: text('username').notNull(),
+    sessionKey: text('session_key'),
+    presentation: text('presentation'),
+    reactions: text('reactions'),
+    commandAlias: text('command_alias'),
+    linkedAt: integer('linked_at').notNull(),
+    refreshedAt: integer('refreshed_at').notNull()
+}, table => ({ usernameIdx: index('lastfm_accounts_username_idx').on(table.username) }));
+
+const lastfmArtists = sqliteTable('lastfm_artists', {
+    userId: text('user_id').notNull().references(() => lastfmAccounts.userId, { onDelete: 'cascade' }),
+    artist: text('artist').notNull(),
+    playcount: integer('playcount').notNull(),
+    updatedAt: integer('updated_at').notNull()
+}, table => ({
+    pk: primaryKey({ columns: [table.userId, table.artist] }),
+    countCheck: check('lastfm_artists_playcount_check', sql`${table.playcount} >= 0`),
+    playsIdx: index('lastfm_artists_plays_idx').on(table.artist, table.playcount)
+}));
+
+const lastfmOauthStates = sqliteTable('lastfm_oauth_states', {
+    state: text('state').primaryKey(),
+    userId: text('user_id').notNull(),
+    expiresAt: integer('expires_at').notNull()
+}, table => ({ expiresIdx: index('lastfm_oauth_states_expiry_idx').on(table.expiresAt) }));
 
 module.exports = {
     guilds,
@@ -2010,5 +2037,8 @@ module.exports = {
     roleplayDisabled,
     roleplayCounts,
     funBlunts,
-    funVapes
+    funVapes,
+    lastfmAccounts,
+    lastfmArtists,
+    lastfmOauthStates
 };
