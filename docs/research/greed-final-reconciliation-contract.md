@@ -72,7 +72,8 @@ This addendum is the implementation gate for drift found during the independent
   are not accepted as path-level closure.
 
 The final independent refresh additionally found four current Premium caps.
-This follow-up is frozen before its implementation or tests:
+The contract was frozen before implementation; migration `0039_premium_delivery_caps`
+and the cumulative tests now enforce it:
 
 - welcome and goodbye retain their existing primary `setup`/`channel` aliases
   and add `/server welcome|goodbye channels action:add|remove|list channel:<channel>`;

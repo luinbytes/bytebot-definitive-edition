@@ -184,7 +184,8 @@ persist a global guild “region” from the deprecated guild field.
 
 The following are deliberately ByteBot-owned operational bounds, not claims
 about Greed: one setup per guild; at most one creation transaction per member
-and guild at a time; at most 25 stored secondary join channels per guild; at
+and guild at a time; at most four configured hubs total (the primary plus three
+active or pending secondary join channels), matching the current Premium guide; at
 most 50 owned temporary channels per configured category because Discord's
 category limit is 50; names/templates/status strings bounded before REST;
 bounded list responses (25 entries per page); and a short (one-second) empty
