@@ -200,6 +200,8 @@ function setConfig(guildId, type, changes) {
             ON CONFLICT (guild_id, type) DO UPDATE SET channel_id=excluded.channel_id, template=excluded.template,
                 enabled=excluded.enabled, format=excluded.format, delete_after_seconds=excluded.delete_after_seconds, updated_at=excluded.updated_at
         `).run(guildId, type, row.channelId, row.template, row.enabled, row.format, row.deleteAfter, Date.now());
+        if (row.channelId) sqlite.prepare('DELETE FROM lifecycle_message_channels WHERE guild_id = ? AND type = ? AND channel_id = ?')
+            .run(guildId, type, row.channelId);
         return getConfig(guildId, type);
     })();
 }

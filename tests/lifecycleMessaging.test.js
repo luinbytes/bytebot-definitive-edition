@@ -96,6 +96,16 @@ describe('lifecycle messaging', () => {
         expect(() => lifecycle.setConfig('guild1', 'welcome', { channelId: 'primary' })).toThrow('At most 4');
     });
 
+    test('promoting an extra channel removes its duplicate destination row', () => {
+        lifecycle.setConfig('guild1', 'welcome', { channelId: 'primary' });
+        lifecycle.addLifecycleChannel('guild1', 'welcome', 'extra');
+        lifecycle.setConfig('guild1', 'welcome', { channelId: 'extra' });
+
+        expect(lifecycle.listLifecycleChannels('guild1', 'welcome')).toEqual(['extra']);
+        expect(database.sqlite.prepare(`SELECT COUNT(*) count FROM lifecycle_message_channels
+            WHERE guild_id = 'guild1' AND type = 'welcome' AND channel_id = 'extra'`).get().count).toBe(0);
+    });
+
     test('first add becomes primary and channel templates override or fall back', async () => {
         const primary = { id: 'primary', name: 'primary', send: jest.fn().mockResolvedValue({ delete: jest.fn() }) };
         const extra = { id: 'extra', name: 'extra', send: jest.fn().mockResolvedValue({ delete: jest.fn() }) };
