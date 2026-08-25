@@ -4,7 +4,7 @@ Frozen 2026-08-23 before implementation. The primary contract is Greed's public 
 
 | Surface | Commands and behavior ByteBot must retain |
 | --- | --- |
-| Autoresponder | `add`, `update`, `remove`, `list`, `clear`, `reset`; channel/role allowlists; trigger-driven role add/remove; `strict`, `reply`, `self_destruct` (6-60s), `delete`, and mention policy. Existing ByteBot `manage`/`browse`, match modes, and cooldown remain compatible. Older sources conflicted at 50/1,000; the current hosted responder and Premium pages agree on 500, which both ByteBot administration paths enforce transactionally without a paywall. |
+| Autoresponder | `add`, `update`, `remove`, `list`, `clear`, `reset`; channel/role allowlists; trigger-driven role add/remove; `strict`, `reply`, `self_destruct` (6-60s), `delete`, and mention policy. Existing ByteBot `manage`/`browse`, match modes, and cooldown remain compatible. Older sources conflicted at 50/1,000; the current [Auto Responder guide](https://greed.best/docs/configuration/messages/responder) and [Premium overview](https://greed.best/premium) agree on 500, which both ByteBot administration paths enforce transactionally without a paywall. |
 | Autoreact | `add`, `remove`, `list`, `clear`; channel/role restrictions; keyword/event triggers; up to 15 unique usable reactions. |
 | Autorole | `add`, `remove`, `list`, `clear`; separate bot autoroles. Roles must be assignable and below the bot. |
 | Timer | `add <channel> <interval> <message>`, `remove`, `list`, `view`; one timer per channel; restart-safe recurring delivery. |

@@ -19,7 +19,7 @@ policy, Discord, or small-VPS boundary.
 | --- | --- | --- |
 | [Live command catalog](https://greed.best/commands) | The page still says it contains every command with its arguments and permissions. Its command payload remains client-rendered and is not published as a stable JSON/OpenAPI registry. The last fully rendered public count snapshot is 945 commands across 17 named categories whose displayed counts total 916. | Preserve the 29-entry `evidence-gap`; never invent names, options, permissions, or a hidden category. |
 | [Current docs index](https://greed.best/docs) | The current first-party navigation exposes global Dashboard, Commands, and Embeds routes plus Getting Started, Premium, Customization, six Security guides, Starboard, VoiceMaster, Levels, Bump Reminder, Reaction Triggers, Command Aliases, Command Permissions, Custom Scripts, Username Tracking, Logging, Tickets, Confessions, Backups, Discovery, Music, Giveaways, Counting, Last.fm, Economy, Fun, Social Lookups & Feeds, Image Editing, Utility, Information, and scripting permissions. | Every named guide family and global product route must map to an issue/contract below. |
-| [Current Premium guide](https://greed.best/docs/premium) and [premium overview](https://greed.best/premium) | Highest caps remain user 15/5s, guild 60/10s, 500 autoresponders, logs 15, autoroles 50, reaction roles 500, autopfp 15, analytics three years, AI 200/30/50/50/100 daily, and bio 190. The overview additionally says user premium bypasses the guild bucket. Both name Uwulock roulette; the overview describes a configured percentage ceiling with adaptive busy-channel throttling. | ByteBot applies evidenced maxima without billing, voting, purchase, or entitlement state. Provider and host bounds remain. The user-premium guild-bypass entitlement is inapplicable because ByteBot has no premium users; every caller shares the universal 15/5s and 60/10s maxima. |
+| [Current Premium guide](https://greed.best/docs/premium) and [premium overview](https://greed.best/premium) | Highest caps remain user 15/5s, guild 60/10s, 500 autoresponders, logs 15, autoroles 50, reaction roles 500, welcome channels 4, leave channels 4, VoiceMaster hubs 4, Join DMs 750/hour, autopfp 15, analytics three years, AI 200/30/50/50/100 daily, and bio 190. The overview additionally says user premium bypasses the guild bucket. Both name Uwulock roulette; the overview describes a configured percentage ceiling with adaptive busy-channel throttling. | ByteBot applies evidenced maxima without billing, voting, purchase, or entitlement state. Provider and host bounds remain. The user-premium guild-bypass entitlement is inapplicable because ByteBot has no premium users; every caller shares the universal 15/5s and 60/10s maxima. |
 | [`greedbest/i18n`](https://github.com/greedbest/i18n/tree/3dadc41852a09567add8a6b2b522d5e2b1a53b2f) | Repository HEAD remains `3dadc41852a09567add8a6b2b522d5e2b1a53b2f` (2026-03-29) with 912 English command JSON files in 20 directories. | The pinned file ledger remains the complete public localization snapshot. Localization proves subjects and strings, not runtime registration metadata. |
 | [`greedbest/docs`](https://github.com/greedbest/docs/tree/60cf7138d45a74bf0cf3fc749c1dc6c43b00df43) | Repository HEAD remains `60cf7138d45a74bf0cf3fc749c1dc6c43b00df43` (2026-06-11). | A guide proves only the syntax and behavior it publishes; conflicts stay visible. |
 
@@ -70,6 +70,24 @@ This addendum is the implementation gate for drift found during the independent
 - a generated 912-row pinned-registry inventory must give every English JSON
   path an owner issue and source-reconciliation state. Directory totals alone
   are not accepted as path-level closure.
+
+The final independent refresh additionally found four current Premium caps.
+This follow-up is frozen before its implementation or tests:
+
+- welcome and goodbye retain their existing primary `setup`/`channel` aliases
+  and add `/server welcome|goodbye channels action:add|remove|list channel:<channel>`;
+  one primary plus added destinations may total at most four, delivery is
+  attempted independently to every configured channel, and reset/guild removal
+  purge all destinations;
+- VoiceMaster permits four configured hubs total (the primary plus at most
+  three active or pending secondary join channels), without a billing gate;
+- `/server welcome dm action:enable|disable|message|view text:<template>` owns
+  Join DM configuration because no exact current Greed command grammar is
+  public. It reuses the validated welcome template variables, runs only after
+  join protection accepts the member, suppresses mentions, and records at most
+  750 successful or in-flight deliveries per guild in a rolling hour;
+- failed DMs release their reservation; restart does not reset the persisted
+  rolling window; no retry or unsolicited bulk-DM queue is added.
 
 ## Integration audit before final delivery
 
