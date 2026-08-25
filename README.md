@@ -17,6 +17,7 @@ A highly modular, scalable, and future-proof Discord bot boilerplate built with 
 -   **Self-hosted Music**: Bounded operator-owned playback, queues, DJ controls, presets, and curated autoplay under `/music`.
 -   **Information and Lookups**: Discord-native profiles, assets, roles, invites, permissions, and observed name history under `/me` and `/server`, plus bounded web, GitHub, and Roblox lookups under `/lookup` and `/game`.
 -   **Social Reposting**: Mention-safe canonical Instagram, TikTok, and X/Twitter post links under `/repost`; persistent provider feeds remain visibly blocked until their credential and terms gates are satisfied.
+-   **Local AI Media**: Bounded on-demand Tesseract OCR and eSpeak NG synthetic speech under `/ai`; chat, transcription, and generative media remain visibly blocked without an approved provider or separate worker.
 
 ## Project Structure
 

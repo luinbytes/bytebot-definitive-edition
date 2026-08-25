@@ -37,9 +37,12 @@ test('/bot help discovers every public Greed category without advertising unfini
     expect(commonPaths.value).toContain('/economy game coinflip');
     expect(commonPaths.value).toContain('/lookup weather');
     expect(commonPaths.value).toContain('/repost');
+    expect(commonPaths.value).toContain('/ai ocr');
+    expect(commonPaths.value).toContain('/ai tts');
     expect(commonPaths.value).toContain('/server role info');
     expect(parityField.value).toContain('/lookup` Information, Utility');
     expect(parityField.value).toContain('/repost` Socials, Utility');
+    expect(parityField.value).toContain('/ai` Information, Utility');
     expect(parityField.value).toContain('/economy` Economy');
     expect(parityField.value).toContain('/ticket` Tickets');
     expect(parityField.value).toContain('Provider-blocked');

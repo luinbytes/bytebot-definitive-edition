@@ -21,7 +21,7 @@ Source: [Greed commands](https://greed.best/commands), researched 2026-08-23. Th
 
 | Live category | Advertised count | ByteBot issues | Status |
 | --- | ---: | --- | --- |
-| Information | 86 | #51, #52, #60 | `partial` |
+| Information | 86 | #51, #52, #60, #62 | `partial` |
 | Utility | 80 | #35, #42, #43, #46, #51, #52, #53, #55, #56, #58, #60, #62 | `partial` |
 | Moderation | 80 | #36, #37, #38 | `partial` |
 | Fun | 55 | #35, #54, #56 | `partial` |
@@ -36,7 +36,7 @@ Source: [Greed commands](https://greed.best/commands), researched 2026-08-23. Th
 | Settings | 47 | #36, #37, #41, #43, #54, #57, #58 | `partial` |
 | Levels | 3 | #50 | `partial` |
 | Socials | 31 | #60, #61 | `complete` — lawful keyless lookups and canonical link reposting are implemented; credentialed feeds, downloads, and undocumented auto-reposter behavior have terminal provider/evidence blockers |
-| Manipulation | 99 | #55, #56, #62 | `tracked` |
+| Manipulation | 99 | #55, #56, #62 | `partial` — bounded media input and local OCR/TTS exist; deterministic effects remain #56 and generative surfaces have terminal provider/resource blockers |
 | Snipe | 4 | #54 | `tracked` |
 | Unidentified remainder | 29 | #64 | `evidence-gap` — the public page does not name its missing bucket |
 | **Total** | **945** | #34–#64 | Mixed |
@@ -52,7 +52,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | `developer` | 4 | #64 | `evidence-gap` — absent from the live public category list and may be internal-only |
 | `economy` | 50 | #48, #49 | `complete` — accounts, banking, earnings, games, crime/robbery, gangs, laboratories, rankings, shops, and administration are reconciled; unpublished algorithms remain visibly ByteBot-owned |
 | `fun` | 71 | #35, #54, #56 | `partial` |
-| `information` | 48 | #51 | `partial` |
+| `information` | 48 | #51, #62 | `partial` |
 | `lastfm` | 22 | #57 | `tracked` |
 | `levels` | 8 | #50 | `partial` |
 | `logs` | 7 | #37, #39, #40, #50 | `partial` |
@@ -99,6 +99,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | Discord profiles/assets, roles, permissions, invites, observed name history, remote server facts, bounded calculation/QR/weather/definition/translation, and configured website screenshots | #51 | Advances live Information/Utility and pinned `information`/`utility`; those broader rows remain `partial` because #52, #53, #55, #58, #60, and #62 still own mapped families. | `tests/informationLookupService.test.js`, `tests/informationLookupCommands.test.js`, `tests/commandHubs.test.js`, and `tests/helpParity.test.js` |
 | Public GitHub profiles/repository search/commit-email search and public Roblox profiles/presence/games/groups/outfits; credentialed or contract-prohibited social providers retained as explicit blockers | #60 | Advances live Information/Utility/Socials and pinned `information`/`socials`/`utility`; Socials remains `partial` because #61 owns feeds and reposters. GitHub contributions and providers without a lawful keyless contract remain visibly blocked. | `tests/informationLookupService.test.js`, `tests/informationLookupCommands.test.js`, `tests/commandHubs.test.js`, and `docs/research/greed-social-game-lookups-contract.md` |
 | Canonical Instagram, TikTok, and X/Twitter link reposting with no scrape/download path; all eight persistent feed providers and the undocumented auto-reposter behavior retained as source-cited terminal blockers | #61 | Completes live and pinned Socials together with #60. No dormant scheduler, token storage, billing gate, or invented crawler is shipped while the provider and evidence gates remain closed. | `tests/socialRepost.test.js`, `tests/helpParity.test.js`, and `docs/research/greed-social-feeds-contract.md` |
+| Local Tesseract OCR and eSpeak NG text-to-speech through one bounded media queue; OpenRouter Q&A, STT, image generation, and semantic editing retained as source-cited credential/resource blockers | #62 | Advances live Information/Utility/Manipulation and pinned `information`/`utility`; Greed's billing caps are evidence only and ByteBot adds no entitlement or daily quota. | `tests/aiMedia.test.js`, `tests/mediaService.test.js`, `tests/helpParity.test.js`, and `docs/research/greed-ai-speech-ocr-generative-contract.md` |
 
 ## Update rule
 

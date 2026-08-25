@@ -213,7 +213,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                 value:
                     '`/me reminder add` • `/me bookmark search` • `/pod panel`\n' +
                     '`/server welcome setup` • `/server goodbye setup` • `/server boost setup`\n' +
-                    '`/server security antinuke-settings` • `/server security antinuke-module`\n' +
+                    '`/server security antinuke-settings`\n' +
                     '`/server antiraid settings` • `/server antiraid module`\n' +
                     '`/server automod settings` • `/server automod filter`\n' +
                     '`/server permissions disable` • `/server permissions denyperm` • `/server permissions protect`\n' +
@@ -222,7 +222,7 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/giveaway start` • `/giveaway edit prize` • `/counter add`\n' +
                     '`/economy balance` • `/economy game coinflip` • `/economy gang info` • `/economy lab status`\n' +
                     '`/server backup create` • `/server customize preset` • `/server discovery publish`\n' +
-                    '`/server role info` • `/lookup weather` • `/lookup github user` • `/repost`\n' +
+                    '`/server role info` • `/lookup weather` • `/lookup github user` • `/repost` • `/ai ocr` • `/ai tts`\n' +
                     '`/mod user warn` • `/mod case view` • `/mod config setup`\n' +
                     '`/mod template set` • `/game roblox profile`\n' +
                     '`/fun uwuify` • `/fun uwulock add`',
@@ -232,13 +232,13 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                 name: 'Public Parity Map',
                 value:
                     'Greed source categories route through ByteBot\'s existing hubs as features land:\n' +
-                    '`/community` Levels, Socials • `/me` Information • `/lookup` Information, Utility • `/repost` Socials, Utility\n' +
+                    '`/community` Levels, Socials • `/me` Information • `/lookup` Information, Utility • `/repost` Socials, Utility • `/ai` Information, Utility\n' +
                     '`/game` Games\n' +
                     '`/server` Auto, Logs, Security, Server, Settings • `/ticket` Tickets • `/mod` Moderation\n' +
                     '`/fun` Fun, Manipulation, Roleplay, Snipe • `/boosterrole` Boosters • `/economy` Economy\n' +
                     '`/music` Music\n' +
                     '**Not yet available (planned):** LastFM, Voice\n' +
-                    '**Provider-blocked:** Social feeds, Rolimons, Valorant, Minecraft, Spotify search, Reddit, YouTube downloads, X, TikTok, Instagram, Telegram, bio providers\n' +
+                    '**Provider-blocked:** AI chat/STT/generation, social feeds, Rolimons, Valorant, Minecraft, Spotify search, Reddit, YouTube downloads, X, TikTok, Instagram, Telegram, bio providers\n' +
                     '**Registry-only evidence gaps:** Developer',
                 inline: false
             }
