@@ -77,6 +77,11 @@ cumulative branch. Their colliding migrations were serialized as 0034-0037;
 the final drift migration is 0038. The 912-row path inventory is
 [`greed-command-registry-inventory.csv`](greed-command-registry-inventory.csv).
 
+The full delivery audit follows repository history rather than manufacturing
+ancestry: PRs #66-#80 are already merged to `master` (some by squash), and
+their merge commits are ancestors here; the exact open heads of PRs #81-#94
+are ancestors here. PRs #70-#74 additionally have patch-equivalent heads.
+
 ## Terminal ledger rules
 
 After those four branches are ancestors and the cumulative gate is green:
@@ -94,9 +99,10 @@ After those four branches are ancestors and the cumulative gate is green:
 
 ## Verification and review gate
 
-Final delivery requires every issue branch #35-#63 to be an ancestor of the
-exact final head; migration/schema and command/help checks; the complete Jest
-suite with one worker and a bounded heap; `git diff --check`; production
+Final delivery requires the merged delivery commit or exact open head for every
+issue #35-#63 to be integrated into the exact final head; migration/schema and
+command/help checks; the complete Jest suite with one worker and a bounded heap;
+`git diff --check`; production
 dependency audit; Compose resolution; independent spec and security reviews;
 and an open PR to `master`. Docker build/runtime, live Discord, and live
 credentialed provider checks must remain explicit if host pressure or missing
