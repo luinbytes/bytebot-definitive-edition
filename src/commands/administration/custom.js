@@ -1,7 +1,8 @@
-const { EmbedBuilder, SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { configOf } = require('../../services/roleAutomationService');
 const { sourceReply } = require('../../services/richContentService');
 const { paginateArray, sendPaginatedMessage } = require('../../utils/paginationUtil');
+const embeds = require('../../utils/embeds');
 
 const named = option => option.setName('name').setDescription('Script name').setRequired(true).setMinLength(1).setMaxLength(32);
 const script = option => option.setName('script').setDescription('Message, embed, or Components V2 script').setRequired(true).setMaxLength(6000);
@@ -34,11 +35,11 @@ module.exports = {
             if (!rules.length) return interaction.editReply('No custom scripts configured.');
             const pages = paginateArray(rules, 5);
             return sendPaginatedMessage({ interaction, deferred: true, totalPages: pages.length, customIdPrefix: 'custom-list',
-                renderPage: page => new EmbedBuilder().setTitle('Custom scripts').setDescription(pages[page].map(rule => {
+                renderPage: page => embeds.brand(`Custom scripts · Page ${page + 1} of ${pages.length}`, pages[page].map(rule => {
                     const config = configOf(rule);
                     const preview = String(config.script || '').replace(/\s+/g, ' ').trim();
                     return `**\`${rule.key}\`** — ${config.useCount || 0} uses\n${preview.slice(0, 300)}${preview.length > 300 ? '…' : ''}`;
-                }).join('\n\n')).setFooter({ text: `Page ${page + 1} of ${pages.length} • ${rules.length} scripts` })
+                }).join('\n\n')).setAuthor({ name: `${rules.length} scripts` })
             });
         }
         const rule = name && service.getCustom(interaction.guildId, name);
