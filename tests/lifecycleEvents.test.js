@@ -35,6 +35,13 @@ describe('lifecycle event routing', () => {
         expect(mockSendJoinDm).not.toHaveBeenCalled();
     });
 
+    test('does not welcome when AntiRaid detects an incident but its action fails', async () => {
+        mockHandleMemberJoin.mockResolvedValue({ status: 'failed' });
+        await joined.execute(member());
+        expect(mockSendLifecycleMessage).not.toHaveBeenCalled();
+        expect(mockSendJoinDm).not.toHaveBeenCalled();
+    });
+
     test('routes Join DM only after join protection accepts the member', async () => {
         const target = member();
         await joined.execute(target);

@@ -65,7 +65,7 @@ describe('lifecycle messaging', () => {
         const { value: server, channel } = guild();
         const target = member(server);
         lifecycle.setConfig(server.id, 'welcome', {
-            channelId: channel.id, template: 'Welcome {user} to {server}, member {memberNumber}', enabled: true, format: 'text'
+            channelId: channel.id, template: 'Welcome {user} ({user.mention}) to {server}, member {memberNumber}', enabled: true, format: 'text'
         });
 
         const real = await lifecycle.sendLifecycleMessage('welcome', target);
@@ -90,7 +90,61 @@ describe('lifecycle messaging', () => {
         expect(lifecycle.listLifecycleChannels('guild1', 'welcome')).toEqual([]);
     });
 
-    test('Join DMs use a persistent 750-per-hour reservation and release failures', async () => {
+    test('the aggregate four-channel cap cannot be bypassed by assigning the primary last', () => {
+        const insert = database.sqlite.prepare("INSERT INTO lifecycle_message_channels (guild_id, type, channel_id) VALUES ('guild1', 'welcome', ?)");
+        ['one', 'two', 'three', 'four'].forEach(id => insert.run(id));
+        expect(() => lifecycle.setConfig('guild1', 'welcome', { channelId: 'primary' })).toThrow('At most 4');
+    });
+
+    test('first add becomes primary and channel templates override or fall back', async () => {
+        const primary = { id: 'primary', name: 'primary', send: jest.fn().mockResolvedValue({ delete: jest.fn() }) };
+        const extra = { id: 'extra', name: 'extra', send: jest.fn().mockResolvedValue({ delete: jest.fn() }) };
+        const { value: server } = guild();
+        server.channels.fetch = jest.fn(id => Promise.resolve({ primary, extra }[id]));
+        lifecycle.addLifecycleChannel(server.id, 'welcome', primary.id);
+        lifecycle.addLifecycleChannel(server.id, 'welcome', extra.id);
+        lifecycle.setConfig(server.id, 'welcome', { enabled: true, template: 'Fallback {user}', format: 'text' });
+        lifecycle.setLifecycleChannelTemplate(server.id, 'welcome', extra.id, 'Custom {channel.name}');
+
+        expect(lifecycle.getConfig(server.id, 'welcome').channel_id).toBe(primary.id);
+        expect((await lifecycle.sendLifecycleMessage('welcome', member(server))).status).toBe('sent');
+        expect(primary.send.mock.calls[0][0].content).toBe('Fallback User');
+        expect(extra.send.mock.calls[0][0].content).toBe('Custom extra');
+        expect(lifecycle.lifecycleChannelUsesCustomTemplate(server.id, 'welcome', extra.id)).toBe(true);
+    });
+
+    test('renders current conditionals, lowercase functions, variables, and timestamp suffixes', () => {
+        const { value: server } = guild();
+        const target = member(server);
+        target.user.bot = false;
+        expect(lifecycle.renderTemplate(
+            '{if {user.bot} == No}{lower(user.name)} joined {guild.name} {user.created_at:R}{else}bot{/if}', target
+        )).toBe('user joined Guild <t:1577836800:R>');
+    });
+
+    test('expands saved custom scripts through the bounded rich-content service', async () => {
+        const { value: server, channel } = guild();
+        server.client = { richContentService: { expandCustom: jest.fn().mockReturnValue('Expanded {user}') } };
+        lifecycle.setConfig(server.id, 'welcome', { channelId: channel.id, enabled: true, format: 'text', template: '{cscript:greeting}' });
+
+        expect((await lifecycle.sendLifecycleMessage('welcome', member(server))).status).toBe('sent');
+        expect(server.client.richContentService.expandCustom).toHaveBeenCalledWith('{cscript:greeting}', server.id);
+        expect(channel.send.mock.calls[0][0].content).toBe('Expanded User');
+    });
+
+    test('welcome and goodbye suppress bots and welcome pauses after 20 human joins per minute', async () => {
+        const { value: server, channel } = guild();
+        lifecycle.setConfig(server.id, 'welcome', { channelId: channel.id, enabled: true, format: 'text' });
+        const bot = member(server);
+        bot.user.bot = true;
+        expect((await lifecycle.sendLifecycleMessage('welcome', bot)).status).toBe('bot');
+        const human = member(server);
+        for (let index = 0; index < 20; index++) expect((await lifecycle.sendLifecycleMessage('welcome', human)).status).toBe('sent');
+        expect((await lifecycle.sendLifecycleMessage('welcome', human)).status).toBe('limited');
+        expect(channel.send).toHaveBeenCalledTimes(20);
+    });
+
+    test('Join DMs attach Server Info, enforce both rolling limits, and release failures', async () => {
         const { value: server } = guild();
         const target = member(server);
         target.send = jest.fn().mockRejectedValue(new Error('closed'));
@@ -98,12 +152,23 @@ describe('lifecycle messaging', () => {
         expect((await lifecycle.sendJoinDm(target)).status).toBe('failed');
         expect(database.sqlite.prepare('SELECT COUNT(*) count FROM join_dm_deliveries').get().count).toBe(0);
 
+        target.send.mockResolvedValue({ id: 'dm1' });
+        expect((await lifecycle.sendJoinDm(target)).status).toBe('sent');
+        expect(target.send.mock.calls[1][0].components[0].toJSON().components[0].custom_id).toBe('join_dm:info:guild1:user1');
+
         const insert = database.sqlite.prepare("INSERT INTO join_dm_deliveries (guild_id, user_id, sent_at) VALUES ('guild1', ?, ?)");
         database.sqlite.transaction(() => {
-            for (let index = 0; index < 750; index++) insert.run(`user-${index}`, Date.now());
+            for (let index = 0; index < 39; index++) insert.run(`minute-${index}`, Date.now());
         })();
         expect((await lifecycle.sendJoinDm(target)).status).toBe('limited');
-        expect(target.send).toHaveBeenCalledTimes(1);
+        database.sqlite.prepare('DELETE FROM join_dm_deliveries').run();
+        database.sqlite.transaction(() => {
+            for (let index = 0; index < 750; index++) insert.run(`hour-${index}`, Date.now() - 120000);
+        })();
+        expect((await lifecycle.sendJoinDm(target)).status).toBe('limited');
+        expect(target.send).toHaveBeenCalledTimes(2);
+        lifecycle.resetConfig(server.id, 'join_dm');
+        expect(database.sqlite.prepare('SELECT COUNT(*) count FROM join_dm_deliveries').get().count).toBe(0);
     });
 
     test('supports the documented Greed embed script fields and link buttons', () => {
@@ -159,8 +224,11 @@ describe('lifecycle messaging', () => {
     test('slash paths preserve pinned channel/settings/remove names and hosted aliases', () => {
         const server = require('../src/commands/administration/server').data.toJSON();
         const groups = Object.fromEntries(server.options.filter(option => option.type === 2).map(option => [option.name, option.options.map(child => child.name)]));
-        expect(groups.welcome).toEqual(expect.arrayContaining(['setup', 'channel', 'channels', 'dm', 'message', 'test', 'view', 'reset']));
-        expect(groups.goodbye).toEqual(expect.arrayContaining(['setup', 'channel', 'channels', 'message', 'test', 'view', 'reset']));
+        expect(groups.welcome).toEqual(expect.arrayContaining(['setup', 'channel', 'channels', 'dm', 'message', 'test', 'preview', 'view', 'reset']));
+        expect(groups.goodbye).toEqual(expect.arrayContaining(['setup', 'channel', 'channels', 'message', 'test', 'preview', 'view', 'reset']));
+        const dm = server.options.find(option => option.name === 'welcome').options.find(option => option.name === 'dm');
+        expect(dm.options.find(option => option.name === 'action').choices.map(choice => choice.value))
+            .toEqual(['enable', 'disable', 'toggle', 'message', 'config', 'view', 'settings', 'show', 'test', 'preview', 'reset', 'clear']);
         expect(groups.boost).toEqual(expect.arrayContaining(['setup', 'channel', 'settings', 'remove', 'test', 'reset']));
         expect(groups.system).toEqual(['channel', 'welcome', 'boost', 'sticker']);
     });

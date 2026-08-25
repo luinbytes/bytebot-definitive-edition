@@ -410,6 +410,10 @@ class RichContentService {
         });
     }
 
+    expandCustom(script, guildId) {
+        return expandCustomScripts(script, name => this.getCustom(guildId, name));
+    }
+
     renderLevel(script, context = {}) {
         const guildId = context.guild?.id;
         if (!guildId) throw new Error('Level-up scripts require a server context.');

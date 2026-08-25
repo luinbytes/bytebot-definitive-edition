@@ -12,7 +12,10 @@ const DEFAULTS = {
     join_dm: 'Welcome to **{server}**, {displayname}!'
 };
 const MAX_LIFECYCLE_CHANNELS = 4;
+const MAX_WELCOMES_PER_MINUTE = 20;
+const MAX_JOIN_DMS_PER_MINUTE = 40;
 const MAX_JOIN_DMS_PER_HOUR = 750;
+const welcomeWindows = new Map();
 const EMBED_KEYS = new Set(['embed', 'content', 'title', 'description', 'color', 'url', 'image', 'thumbnail', 'timestamp', 'author', 'field', 'fields', 'footer', 'button']);
 
 function ordinal(number) {
@@ -35,28 +38,42 @@ function valuesFor(member, channel = null) {
     const mention = `<@${member.id || user.id}>`;
     const avatar = user.displayAvatarURL?.({ size: 256 }) || '';
     const roles = member.roles?.cache ? [...member.roles.cache.values()].filter(role => role.id !== guild.id) : [];
+    const topRole = member.roles?.highest?.id === guild.id ? null : member.roles?.highest;
+    const boostAt = member.premiumSince || null;
+    const count = Number(guild.memberCount || 0);
     const guildCreatedAt = guild.createdAt || now;
     const channelCreatedAt = channel?.createdAt || now;
     return {
-        user: mention, mention, 'user.mention': mention,
+        user: user.username || 'Unknown', mention, 'user.mention': mention,
         'user.id': user.id || member.id, 'user.avatar': avatar, 'user.display_avatar': avatar,
         'user.banner': user.bannerURL?.({ size: 1024 }) || '',
         username: user.username || 'Unknown', 'user.name': user.username || 'Unknown',
-        tag: user.tag || user.username || 'Unknown', 'user.tag': user.tag || user.username || 'Unknown',
+        tag: user.discriminator || '0', 'user.tag': user.discriminator || '0',
         displayname: member.displayName || user.displayName || user.username || 'Unknown',
         'user.display_name': member.displayName || user.displayName || user.username || 'Unknown',
         'user.nick': member.nickname || member.displayName || '', 'user.role_count': String(roles.length),
         'user.roles': roles.map(role => `<@&${role.id}>`).join(', '),
+        'user.role_list': roles.map(role => role.name).join(', '),
+        'user.role_text_list': roles.map(role => `<@&${role.id}>`).join(', '),
+        'user.top_role': topRole?.name || 'N/A', 'user.color': topRole?.hexColor || member.displayHexColor || 'N/A',
+        'user.join_position': count ? String(count) : 'N/A', 'user.join_position_suffix': count ? ordinal(count) : 'N/A',
         'user.bot': user.bot ? 'Yes' : 'No', 'user.boost': member.premiumSince ? 'Yes' : 'No',
-        'user.created_at': relative(createdAt), 'user.created_at_timestamp': String(Math.floor(createdAt.getTime() / 1000)),
+        'user.created_at': full(createdAt), 'user.created_at_timestamp': String(Math.floor(createdAt.getTime() / 1000)),
         'user.created_at_iso': createdAt.toISOString(), 'user.created_at_date': isoDate(createdAt),
-        'user.joined_at': relative(joinedAt), 'user.joined_at_timestamp': String(Math.floor(joinedAt.getTime() / 1000)),
-        server: guild.name, 'guild.name': guild.name, 'guild.id': guild.id || '',
+        'user.joined_at': full(joinedAt), 'user.joined_at_timestamp': String(Math.floor(joinedAt.getTime() / 1000)),
+        'user.boost_since': boostAt ? full(boostAt) : 'N/A', 'user.premium_since': boostAt ? full(boostAt) : 'N/A',
+        'user.boosting_since': boostAt ? full(boostAt) : 'N/A',
+        'user.boost_since_timestamp': boostAt ? String(Math.floor(boostAt.getTime() / 1000)) : 'N/A',
+        'user.premium_since_timestamp': boostAt ? String(Math.floor(boostAt.getTime() / 1000)) : 'N/A',
+        'user.boosting_since_timestamp': boostAt ? String(Math.floor(boostAt.getTime() / 1000)) : 'N/A',
+        'user.guild_avatar': member.displayAvatarURL?.({ size: 256 }) || 'N/A',
+        server: guild.name, guild: guild.name, 'guild.name': guild.name, 'guild.id': guild.id || '',
         'guild.owner': guild.ownerId ? `<@${guild.ownerId}>` : '',
         'guild.owner_id': guild.ownerId || '',
-        'guild.icon': guild.iconURL?.({ size: 256 }) || '',
-        'guild.count': String(guild.memberCount || 0), 'guild.mention': guild.name,
-        'guild.created_at': relative(guildCreatedAt), 'guild.created_at_date': isoDate(guildCreatedAt),
+        'guild.icon': guild.iconURL?.({ size: 256 }) || '', 'guild.banner': guild.bannerURL?.({ size: 1024 }) || 'N/A',
+        'guild.count': count.toLocaleString('en-US'), 'guild.member_count': count.toLocaleString('en-US'), 'guild.mention': guild.name,
+        'guild.created_at': full(guildCreatedAt), 'guild.created_at_timestamp': String(Math.floor(guildCreatedAt.getTime() / 1000)), 'guild.created_at_date': isoDate(guildCreatedAt),
+        'guild.emoji_count': String(guild.emojis?.cache?.size || 0), 'guild.role_count': String(guild.roles?.cache?.size || 0),
         memberCount: String(guild.memberCount || 0), membercount: String(guild.memberCount || 0),
         memberNumber: ordinal(guild.memberCount || 0), membernumber: ordinal(guild.memberCount || 0),
         joinedAt: date(joinedAt), joinedat: date(joinedAt), joinedRelative: relative(joinedAt), joinedrelative: relative(joinedAt),
@@ -66,7 +83,7 @@ function valuesFor(member, channel = null) {
         accountAgeMonths: String(Math.floor(accountAgeDays / 30)), accountagemonths: String(Math.floor(accountAgeDays / 30)),
         boostCount: String(guild.premiumSubscriptionCount || 0), boostLevel: String(guild.premiumTier || 0),
         'guild.boost_count': String(guild.premiumSubscriptionCount || 0), 'guild.boost_tier': String(guild.premiumTier || 0),
-        channel: channel ? `<#${channel.id}>` : '', 'channel.id': channel?.id || '',
+        channel: channel?.name || '', 'channel.id': channel?.id || '',
         'channel.name': channel?.name || '', 'channel.mention': channel ? `<#${channel.id}>` : '',
         'channel.topic': channel?.topic || '', 'channel.category_id': channel?.parentId || '',
         'channel.is_thread': channel?.isThread?.() ? 'Yes' : 'No',
@@ -89,13 +106,54 @@ function validateTemplate(template) {
     const known = valuesFor({ id: '0', guild: { name: '', memberCount: 0 }, user: { username: '', createdAt: new Date(0) } });
     const unknown = variableNames(template).find(name => !Object.hasOwn(known, name));
     if (unknown) throw new Error(`Unknown template variable: {${unknown}}`);
-    if (/\{embed\}/i.test(template)) parseEmbedScript(template, known);
+    if (/\{embed\}/i.test(template) && !/\{(?:if |cscript:|cv2)/i.test(template)) parseEmbedScript(template, known);
     return template;
+}
+
+function conditionalValue(input, values) {
+    const key = String(input).trim().replace(/^\{([^{}]+)\}$/, '$1');
+    return Object.hasOwn(values, key) ? String(values[key]) : key.replace(/^['"]|['"]$/g, '');
+}
+
+function renderConditionals(template, values) {
+    let source = String(template);
+    const block = /\{if ([^{}]*(?:\{[^{}]+\}[^{}]*)*)\}([\s\S]*?)\{\/if\}/i;
+    let match;
+    while ((match = source.match(block))) {
+        const branches = [];
+        const marker = /\{(elseif [^{}]*(?:\{[^{}]+\}[^{}]*)*|else)\}/gi;
+        let cursor = 0;
+        let condition = match[1];
+        for (const part of match[2].matchAll(marker)) {
+            branches.push({ condition, content: match[2].slice(cursor, part.index) });
+            condition = part[1].toLowerCase() === 'else' ? null : part[1].slice(7);
+            cursor = part.index + part[0].length;
+        }
+        branches.push({ condition, content: match[2].slice(cursor) });
+        const chosen = branches.find(branch => {
+            if (branch.condition === null) return true;
+            const comparison = branch.condition.match(/^(.+?)\s*(==|!=)\s*(.+)$/);
+            if (comparison) {
+                const equal = conditionalValue(comparison[1], values).toLowerCase() === conditionalValue(comparison[3], values).toLowerCase();
+                return comparison[2] === '==' ? equal : !equal;
+            }
+            return !['', 'false', 'no', '0', 'none', 'null'].includes(conditionalValue(branch.condition, values).toLowerCase());
+        });
+        source = source.replace(match[0], chosen?.content || '');
+    }
+    return source;
 }
 
 function renderTemplate(template, member, channel = null) {
     const values = valuesFor(member, channel);
-    return String(template).replace(/\{\{?([A-Za-z][\w.]*)\}\}?/g, (token, name) => values[name] ?? token);
+    return renderConditionals(template, values)
+        .replace(/\{lower\(([A-Za-z][\w.]*)\)\}/g, (token, name) => values[name] == null ? token : String(values[name]).toLowerCase())
+        .replace(/\{\{?([A-Za-z][\w.]*)(?::([tTdDfFR]))?\}\}?/g, (token, name, style) => {
+            const value = values[name];
+            if (value == null) return token;
+            if (style && /^<t:\d+:[tTdDfFR]>$/.test(value)) return value.replace(/:[tTdDfFR]>$/, `:${style}>`);
+            return value;
+        });
 }
 
 function assertType(type) {
@@ -122,21 +180,28 @@ function setConfig(guildId, type, changes) {
         && (!Number.isInteger(changes.deleteAfterSeconds) || changes.deleteAfterSeconds < 1 || changes.deleteAfterSeconds > 30)) {
         throw new Error('Auto-delete must be between 1 and 30 seconds.');
     }
-    const current = getConfig(guildId, type) || {};
-    const row = {
-        channelId: changes.channelId === undefined ? current.channel_id || null : changes.channelId,
-        template: changes.template === undefined ? current.template || null : changes.template,
-        enabled: changes.enabled === undefined ? Number(current.enabled || 0) : Number(changes.enabled),
-        format: changes.format === undefined ? current.format || 'embed' : changes.format,
-        deleteAfter: changes.deleteAfterSeconds === undefined ? current.delete_after_seconds || null : changes.deleteAfterSeconds
-    };
-    sqlite.prepare(`
-        INSERT INTO lifecycle_messages (guild_id, type, channel_id, template, enabled, format, delete_after_seconds, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (guild_id, type) DO UPDATE SET channel_id=excluded.channel_id, template=excluded.template,
-            enabled=excluded.enabled, format=excluded.format, delete_after_seconds=excluded.delete_after_seconds, updated_at=excluded.updated_at
-    `).run(guildId, type, row.channelId, row.template, row.enabled, row.format, row.deleteAfter, Date.now());
-    return getConfig(guildId, type);
+    return sqlite.transaction(() => {
+        const current = getConfig(guildId, type) || {};
+        const row = {
+            channelId: changes.channelId === undefined ? current.channel_id || null : changes.channelId,
+            template: changes.template === undefined ? current.template || null : changes.template,
+            enabled: changes.enabled === undefined ? Number(current.enabled || 0) : Number(changes.enabled),
+            format: changes.format === undefined ? current.format || 'embed' : changes.format,
+            deleteAfter: changes.deleteAfterSeconds === undefined ? current.delete_after_seconds || null : changes.deleteAfterSeconds
+        };
+        const extra = sqlite.prepare('SELECT channel_id FROM lifecycle_message_channels WHERE guild_id = ? AND type = ?')
+            .all(guildId, type).map(item => item.channel_id);
+        if (new Set([row.channelId, ...extra].filter(Boolean)).size > MAX_LIFECYCLE_CHANNELS) {
+            throw new Error(`At most ${MAX_LIFECYCLE_CHANNELS} ${type} channels are allowed.`);
+        }
+        sqlite.prepare(`
+            INSERT INTO lifecycle_messages (guild_id, type, channel_id, template, enabled, format, delete_after_seconds, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (guild_id, type) DO UPDATE SET channel_id=excluded.channel_id, template=excluded.template,
+                enabled=excluded.enabled, format=excluded.format, delete_after_seconds=excluded.delete_after_seconds, updated_at=excluded.updated_at
+        `).run(guildId, type, row.channelId, row.template, row.enabled, row.format, row.deleteAfter, Date.now());
+        return getConfig(guildId, type);
+    })();
 }
 
 function resetConfig(guildId, type) {
@@ -148,6 +213,7 @@ function resetConfig(guildId, type) {
             format='embed', delete_after_seconds=NULL, updated_at=excluded.updated_at
     `).run(guildId, type, Date.now());
     sqlite.prepare('DELETE FROM lifecycle_message_channels WHERE guild_id = ? AND type = ?').run(guildId, type);
+    if (type === 'join_dm') sqlite.prepare('DELETE FROM join_dm_deliveries WHERE guild_id = ?').run(guildId);
 }
 
 function listLifecycleChannels(guildId, type) {
@@ -157,12 +223,23 @@ function listLifecycleChannels(guildId, type) {
     return [...new Set([primary, ...extra].filter(Boolean))];
 }
 
+function lifecycleChannelUsesCustomTemplate(guildId, type, channelId) {
+    const config = getConfig(guildId, type);
+    if (config?.channel_id === channelId) return Boolean(config.template);
+    return Boolean(sqlite.prepare(`SELECT template FROM lifecycle_message_channels
+        WHERE guild_id = ? AND type = ? AND channel_id = ?`).get(guildId, type, channelId)?.template);
+}
+
 function addLifecycleChannel(guildId, type, channelId) {
     assertType(type);
     return sqlite.transaction(() => {
         const channels = listLifecycleChannels(guildId, type);
         if (channels.includes(channelId)) return channels;
         if (channels.length >= MAX_LIFECYCLE_CHANNELS) throw new Error(`At most ${MAX_LIFECYCLE_CHANNELS} ${type} channels are allowed.`);
+        if (!channels.length) {
+            setConfig(guildId, type, { channelId });
+            return listLifecycleChannels(guildId, type);
+        }
         sqlite.prepare('INSERT INTO lifecycle_message_channels (guild_id, type, channel_id) VALUES (?, ?, ?)')
             .run(guildId, type, channelId);
         return listLifecycleChannels(guildId, type);
@@ -170,13 +247,28 @@ function addLifecycleChannel(guildId, type, channelId) {
 }
 
 function removeLifecycleChannel(guildId, type, channelId) {
-    if (getConfig(guildId, type)?.channel_id === channelId) {
-        sqlite.prepare('UPDATE lifecycle_messages SET channel_id = NULL, updated_at = ? WHERE guild_id = ? AND type = ?')
-            .run(Date.now(), guildId, type);
-    }
-    sqlite.prepare('DELETE FROM lifecycle_message_channels WHERE guild_id = ? AND type = ? AND channel_id = ?')
-        .run(guildId, type, channelId);
-    return listLifecycleChannels(guildId, type);
+    return sqlite.transaction(() => {
+        if (getConfig(guildId, type)?.channel_id === channelId) {
+            const promoted = sqlite.prepare(`SELECT channel_id, template FROM lifecycle_message_channels
+                WHERE guild_id = ? AND type = ? ORDER BY channel_id LIMIT 1`).get(guildId, type);
+            sqlite.prepare('UPDATE lifecycle_messages SET channel_id = ?, template = COALESCE(?, template), updated_at = ? WHERE guild_id = ? AND type = ?')
+                .run(promoted?.channel_id || null, promoted?.template || null, Date.now(), guildId, type);
+            if (promoted) sqlite.prepare('DELETE FROM lifecycle_message_channels WHERE guild_id = ? AND type = ? AND channel_id = ?')
+                .run(guildId, type, promoted.channel_id);
+        }
+        sqlite.prepare('DELETE FROM lifecycle_message_channels WHERE guild_id = ? AND type = ? AND channel_id = ?')
+            .run(guildId, type, channelId);
+        return listLifecycleChannels(guildId, type);
+    })();
+}
+
+function setLifecycleChannelTemplate(guildId, type, channelId, template) {
+    validateTemplate(template);
+    if (getConfig(guildId, type)?.channel_id === channelId) return setConfig(guildId, type, { template });
+    const changed = sqlite.prepare(`UPDATE lifecycle_message_channels SET template = ?
+        WHERE guild_id = ? AND type = ? AND channel_id = ?`).run(template, guildId, type, channelId).changes;
+    if (!changed) throw new Error('That lifecycle channel is not configured.');
+    return template;
 }
 
 function migrateLegacyWelcome() {
@@ -269,12 +361,19 @@ function parseEmbedScript(template, replacements = null) {
     return payload;
 }
 
-function buildPayload(config, member, test = false, channel = null) {
-    const rendered = renderTemplate(config.template || DEFAULTS[config.type], member, channel);
+function buildPayload(config, member, test = false, channel = null, template = config.template || DEFAULTS[config.type]) {
+    const rich = member.client?.richContentService || member.guild.client?.richContentService;
+    const expanded = rich?.expandCustom ? rich.expandCustom(template, member.guild.id) : template;
+    const rendered = renderTemplate(expanded, member, channel);
     const content = (test ? `[Test] ${rendered}` : rendered).slice(0, 2000);
     const allowedMentions = { parse: [], users: [member.id || member.user.id], roles: [], repliedUser: false };
-    if (/\{embed\}/i.test(config.template || '')) {
-        const payload = parseEmbedScript(config.template, valuesFor(member, channel));
+    if (rich && /^\s*\{(?:cv2(?::)?|embed|content\s*:)/i.test(rendered)) {
+        const payload = rich.render(rendered, { user: member.user, member, guild: member.guild, channel });
+        if (test && !payload.flags) payload.content = `[Test]${payload.content ? ` ${payload.content}` : ''}`;
+        return { ...payload, allowedMentions };
+    }
+    if (/\{embed\}/i.test(rendered)) {
+        const payload = parseEmbedScript(rendered);
         if (test) payload.content = `[Test]${payload.content ? ` ${payload.content}` : ''}`;
         return { ...payload, allowedMentions };
     }
@@ -285,16 +384,33 @@ function buildPayload(config, member, test = false, channel = null) {
     return { embeds: [embed], allowedMentions };
 }
 
+function welcomeAllowed(guildId, now = Date.now()) {
+    const retained = (welcomeWindows.get(guildId) || []).filter(timestamp => timestamp > now - 60000);
+    if (retained.length >= MAX_WELCOMES_PER_MINUTE) return false;
+    retained.push(now);
+    if (!welcomeWindows.has(guildId) && welcomeWindows.size >= 1000) welcomeWindows.delete(welcomeWindows.keys().next().value);
+    welcomeWindows.set(guildId, retained);
+    return true;
+}
+
+function purgeLifecycleRuntime(guildId) {
+    welcomeWindows.delete(guildId);
+}
+
 async function sendLifecycleMessage(type, member, { test = false } = {}) {
     const config = getConfig(member.guild.id, type);
     if (!config || (!test && !config.enabled)) return { status: 'disabled' };
     const channelIds = listLifecycleChannels(member.guild.id, type);
     if (!channelIds.length) return { status: 'unconfigured' };
+    if (!test && member.user?.bot && (type === 'welcome' || type === 'goodbye')) return { status: 'bot' };
+    if (!test && type === 'welcome' && !welcomeAllowed(member.guild.id)) return { status: 'limited' };
     const sent = [];
     for (const channelId of channelIds) {
         const channel = await fetchChannel(member.guild, channelId, { logContext: `${type}-message` });
         if (!channel) continue;
-        const message = await safeChannelSend(channel, buildPayload(config, member, test, channel), { logContext: `${type}-message` });
+        const override = channelId === config.channel_id ? null : sqlite.prepare(`SELECT template FROM lifecycle_message_channels
+            WHERE guild_id = ? AND type = ? AND channel_id = ?`).get(member.guild.id, type, channelId)?.template;
+        const message = await safeChannelSend(channel, buildPayload(config, member, test, channel, override || config.template || DEFAULTS[type]), { logContext: `${type}-message` });
         if (!message) continue;
         sent.push(message);
         if (config.delete_after_seconds) {
@@ -305,22 +421,33 @@ async function sendLifecycleMessage(type, member, { test = false } = {}) {
     return sent.length ? { status: 'sent', message: sent[0], messages: sent } : { status: 'failed' };
 }
 
-async function sendJoinDm(member) {
-    const config = getConfig(member.guild.id, 'join_dm');
-    if (!config?.enabled) return { status: 'disabled' };
+async function sendJoinDm(member, { test = false } = {}) {
+    const config = getConfig(member.guild.id, 'join_dm') || { type: 'join_dm', format: 'embed' };
+    if (!test && !config.enabled) return { status: 'disabled' };
+    if (member.user?.bot) return { status: 'bot' };
+    const payloadFor = isTest => {
+        const payload = buildPayload(config, member, isTest);
+        payload.allowedMentions = { parse: [], users: [], roles: [], repliedUser: false };
+        if ((payload.components?.length || 0) >= 5) throw new Error('Join DM scripts may use at most four component rows because Server Info is always attached.');
+        payload.components = [...(payload.components || []), new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`join_dm:info:${member.guild.id}:${member.id}`).setLabel('Server Info').setStyle(ButtonStyle.Secondary)
+        )];
+        return payload;
+    };
+    if (test) return { status: 'sent', message: await member.send(payloadFor(true)) };
     const reservationId = sqlite.transaction(() => {
-        const cutoff = Date.now() - 60 * 60 * 1000;
-        sqlite.prepare('DELETE FROM join_dm_deliveries WHERE guild_id = ? AND sent_at < ?').run(member.guild.id, cutoff);
-        const count = sqlite.prepare('SELECT COUNT(*) count FROM join_dm_deliveries WHERE guild_id = ?').get(member.guild.id).count;
-        if (count >= MAX_JOIN_DMS_PER_HOUR) return null;
+        const now = Date.now();
+        sqlite.prepare('DELETE FROM join_dm_deliveries WHERE guild_id = ? AND sent_at < ?').run(member.guild.id, now - 60 * 60 * 1000);
+        const hour = sqlite.prepare('SELECT COUNT(*) count FROM join_dm_deliveries WHERE guild_id = ?').get(member.guild.id).count;
+        const minute = sqlite.prepare('SELECT COUNT(*) count FROM join_dm_deliveries WHERE guild_id = ? AND sent_at >= ?')
+            .get(member.guild.id, now - 60000).count;
+        if (minute >= MAX_JOIN_DMS_PER_MINUTE || hour >= MAX_JOIN_DMS_PER_HOUR) return null;
         return Number(sqlite.prepare('INSERT INTO join_dm_deliveries (guild_id, user_id, sent_at) VALUES (?, ?, ?)')
-            .run(member.guild.id, member.id, Date.now()).lastInsertRowid);
+            .run(member.guild.id, member.id, now).lastInsertRowid);
     })();
     if (!reservationId) return { status: 'limited' };
     try {
-        const payload = buildPayload(config, member);
-        payload.allowedMentions = { parse: [], users: [], roles: [], repliedUser: false };
-        return { status: 'sent', message: await member.send(payload) };
+        return { status: 'sent', message: await member.send(payloadFor(false)) };
     } catch (error) {
         sqlite.prepare('DELETE FROM join_dm_deliveries WHERE id = ?').run(reservationId);
         logger.warn(`Join DM delivery failed for ${member.id}: ${error.message}`);
@@ -334,6 +461,6 @@ function isNewBoost(oldMember, newMember) {
 
 module.exports = {
     TYPES, DEFAULTS, validateTemplate, renderTemplate, parseEmbedScript, getConfig, setConfig, resetConfig,
-    addLifecycleChannel, listLifecycleChannels, removeLifecycleChannel, migrateLegacyWelcome,
-    sendJoinDm, sendLifecycleMessage, isNewBoost
+    addLifecycleChannel, listLifecycleChannels, lifecycleChannelUsesCustomTemplate, removeLifecycleChannel, migrateLegacyWelcome,
+    setLifecycleChannelTemplate, purgeLifecycleRuntime, sendJoinDm, sendLifecycleMessage, isNewBoost
 };

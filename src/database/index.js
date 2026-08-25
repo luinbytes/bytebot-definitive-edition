@@ -163,7 +163,8 @@ const expectedSchema = {
     lifecycle_message_channels: {
         guild_id: 'TEXT NOT NULL',
         type: 'TEXT NOT NULL',
-        channel_id: 'TEXT NOT NULL'
+        channel_id: 'TEXT NOT NULL',
+        template: 'TEXT'
     },
     join_dm_deliveries: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',

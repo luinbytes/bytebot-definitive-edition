@@ -115,6 +115,7 @@ const lifecycleMessageChannels = sqliteTable('lifecycle_message_channels', {
     guildId: text('guild_id').notNull(),
     type: text('type').notNull(),
     channelId: text('channel_id').notNull(),
+    template: text('template'),
 }, table => ({ pk: primaryKey({ columns: [table.guildId, table.type, table.channelId] }) }));
 
 const joinDmDeliveries = sqliteTable('join_dm_deliveries', {

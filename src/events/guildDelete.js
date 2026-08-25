@@ -1,10 +1,32 @@
 const { Events } = require('discord.js');
-const { db } = require('../database/index');
+const { db, sqlite } = require('../database/index');
 const { guilds, musicConfig, lifecycleMessages, lifecycleMessageChannels, joinDmDeliveries, reminders, automationRules, autoResponses, uwuLockMembers, uwuRouletteConfigs } = require('../database/schema');
 const { eq, and } = require('drizzle-orm');
 const logger = require('../utils/logger');
 const { dbLog } = require('../utils/dbLogger');
 const { runGuildLifecycle } = require('../utils/guildLifecycle');
+const lifecycle = require('../services/lifecycleMessageService');
+
+const LEVEL_TABLES = [
+    'member_levels', 'level_configs', 'level_role_rewards', 'level_ignores', 'level_boosts',
+    'level_live_boards', 'level_role_jobs', 'server_daily_metrics', 'analytics_events',
+    'reaction_placements', 'level_voice_sessions', 'member_presence', 'activity_logs'
+];
+const LOG_TABLES = ['event_log_outbox', 'event_log_ignores', 'event_log_channels'];
+
+async function purgeServiceOrTables(service, guildId, tables) {
+    if (service?.purgeGuild) {
+        try {
+            await service.purgeGuild(guildId);
+            return;
+        } catch (error) {
+            logger.warn(`Service cleanup failed for guild ${guildId}; applying direct database fallback: ${error.message}`);
+        }
+    }
+    sqlite.transaction(() => {
+        for (const table of tables) sqlite.prepare(`DELETE FROM ${table} WHERE guild_id = ?`).run(guildId);
+    })();
+}
 
 async function handleGuildDelete(guild) {
     logger.info(`Left or kicked from guild: ${guild.name} (ID: ${guild.id})`);
@@ -16,8 +38,9 @@ async function handleGuildDelete(guild) {
         ['music config', () => db.delete(musicConfig).where(eq(musicConfig.guildId, guild.id))],
         ['community utilities', () => guild.client.communityUtilityService?.purgeGuild(guild.id)],
         ['fun state', () => guild.client.funService?.purgeGuild(guild.id)],
-        ['levels and analytics', () => guild.client.levelAnalyticsService?.purgeGuild(guild.id)],
-        ['event logs', () => guild.client.eventLoggingService?.purgeGuild(guild.id)],
+        ['levels and analytics', () => purgeServiceOrTables(guild.client.levelAnalyticsService, guild.id, LEVEL_TABLES)],
+        ['event logs', () => purgeServiceOrTables(guild.client.eventLoggingService, guild.id, LOG_TABLES)],
+        ['lifecycle runtime', () => lifecycle.purgeLifecycleRuntime(guild.id)],
         ['lifecycle messages', () => db.delete(lifecycleMessages).where(eq(lifecycleMessages.guildId, guild.id))],
         ['lifecycle channels', () => db.delete(lifecycleMessageChannels).where(eq(lifecycleMessageChannels.guildId, guild.id))],
         ['join DM deliveries', () => db.delete(joinDmDeliveries).where(eq(joinDmDeliveries.guildId, guild.id))],

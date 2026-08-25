@@ -134,6 +134,16 @@ describe('UwU Lock commands', () => {
         expect(client.eventLoggingService.purgeGuild).toHaveBeenCalledWith('guild1');
     });
 
+    test('guild removal directly purges level and log rows when services did not initialize', async () => {
+        database.sqlite.prepare("INSERT INTO level_configs (guild_id, updated_at) VALUES ('guild1', 1)").run();
+        database.sqlite.prepare("INSERT INTO event_log_channels (guild_id, module, channel_id, created_at) VALUES ('guild1', 'member', 'channel1', 1)").run();
+
+        await require('../src/events/guildDelete').execute({ id: 'guild1', name: 'Guild', client: {} });
+
+        expect(database.sqlite.prepare("SELECT COUNT(*) count FROM level_configs WHERE guild_id = 'guild1'").get().count).toBe(0);
+        expect(database.sqlite.prepare("SELECT COUNT(*) count FROM event_log_channels WHERE guild_id = 'guild1'").get().count).toBe(0);
+    });
+
     test('/fun uwuify transforms supplied text without enabling mentions', async () => {
         const reply = jest.fn();
         await fun.execute({

@@ -281,6 +281,13 @@
       "when": 1787731200000,
       "tag": "0039_premium_delivery_caps",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1787734800000,
+      "tag": "0040_lifecycle_source_drift",
+      "breakpoints": true
     }
   ]
 }

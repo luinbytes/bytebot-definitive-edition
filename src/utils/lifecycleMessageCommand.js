@@ -28,17 +28,24 @@ function addMessageGroup(builder, type) {
         .addSubcommand(sub => sub.setName('view').setDescription(`View ${type} settings`))
         .addSubcommand(sub => sub.setName('reset').setDescription(`Reset ${type} settings`));
         if (type === 'welcome' || type === 'goodbye') {
+            group.addSubcommand(sub => sub.setName('preview').setDescription(`Preview the ${type} message`));
             group.addSubcommand(sub => sub.setName('channels').setDescription(`Manage up to four ${type} channels`)
                 .addStringOption(opt => opt.setName('action').setDescription('Channel action').setRequired(true).addChoices(
-                    { name: 'Add', value: 'add' }, { name: 'Remove', value: 'remove' }, { name: 'List', value: 'list' }
+                    { name: 'Add', value: 'add' }, { name: 'Remove', value: 'remove' }, { name: 'List', value: 'list' },
+                    { name: 'Message', value: 'message' }
                 ))
-                .addChannelOption(opt => opt.setName('channel').setDescription(`${label} channel`).addChannelTypes(ChannelType.GuildText, ChannelType.PublicThread, ChannelType.PrivateThread, ChannelType.AnnouncementThread)));
+                .addChannelOption(opt => opt.setName('channel').setDescription(`${label} channel`).addChannelTypes(ChannelType.GuildText, ChannelType.PublicThread, ChannelType.PrivateThread, ChannelType.AnnouncementThread))
+                .addStringOption(opt => opt.setName('text').setDescription('Channel-specific message').setMinLength(1).setMaxLength(2000)));
         }
         if (type === 'welcome') {
             group.addSubcommand(sub => sub.setName('dm').setDescription('Manage join direct messages')
                 .addStringOption(opt => opt.setName('action').setDescription('Join DM action').setRequired(true).addChoices(
                     { name: 'Enable', value: 'enable' }, { name: 'Disable', value: 'disable' },
-                    { name: 'Message', value: 'message' }, { name: 'View', value: 'view' }
+                    { name: 'Toggle', value: 'toggle' }, { name: 'Message', value: 'message' },
+                    { name: 'Config', value: 'config' }, { name: 'View', value: 'view' },
+                    { name: 'Settings', value: 'settings' }, { name: 'Show', value: 'show' },
+                    { name: 'Test', value: 'test' }, { name: 'Preview', value: 'preview' },
+                    { name: 'Reset', value: 'reset' }, { name: 'Clear', value: 'clear' }
                 ))
                 .addStringOption(opt => opt.setName('text').setDescription('Join DM template').setMinLength(1).setMaxLength(2000)));
         }
@@ -69,10 +76,22 @@ function settingsEmbed(type, config) {
     return embeds.brand(`${type[0].toUpperCase()}${type.slice(1)} Settings`, [
         `Status: **${config?.enabled ? 'enabled' : 'disabled'}**`,
         ...(type === 'join_dm' ? [] : [`Channels: ${channels.length ? channels.map(id => `<#${id}>`).join(', ') : '**not set**'}`]),
+        ...(type === 'join_dm' ? ['Limits: **40 per minute, 750 per hour**'] : []),
         `Format: **${config?.format || 'embed'}**`,
         `Auto-delete: **${config?.delete_after_seconds ? `${config.delete_after_seconds} seconds` : 'off'}**`,
         `Template: ${config?.template ? `\n${config.template}` : '**default**'}`
     ].join('\n'));
+}
+
+function assertLifecycleChannel(guild, channel) {
+    const thread = channel.isThread?.();
+    const required = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.EmbedLinks,
+        thread ? PermissionFlagsBits.SendMessagesInThreads : PermissionFlagsBits.SendMessages];
+    if (!guild.members.me.permissionsIn(channel).has(required) || (thread && !channel.sendable)) {
+        throw new Error(thread
+            ? 'I need View Channel, Embed Links, Send Messages in Threads, and access to that thread.'
+            : 'I need View Channel, Send Messages, and Embed Links in that lifecycle channel.');
+    }
 }
 
 async function recorded(interaction, action, perform) {
@@ -115,10 +134,24 @@ async function executeLifecycle(interaction) {
         if (type === 'welcome' && subcommand === 'dm') {
             const action = interaction.options.getString('action', true);
             const dmType = 'join_dm';
-            if (action === 'view') return interaction.editReply({ embeds: [settingsEmbed(dmType, lifecycle.getConfig(interaction.guild.id, dmType))] });
+            if (['config', 'view', 'settings', 'show'].includes(action)) return interaction.editReply({ embeds: [settingsEmbed(dmType, lifecycle.getConfig(interaction.guild.id, dmType))] });
+            if (action === 'test' || action === 'preview') {
+                const result = await lifecycle.sendJoinDm(interaction.member, { test: true });
+                if (result.status !== 'sent') throw new Error(`Join DM test could not be sent: ${result.status}.`);
+                return interaction.editReply({ embeds: [embeds.success('Join DM Test Sent', 'Check your direct messages.')] });
+            }
+            if (action === 'reset' || action === 'clear') {
+                await recorded(interaction, 'LIFECYCLE_JOIN_DM_RESET', () => lifecycle.resetConfig(interaction.guild.id, dmType));
+                return interaction.editReply({ embeds: [settingsEmbed(dmType, lifecycle.getConfig(interaction.guild.id, dmType))] });
+            }
             const changes = {};
             if (action === 'enable' || action === 'disable') changes.enabled = action === 'enable';
-            if (action === 'message') changes.template = interaction.options.getString('text', true);
+            if (action === 'toggle') changes.enabled = !lifecycle.getConfig(interaction.guild.id, dmType)?.enabled;
+            if (action === 'message') {
+                const text = interaction.options.getString('text');
+                if (!text) return interaction.editReply({ embeds: [settingsEmbed(dmType, lifecycle.getConfig(interaction.guild.id, dmType))] });
+                changes.template = text;
+            }
             await recorded(interaction, `LIFECYCLE_JOIN_DM_${action.toUpperCase()}`, () => lifecycle.setConfig(interaction.guild.id, dmType, changes));
             return interaction.editReply({ embeds: [settingsEmbed(dmType, lifecycle.getConfig(interaction.guild.id, dmType))] });
         }
@@ -127,37 +160,37 @@ async function executeLifecycle(interaction) {
             const channel = interaction.options.getChannel('channel');
             if (action === 'list') {
                 const channels = lifecycle.listLifecycleChannels(interaction.guild.id, type);
-                return interaction.editReply({ embeds: [embeds.brand(`${type} Channels`, channels.length ? channels.map(id => `<#${id}>`).join('\n') : 'No channels configured.')] });
+                return interaction.editReply({ embeds: [embeds.brand(`${type} Channels`, channels.length
+                    ? channels.map(id => `<#${id}> · ${lifecycle.lifecycleChannelUsesCustomTemplate(interaction.guild.id, type, id) ? 'custom' : 'fallback'}`).join('\n')
+                    : 'No channels configured.')] });
             }
-            if (!channel) throw new Error('Choose a channel for add or remove.');
-            if (action === 'add' && !interaction.guild.members.me.permissionsIn(channel)
-                .has([PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks])) {
-                throw new Error('I need Send Messages and Embed Links in that lifecycle channel.');
-            }
+            if (!channel) throw new Error('Choose a channel for this action.');
+            if (action === 'add') assertLifecycleChannel(interaction.guild, channel);
             await recorded(interaction, `LIFECYCLE_${type.toUpperCase()}_CHANNEL_${action.toUpperCase()}`, () =>
                 action === 'add' ? lifecycle.addLifecycleChannel(interaction.guild.id, type, channel.id)
-                    : lifecycle.removeLifecycleChannel(interaction.guild.id, type, channel.id));
+                    : action === 'message' ? lifecycle.setLifecycleChannelTemplate(interaction.guild.id, type, channel.id, interaction.options.getString('text', true))
+                        : lifecycle.removeLifecycleChannel(interaction.guild.id, type, channel.id));
             return interaction.editReply({ embeds: [settingsEmbed(type, lifecycle.getConfig(interaction.guild.id, type))] });
         }
         if (subcommand === 'view' || subcommand === 'settings') return interaction.editReply({ embeds: [settingsEmbed(type, lifecycle.getConfig(interaction.guild.id, type))] });
         if (subcommand === 'variables') {
             return interaction.editReply({ embeds: [embeds.brand('Lifecycle Variables', '`{user}` `{username}` `{displayname}` `{server}` `{memberCount}` `{memberNumber}` `{joinedAt}` `{createdAt}` `{accountAgeDays}` `{boostCount}` `{boostLevel}`\nGreed aliases such as `{user.name}`, `{user.mention}`, and `{guild.name}` are also supported.')] });
         }
-        if (subcommand === 'test') {
+        if (subcommand === 'test' || subcommand === 'preview') {
             const result = await lifecycle.sendLifecycleMessage(type, interaction.member, { test: true });
             if (result.status !== 'sent') throw new Error(`Test could not be sent: ${result.status}.`);
             return interaction.editReply({ embeds: [embeds.success('Test Sent', `A test ${type} message was sent.`)] });
         }
         if (subcommand === 'reset' || subcommand === 'remove') {
-            await recorded(interaction, `LIFECYCLE_${type.toUpperCase()}_RESET`, () => lifecycle.resetConfig(interaction.guild.id, type));
+            await recorded(interaction, `LIFECYCLE_${type.toUpperCase()}_RESET`, () => {
+                lifecycle.resetConfig(interaction.guild.id, type);
+                if (type === 'welcome') lifecycle.resetConfig(interaction.guild.id, 'join_dm');
+            });
         } else {
             const changes = {};
             if (subcommand === 'setup' || subcommand === 'channel') {
                 const channel = interaction.options.getChannel('channel', true);
-                if (!interaction.guild.members.me.permissionsIn(channel)
-                    .has([PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks])) {
-                    throw new Error('I need Send Messages and Embed Links in that lifecycle channel.');
-                }
+                assertLifecycleChannel(interaction.guild, channel);
                 changes.channelId = channel.id;
             }
             if (subcommand === 'message') {

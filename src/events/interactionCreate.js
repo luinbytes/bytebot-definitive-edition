@@ -25,6 +25,19 @@ module.exports = {
             return;
         }
         processedInteractions.add(interaction.id);
+        if (interaction.isButton() && interaction.customId.startsWith('join_dm:info:')) {
+            const [, , guildId, recipientId] = interaction.customId.split(':');
+            if (interaction.user.id !== recipientId) {
+                return interaction.reply({ content: 'That Server Info button belongs to another member.', flags: [MessageFlags.Ephemeral] });
+            }
+            const guild = client.guilds.cache.get(guildId);
+            return interaction.reply({
+                embeds: [embeds.brand('Server Info', guild
+                    ? `**${guild.name}**\nServer ID: \`${guild.id}\`\nMembers: **${guild.memberCount.toLocaleString('en-US')}**`
+                    : 'That server is no longer available to ByteBot.')],
+                flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+            });
+        }
         if ((interaction.isButton() || interaction.isAnySelectMenu())
             && interaction.customId.startsWith('eventlogs:')) {
             if (!client.eventLoggingService) return interaction.reply({ content: 'Event logging is temporarily unavailable.', flags: [MessageFlags.Ephemeral] });

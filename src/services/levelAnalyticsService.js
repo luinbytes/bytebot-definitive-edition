@@ -84,9 +84,13 @@ class LevelAnalyticsService {
             'level_live_boards', 'level_role_jobs', 'server_daily_metrics', 'analytics_events',
             'reaction_placements', 'level_voice_sessions', 'member_presence', 'activity_logs'
         ];
-        return this.sqlite.transaction(() => {
+        const result = this.sqlite.transaction(() => {
             for (const table of tables) this.sqlite.prepare(`DELETE FROM ${table} WHERE guild_id = ?`).run(guildId);
         })();
+        for (const [key, value] of this.confirmations) {
+            if (value.guildId === guildId) this.confirmations.delete(key);
+        }
+        return result;
     }
 
     assertRoleMutationAuthority(interaction) {

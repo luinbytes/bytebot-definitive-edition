@@ -14,7 +14,7 @@ module.exports = {
         }
         try {
             const incident = await handleMemberJoin(member);
-            if (incident?.status === 'punished') return;
+            if (incident) return;
             try {
                 await handleAutomodMemberUpdate({ displayName: null, nickname: null }, member);
             } catch (error) {
