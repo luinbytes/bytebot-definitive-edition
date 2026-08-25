@@ -79,7 +79,10 @@ describe('rich-content persistence', () => {
     });
 
     test('guild-bound custom buttons resolve from direct messages', async () => {
-        const guild = { id: 'guild1', name: 'Guild' };
+        const fetched = { id: 'user1', guild: null, user: { id: 'user1', username: 'Ada' } };
+        const fetch = jest.fn().mockResolvedValue(fetched);
+        const guild = { id: 'guild1', name: 'Guild', members: { cache: new Map(), fetch } };
+        fetched.guild = guild;
         service.client = { guilds: { cache: new Map([[guild.id, guild]]) } };
         await service.saveCustom(guild.id, 'admin1', 'rules', '{content: Bound {guild.name}}');
         const interaction = {
@@ -91,6 +94,11 @@ describe('rich-content persistence', () => {
 
         expect(interaction.reply.mock.calls[0][0].content).toBe('Bound Guild');
         expect(JSON.parse(service.getCustom(guild.id, 'rules').config).useCount).toBe(1);
+
+        const repeated = { ...interaction, reply: jest.fn() };
+        await service.handleCustomButton(repeated);
+        expect(repeated.reply.mock.calls[0][0].content).toContain('Please wait');
+        expect(fetch).toHaveBeenCalledTimes(1);
     });
 
     test('saved embeds follow their owner and publishing enforces the highest public cap', async () => {

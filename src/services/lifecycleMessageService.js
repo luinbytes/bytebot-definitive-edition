@@ -24,7 +24,7 @@ function ordinal(number) {
     return `${number}${({ 1: 'st', 2: 'nd', 3: 'rd' })[number % 10] || 'th'}`;
 }
 
-function valuesFor(member, channel = null) {
+function valuesFor(member, channel = null, includeJoinPosition = false) {
     const guild = member.guild;
     const user = member.user || member;
     const now = new Date();
@@ -41,11 +41,13 @@ function valuesFor(member, channel = null) {
     const topRole = member.roles?.highest?.id === guild.id ? null : member.roles?.highest;
     const boostAt = member.premiumSince || null;
     const count = Number(guild.memberCount || 0);
-    const joinedMembers = [...(guild.members?.cache?.values?.() || [])]
-        .filter(item => item.joinedTimestamp != null)
-        .sort((left, right) => left.joinedTimestamp - right.joinedTimestamp);
-    const joinedIndex = joinedMembers.findIndex(item => item.id === (member.id || user.id));
-    const joinPosition = joinedIndex < 0 ? count : joinedIndex + 1;
+    let joinPosition = 0;
+    const memberId = member.id || user.id;
+    if (includeJoinPosition && member.joinedTimestamp != null && guild.members?.cache?.has?.(memberId)) {
+        for (const item of guild.members?.cache?.values?.() || []) {
+            if (item.joinedTimestamp != null && item.joinedTimestamp <= member.joinedTimestamp) joinPosition += 1;
+        }
+    }
     const userTag = user.tag || (user.discriminator && user.discriminator !== '0'
         ? `${user.username}#${user.discriminator}` : user.username || 'Unknown');
     const guildCreatedAt = guild.createdAt || now;
@@ -92,7 +94,7 @@ function valuesFor(member, channel = null) {
         'guild.boost_count': String(guild.premiumSubscriptionCount || 0), 'guild.boost_tier': guild.premiumTier ? String(guild.premiumTier) : 'No Level',
         channel: channel?.name || '', 'channel.id': channel?.id || '',
         'channel.name': channel?.name || '', 'channel.mention': channel ? `<#${channel.id}>` : '',
-        'channel.topic': channel?.topic || '', 'channel.category_id': channel?.parentId || '',
+        'channel.topic': channel?.topic || 'N/A', 'channel.category_id': channel?.parentId || '',
         'channel.is_thread': channel?.isThread?.() ? 'Yes' : 'No',
         'channel.created_at': channel ? relative(channelCreatedAt) : ''
     };
@@ -158,15 +160,19 @@ function renderConditionals(template, values) {
     return source;
 }
 
-function renderTemplate(template, member, channel = null) {
-    const values = valuesFor(member, channel);
+function renderTemplate(template, member, channel = null, overrides = {}) {
+    const values = { ...valuesFor(member, channel, /\{user\.join_position(?:_suffix)?\}/i.test(template)), ...overrides };
+    const safe = value => String(value).replaceAll('{', '｛').replaceAll('}', '｝').replaceAll('$v', '＄v');
     return renderConditionals(template, values)
-        .replace(/\{lower\(([A-Za-z][\w.]*)\)\}/g, (token, name) => values[name] == null ? token : String(values[name]).toLowerCase())
-        .replace(/\{\{?([A-Za-z][\w.]*)(?::([tTdDfFR]))?\}\}?/g, (token, name, style) => {
+        .replace(/\{lower\(([A-Za-z][\w.]*)\)\}/g, (token, name) => values[name] == null ? token : safe(String(values[name]).toLowerCase()))
+        .replace(/\{\{([A-Za-z][\w.]*)(?::([tTdDfFR]))?\}\}|\{([A-Za-z][\w.]*)(?::([tTdDfFR]))?\}/g,
+            (token, doubleName, doubleStyle, singleName, singleStyle) => {
+            const name = doubleName || singleName;
+            const style = doubleStyle || singleStyle;
             const value = values[name];
             if (value == null) return token;
             if (style && /^<t:\d+:[tTdDfFR]>$/.test(value)) return value.replace(/:[tTdDfFR]>$/, `:${style}>`);
-            return value;
+            return safe(value);
         });
 }
 

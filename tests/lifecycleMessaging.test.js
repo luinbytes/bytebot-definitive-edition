@@ -140,6 +140,9 @@ describe('lifecycle messaging', () => {
         expect(lifecycle.renderTemplate(
             '{if {user.join_position} < 100}{lower(user.name)} {user.tag} joined {user.join_position_suffix} at {user.created_at:R} on {guild.boost_tier}{else}full{/if}', target
         )).toBe('user User#1234 joined 2nd at <t:1577836800:R> on No Level');
+        server.members.cache.delete(target.id);
+        expect(lifecycle.renderTemplate('{user.join_position}|{channel.topic}', target, { id: 'channel1' }))
+            .toBe('N/A|N/A');
     });
 
     test('expands saved custom scripts through the bounded rich-content service', async () => {

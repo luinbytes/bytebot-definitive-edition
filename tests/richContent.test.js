@@ -31,16 +31,19 @@ describe('Greed-compatible rich content', () => {
             user: { id: '10', username: 'Member', bot: false },
             roles: { highest: { id: 'role1', name: 'Member', hexColor: '#123456' } }
         };
+        member.user.createdAt = new Date('2020-01-01T00:00:00Z');
         const guild = {
-            id: '20', name: 'Guild', memberCount: 2, premiumTier: 0,
+            id: '20', name: 'Guild', memberCount: 1200, premiumTier: 0,
             members: { cache: new Map([['older', { id: 'older', joinedTimestamp: 1 }], [member.id, member]]) }
         };
         const payload = renderScript(
-            '{content: {user.bot}|{user.boost}|{user.top_role}|{user.color}|{user.join_position}|{guild.boost_tier}|{channel.topic}}',
+            '{content: {if {user.join_position} < 3}{lower(user.name)}|{user.bot}|{user.boost}|{user.top_role}|{user.color}|{user.join_position}|{guild.boost_tier}|{guild.count}|{channel.topic}|{user.created_at:R}{else}bad{/if}}',
             { member, guild, channel: { id: '30' } }
         );
 
-        expect(payload.content).toBe('No|No|Member|#123456|2|No Level|N/A');
+        expect(payload.content).toBe('member|No|No|Member|#123456|2|No Level|1,200|N/A|<t:1577836800:R>');
+        member.roles.highest = { id: guild.id, name: '@everyone' };
+        expect(renderScript('{content: {user.top_role}}', { member, guild }).content).toBe('N/A');
     });
 
     test('leaves AFK-only variables untouched outside an AFK context', () => {

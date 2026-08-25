@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const { and, eq } = require('drizzle-orm');
 const { db } = require('../database');
 const { automationRules } = require('../database/schema');
-const { parseEmbedScript } = require('./lifecycleMessageService');
+const { parseEmbedScript, renderTemplate } = require('./lifecycleMessageService');
 
 const SAFE_MENTIONS = { parse: [], repliedUser: false };
 
@@ -16,11 +16,6 @@ function renderVariables(script, context = {}) {
     const subject = member?.user || user || member;
     const mentionerAvatar = mentioner?.displayAvatarURL?.() || mentioner?.avatarURL?.() || '';
     const avatar = subject?.displayAvatarURL?.() || subject?.avatarURL?.() || '';
-    const joinedMembers = [...(guild?.members?.cache?.values?.() || [])]
-        .filter(item => item.joinedTimestamp != null)
-        .sort((left, right) => left.joinedTimestamp - right.joinedTimestamp);
-    const joinedIndex = joinedMembers.findIndex(item => item.id === (member?.id || subject?.id));
-    const joinPosition = joinedIndex < 0 ? Number(guild?.memberCount || 0) : joinedIndex + 1;
     const values = {
         user: subject?.username || '',
         'user.id': subject?.id || member?.id || '',
@@ -32,9 +27,9 @@ function renderVariables(script, context = {}) {
         'user.created_at': subject?.createdAt?.toISOString?.() || '',
         'user.bot': subject?.bot ? 'Yes' : 'No',
         'user.display_name': member?.displayName || subject?.displayName || subject?.username || '',
-        'user.top_role': member?.roles?.highest?.name || 'N/A',
+        'user.top_role': member?.roles?.highest?.id && member.roles.highest.id !== guild?.id
+            ? member.roles.highest.name : 'N/A',
         'user.color': member?.roles?.highest?.hexColor || member?.displayHexColor || 'N/A',
-        'user.join_position': joinPosition ? String(joinPosition) : 'N/A',
         'member.display_name': member?.displayName || subject?.displayName || subject?.username || '',
         'member.nick': member?.nickname || '',
         'member.roles': member?.roles?.cache?.filter?.(role => role.id !== guild?.id).map?.(role => `<@&${role.id}>`).join(', ') || '',
@@ -313,7 +308,13 @@ function renderLegacy(script, context) {
 }
 
 function renderScript(script, context) {
-    const rendered = renderVariables(script, context);
+    const subject = context?.member || context?.user;
+    const lifecycleMember = context?.guild && subject
+        ? (subject.guild ? subject : { ...subject, id: subject.id || context.user?.id,
+            user: subject.user || context.user || subject, guild: context.guild })
+        : null;
+    const source = lifecycleMember ? renderTemplate(script, lifecycleMember, context.channel, context.variables) : script;
+    const rendered = renderVariables(source, context);
     if (/^\s*\{cv2(?::)?\}/i.test(rendered)) return renderComponents(rendered, context);
     if (/\{embed\}/i.test(rendered)) validateLegacy(rendered);
     let payload;
@@ -408,6 +409,7 @@ class RichContentService {
         this.client = client;
         this.automation = automation;
         this.paginationLocks = new Map();
+        this.customButtonCooldowns = new Map();
     }
 
     render(script, context = {}) {
@@ -570,12 +572,21 @@ class RichContentService {
         const parts = interaction.customId.slice('rich:custom:'.length).split(':');
         const boundGuildId = parts.length === 2 ? parts.shift() : interaction.guildId;
         const name = parts[0];
+        const cooldownKey = `${boundGuildId}:${interaction.user.id}:${name}`;
+        const now = Date.now();
+        if ((this.customButtonCooldowns.get(cooldownKey) || 0) > now - 2000) {
+            return interaction.reply({ content: 'Please wait before using that custom response again.', flags: MessageFlags.Ephemeral });
+        }
+        if (!this.customButtonCooldowns.has(cooldownKey) && this.customButtonCooldowns.size >= 10000) {
+            this.customButtonCooldowns.delete(this.customButtonCooldowns.keys().next().value);
+        }
+        this.customButtonCooldowns.set(cooldownKey, now);
         const rule = this.getCustom(boundGuildId, name);
         if (!rule) {
             return interaction.reply({ content: 'That custom response is no longer available.', flags: MessageFlags.Ephemeral });
         }
         const guild = interaction.guild || this.client.guilds.cache.get(boundGuildId);
-        const member = interaction.member || (guild?.members?.fetch
+        const member = interaction.member || guild?.members?.cache?.get(interaction.user.id) || (guild?.members?.fetch
             ? await guild.members.fetch(interaction.user.id).catch(() => null) : null);
         const payload = this.render(configOf(rule).script, {
             user: interaction.user, member, guild,
