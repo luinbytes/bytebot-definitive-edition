@@ -98,6 +98,13 @@ async function showCommandDetails(interaction, client, commandName) {
         });
     }
 
+    if (commandData.name === 'fun') {
+        embed.addFields({
+            name: 'Public parity and safety',
+            value: 'Snipe keeps at most 10 entries per kind/channel for 15 minutes and honors global self-protection. Roleplay exposes 40 provider-backed actions; `fuck`, `spank`, and `nutkick` are visibly policy-excluded. `howgay`, `pp`, `bitches`, `nword`, and `nwordlb` are policy-excluded. Image/media subjects remain mapped to the bounded #56 media seam.'
+        });
+    }
+
     return interaction.reply({
         embeds: [embed],
         flags: [MessageFlags.Ephemeral]
@@ -212,14 +219,29 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
             {
                 name: 'Common Paths',
                 value:
-                    '`/me reminder add` • `/pod panel` • `/server welcome setup`\n' +
-                    '`/server security antinuke-settings` • `/server antiraid settings` • `/server automod filter`\n' +
-                    '`/reactionrole add` • `/ticket setup` • `/giveaway start` • `/counter add`\n' +
-                    '`/economy balance` • `/economy game coinflip` • `/server backup create`\n' +
-                    '`/server role info` • `/server logs add` • `/analytics days:60` • `/levels rank`\n' +
-                    '`/lookup weather` • `/lookup github user` • `/repost` • `/ai ocr` • `/ai tts`\n' +
-                    '`/mod user warn` • `/game roblox profile`\n' +
-                    '`/fun uwuify` • `/fun uwulock add` • `/image effect apply`',
+                    '`/me reminder add` • `/me bookmark search` • `/pod panel`\n' +
+                    '`/server welcome setup` • `/server goodbye setup` • `/server boost setup`\n' +
+                    '`/server security antinuke-settings` • `/server security antinuke-module`\n' +
+                    '`/server antiraid settings` • `/server antiraid module`\n' +
+                    '`/server automod settings` • `/server automod filter`\n' +
+                    '`/server permissions disable` • `/server permissions denyperm` • `/server permissions protect`\n' +
+                    '`/ticket setup` • `/ticket panel manage` • `/ticket settings view`\n' +
+                    '`/giveaway start` • `/giveaway edit prize` • `/counter add`\n' +
+                    '`/economy balance` • `/economy game coinflip` • `/economy gang info` • `/economy lab status`\n' +
+                    '`/game warthunder stats`\n' +
+                    '`/fun uwuify` • `/fun uwulock add` • `/fun snipe protect` • `/fun roleplay action`\n' +
+                    '`/fun game tictactoe` • `/fun game blacktea` • `/image effect apply`',
+                inline: false
+            },
+            {
+                name: 'More Common Paths',
+                value:
+                    '`/reactionrole add` • `/buttonrole add` • `/temprole add` • `/boosterrole create`\n' +
+                    '`/server backup create` • `/server customize preset` • `/server discovery publish`\n' +
+                    '`/server stats days:60` • `/mod user warn` • `/mod case view` • `/mod config setup`\n' +
+                    '`/mod template set` • `/server role info` • `/server logs add`\n' +
+                    '`/lookup weather` • `/lookup github user` • `/game roblox profile`\n' +
+                    '`/repost` • `/ai ocr` • `/ai tts`',
                 inline: false
             },
             {

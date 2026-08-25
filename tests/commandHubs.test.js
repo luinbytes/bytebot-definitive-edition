@@ -409,7 +409,8 @@ describe('Intent command hubs', () => {
         const protect = findOption(uwuLock, 'protect');
 
         expect(optionNames(command.options)).toEqual([
-            '8ball', 'coin', 'dice', 'joke', 'uwuify', 'choose', 'random-member', 'quote', 'poll', 'uwulock'
+            '8ball', 'coin', 'dice', 'joke', 'uwuify', 'choose', 'random-member', 'quote', 'poll', 'uwulock',
+            'snipe', 'roleplay', 'game', 'meter', 'blunt', 'vape', 'roast', 'randomhex'
         ]);
         expect(uwuLock.description).toContain('Manage Server');
         expect(optionNames(uwuLock.options)).toEqual(['add', 'remove', 'list', 'protect']);

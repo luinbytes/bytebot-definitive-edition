@@ -17,6 +17,7 @@ async function handleGuildDelete(guild) {
             await guild.client.musicService?.purgeGuild(guild.id);
             await db.delete(musicConfig).where(eq(musicConfig.guildId, guild.id));
             guild.client.communityUtilityService?.purgeGuild(guild.id);
+            guild.client.funService?.purgeGuild(guild.id);
             await db.delete(lifecycleMessages).where(eq(lifecycleMessages.guildId, guild.id));
             await db.delete(automationRules).where(eq(automationRules.guildId, guild.id));
             await db.delete(autoResponses).where(eq(autoResponses.guildId, guild.id));

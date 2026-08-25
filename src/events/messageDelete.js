@@ -9,6 +9,12 @@ module.exports = {
         if (!message.id) return;
 
         try {
+            client.funService?.captureDeleted(message);
+        } catch (error) {
+            logger.error(`Failed to capture deleted message ${message.id}: ${error.message}`);
+        }
+
+        try {
             // Mark any bookmarks of this message as deleted
             const markedCount = await bookmarkUtil.markDeleted(message.id);
 

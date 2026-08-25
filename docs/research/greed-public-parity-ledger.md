@@ -26,7 +26,7 @@ Source: [Greed commands](https://greed.best/commands), researched 2026-08-23. Th
 | Moderation | 80 | #36, #37, #38 | `partial` |
 | Fun | 55 | #35, #52, #53, #54, #56 | `partial` |
 | Economy | 38 | #48, #49 | `partial` — core accounts, ledger, earnings, banking, jobs, shops, configuration, and administration are implemented; #49 owns games, gangs, laboratories, crime/robbery, and rankings |
-| Roleplay | 3 | #54 | `tracked` |
+| Roleplay | 3 | #54 | `partial` — implementation is locally verified; live Discord proof remains outstanding |
 | Security | 82 | #36, #39, #40 | `complete` — all mapped public protection surfaces are implemented |
 | LastFM | 65 | #57 | `tracked` |
 | Logs | 5 | #37, #39, #40, #50 | `complete` — moderation, protection, and configurable event-log delivery are implemented with the public 15-channel maximum |
@@ -37,7 +37,7 @@ Source: [Greed commands](https://greed.best/commands), researched 2026-08-23. Th
 | Levels | 3 | #50 | `complete` — text/voice levels, rewards, rank cards, and bounded analytics are implemented |
 | Socials | 31 | #60, #61 | `complete` — lawful keyless lookups and canonical link reposting are implemented; credentialed feeds, downloads, and undocumented auto-reposter behavior have terminal provider/evidence blockers |
 | Manipulation | 99 | #55, #56, #62 | `complete` — shared bounded inputs, local transforms/effects/templates, OCR, and TTS are implemented; exact provider assets/algorithms and generative surfaces have terminal evidence/provider/resource blockers |
-| Snipe | 4 | #54 | `tracked` |
+| Snipe | 4 | #54 | `partial` — implementation is locally verified; live Discord proof remains outstanding |
 | Unidentified remainder | 29 | #64 | `evidence-gap` — the public page does not name its missing bucket |
 | **Total** | **945** | #34–#64 | Mixed |
 
@@ -59,11 +59,11 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | `manipulation` | 3 | #56 | `complete` — AlexFlipnote, Jeyy, and Popcat provider families are reconciled to local implementations, explicit blockers, or evidence gaps without proxying undocumented APIs |
 | `moderation` | 101 | #37, #38 | `partial` |
 | `music` | 9 | #58 | `tracked` |
-| `roleplay` | 1 | #54 | `tracked` |
+| `roleplay` | 1 | #54 | `partial` — all 43 pinned action subjects are mapped; live Discord proof remains outstanding |
 | `security` | 102 | #39, #40 | `complete` — all pinned public security families are reconciled |
 | `server` | 214 | #41, #43, #44, #45, #46, #47, #50 | `partial` |
 | `settings` | 42 | #36, #37, #41, #43, #54, #57, #58 | `partial` |
-| `snipe` | 5 | #54 | `tracked` |
+| `snipe` | 5 | #54 | `partial` — all five files are locally verified with bounded retention; live Discord proof remains outstanding |
 | `socials` | 11 | #60, #61 | `complete` — implemented public lookups/link reposting plus source-cited provider, licensing, and command-shape blockers reconcile the registry surface |
 | `utility` | 123 | #35, #42, #43, #46, #51, #52, #53, #55, #58, #60, #62 | `partial` |
 | `voice` | 33 | #59 | `partial` |
@@ -105,6 +105,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | Universal highest public command/autorole/reaction/log/retention allowances; cached native-helper diagnostics; lazy helpers; and a production 1 CPU/1 GiB Compose profile with event-loop health | #63 | Applies cross-cutting premium maxima without billing, voting, purchase, or entitlement state and packages the cumulative #50/#55/#56/#58/#61/#62 runtime. | `tests/smallVpsPackaging.test.js`, `tests/automationPlatform.test.js`, `tests/roleAutomation.test.js`, `tests/eventLoggingService.test.js`, and `docs/research/greed-small-vps-caps-contract.md` |
 | AFK statuses and custom responses, global time zones, private diary entries, reminder snooze, and expanded birthday input | #52 | Advances live Information/Fun/Utility and pinned `information`/`fun`/`utility`; the broader rows remain `partial` while their other mapped issues are open. Premium custom AFK responses are available without billing. | `tests/personalUtilities.test.js`, `tests/personalAfk.test.js`, `tests/reminder.test.js`, `tests/richContent.test.js`, `tests/commandHubs.test.js`, and `tests/databaseMigrations.test.js` |
 | Anonymous confessions with categories, moderation, replies, reactions, reports, and cooldowns; durable polls; exact-target thread/pin/image-only controls; quote images; choose and random-member utilities | #53 | Advances live Fun/Utility and pinned `fun`/`utility`; those rows remain `partial` while their other mapped issues are open. | `tests/communityUtilities.test.js`, `tests/communityInteractionRouting.test.js`, `tests/commandHubs.test.js`, `tests/databaseMigrations.test.js`, and `tests/schema.test.js` |
+| Bounded deleted/edit/reaction snipes and universal self-protection; 40 attributed roleplay actions with three terminal exclusions; RPS, tic-tac-toe, BlackTea, flags, WYR, IQ/color/roast, blunt, and vape subjects | #54 | Advances live and pinned Snipe/Roleplay pending live Discord proof; advances Fun and Settings while image/media subjects remain owned by #56. The slur leaderboard and targeted protected-character/adult meters are terminal policy exclusions. | `tests/funParity.test.js`, `tests/funParityCommands.test.js`, `tests/funGames.test.js`, `tests/funEventRouting.test.js`, `tests/helpParity.test.js`, `tests/databaseMigrations.test.js`, and `tests/schema.test.js` |
 
 ## Update rule
 

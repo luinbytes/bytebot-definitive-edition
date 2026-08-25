@@ -253,6 +253,13 @@
       "when": 1787716800000,
       "tag": "0035_community_utilities",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1787720400000,
+      "tag": "0036_fun_parity",
+      "breakpoints": true
     }
   ]
 }

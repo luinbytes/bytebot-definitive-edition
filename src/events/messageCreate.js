@@ -63,6 +63,14 @@ module.exports = {
             logger.error('AFK handler error:', error);
         }
 
+        if (client.funService) {
+            try {
+                if (await client.funService.handleMessage(message)) return;
+            } catch (error) {
+                logger.error('Fun game message handler error:', error);
+            }
+        }
+
         // Auto-responder check
         if (client.autoResponderService) {
             try {

@@ -5,10 +5,12 @@ const logger = require('../utils/logger');
 
 module.exports = {
     name: Events.MessageUpdate,
-    async execute(oldMessage, newMessage) {
+    async execute(oldMessage, newMessage, client) {
         try {
+            const captureSnipe = !oldMessage.partial && !newMessage.partial;
             if (newMessage.partial) newMessage = await newMessage.fetch();
             if (!newMessage.guild || newMessage.author?.bot || oldMessage.content === newMessage.content) return;
+            if (captureSnipe) client.funService?.captureEdited(oldMessage, newMessage);
             if (await handleMassMention(newMessage)) return;
             await handleMessage(newMessage);
         } catch (error) {

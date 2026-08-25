@@ -1496,6 +1496,38 @@ const expectedSchema = {
         channel_id: 'TEXT NOT NULL',
         created_by: 'TEXT NOT NULL',
         created_at: 'INTEGER NOT NULL'
+    },
+    snipe_protections: {
+        user_id: 'TEXT PRIMARY KEY',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    roleplay_disabled: {
+        guild_id: 'TEXT NOT NULL',
+        action: 'TEXT NOT NULL',
+        updated_by: 'TEXT NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    roleplay_counts: {
+        guild_id: 'TEXT NOT NULL',
+        actor_id: 'TEXT NOT NULL',
+        target_id: 'TEXT NOT NULL',
+        action: 'TEXT NOT NULL',
+        count: 'INTEGER DEFAULT 0 NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    fun_blunts: {
+        user_id: 'TEXT PRIMARY KEY',
+        sparked_at: 'INTEGER',
+        last_sparked_at: 'INTEGER',
+        taps: 'INTEGER DEFAULT 0 NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
+    },
+    fun_vapes: {
+        guild_id: 'TEXT PRIMARY KEY',
+        holder_id: 'TEXT NOT NULL',
+        flavor: "TEXT DEFAULT 'mint' NOT NULL",
+        hits: 'INTEGER DEFAULT 0 NOT NULL',
+        updated_at: 'INTEGER NOT NULL'
     }
 };
 
@@ -1567,7 +1599,9 @@ const compatibilityUniqueKeys = {
     economy_jobs: ['guild_id', 'name'],
     economy_shop_items: ['guild_id', 'role_id'],
     economy_gang_members: ['guild_id', 'user_id'],
-    economy_labs: ['guild_id', 'user_id']
+    economy_labs: ['guild_id', 'user_id'],
+    roleplay_disabled: ['guild_id', 'action'],
+    roleplay_counts: ['guild_id', 'actor_id', 'target_id', 'action']
 };
 
 function hasUniqueKey(tableName, columns) {
