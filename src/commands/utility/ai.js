@@ -17,11 +17,16 @@ module.exports = {
 
     async execute(interaction, client) {
         if (!client.aiMediaService) throw new UserFacingError('Local AI media tools are unavailable.');
-        if (interaction.guild && !interaction.guild.members.me.permissionsIn(interaction.channel).has(PermissionFlagsBits.AttachFiles)) {
-            throw new UserFacingError('I need Attach Files permission to use local AI media tools.');
+        const action = interaction.options.getSubcommand();
+        const required = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles];
+        if (action === 'ocr') required.push(PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks);
+        if (interaction.guild && !interaction.guild.members.me.permissionsIn(interaction.channel).has(required)) {
+            throw new UserFacingError(action === 'ocr'
+                ? 'I need View Channel, Send Messages, Read Message History, Embed Links, and Attach Files permissions to run OCR.'
+                : 'I need View Channel, Send Messages, and Attach Files permissions to generate speech.');
         }
 
-        if (interaction.options.getSubcommand() === 'ocr') {
+        if (action === 'ocr') {
             const text = await client.aiMediaService.ocr(interaction.options.getAttachment('image', true));
             if (!text) throw new UserFacingError('No text could be extracted from the image.');
             const embed = embeds.brand('Extracted Text', text.length <= 4000 ? text : 'The complete extracted text is attached.')

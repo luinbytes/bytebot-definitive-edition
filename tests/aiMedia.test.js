@@ -44,6 +44,12 @@ test('/ai exposes only bounded local OCR and TTS paths', async () => {
         allowedMentions: { parse: [] }
     });
     expect(ttsInteraction.editReply.mock.calls[0][0].files[0].name).toBe('speech.wav');
+
+    const blocked = interaction('ocr');
+    blocked.guild = { members: { me: { permissionsIn: () => ({ has: () => false }) } } };
+    blocked.channel = {};
+    await expect(command.execute(blocked, { aiMediaService: { ocr } })).rejects.toThrow('View Channel');
+    expect(ocr).toHaveBeenCalledTimes(1);
 });
 
 test('local AI media tools invoke fixed binaries with bounded local output', async () => {
