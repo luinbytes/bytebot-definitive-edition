@@ -3,7 +3,7 @@ const { UserFacingError } = require('../../utils/errorHandlerUtil');
 
 const INVALID_URL = 'Please provide a valid URL\n-# Example: repost https://www.tiktok.com/@user/video/123';
 const POST_URL_REQUIRED = 'Please provide a post/video URL\n-# Profile or username lookups are not supported in this command';
-const UNSUPPORTED = 'Unsupported platform\n-# Supported: Instagram, TikTok, X/Twitter';
+const UNSUPPORTED = 'Unsupported URL\n-# Supported platforms: Instagram, TikTok, Twitter/X';
 
 function canonicalPostUrl(value) {
     let url;
@@ -17,17 +17,17 @@ function canonicalPostUrl(value) {
     const host = url.hostname.toLowerCase().replace(/^www\./, '');
     let match;
     if (host === 'tiktok.com') {
-        match = url.pathname.match(/^\/@([A-Za-z0-9._]{2,24})\/video\/(\d+)\/?$/);
+        match = url.pathname.match(/^\/@([A-Za-z0-9._]{2,24})\/video\/(\d{1,20})\/?$/);
         if (match) return `https://www.tiktok.com/@${match[1]}/video/${match[2]}`;
         throw new UserFacingError(POST_URL_REQUIRED);
     }
     if (host === 'instagram.com') {
-        match = url.pathname.match(/^\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?$/);
+        match = url.pathname.match(/^\/(p|reel|tv)\/([A-Za-z0-9_-]{1,64})\/?$/);
         if (match) return `https://www.instagram.com/${match[1]}/${match[2]}/`;
         throw new UserFacingError(POST_URL_REQUIRED);
     }
     if (host === 'x.com' || host === 'twitter.com') {
-        match = url.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)\/?$/);
+        match = url.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/status\/(\d{1,20})\/?$/);
         if (match) return `https://x.com/${match[1]}/status/${match[2]}`;
         throw new UserFacingError(POST_URL_REQUIRED);
     }

@@ -30,7 +30,8 @@ test('/repost forwards only canonical supported post links without mentions', as
     for (const [input, message] of [
         ['not a url', 'Please provide a valid URL\n-# Example: repost https://www.tiktok.com/@user/video/123'],
         ['https://www.tiktok.com/@greed', 'Please provide a post/video URL\n-# Profile or username lookups are not supported in this command'],
-        ['https://example.com/post/123', 'Unsupported platform\n-# Supported: Instagram, TikTok, X/Twitter']
+        ['https://example.com/post/123', 'Unsupported URL\n-# Supported platforms: Instagram, TikTok, Twitter/X'],
+        [`https://x.com/greed/status/${'1'.repeat(2020)}`, 'Please provide a post/video URL\n-# Profile or username lookups are not supported in this command']
     ]) {
         await expect(command.execute(interaction(input))).rejects.toThrow(message);
     }
