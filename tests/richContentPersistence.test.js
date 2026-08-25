@@ -101,6 +101,29 @@ describe('rich-content persistence', () => {
         expect(fetch).toHaveBeenCalledTimes(1);
     });
 
+    test('guild-bound custom buttons bound member lookup bursts and cache misses', async () => {
+        const fetch = jest.fn().mockResolvedValue(null);
+        const guild = { id: 'guild1', members: { cache: new Map(), fetch } };
+        service.client = { guilds: { cache: new Map([[guild.id, guild]]) } };
+        await service.saveCustom(guild.id, 'admin1', 'one', '{content: One}');
+        await service.saveCustom(guild.id, 'admin1', 'two', '{content: Two}');
+        const now = jest.spyOn(Date, 'now').mockReturnValue(100000);
+        const interaction = name => ({
+            customId: `rich:custom:guild1:${name}`, guildId: null, guild: null, channel: { id: 'dm1' },
+            user: { id: 'former', username: 'Former' }, reply: jest.fn().mockResolvedValue({})
+        });
+
+        await service.handleCustomButton(interaction('one'));
+        const blocked = interaction('two');
+        await service.handleCustomButton(blocked);
+        expect(blocked.reply.mock.calls[0][0].content).toContain('Please wait');
+        now.mockReturnValue(102001);
+        await service.handleCustomButton(interaction('two'));
+
+        expect(fetch).toHaveBeenCalledTimes(1);
+        now.mockRestore();
+    });
+
     test('saved embeds follow their owner and publishing enforces the highest public cap', async () => {
         await service.saveEmbed('user1', 'Welcome', '{embed}$v{title: Hello}');
         expect(JSON.parse(service.getEmbed('user1', 'welcome').config).script).toContain('Hello');

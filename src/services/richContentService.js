@@ -410,6 +410,7 @@ class RichContentService {
         this.automation = automation;
         this.paginationLocks = new Map();
         this.customButtonCooldowns = new Map();
+        this.customButtonMemberMisses = new Map();
     }
 
     render(script, context = {}) {
@@ -572,7 +573,7 @@ class RichContentService {
         const parts = interaction.customId.slice('rich:custom:'.length).split(':');
         const boundGuildId = parts.length === 2 ? parts.shift() : interaction.guildId;
         const name = parts[0];
-        const cooldownKey = `${boundGuildId}:${interaction.user.id}:${name}`;
+        const cooldownKey = `${boundGuildId}:${interaction.user.id}`;
         const now = Date.now();
         if ((this.customButtonCooldowns.get(cooldownKey) || 0) > now - 2000) {
             return interaction.reply({ content: 'Please wait before using that custom response again.', flags: MessageFlags.Ephemeral });
@@ -586,8 +587,17 @@ class RichContentService {
             return interaction.reply({ content: 'That custom response is no longer available.', flags: MessageFlags.Ephemeral });
         }
         const guild = interaction.guild || this.client.guilds.cache.get(boundGuildId);
-        const member = interaction.member || guild?.members?.cache?.get(interaction.user.id) || (guild?.members?.fetch
-            ? await guild.members.fetch(interaction.user.id).catch(() => null) : null);
+        const memberKey = `${boundGuildId}:${interaction.user.id}`;
+        let member = interaction.member || guild?.members?.cache?.get(interaction.user.id) || null;
+        if (!member && guild?.members?.fetch && (this.customButtonMemberMisses.get(memberKey) || 0) <= now - 30000) {
+            member = await guild.members.fetch(interaction.user.id).catch(() => null);
+            if (!member) {
+                if (!this.customButtonMemberMisses.has(memberKey) && this.customButtonMemberMisses.size >= 10000) {
+                    this.customButtonMemberMisses.delete(this.customButtonMemberMisses.keys().next().value);
+                }
+                this.customButtonMemberMisses.set(memberKey, now);
+            }
+        }
         const payload = this.render(configOf(rule).script, {
             user: interaction.user, member, guild,
             channel: interaction.channel, customButtonGuildId: boundGuildId
