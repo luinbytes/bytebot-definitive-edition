@@ -23,7 +23,8 @@ test('/bot help discovers every public Greed category without advertising unfini
         'Snipe', 'Socials', 'Utility', 'Voice', 'Boosters', 'Developer', 'Music'
     ];
 
-    expect(parityField.value).toContain('planned');
+    expect(parityField.value).toContain('/voicemaster` Voice');
+    expect(parityField.value).not.toContain('planned');
     publicCategories.forEach(category => expect(parityField.value).toContain(category));
     expect(parityField.value.length).toBeLessThanOrEqual(1024);
     expect(commonPaths.value).toContain('/fun uwuify');
@@ -55,6 +56,7 @@ test('/bot help discovers every public Greed category without advertising unfini
     expect(parityField.value).toContain('/image` Manipulation');
     expect(parityField.value).toContain('/ticket` Tickets');
     expect(parityField.value).toContain('Provider-blocked');
+    expect(parityField.value).toContain('persistent social feeds/downloads');
     expect(parityField.value).toContain('Rolimons');
     expect(parityField.value).toContain('Valorant');
 });

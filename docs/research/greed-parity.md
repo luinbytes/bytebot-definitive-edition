@@ -4,7 +4,7 @@ Research date: 2026-08-23. Sources below are first-party unless explicitly marke
 
 ## Executive findings
 
-- The live catalog currently advertises **945 commands**. Its rendered category labels expose counts for 17 categories: Information 86, Utility 80, Moderation 80, Fun 55, Economy 38, Roleplay 3, Security 82, LastFM 65, Logs 5, Voice 29, Auto 45, Server 164, Settings 47, Levels 3, Socials 31, Manipulation 99, and Snipe 4. These displayed counts sum to 916, leaving 29 commands unaccounted for. The page does not identify the missing bucket; do not assume it is NSFW merely because an `nsfw` command appears in the crawler sample.
+- The dated rendered catalog snapshot captured on 2026-08-23 advertised **945 commands**. Its rendered category labels exposed counts for 17 categories: Information 86, Utility 80, Moderation 80, Fun 55, Economy 38, Roleplay 3, Security 82, LastFM 65, Logs 5, Voice 29, Auto 45, Server 164, Settings 47, Levels 3, Socials 31, Manipulation 99, and Snipe 4. These displayed counts sum to 916, leaving 29 commands unaccounted for. The page does not identify the missing bucket; do not assume it is NSFW merely because an `nsfw` command appears in the crawler sample.
 - The catalog is client-rendered and Cloudflare-protected. Its public crawler output exposes command names, a short description, arguments, and permissions for only a small moving sample; no public first-party JSON/OpenAPI command registry was discoverable. The exact 945-name list, aliases, option types, default permissions, scopes, and premium flags therefore remain **unverified**.
 - Greed's public docs use the comma prefix (``,``), and a live first-party social-feeds page says Greed has reached Discord's 100 slash-command cap; Pinterest, SoundCloud, and Kick are therefore prefix-only (or dashboard) surfaces. This explains why the 945-item catalog cannot be treated as 945 slash commands. Exact registration metadata and visibility for the rest remain unverified.
 - A pinned first-party [`greedbest/i18n` commit](https://github.com/greedbest/i18n/tree/3dadc41852a09567add8a6b2b522d5e2b1a53b2f) labels English as the complete base language and contains **912 English command JSON files**, including [`uwulock.json`](https://raw.githubusercontent.com/greedbest/i18n/3dadc41852a09567add8a6b2b522d5e2b1a53b2f/locales/en/commands/fun/uwulock.json) and [`uwuify.json`](https://raw.githubusercontent.com/greedbest/i18n/3dadc41852a09567add8a6b2b522d5e2b1a53b2f/locales/en/commands/fun/uwuify.json). This corrects the earlier uwulock evidence gap, but the i18n snapshot and live 945-item catalog are different artifacts and dates; do not subtract them to infer a missing-command list.
@@ -12,7 +12,7 @@ Research date: 2026-08-23. Sources below are first-party unless explicitly marke
 
 ## Live catalog evidence
 
-The current [`Greed command catalog`](https://greed.best/commands) says it shows every command with arguments and permissions and renders these category counts:
+The 2026-08-23 rendered [`Greed command catalog`](https://greed.best/commands) snapshot said it showed every command with arguments and permissions and rendered these category counts:
 
 | Category as rendered | Count |
 | --- | ---: |
@@ -217,7 +217,7 @@ Greed bot/server probing and live interaction testing are out of scope. For this
 - the current official docs and their documented command/feature behavior; and
 - the pinned official English i18n registry, including its 912 command JSON files and the verified uwulock/uwuify entries.
 
-The live catalog advertises 945 entries, while the pinned i18n snapshot contains 912 English command files under a different category taxonomy and date. That is a documented artifact limitation, not a basis for inferring 33 missing commands or claiming that every catalog entry is a slash command.
+The dated rendered catalog snapshot advertised 945 entries, while the pinned i18n snapshot contains 912 English command files under a different category taxonomy and date. That is a documented artifact limitation, not a basis for inferring 33 missing commands or claiming that every catalog entry is a slash command.
 
 Public-source parity means matching the verified names, category/feature families, documented invocation surfaces, and documented premium claims above. Any runtime detail absent from those sources—such as uwulock option types, RBAC, persistence, channel/thread/DM scope, exemptions, deletion/webhook replay behavior, attachment handling, transformation algorithm, or premium gating—is an explicit ByteBot implementation decision. It must be documented as ByteBot behavior, not presented as a Greed parity claim or inferred from the screenshot.
 

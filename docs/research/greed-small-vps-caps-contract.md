@@ -11,7 +11,9 @@ private billing surface was queried.
 
 ## Evidence and policy
 
-The strongest current entitlement source is [Greed Premium](https://greed.best/docs/premium).
+The strongest current entitlement sources are the [Greed Premium guide](https://greed.best/docs/premium)
+and [Premium overview](https://greed.best/premium), including the overview's
+user-premium guild-bucket bypass and the shared 500-responder maximum.
 The public parity baseline and first-party conflicts are retained in
 [`greed-parity.md`](greed-parity.md). ByteBot exposes current premium maxima to
 everyone without subscription, vote, purchase, SKU, card, crypto, or
@@ -43,9 +45,10 @@ gates.
 
 ## Required cumulative head
 
-PR #94's exact head contains the reviewed #50 and #56 branches, including the
-resource/cancellation fixes required by this contract. The final #64 branch
-must preserve that ancestry while integrating the remaining frozen slices.
+PR #94's exact head and every remaining reviewed slice are ancestors of the
+final #64 integration branch. The cumulative ancestry, including serialized
+migrations 0034-0038, is recorded in
+[`greed-final-reconciliation-contract.md`](greed-final-reconciliation-contract.md).
 
 ## Helper inventory and lifecycle
 
@@ -92,8 +95,7 @@ provider success without live evidence.
 
 ## Verification boundary
 
-After this contract commit, implementation may merge the two required reviewed
-branches and begin tests. Required automated proof is:
+The cumulative branch is integrated. Required automated proof is:
 
 1. exact user/guild throughput boundaries and bounded in-memory cleanup;
 2. transactional 50-autorole, 500-autoresponder, and existing 500-reaction-role proof;

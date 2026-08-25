@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { createHash } = require('crypto');
 
 const expectedCounts = {
     auto: 55, boosters: 3, developer: 4, economy: 50, fun: 71,
@@ -12,6 +13,8 @@ test('every pinned English Greed command file has an owner and terminal source s
     const lines = fs.readFileSync(path.join(__dirname, '../docs/research/greed-command-registry-inventory.csv'), 'utf8').trim().split('\n');
     expect(lines.shift()).toBe('path,owner_issues,state');
     expect(lines).toHaveLength(912);
+    expect(createHash('sha256').update(lines.map(line => line.split(',')[0]).join('\n')).digest('hex'))
+        .toBe('1935aaa6fd85ef11e3a77902c68a9b56a0cf268e72eed547fb876264d7384ff9');
 
     const paths = new Set();
     const counts = {};

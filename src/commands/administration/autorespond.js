@@ -5,7 +5,7 @@ const { autoResponses } = require('../../database/schema');
 const { eq, and, count } = require('drizzle-orm');
 const config = require('../../utils/config');
 const { dbLog } = require('../../utils/dbLogger');
-const { MAX_AUTO_RESPONDERS } = require('../../services/autoResponderService');
+const { createAutoResponder, MAX_AUTO_RESPONDERS } = require('../../services/autoResponderService');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -159,25 +159,6 @@ async function handleAdd(interaction, client) {
     const role = interaction.options.getRole('role');
     const cooldown = interaction.options.getInteger('cooldown') || 60;
 
-    // Check the shared public limit.
-    const countResult = await dbLog.select('autoResponses',
-        () => db.select({ count: count() })
-            .from(autoResponses)
-            .where(eq(autoResponses.guildId, interaction.guild.id))
-            .get(),
-        { guildId: interaction.guild.id, operation: 'count' }
-    );
-
-    if (countResult.count >= MAX_AUTO_RESPONDERS) {
-        return interaction.editReply({
-            embeds: [embeds.error(
-                'Limit Reached',
-                `This server has reached the maximum of ${MAX_AUTO_RESPONDERS} auto-responses. Delete some with \`/autorespond remove\` first.`
-            )],
-            flags: [MessageFlags.Ephemeral]
-        });
-    }
-
     // Validate regex (dev only for security)
     if (matchType === 'regex') {
         if (!config.developers.includes(interaction.user.id)) {
@@ -201,8 +182,10 @@ async function handleAdd(interaction, client) {
     }
 
     // Insert
-    const result = await dbLog.insert('autoResponses',
-        () => db.insert(autoResponses).values({
+    let result;
+    try {
+        result = await dbLog.insert('autoResponses',
+            () => [createAutoResponder({
             guildId: interaction.guild.id,
             trigger,
             response,
@@ -215,9 +198,16 @@ async function handleAdd(interaction, client) {
             useCount: 0,
             createdAt: new Date(),
             lastUsed: null
-        }).returning(),
-        { guildId: interaction.guild.id, trigger, matchType }
-    );
+            })],
+            { guildId: interaction.guild.id, trigger, matchType }
+        );
+    } catch (error) {
+        if (error.code !== 'AUTO_RESPONDER_LIMIT') throw error;
+        return interaction.editReply({
+            embeds: [embeds.error('Limit Reached', `${error.message} Delete some with \`/autorespond remove\` first.`)],
+            flags: [MessageFlags.Ephemeral]
+        });
+    }
 
     // Invalidate cache
     client.autoResponderService.invalidateCache(interaction.guild.id);

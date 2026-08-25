@@ -262,9 +262,8 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
                     '`/game` Games\n' +
                     '`/server` Auto, Logs, Security, Server, Settings • `/ticket` Tickets • `/mod` Moderation\n' +
                     '`/fun` Fun, Roleplay, Snipe • `/image` Manipulation • `/boosterrole` Boosters • `/economy` Economy • `/lastfm` LastFM\n' +
-                    '`/music` Music\n' +
-                    '**Not yet available (planned):** Voice\n' +
-                    '**Provider-blocked:** AI chat/STT/generation, social feeds, Rolimons, Valorant, Minecraft, Spotify search, Reddit, YouTube downloads, X, TikTok, Instagram, Telegram, bio providers\n' +
+                    '`/music` Music • `/voicemaster` Voice\n' +
+                    '**Provider-blocked:** AI chat/STT/generation, persistent social feeds/downloads/provider-backed behavior, Rolimons, Valorant, Minecraft, Spotify search, Reddit, YouTube downloads, Telegram, bio providers\n' +
                     '**Registry-only evidence gaps:** Developer',
                 inline: false
             }
