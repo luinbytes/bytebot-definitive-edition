@@ -67,6 +67,26 @@ describe('message and member automation platform', () => {
         expect(await service.list('guild2', 'timer')).toHaveLength(1);
     });
 
+    test('autoroles use the highest public 50-role cap transactionally', async () => {
+        const AutomationService = require('../src/services/automationService');
+        service = new AutomationService({ guilds: { cache: new Map() } });
+        for (let index = 0; index < 50; index += 1) {
+            await service.upsert({
+                guildId: 'guild1', kind: 'autorole', key: `member:role-${index}`,
+                config: { roleId: `role-${index}` }, createdBy: 'admin1'
+            });
+        }
+        expect(() => service.upsert({
+            guildId: 'guild1', kind: 'autorole', key: 'bot:overflow',
+            config: { roleId: 'overflow' }, createdBy: 'admin1'
+        })).toThrow('50 autorole');
+        expect(service.upsert({
+            guildId: 'guild1', kind: 'autorole', key: 'member:role-0',
+            config: { roleId: 'updated' }, createdBy: 'admin1'
+        })).toEqual(expect.objectContaining({ key: 'member:role-0' }));
+        expect(await service.list('guild1', 'autorole')).toHaveLength(50);
+    });
+
     test('autoreact honors channel and role scopes and caps configured reactions', async () => {
         const AutomationService = require('../src/services/automationService');
         service = new AutomationService({ guilds: { cache: new Map() } });

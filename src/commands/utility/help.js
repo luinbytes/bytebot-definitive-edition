@@ -212,21 +212,13 @@ function buildOverviewEmbed(client, commands, sortedCategories, categories) {
             {
                 name: 'Common Paths',
                 value:
-                    '`/me reminder add` • `/me bookmark search` • `/pod panel`\n' +
-                    '`/server welcome setup` • `/server goodbye setup` • `/server boost setup`\n' +
-                    '`/server security antinuke-settings`\n' +
-                    '`/server antiraid settings` • `/server antiraid module`\n' +
-                    '`/server automod settings` • `/server automod filter`\n' +
-                    '`/server permissions disable` • `/server permissions denyperm` • `/server permissions protect`\n' +
-                    '`/reactionrole add` • `/buttonrole add` • `/temprole add` • `/boosterrole create`\n' +
-                    '`/ticket setup` • `/ticket panel manage` • `/ticket settings view`\n' +
-                    '`/giveaway start` • `/giveaway edit prize` • `/counter add`\n' +
-                    '`/economy balance` • `/economy game coinflip` • `/economy gang info` • `/economy lab status`\n' +
-                    '`/server backup create` • `/server customize preset` • `/server discovery publish`\n' +
-                    '`/server role info` • `/lookup weather` • `/lookup github user` • `/repost` • `/ai ocr` • `/ai tts`\n' +
-                    '`/analytics days:60` • `/levels rank` • `/server logs add`\n' +
-                    '`/mod user warn` • `/mod case view` • `/mod config setup`\n' +
-                    '`/mod template set` • `/game roblox profile`\n' +
+                    '`/me reminder add` • `/pod panel` • `/server welcome setup`\n' +
+                    '`/server security antinuke-settings` • `/server antiraid settings` • `/server automod filter`\n' +
+                    '`/reactionrole add` • `/ticket setup` • `/giveaway start` • `/counter add`\n' +
+                    '`/economy balance` • `/economy game coinflip` • `/server backup create`\n' +
+                    '`/server role info` • `/server logs add` • `/analytics days:60` • `/levels rank`\n' +
+                    '`/lookup weather` • `/lookup github user` • `/repost` • `/ai ocr` • `/ai tts`\n' +
+                    '`/mod user warn` • `/game roblox profile`\n' +
                     '`/fun uwuify` • `/fun uwulock add` • `/image effect apply`',
                 inline: false
             },

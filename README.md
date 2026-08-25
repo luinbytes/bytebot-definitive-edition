@@ -18,6 +18,9 @@ A highly modular, scalable, and future-proof Discord bot boilerplate built with 
 -   **Information and Lookups**: Discord-native profiles, assets, roles, invites, permissions, and observed name history under `/me` and `/server`, plus bounded web, GitHub, and Roblox lookups under `/lookup` and `/game`.
 -   **Social Reposting**: Mention-safe canonical Instagram, TikTok, and X/Twitter post links under `/repost`; persistent provider feeds remain visibly blocked until their credential and terms gates are satisfied.
 -   **Local AI Media**: Bounded on-demand Tesseract OCR and eSpeak NG synthetic speech under `/ai`; chat, transcription, and generative media remain visibly blocked without an approved provider or separate worker.
+-   **Levels and Analytics**: Text/voice levels, rank cards, event logs, and real-row analytics with the public 15-channel and three-year maxima.
+-   **Local Image Tools**: One queued Sharp worker for bounded transforms, effects, captions, comparisons, and dominant-color inspection under `/image`.
+-   **Small-VPS Runtime**: Production Compose defaults to 1 CPU, 1 GiB, 128 PIDs, a 640 MiB Node heap, lazy native helpers, and event-loop health checks.
 
 ## Project Structure
 
@@ -47,6 +50,20 @@ config.json         # Branding global constants
 3.  **Database Setup**: Run `npm run db:push` to sync the schema to your local `sqlite.db`.
 4.  **Run Development Mode**: `npm run dev` (Runs tests + starts bot).
 
+## Production container
+
+Copy `.env.example` to `.env`, set the required Discord values, then run
+`docker compose up --build -d`. The checked-in Compose profile hard-limits the
+container to one CPU and 1 GiB and persists SQLite in the `bytebot-data` volume.
+`/bot stats` reports cached Sharp, OCR, speech, and music readiness. Music stays
+disabled until `MUSIC_LIBRARY_PATH` points to an operator-owned library; all
+native helpers otherwise remain process-free while idle.
+
+The container health check proves the Node event loop is advancing. It does not
+claim that Discord, voice UDP, or an external lookup provider is reachable.
+See [`greed-small-vps-caps-contract.md`](docs/research/greed-small-vps-caps-contract.md)
+for the exact cap, helper, and runtime evidence boundary.
+
 ## Development Guidelines
 
 ### 1. Adding Commands
@@ -69,7 +86,7 @@ The `interactionCreate` event follows a strict safety pipeline:
     - **Scoped access**: Applies root or exact-path disable, allow, and deny rules for the guild, channel, role, or member.
     - **Virtual permissions**: Applies fake role permissions only to explicitly declared `virtualPermissions` checks.
     - **Role allowlists**: Applies compatible `commandPermissions` role restrictions after the checks above.
-5. **Cooldowns**: Enforces per-user rate limiting.
+5. **Rate limits and cooldowns**: Applies the public 15-per-5-second user and 60-per-10-second guild windows, then command-specific cooldowns.
 6. **Database Logging**: Updates `commandsRun` and `lastSeen` only after all security checks pass.
 7. **Execution**: Wraps the command in a try/catch with automatic error reporting.
 

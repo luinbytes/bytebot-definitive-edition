@@ -23,12 +23,12 @@ module.exports = {
         .addSubcommandGroup(group => group
             .setName('secondary')
             .setDescription('Manage secondary join-to-create channels')
-            .addSubcommand(sub => voiceChannel(sub.setName('add').setDescription('Add a secondary join-to-create channel (Premium)')))
-            .addSubcommand(sub => voiceChannel(sub.setName('remove').setDescription('Remove a secondary join-to-create channel (Premium)')))
-            .addSubcommand(sub => sub.setName('list').setDescription('List all secondary join-to-create channels (Premium)'))
+            .addSubcommand(sub => voiceChannel(sub.setName('add').setDescription('Add a secondary join-to-create channel')))
+            .addSubcommand(sub => voiceChannel(sub.setName('remove').setDescription('Remove a secondary join-to-create channel')))
+            .addSubcommand(sub => sub.setName('list').setDescription('List all secondary join-to-create channels'))
             .addSubcommand(sub => voiceChannel(sub
                 .setName('category')
-                .setDescription('Set the category for a secondary join-to-create channel (Premium)'))
+                .setDescription('Set the category for a secondary join-to-create channel'))
                 .addChannelOption(option => option
                     .setName('category')
                     .setDescription('Category for temporary channels')

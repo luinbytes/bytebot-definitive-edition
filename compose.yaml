@@ -1,0 +1,15 @@
+services:
+  bytebot:
+    build: .
+    env_file: .env
+    restart: unless-stopped
+    init: true
+    cpus: 1.0
+    mem_limit: 1g
+    pids_limit: 128
+    stop_grace_period: 15s
+    volumes:
+      - bytebot-data:/app/data
+
+volumes:
+  bytebot-data:

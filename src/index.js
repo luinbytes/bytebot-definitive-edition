@@ -31,12 +31,18 @@ const client = new Client({
 
 const { InformationLookupService } = require('./services/informationLookupService');
 const { LocalAiMediaService } = require('./services/localAiMediaService');
+const { CommandRateLimiter } = require('./utils/commandRateLimit');
+const { inspectHelpers } = require('./utils/helperHealth');
+const { startHeartbeat } = require('./utils/runtimeHeartbeat');
 
 client.commands = new Collection();
 client.contextMenus = new Collection();
 client.cooldowns = new Collection();
 client.informationLookupService = new InformationLookupService();
 client.aiMediaService = new LocalAiMediaService();
+client.commandRateLimiter = new CommandRateLimiter();
+client.helperHealth = inspectHelpers();
+let stopHeartbeat = () => {};
 
 // Error handling for future-proofing
 process.on('unhandledRejection', (reason, promise) => {
@@ -80,6 +86,7 @@ const shutdown = async (signal) => {
         }
 
         // Destroy Discord client
+        stopHeartbeat();
         client.destroy();
         logger.success('Bot shutdown complete');
         process.exit(0);
@@ -105,6 +112,7 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
         await commandHandler(client);
 
         await client.login(process.env.DISCORD_TOKEN);
+        stopHeartbeat = startHeartbeat();
     } catch (error) {
         logger.error(`Initialization Error: ${error}`);
     }

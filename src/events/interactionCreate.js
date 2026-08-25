@@ -608,6 +608,14 @@ module.exports = {
             }
         }
 
+        const throughput = client.commandRateLimiter?.consume(interaction.user.id, interaction.guildId);
+        if (throughput && !throughput.allowed) {
+            return interaction.reply({
+                embeds: [embeds.warn('Rate Limit', `The highest public command allowance was reached. Try again <t:${Math.ceil(throughput.retryAt / 1000)}:R>.`)],
+                flags: [MessageFlags.Ephemeral]
+            });
+        }
+
         // 5. Cooldown Logic
         const { cooldowns } = client;
         if (!cooldowns.has(command.data.name)) {

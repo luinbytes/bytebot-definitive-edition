@@ -2,6 +2,10 @@ FROM node:22-bookworm-slim
 
 WORKDIR /app
 
+ENV NODE_ENV=production
+ENV NODE_OPTIONS=--max-old-space-size=640
+ENV DATABASE_URL=/app/data/sqlite.db
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         espeak-ng=1.51+dfsg-10+deb12u2 \
@@ -13,8 +17,13 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --omit=dev --no-audit --no-fund
 
 COPY . .
+RUN mkdir -p /app/data && chown node:node /app/data
 
-CMD ["npm", "test", "--", "--runInBand"]
+VOLUME ["/app/data"]
+USER node
+STOPSIGNAL SIGTERM
+HEALTHCHECK --interval=30s --timeout=3s --start-period=45s --retries=3 CMD ["node", "./scripts/healthcheck.js"]
+CMD ["npm", "start"]

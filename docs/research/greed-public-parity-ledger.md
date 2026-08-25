@@ -29,12 +29,12 @@ Source: [Greed commands](https://greed.best/commands), researched 2026-08-23. Th
 | Roleplay | 3 | #54 | `tracked` |
 | Security | 82 | #36, #39, #40 | `complete` — all mapped public protection surfaces are implemented |
 | LastFM | 65 | #57 | `tracked` |
-| Logs | 5 | #37, #39, #40, #50 | `partial` |
+| Logs | 5 | #37, #39, #40, #50 | `complete` — moderation, protection, and configurable event-log delivery are implemented with the public 15-channel maximum |
 | Voice | 29 | #58, #59 | `partial` |
 | Auto | 45 | #42, #43 | `complete` — all mapped public automation and self-service role surfaces are implemented |
 | Server | 164 | #41, #43, #44, #45, #46, #47, #50 | `partial` |
 | Settings | 47 | #36, #37, #41, #43, #54, #57, #58 | `partial` |
-| Levels | 3 | #50 | `partial` |
+| Levels | 3 | #50 | `complete` — text/voice levels, rewards, rank cards, and bounded analytics are implemented |
 | Socials | 31 | #60, #61 | `complete` — lawful keyless lookups and canonical link reposting are implemented; credentialed feeds, downloads, and undocumented auto-reposter behavior have terminal provider/evidence blockers |
 | Manipulation | 99 | #55, #56, #62 | `complete` — shared bounded inputs, local transforms/effects/templates, OCR, and TTS are implemented; exact provider assets/algorithms and generative surfaces have terminal evidence/provider/resource blockers |
 | Snipe | 4 | #54 | `tracked` |
@@ -54,8 +54,8 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | `fun` | 71 | #35, #54, #56 | `partial` |
 | `information` | 48 | #51, #62 | `partial` |
 | `lastfm` | 22 | #57 | `tracked` |
-| `levels` | 8 | #50 | `partial` |
-| `logs` | 7 | #37, #39, #40, #50 | `partial` |
+| `levels` | 8 | #50 | `complete` — every pinned levels subject is implemented or mapped to an explicit alias/evidence decision |
+| `logs` | 7 | #37, #39, #40, #50 | `complete` — every pinned logging subject is implemented or mapped to the shared event-log surface |
 | `manipulation` | 3 | #56 | `complete` — AlexFlipnote, Jeyy, and Popcat provider families are reconciled to local implementations, explicit blockers, or evidence gaps without proxying undocumented APIs |
 | `moderation` | 101 | #37, #38 | `partial` |
 | `music` | 9 | #58 | `tracked` |
@@ -101,6 +101,8 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | Canonical Instagram, TikTok, and X/Twitter link reposting with no scrape/download path; all eight persistent feed providers and the undocumented auto-reposter behavior retained as source-cited terminal blockers | #61 | Completes live and pinned Socials together with #60. No dormant scheduler, token storage, billing gate, or invented crawler is shipped while the provider and evidence gates remain closed. | `tests/socialRepost.test.js`, `tests/helpParity.test.js`, and `docs/research/greed-social-feeds-contract.md` |
 | Local Tesseract OCR and eSpeak NG text-to-speech through one bounded media queue; OpenRouter Q&A, STT, image generation, and semantic editing retained as source-cited credential/resource blockers | #62 | Advances live Information/Utility/Manipulation and pinned `information`/`utility`; Greed's billing caps are evidence only and ByteBot adds no entitlement or daily quota. | `tests/aiMedia.test.js`, `tests/mediaService.test.js`, `tests/helpParity.test.js`, and `docs/research/greed-ai-speech-ocr-generative-contract.md` |
 | Attachment/member/reply/URL/avatar resolution; pinned public-only downloads; image signatures and dimensions; a single fail-closed processor queue; `/image` resize, rotate, compress, conversion, 16 local effects, caption/compare layouts, and dominant color | #55, #56 | Completes pinned `manipulation` and advances live Manipulation/Fun/Utility. Named provider effects and templates without public algorithms or licensed assets have terminal blocker/evidence-gap mappings; OCR remains owned by #62. | `tests/mediaService.test.js`, `tests/imageManipulation.test.js`, `tests/helpParity.test.js`, and `tests/commands.test.js` |
+| Text/voice levels, rewards, rank-card styling, 15-channel event logging, and 1,095-day real-row analytics | #50 | Completes live/pinned Levels and Logs; advances Server/Settings. Unknown XP algorithms and unavailable historical data remain explicit ByteBot-owned/evidence boundaries. | `tests/levelAnalyticsService.test.js`, `tests/eventLoggingService.test.js`, `tests/levelsAnalyticsCommands.test.js`, and `docs/research/greed-levels-analytics-contract.md` |
+| Universal highest public command/autorole/reaction/log/retention allowances; cached native-helper diagnostics; lazy helpers; and a production 1 CPU/1 GiB Compose profile with event-loop health | #63 | Applies cross-cutting premium maxima without billing, voting, purchase, or entitlement state and packages the cumulative #50/#55/#56/#58/#61/#62 runtime. | `tests/smallVpsPackaging.test.js`, `tests/automationPlatform.test.js`, `tests/roleAutomation.test.js`, `tests/eventLoggingService.test.js`, and `docs/research/greed-small-vps-caps-contract.md` |
 
 ## Update rule
 
