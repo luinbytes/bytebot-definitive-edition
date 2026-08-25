@@ -61,7 +61,10 @@ test('local AI media tools invoke fixed binaries with bounded local output', asy
         return filename;
     };
     const ocrPath = executable('ocr', "printf 'Read by Tesseract'");
-    const ttsPath = executable('tts', "while [ \"$1\" != '-w' ]; do shift; done; shift; printf 'RIFF----WAVE' > \"$1\"; cat >/dev/null");
+    const wav = Buffer.from('524946462600000057415645666d74201000000001000100401f0000401f00000100080064617461020000008080', 'hex');
+    const ttsPath = path.join(directory, 'tts');
+    fs.writeFileSync(ttsPath, `#!/usr/bin/env node\nconst fs=require('fs'); const args=process.argv.slice(2); fs.writeFileSync(args[args.indexOf('-w')+1], Buffer.from('${wav.toString('hex')}','hex'));`);
+    fs.chmodSync(ttsPath, 0o755);
     const signal = new AbortController().signal;
     const media = { processImage: (_input, processor) => processor({ buffer: Buffer.from('image'), format: 'png' }, directory, signal) };
     const queue = { run: processor => processor(directory, signal) };
@@ -69,11 +72,29 @@ test('local AI media tools invoke fixed binaries with bounded local output', asy
     const service = new LocalAiMediaService({ media, queue, ocrPath, ttsPath });
 
     await expect(service.ocr({ url: 'https://example.com/image.png' })).resolves.toBe('Read by Tesseract');
-    await expect(service.tts('Hello')).resolves.toEqual(Buffer.from('RIFF----WAVE'));
+    await expect(service.tts('Hello')).resolves.toEqual(wav);
     await expect(service.tts('x'.repeat(2001))).rejects.toThrow('2,000');
     await expect(new LocalAiMediaService({
         media: { processImage: jest.fn().mockRejectedValue(new Error('Image bytes are not supported.')) }, queue
     }).ocr({})).rejects.toThrow('The attached file is not a valid image.');
+    const invalidTts = executable('invalid-tts', "while [ \"$1\" != '-w' ]; do shift; done; shift; printf 'RIFF----WAVE' > \"$1\"");
+    await expect(new LocalAiMediaService({ media, queue, ttsPath: invalidTts }).tts('Hello'))
+        .rejects.toThrow('Failed to generate local synthetic speech.');
 
+    fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test('local AI media shutdown cancels active helpers and drains cleanup', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'bytebot-ai-stop-'));
+    const sleeper = path.join(directory, 'sleeper');
+    fs.writeFileSync(sleeper, '#!/bin/sh\nsleep 2');
+    fs.chmodSync(sleeper, 0o755);
+    const { LocalAiMediaService } = require('../src/services/localAiMediaService');
+    const service = new LocalAiMediaService({ ttsPath: sleeper });
+    const pending = service.tts('Stop me');
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    await expect(service.close()).resolves.toBeUndefined();
+    await expect(pending).rejects.toThrow('Failed to generate local synthetic speech.');
     fs.rmSync(directory, { recursive: true, force: true });
 });

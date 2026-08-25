@@ -66,6 +66,7 @@ const shutdown = async (signal) => {
         client.ticketService?.cleanup?.();
         client.voiceMasterService?.cleanup?.();
         await client.musicService?.cleanup?.();
+        await client.aiMediaService?.close?.();
         await require('./services/automodService').cleanup();
         require('./services/antiraidService').clearWindows();
         if (client.starboardService && client.starboardService.cleanup) {
