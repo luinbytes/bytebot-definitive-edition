@@ -65,6 +65,9 @@ test('local AI media tools invoke fixed binaries with bounded local output', asy
     await expect(service.ocr({ url: 'https://example.com/image.png' })).resolves.toBe('Read by Tesseract');
     await expect(service.tts('Hello')).resolves.toEqual(Buffer.from('RIFF----WAVE'));
     await expect(service.tts('x'.repeat(2001))).rejects.toThrow('2,000');
+    await expect(new LocalAiMediaService({
+        media: { processImage: jest.fn().mockRejectedValue(new Error('Image bytes are not supported.')) }, queue
+    }).ocr({})).rejects.toThrow('The attached file is not a valid image.');
 
     fs.rmSync(directory, { recursive: true, force: true });
 });

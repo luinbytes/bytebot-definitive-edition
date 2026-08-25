@@ -75,7 +75,10 @@ class LocalAiMediaService {
                 const output = await runProcess(this.ocrPath, [filename, 'stdout', '-l', 'eng'], null, signal);
                 return output.toString('utf8').trim();
             });
-        } catch {
+        } catch (error) {
+            if (/^(?:Image bytes|Images must|Image content type|Image dimensions|Media cannot|Media dimensions)/.test(error.message)) {
+                throw new UserFacingError('The attached file is not a valid image.');
+            }
             throw new UserFacingError('Failed to extract text from image.');
         }
     }
