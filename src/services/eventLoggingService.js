@@ -11,6 +11,10 @@ const MODULES = [
     'roles', 'invites', 'emojis', 'stickers', 'integrations', 'soundboard'
 ];
 const ALIASES = Object.fromEntries(MODULES.flatMap(name => [[name, name], [name.replace(/s$/, ''), name]]));
+const MAX_GUILD_OUTBOX_ROWS = 5000;
+const MAX_OUTBOX_ROWS = 20000;
+const MAX_GUILD_OUTBOX_BYTES = 16 * 1024 * 1024;
+const MAX_OUTBOX_BYTES = 64 * 1024 * 1024;
 
 class EventLoggingService {
     constructor({ sqlite, client, now = Date.now }) {
@@ -46,6 +50,23 @@ class EventLoggingService {
             removed = statement.run(terminalCutoff, uncertainCutoff, limit).changes;
             total += removed;
         } while (removed === limit);
+        const trim = guildId => {
+            const where = guildId ? 'WHERE guild_id = ?' : '';
+            const values = guildId ? [guildId] : [];
+            const maxRows = guildId ? MAX_GUILD_OUTBOX_ROWS : MAX_OUTBOX_ROWS;
+            const maxBytes = guildId ? MAX_GUILD_OUTBOX_BYTES : MAX_OUTBOX_BYTES;
+            let stats = this.sqlite.prepare(`SELECT COUNT(*) AS rows, COALESCE(SUM(length(CAST(payload AS BLOB))), 0) AS bytes FROM event_log_outbox ${where}`).get(...values);
+            while (stats.rows > maxRows || stats.bytes > maxBytes) {
+                const removedTerminal = this.sqlite.prepare(`DELETE FROM event_log_outbox WHERE id IN (
+                    SELECT id FROM event_log_outbox ${where ? `${where} AND` : 'WHERE'} status IN ('sent','failed') ORDER BY id LIMIT ?
+                )`).run(...values, limit).changes;
+                if (!removedTerminal) break;
+                total += removedTerminal;
+                stats = this.sqlite.prepare(`SELECT COUNT(*) AS rows, COALESCE(SUM(length(CAST(payload AS BLOB))), 0) AS bytes FROM event_log_outbox ${where}`).get(...values);
+            }
+        };
+        for (const { guild_id: guildId } of this.sqlite.prepare('SELECT DISTINCT guild_id FROM event_log_outbox').all()) trim(guildId);
+        trim(null);
         this.lastOutboxPrune = this.now();
         return total;
     }
@@ -60,6 +81,20 @@ class EventLoggingService {
         clearInterval(this.interactiveTimer);
         this.pending.clear();
         this.confirmations.clear();
+    }
+
+    purgeGuild(guildId) {
+        this.sqlite.transaction(() => {
+            this.sqlite.prepare('DELETE FROM event_log_outbox WHERE guild_id = ?').run(guildId);
+            this.sqlite.prepare('DELETE FROM event_log_ignores WHERE guild_id = ?').run(guildId);
+            this.sqlite.prepare('DELETE FROM event_log_channels WHERE guild_id = ?').run(guildId);
+        })();
+        for (const [key, value] of this.pending) {
+            if (key.startsWith(`${guildId}:`) || value.guildId === guildId) this.pending.delete(key);
+        }
+        for (const [key, value] of this.confirmations) {
+            if (value.guildId === guildId) this.confirmations.delete(key);
+        }
     }
 
     module(value) {
@@ -310,16 +345,33 @@ class EventLoggingService {
         this.pruneOutbox();
         const rows = this.sqlite.prepare(`SELECT channel_id, color FROM event_log_channels WHERE guild_id = ? AND module = ?`)
             .all(guild.id, module);
-        for (const row of rows) this.sqlite.prepare(`
-            INSERT OR IGNORE INTO event_log_outbox
-                (guild_id, event_key, channel_id, module, payload, attempts, next_attempt_at, status, created_at)
-            VALUES (?, ?, ?, ?, ?, 0, ?, 'pending', ?)
-        `).run(guild.id, eventKey, row.channel_id, module, JSON.stringify({
-            title: String(title || `${module} event`).slice(0, 256),
-            description: String(description || 'No details available.').slice(0, 4096), color: row.color || config.brand.color
-        }), now, now);
+        const inserted = this.sqlite.transaction(() => {
+            let count = 0;
+            for (const row of rows) {
+                const duplicate = this.sqlite.prepare(`SELECT 1 FROM event_log_outbox WHERE guild_id = ? AND event_key = ? AND channel_id = ?`)
+                    .get(guild.id, eventKey, row.channel_id);
+                if (duplicate) continue;
+                const guildStats = this.sqlite.prepare(`SELECT COUNT(*) AS rows, COALESCE(SUM(length(CAST(payload AS BLOB))), 0) AS bytes FROM event_log_outbox WHERE guild_id = ?`).get(guild.id);
+                const globalStats = this.sqlite.prepare(`SELECT COUNT(*) AS rows, COALESCE(SUM(length(CAST(payload AS BLOB))), 0) AS bytes FROM event_log_outbox`).get();
+                const payload = JSON.stringify({
+                    title: String(title || `${module} event`).slice(0, 256),
+                    description: String(description || 'No details available.').slice(0, 4096),
+                    color: row.color || config.brand.color
+                });
+                const payloadBytes = Buffer.byteLength(payload);
+                if (guildStats.rows >= MAX_GUILD_OUTBOX_ROWS || globalStats.rows >= MAX_OUTBOX_ROWS
+                    || guildStats.bytes + payloadBytes > MAX_GUILD_OUTBOX_BYTES
+                    || globalStats.bytes + payloadBytes > MAX_OUTBOX_BYTES) break;
+                count += this.sqlite.prepare(`
+                    INSERT INTO event_log_outbox
+                        (guild_id, event_key, channel_id, module, payload, attempts, next_attempt_at, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, 0, ?, 'pending', ?)
+                `).run(guild.id, eventKey, row.channel_id, module, payload, now, now).changes;
+            }
+            return count;
+        })();
         await this.processOutbox();
-        return rows.length;
+        return inserted;
     }
 
     async processOutbox(limit = 50) {

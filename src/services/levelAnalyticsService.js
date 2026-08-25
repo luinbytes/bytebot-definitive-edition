@@ -78,6 +78,17 @@ class LevelAnalyticsService {
         this.confirmations.clear();
     }
 
+    purgeGuild(guildId) {
+        const tables = [
+            'member_levels', 'level_configs', 'level_role_rewards', 'level_ignores', 'level_boosts',
+            'level_live_boards', 'level_role_jobs', 'server_daily_metrics', 'analytics_events',
+            'reaction_placements', 'level_voice_sessions', 'member_presence', 'activity_logs'
+        ];
+        return this.sqlite.transaction(() => {
+            for (const table of tables) this.sqlite.prepare(`DELETE FROM ${table} WHERE guild_id = ?`).run(guildId);
+        })();
+    }
+
     assertRoleMutationAuthority(interaction) {
         const rewards = this.sqlite.prepare(`SELECT role_id FROM level_role_rewards WHERE guild_id = ?`)
             .all(interaction.guildId);

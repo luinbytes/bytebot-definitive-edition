@@ -12,6 +12,23 @@ const MAX_ATTACHMENTS = 10;
 const ROULETTE_WINDOW_MS = 10_000;
 const MAX_ROULETTE_REPLAYS = 10;
 const rouletteWindows = new Map();
+const webhookRequests = new Map();
+
+function getReplayWebhook(channel, botId) {
+    let request = webhookRequests.get(channel.id);
+    if (!request) {
+        request = channel.fetchWebhooks().then(webhooks =>
+            Array.from(webhooks.values()).find(item =>
+                item.owner?.id === botId && item.name === WEBHOOK_NAME
+            ) || channel.createWebhook({ name: WEBHOOK_NAME, reason: 'UwU Lock message replay' })
+        );
+        webhookRequests.set(channel.id, request);
+        request.finally(() => {
+            if (webhookRequests.get(channel.id) === request) webhookRequests.delete(channel.id);
+        }).catch(() => {});
+    }
+    return request;
+}
 
 function uwuifyText(text) {
     const input = String(text ?? '');
@@ -120,13 +137,7 @@ async function handleUwuLockMessage(message) {
 
     let replay;
     try {
-        const webhooks = await webhookChannel.fetchWebhooks();
-        const webhook = Array.from(webhooks.values()).find(item =>
-            item.owner?.id === message.client.user.id && item.name === WEBHOOK_NAME
-        ) || await webhookChannel.createWebhook({
-            name: WEBHOOK_NAME,
-            reason: 'UwU Lock message replay'
-        });
+        const webhook = await getReplayWebhook(webhookChannel, message.client.user.id);
         const payload = {
             content: uwuifyText(message.content),
             username: (message.member?.displayName || message.author.username).slice(0, 80),

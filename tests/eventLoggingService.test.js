@@ -251,4 +251,38 @@ describe('EventLoggingService', () => {
         expect(database.sqlite.prepare(`SELECT event_key FROM event_log_outbox ORDER BY event_key`).all())
             .toEqual([{ event_key: 'recoverable' }]);
     });
+
+    test('outbox admission is bounded per guild', async () => {
+        const channel = { id: 'channel1', send: jest.fn() };
+        const server = guild([channel]);
+        service.add(server, channel, 'messages');
+        const insert = database.sqlite.prepare(`
+            INSERT INTO event_log_outbox
+                (guild_id, event_key, channel_id, module, payload, attempts, next_attempt_at, status, created_at)
+            VALUES ('guild1', ?, 'channel1', 'messages', '{}', 0, ?, 'pending', ?)
+        `);
+        database.sqlite.transaction(() => {
+            for (let index = 0; index < 5000; index++) insert.run(`queued:${index}`, now, now);
+        })();
+
+        expect(await service.log(server, 'messages', 'overflow', {})).toBe(0);
+        expect(database.sqlite.prepare("SELECT 1 FROM event_log_outbox WHERE event_key = 'overflow'").get()).toBeUndefined();
+    });
+
+    test('guild purge removes durable and interactive event-log state only for that guild', () => {
+        const first = guild([{ id: 'channel1', send: jest.fn() }]);
+        const second = { ...guild([{ id: 'channel2', send: jest.fn() }]), id: 'guild2' };
+        service.add(first, first.channels.cache.get('channel1'), 'messages');
+        service.add(second, second.channels.cache.get('channel2'), 'messages');
+        service.pending.set('guild1:user1', { expiresAt: now + 1000 });
+        service.pending.set('guild2:user2', { expiresAt: now + 1000 });
+        service.confirmations.set('one', { guildId: 'guild1', expiresAt: now + 1000 });
+        service.confirmations.set('two', { guildId: 'guild2', expiresAt: now + 1000 });
+
+        service.purgeGuild('guild1');
+
+        expect(database.sqlite.prepare('SELECT guild_id FROM event_log_channels').all()).toEqual([{ guild_id: 'guild2' }]);
+        expect([...service.pending.keys()]).toEqual(['guild2:user2']);
+        expect([...service.confirmations.keys()]).toEqual(['two']);
+    });
 });

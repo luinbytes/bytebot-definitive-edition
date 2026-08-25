@@ -623,9 +623,14 @@ function replyUwuList(interaction, state) {
     const protectedList = state === 'protected';
     const title = protectedList ? 'UwU-Protected Members' : 'UwU Lock Targets';
     const empty = protectedList ? 'No members are protected.' : 'No members are targeted.';
-    const description = members.length
-        ? members.map(member => `<@${member.userId}>`).join('\n')
-        : empty;
+    const lines = [];
+    for (const member of members) {
+        const line = `<@${member.userId}>`;
+        if ([...lines, line, `… ${members.length - lines.length - 1} more.`].join('\n').length > 4000) break;
+        lines.push(line);
+    }
+    const omitted = members.length - lines.length;
+    const description = lines.length ? `${lines.join('\n')}${omitted ? `\n… ${omitted} more.` : ''}` : empty;
 
     return interaction.reply({
         embeds: [embeds.brand(title, description)],

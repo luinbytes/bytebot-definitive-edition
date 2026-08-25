@@ -90,6 +90,20 @@ describe('UwU Lock commands', () => {
         expect(database.sqlite.prepare('SELECT COUNT(*) AS count FROM uwu_lock_members').get().count).toBe(0);
     });
 
+    test('large member lists stay within Discord embed limits', async () => {
+        const insert = database.sqlite.prepare("INSERT INTO uwu_lock_members (guild_id, user_id, state) VALUES ('guild1', ?, 'target')");
+        database.sqlite.transaction(() => {
+            for (let index = 0; index < 600; index++) insert.run(String(index).padStart(20, '0'));
+        })();
+        const targetList = interaction({ subcommand: 'list' });
+
+        await fun.execute(targetList);
+
+        const description = targetList.reply.mock.calls[0][0].embeds[0].data.description;
+        expect(description.length).toBeLessThanOrEqual(4096);
+        expect(description).toMatch(/… \d+ more\.$/);
+    });
+
     test('roulette uses the documented percentage setting and zero disables it', async () => {
         expect(fun.data.toJSON().options.find(option => option.name === 'uwulock').options.map(option => option.name))
             .toEqual(['add', 'remove', 'list', 'protect', 'roulette']);
@@ -107,10 +121,17 @@ describe('UwU Lock commands', () => {
         database.sqlite.prepare("INSERT INTO uwu_lock_members (guild_id, user_id, state) VALUES ('guild1', 'user1', 'target')").run();
         database.sqlite.prepare("INSERT INTO uwu_roulette_configs (guild_id, percentage, updated_at) VALUES ('guild1', 25, 1)").run();
 
-        await require('../src/events/guildDelete').execute({ id: 'guild1', name: 'Guild', client: {} });
+        const client = {
+            giveawayService: { purgeGuild: jest.fn(() => { throw new Error('broken cleanup'); }) },
+            levelAnalyticsService: { purgeGuild: jest.fn() },
+            eventLoggingService: { purgeGuild: jest.fn() }
+        };
+        await require('../src/events/guildDelete').execute({ id: 'guild1', name: 'Guild', client });
 
         expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM uwu_lock_members WHERE guild_id = 'guild1'").get().count).toBe(0);
         expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM uwu_roulette_configs WHERE guild_id = 'guild1'").get().count).toBe(0);
+        expect(client.levelAnalyticsService.purgeGuild).toHaveBeenCalledWith('guild1');
+        expect(client.eventLoggingService.purgeGuild).toHaveBeenCalledWith('guild1');
     });
 
     test('/fun uwuify transforms supplied text without enabling mentions', async () => {

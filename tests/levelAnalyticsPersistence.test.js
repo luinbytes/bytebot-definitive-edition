@@ -77,4 +77,19 @@ describe('level and analytics persistence', () => {
             'event_log_outbox'
         ]));
     });
+
+    test('guild purge removes level and analytics state without touching another guild', async () => {
+        database = require('../src/database');
+        await database.runMigrations();
+        const LevelAnalyticsService = require('../src/services/levelAnalyticsService');
+        const service = new LevelAnalyticsService({ sqlite: database.sqlite });
+        database.sqlite.prepare("INSERT INTO member_levels (guild_id, user_id, updated_at) VALUES ('guild1', 'user1', 1), ('guild2', 'user2', 1)").run();
+        database.sqlite.prepare("INSERT INTO analytics_events (guild_id, event_type, event_id, occurred_at) VALUES ('guild1', 'message', 'one', 1), ('guild2', 'message', 'two', 1)").run();
+
+        service.purgeGuild('guild1');
+
+        expect(database.sqlite.prepare("SELECT guild_id FROM member_levels").all()).toEqual([{ guild_id: 'guild2' }]);
+        expect(database.sqlite.prepare("SELECT guild_id FROM analytics_events").all()).toEqual([{ guild_id: 'guild2' }]);
+        service.cleanup();
+    });
 });
