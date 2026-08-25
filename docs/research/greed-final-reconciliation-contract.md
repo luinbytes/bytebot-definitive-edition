@@ -18,7 +18,7 @@ policy, Discord, or small-VPS boundary.
 | Source | Current evidence | Reconciliation rule |
 | --- | --- | --- |
 | [Live command catalog](https://greed.best/commands) | The page still says it contains every command with its arguments and permissions. Its command payload remains client-rendered and is not published as a stable JSON/OpenAPI registry. The last fully rendered public count snapshot is 945 commands across 17 named categories whose displayed counts total 916. | Preserve the 29-entry `evidence-gap`; never invent names, options, permissions, or a hidden category. |
-| [Current docs index](https://greed.best/docs) | The current first-party navigation exposes global Dashboard, Commands, and Embeds routes plus Getting Started, Premium, Customization, six Security guides, Starboard, VoiceMaster, Levels, Bump Reminder, Reaction Triggers, Command Aliases, Command Permissions, Custom Scripts, Username Tracking, Logging, Tickets, Confessions, Backups, Discovery, Music, Giveaways, Counting, Last.fm, Economy, Fun, Social Lookups & Feeds, Image Editing, Utility, Information, and scripting permissions. | Every named guide family and global product route must map to an issue/contract below. |
+| [Current docs index](https://greed.best/docs) | The current first-party navigation additionally exposes Welcome, Leave, Join DM, Boost Messages, and AutoPFP under Server Configuration → Automation. | Every named guide family and global product route must map to an issue/contract below. |
 | [Current Premium guide](https://greed.best/docs/premium) and [premium overview](https://greed.best/premium) | Highest caps remain user 15/5s, guild 60/10s, 500 autoresponders, logs 15, autoroles 50, reaction roles 500, welcome channels 4, leave channels 4, VoiceMaster hubs 4, Join DMs 750/hour, autopfp 15, analytics three years, AI 200/30/50/50/100 daily, and bio 190. The overview additionally says user premium bypasses the guild bucket. Both name Uwulock roulette; the overview describes a configured percentage ceiling with adaptive busy-channel throttling. | ByteBot applies evidenced maxima without billing, voting, purchase, or entitlement state. Provider and host bounds remain. The user-premium guild-bypass entitlement is inapplicable because ByteBot has no premium users; every caller shares the universal 15/5s and 60/10s maxima. |
 | [`greedbest/i18n`](https://github.com/greedbest/i18n/tree/3dadc41852a09567add8a6b2b522d5e2b1a53b2f) | Repository HEAD remains `3dadc41852a09567add8a6b2b522d5e2b1a53b2f` (2026-03-29) with 912 English command JSON files in 20 directories. | The pinned file ledger remains the complete public localization snapshot. Localization proves subjects and strings, not runtime registration metadata. |
 | [`greedbest/docs`](https://github.com/greedbest/docs/tree/60cf7138d45a74bf0cf3fc749c1dc6c43b00df43) | Repository HEAD remains `60cf7138d45a74bf0cf3fc749c1dc6c43b00df43` (2026-06-11). | A guide proves only the syntax and behavior it publishes; conflicts stay visible. |
@@ -32,6 +32,7 @@ policy, Discord, or small-VPS boundary.
 | Premium and Customization | #47, #63, `greed-backup-customization-discovery-contract.md`, `greed-small-vps-caps-contract.md` | Highest caps and customization available without billing; card font/effect values remain an evidence gap. |
 | Antinuke, Antiraid, Automod, Moderation, Fake Permissions, Honeypot | #36-#40 and their frozen security/moderation contracts | Implemented and verified; Discord-owned AutoMod substitutes only where the source contract records it. |
 | Starboard, Bump Reminder, Reaction Triggers, Username Tracking | #42-#43 and `greed-automation-contract.md` | Implemented and verified. |
+| Welcome, Leave, Join DM, Boost Messages, AutoPFP | #41, #64 and `greed-lifecycle-messaging-contract.md` | Lifecycle and Join DM behavior map to `/server`; AutoPFP has an explicit terminal provider/licensing boundary because no public category pool or lawful API is identified. |
 | VoiceMaster | #59 and `greed-voice-master-contract.md` | Implemented within Discord's application-command and voice-channel constraints. |
 | Levels and Logging | #50 and `greed-levels-analytics-contract.md` | Implemented with real retained rows; unpublished XP algorithms and unavailable historical backfill are explicit ByteBot-owned boundaries. |
 | Custom Scripts and scripting permissions | #44 and `greed-rich-content-contract.md` | Implemented as a bounded non-executable script language. |
@@ -89,6 +90,24 @@ and the cumulative tests now enforce it:
   750 successful or in-flight deliveries per guild in a rolling hour;
 - failed DMs release their reservation; restart does not reset the persisted
   rolling window; no retry or unsolicited bulk-DM queue is added.
+
+A second live-doc refresh on 2026-08-25 is frozen before its implementation or
+tests. It supersedes the earlier claim that Join DM grammar was unpublished:
+
+- Join DM exposes every documented action/alias through `/server welcome dm`,
+  carries a recipient-bound Server Info button, and enforces both highest-tier
+  limits: 40 per rolling minute and 750 per rolling hour;
+- Welcome/Leave register `preview`, suppress bot lifecycle messages, and Welcome
+  pauses after 20 accepted human joins per rolling minute;
+- lifecycle rendering reuses the bounded rich-content/custom-script/Components
+  V2 engine and adds the exact current user, guild, channel, conditional,
+  lowercase, and timestamp behavior; each extra destination may override the
+  primary template while otherwise falling back to it;
+- the AutoPFP slash surface is visible but terminally blocked because the six
+  category pools have no published licensed assets or provider API; no scraper,
+  unrelated-avatar substitute, dormant schedule, or webhook is created; and
+- thread preflight and direct guild-cleanup fallbacks close the exact-head
+  security-review findings before delivery.
 
 ## Integration audit before final delivery
 

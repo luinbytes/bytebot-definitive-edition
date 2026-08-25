@@ -36,8 +36,8 @@ bounds remain mandatory.
 | Welcome channels | 4 | One primary plus added destinations, delivered independently without billing. |
 | Leave channels | 4 | One primary plus added destinations, delivered independently without billing. |
 | VoiceMaster hubs | 4 | One primary plus at most three active/pending secondary hubs. |
-| Join DMs | 750/hour | Persistent rolling guild window; failed sends release their reservation and no retry queue is added. |
-| Autopfp channels | 15 | The public subject remains a #64 evidence/provider reconciliation item; no absent feature is invented here. |
+| Join DMs | 40/minute and 750/hour | Both persistent rolling guild windows apply; failed sends release their reservation and no retry queue is added. |
+| Autopfp channels | 15 | Command surface is explicit, but the category pools have no public licensed assets/provider; scheduling and webhooks remain terminally blocked rather than fabricating content. |
 | Analytics retention | 3 years | #50's 1,095-day retention and query maximum are integrated. |
 | User extras | highest/current premium behavior | Existing snipe protection, rank styling, purge filters, and 1.5x economy earnings remain available without Greed entitlement checks. |
 | VoiceMaster extras | available to all | Remove stale `(Premium)` discovery labels; real Manage Server/channel-owner checks remain. |
