@@ -1,7 +1,7 @@
 services:
   bytebot:
     build: .
-    env_file: .env
+    env_file: ${BYTEBOT_ENV_FILE:-.env}
     restart: unless-stopped
     init: true
     cpus: 1.0
