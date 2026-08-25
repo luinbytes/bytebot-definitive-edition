@@ -103,6 +103,16 @@ describe('UwU Lock commands', () => {
             .toBeUndefined();
     });
 
+    test('guild removal purges UwU Lock targets and roulette configuration', async () => {
+        database.sqlite.prepare("INSERT INTO uwu_lock_members (guild_id, user_id, state) VALUES ('guild1', 'user1', 'target')").run();
+        database.sqlite.prepare("INSERT INTO uwu_roulette_configs (guild_id, percentage, updated_at) VALUES ('guild1', 25, 1)").run();
+
+        await require('../src/events/guildDelete').execute({ id: 'guild1', name: 'Guild', client: {} });
+
+        expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM uwu_lock_members WHERE guild_id = 'guild1'").get().count).toBe(0);
+        expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM uwu_roulette_configs WHERE guild_id = 'guild1'").get().count).toBe(0);
+    });
+
     test('/fun uwuify transforms supplied text without enabling mentions', async () => {
         const reply = jest.fn();
         await fun.execute({

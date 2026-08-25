@@ -1,6 +1,6 @@
 const { Events } = require('discord.js');
 const { db } = require('../database/index');
-const { guilds, musicConfig, lifecycleMessages, reminders, automationRules, autoResponses, uwuRouletteConfigs } = require('../database/schema');
+const { guilds, musicConfig, lifecycleMessages, reminders, automationRules, autoResponses, uwuLockMembers, uwuRouletteConfigs } = require('../database/schema');
 const { eq, and } = require('drizzle-orm');
 const logger = require('../utils/logger');
 const { dbLog } = require('../utils/dbLogger');
@@ -21,6 +21,7 @@ async function handleGuildDelete(guild) {
             await db.delete(lifecycleMessages).where(eq(lifecycleMessages.guildId, guild.id));
             await db.delete(automationRules).where(eq(automationRules.guildId, guild.id));
             await db.delete(autoResponses).where(eq(autoResponses.guildId, guild.id));
+            await db.delete(uwuLockMembers).where(eq(uwuLockMembers.guildId, guild.id));
             await db.delete(uwuRouletteConfigs).where(eq(uwuRouletteConfigs.guildId, guild.id));
             await dbLog.delete('guilds',
                 () => db.delete(guilds).where(eq(guilds.id, guild.id)),
