@@ -72,22 +72,10 @@ This addendum is the implementation gate for drift found during the independent
 
 ## Integration audit before final delivery
 
-The exact #63 head `51ee856f05aac303a2362eceb17d224f51c1d7d1`
-contains #50, #51, #55, #56, #58-#63, but four already researched and
-reviewed delivery branches are not ancestors:
-
-| Missing issue | Required branch | Frozen contract | Planned migration slot |
-| --- | --- | --- | ---: |
-| #52 | `feature/personal-utilities` | `greed-personal-utilities-contract.md` | 0034 |
-| #53 | `feature/community-utilities` | `greed-community-utilities-contract.md` | 0035 |
-| #54 | `feature/snipe-fun-roleplay` | `greed-snipe-fun-roleplay-contract.md` | 0036 |
-| #57 | `feature/lastfm` | `greed-lastfm-contract.md` | 0037 |
-
-Those branches may be merged only after this contract is committed and pushed.
-Conflict resolution must preserve both sides, renumber their colliding `0027`
-migrations and Drizzle journal entries to 0034-0037, retain all current
-resource/cancellation fixes, and add no new public behavior except the
-separately frozen drift addendum above.
+The #52, #53, #54, and #57 delivery branches are now ancestors of this
+cumulative branch. Their colliding migrations were serialized as 0034-0037;
+the final drift migration is 0038. The 912-row path inventory is
+[`greed-command-registry-inventory.csv`](greed-command-registry-inventory.csv).
 
 ## Terminal ledger rules
 

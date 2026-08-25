@@ -17,8 +17,8 @@ or an absent command row.
 
 | Source | Evidence used | Resolution |
 | --- | --- | --- |
-| [Current hosted Levels guide](https://greed.best/docs/configuration/levels) and its [official source](https://raw.githubusercontent.com/greedbest/docs/main/configuration/levels.mdx) | Public prefix-command syntax, member/admin split, text/voice XP claims, direct configuration controls, level-up script variables, rank-card controls, aliases, and reset warning. | The hosted guide is newer and materially richer than the current raw MDX: it adds direct text/voice/channel/message/DM/anti-AFK commands, script syntax, and rank-card controls. The hosted first-party page therefore wins for current behavior; the raw source remains a reproducible older baseline. Neither establishes XP rates, formulas, cooldowns, role caps, or a complete Discord permission matrix. |
-| [Current Logging guide](https://greed.best/docs/configuration/logging) and [official source](https://raw.githubusercontent.com/greedbest/docs/main/configuration/logging.mdx) | Log setup/removal/view syntax, module names, moderation-log setting, and module descriptions. | The raw source is the reproducible baseline. The hosted page is newer in presentation and uses singular event names plus an interactive no-argument form; those are retained as compatibility aliases, not silently merged into a single Greed fact. |
+| [Current hosted Levels guide](https://greed.best/docs/configuration/levels) and its [official source](https://raw.githubusercontent.com/greedbest/docs/60cf7138d45a74bf0cf3fc749c1dc6c43b00df43/configuration/levels.mdx) | Public prefix-command syntax, member/admin split, text/voice XP claims, direct configuration controls, level-up script variables, rank-card controls, aliases, and reset warning. | The hosted guide is newer and materially richer than the current raw MDX: it adds direct text/voice/channel/message/DM/anti-AFK commands, script syntax, and rank-card controls. The hosted first-party page therefore wins for current behavior; the raw source remains a reproducible older baseline. Neither establishes XP rates, formulas, cooldowns, role caps, or a complete Discord permission matrix. |
+| [Current Logging guide](https://greed.best/docs/configuration/logging) and [official source](https://raw.githubusercontent.com/greedbest/docs/60cf7138d45a74bf0cf3fc749c1dc6c43b00df43/configuration/logging.mdx) | Log setup/removal/view syntax, module names, moderation-log setting, and module descriptions. | The raw source is the reproducible baseline. The hosted page is newer in presentation and uses singular event names plus an interactive no-argument form; those are retained as compatibility aliases, not silently merged into a single Greed fact. |
 | [Current Greed homepage](https://greed.best/) | Greed shows `,analytics`, a “Server analytics for …” response, and says it tracks messages, reactions, voice, and membership over time with cards/charts. | This establishes the public command name and product-level analytics categories. It does not establish option names, chart grain, membership definitions, or historical backfill behavior. |
 | [Current Premium guide](https://greed.best/docs/premium) | Analytics retention is 60 days free / 3 years Server Premium; “Server stats card” is named as Premium-only; free/premium log-channel caps are 4/15. | These are the current numeric entitlement facts. ByteBot has no billing service, so it provides the highest documented non-billing allowance (15 log channels and 1,095 days) and labels that as a ByteBot policy. |
 | [Current command catalog](https://greed.best/commands) | The catalog claims to list every command with arguments and permissions. | The page is client-rendered; its public HTML exposes the claim and controls but not the Levels, analytics, or Logs rows. It cannot prove exact registration, option types, permissions, or Premium flags. |
@@ -511,11 +511,11 @@ analytics rows in place.
 - Exact Discord registration (prefix versus slash), option types, aliases,
   command IDs, and premium flags remain unverified. Localization paths are
   not a machine-readable command registry.
-- Existing ByteBot activity rows have no event idempotency ledger or retention
-  cleanup, and general voice/membership analytics are incomplete. This is an
-  implementation gap, not permission to report fabricated history.
-- No live Greed bot probing, production Discord mutation, or repository test
-  suite run is part of this research gate.
+- ByteBot now uses event idempotency keys, bounded retention cleanup, and real
+  text, voice, and membership rows. Pre-install history is unavailable and is
+  never fabricated; Greed's private aggregation algorithm remains unpublished.
+- No live Greed bot probing or production Discord mutation was part of this
+  research gate; implementation verification is recorded in the parity ledger.
 
 ## Verification and acceptance matrix
 

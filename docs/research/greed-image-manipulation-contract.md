@@ -71,7 +71,7 @@ operations needed for an honest 1:1 implementation.
 | Jeyy provider | Registry proves a provider family but publishes no operation names; Greed docs group filters generically | `evidence-gap`: exact provider inventory and behavior cannot be derived honestly. Named `animate`, `distort`, `modify`, `overlay`, `render`, and `scene` entries remain mapped individually above. |
 | Dominant color | `fun/dominant` and `information/dominant` | `implemented`: one `/image inspect dominant` path accepts the shared sources. |
 | Image-to-GIF | `utility/img2gif`, supporting PNG/JPG/WebP/GIF | `implemented`: `/image transform convert format:gif`; the file is attached directly instead of inventing Greed's private CDN. |
-| OCR | `information/ocr`, publicly sourced from OCR.space | `blocked` in this slice and owned by #62: no credential or local OCR runtime is packaged, and #62 owns AI/speech/OCR limits and provider disclosure. |
+| OCR | `information/ocr`, publicly sourced from OCR.space | `implemented` by #62 as bounded local Tesseract OCR through the shared media queue. Exact OCR.space/Greed provider output remains an explicit provider-parity boundary. |
 
 This terminal mapping is intentionally narrower than claiming visual parity from
 command names. If Greed publishes algorithms, licensed assets, or deterministic
