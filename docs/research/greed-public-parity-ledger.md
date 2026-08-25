@@ -24,7 +24,7 @@ Source: [Greed commands](https://greed.best/commands), researched 2026-08-23. Th
 | Information | 86 | #51, #52, #60, #62 | `partial` |
 | Utility | 80 | #35, #42, #43, #46, #51, #52, #53, #55, #56, #58, #60, #62 | `partial` |
 | Moderation | 80 | #36, #37, #38 | `partial` |
-| Fun | 55 | #35, #54, #56 | `partial` |
+| Fun | 55 | #35, #52, #54, #56 | `partial` |
 | Economy | 38 | #48, #49 | `partial` — core accounts, ledger, earnings, banking, jobs, shops, configuration, and administration are implemented; #49 owns games, gangs, laboratories, crime/robbery, and rankings |
 | Roleplay | 3 | #54 | `tracked` |
 | Security | 82 | #36, #39, #40 | `complete` — all mapped public protection surfaces are implemented |
@@ -51,8 +51,8 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | `boosters` | 3 | #43 | `complete` — current/lost booster views and the full custom booster-role lifecycle are reconciled |
 | `developer` | 4 | #64 | `evidence-gap` — absent from the live public category list and may be internal-only |
 | `economy` | 50 | #48, #49 | `complete` — accounts, banking, earnings, games, crime/robbery, gangs, laboratories, rankings, shops, and administration are reconciled; unpublished algorithms remain visibly ByteBot-owned |
-| `fun` | 71 | #35, #54, #56 | `partial` |
-| `information` | 48 | #51, #62 | `partial` |
+| `fun` | 71 | #35, #52, #54, #56 | `partial` |
+| `information` | 48 | #51, #52, #62 | `partial` |
 | `lastfm` | 22 | #57 | `tracked` |
 | `levels` | 8 | #50 | `complete` — every pinned levels subject is implemented or mapped to an explicit alias/evidence decision |
 | `logs` | 7 | #37, #39, #40, #50 | `complete` — every pinned logging subject is implemented or mapped to the shared event-log surface |
@@ -103,6 +103,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | Attachment/member/reply/URL/avatar resolution; pinned public-only downloads; image signatures and dimensions; a single fail-closed processor queue; `/image` resize, rotate, compress, conversion, 16 local effects, caption/compare layouts, and dominant color | #55, #56 | Completes pinned `manipulation` and advances live Manipulation/Fun/Utility. Named provider effects and templates without public algorithms or licensed assets have terminal blocker/evidence-gap mappings; OCR remains owned by #62. | `tests/mediaService.test.js`, `tests/imageManipulation.test.js`, `tests/helpParity.test.js`, and `tests/commands.test.js` |
 | Text/voice levels, rewards, rank-card styling, 15-channel event logging, and 1,095-day real-row analytics | #50 | Completes live/pinned Levels and Logs; advances Server/Settings. Unknown XP algorithms and unavailable historical data remain explicit ByteBot-owned/evidence boundaries. | `tests/levelAnalyticsService.test.js`, `tests/eventLoggingService.test.js`, `tests/levelsAnalyticsCommands.test.js`, and `docs/research/greed-levels-analytics-contract.md` |
 | Universal highest public command/autorole/reaction/log/retention allowances; cached native-helper diagnostics; lazy helpers; and a production 1 CPU/1 GiB Compose profile with event-loop health | #63 | Applies cross-cutting premium maxima without billing, voting, purchase, or entitlement state and packages the cumulative #50/#55/#56/#58/#61/#62 runtime. | `tests/smallVpsPackaging.test.js`, `tests/automationPlatform.test.js`, `tests/roleAutomation.test.js`, `tests/eventLoggingService.test.js`, and `docs/research/greed-small-vps-caps-contract.md` |
+| AFK statuses and custom responses, global time zones, private diary entries, reminder snooze, and expanded birthday input | #52 | Advances live Information/Fun/Utility and pinned `information`/`fun`/`utility`; the broader rows remain `partial` while their other mapped issues are open. Premium custom AFK responses are available without billing. | `tests/personalUtilities.test.js`, `tests/personalAfk.test.js`, `tests/reminder.test.js`, `tests/richContent.test.js`, `tests/commandHubs.test.js`, and `tests/databaseMigrations.test.js` |
 
 ## Update rule
 

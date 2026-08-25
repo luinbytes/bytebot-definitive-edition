@@ -29,6 +29,9 @@ describe('Intent command hubs', () => {
             'info',
             'settings',
             'reminder',
+            'afk',
+            'timezone',
+            'diary',
             'bookmark',
             'birthday',
             'streak',
@@ -44,8 +47,12 @@ describe('Intent command hubs', () => {
         expect(optionNames(findOption(command, 'reminder').options)).toEqual([
             'add',
             'list',
-            'cancel'
+            'cancel',
+            'snooze'
         ]);
+        expect(optionNames(findOption(command, 'afk').options)).toEqual(['set', 'embed', 'reset']);
+        expect(optionNames(findOption(command, 'timezone').options)).toEqual(['view', 'set', 'remove']);
+        expect(optionNames(findOption(command, 'diary').options)).toEqual(['create', 'view', 'delete']);
         expect(optionNames(findOption(command, 'bookmark').options)).toEqual([
             'list',
             'search',

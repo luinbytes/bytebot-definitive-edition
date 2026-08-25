@@ -57,6 +57,10 @@ describe('database migrations', () => {
                 expect.objectContaining({ name: 'dj_role_id' }),
                 expect.objectContaining({ name: 'autoplay', notnull: 1, dflt_value: '0' })
             ]));
+        expect(database.sqlite.prepare("PRAGMA index_list('diary_entries')").all()
+            .some(index => index.unique === 1)).toBe(true);
+        expect(() => database.sqlite.prepare(`INSERT INTO afk_statuses (user_id, status, set_at)
+            VALUES ('user1', ?, 1)`).run('x'.repeat(26))).toThrow();
         expect(() => database.sqlite.prepare(`INSERT INTO economy_accounts
             (scope_type, scope_id, user_id, wallet, bank, created_at, updated_at)
             VALUES ('guild', 'guild1', 'user1', -1, 0, 1, 1)`).run()).toThrow();
