@@ -16,6 +16,7 @@ A highly modular, scalable, and future-proof Discord bot boilerplate built with 
 -   **Server Portability and Presentation**: Versioned guild backups, per-server ByteBot profiles, opt-in discovery listings, and range-aware server cards under `/server`.
 -   **Self-hosted Music**: Bounded operator-owned playback, queues, DJ controls, presets, and curated autoplay under `/music`.
 -   **Information and Lookups**: Discord-native profiles, assets, roles, invites, permissions, and observed name history under `/me` and `/server`, plus bounded web, GitHub, and Roblox lookups under `/lookup` and `/game`.
+-   **Social Reposting**: Mention-safe canonical Instagram, TikTok, and X/Twitter post links under `/repost`; persistent provider feeds remain visibly blocked until their credential and terms gates are satisfied.
 
 ## Project Structure
 

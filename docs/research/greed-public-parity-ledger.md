@@ -35,7 +35,7 @@ Source: [Greed commands](https://greed.best/commands), researched 2026-08-23. Th
 | Server | 164 | #41, #43, #44, #45, #46, #47, #50 | `partial` |
 | Settings | 47 | #36, #37, #41, #43, #54, #57, #58 | `partial` |
 | Levels | 3 | #50 | `partial` |
-| Socials | 31 | #60, #61 | `tracked` |
+| Socials | 31 | #60, #61 | `complete` — lawful keyless lookups and canonical link reposting are implemented; credentialed feeds, downloads, and undocumented auto-reposter behavior have terminal provider/evidence blockers |
 | Manipulation | 99 | #55, #56, #62 | `tracked` |
 | Snipe | 4 | #54 | `tracked` |
 | Unidentified remainder | 29 | #64 | `evidence-gap` — the public page does not name its missing bucket |
@@ -64,7 +64,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | `server` | 214 | #41, #43, #44, #45, #46, #47, #50 | `partial` |
 | `settings` | 42 | #36, #37, #41, #43, #54, #57, #58 | `partial` |
 | `snipe` | 5 | #54 | `tracked` |
-| `socials` | 11 | #60, #61 | `tracked` |
+| `socials` | 11 | #60, #61 | `complete` — implemented public lookups/link reposting plus source-cited provider, licensing, and command-shape blockers reconcile the registry surface |
 | `utility` | 123 | #35, #42, #43, #46, #51, #52, #53, #55, #58, #60, #62 | `partial` |
 | `voice` | 33 | #59 | `partial` |
 | **Total** | **912** | #35–#64 | Mixed |
@@ -98,6 +98,7 @@ Source: [`greedbest/i18n` commit `3dadc41852a09567add8a6b2b522d5e2b1a53b2f`](htt
 | Twelve wager games with durable interactive sessions, crime/robbery, race-safe gangs, passive-income laboratories, and committed guild rankings | #49 | Completes all 50 pinned Economy files. Public names, bounds, and errors match first-party evidence; unpublished odds/progression use the frozen ByteBot-owned rules contract. | `tests/economyProgression.test.js`, `tests/economyCommand.test.js`, `tests/helpParity.test.js`, `tests/interactionAcknowledgement.test.js`, `tests/databaseMigrations.test.js`, and `tests/schema.test.js` |
 | Discord profiles/assets, roles, permissions, invites, observed name history, remote server facts, bounded calculation/QR/weather/definition/translation, and configured website screenshots | #51 | Advances live Information/Utility and pinned `information`/`utility`; those broader rows remain `partial` because #52, #53, #55, #58, #60, and #62 still own mapped families. | `tests/informationLookupService.test.js`, `tests/informationLookupCommands.test.js`, `tests/commandHubs.test.js`, and `tests/helpParity.test.js` |
 | Public GitHub profiles/repository search/commit-email search and public Roblox profiles/presence/games/groups/outfits; credentialed or contract-prohibited social providers retained as explicit blockers | #60 | Advances live Information/Utility/Socials and pinned `information`/`socials`/`utility`; Socials remains `partial` because #61 owns feeds and reposters. GitHub contributions and providers without a lawful keyless contract remain visibly blocked. | `tests/informationLookupService.test.js`, `tests/informationLookupCommands.test.js`, `tests/commandHubs.test.js`, and `docs/research/greed-social-game-lookups-contract.md` |
+| Canonical Instagram, TikTok, and X/Twitter link reposting with no scrape/download path; all eight persistent feed providers and the undocumented auto-reposter behavior retained as source-cited terminal blockers | #61 | Completes live and pinned Socials together with #60. No dormant scheduler, token storage, billing gate, or invented crawler is shipped while the provider and evidence gates remain closed. | `tests/socialRepost.test.js`, `tests/helpParity.test.js`, and `docs/research/greed-social-feeds-contract.md` |
 
 ## Update rule
 
