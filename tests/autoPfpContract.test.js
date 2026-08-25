@@ -5,13 +5,17 @@ describe('AutoPFP terminal provider contract', () => {
     test('registers the documented Administrator-only slash surface', () => {
         const json = autopfp.data.toJSON();
         expect(json.name).toBe('autopfp');
+        expect(json.dm_permission).toBe(false);
         expect(json.default_member_permissions).toBe(PermissionFlagsBits.Administrator.toString());
         expect(json.options.map(option => option.name)).toEqual(['add', 'interval', 'test', 'list', 'remove']);
+        expect(json.options[0].options.find(option => option.name === 'categories').choices.map(choice => choice.value))
+            .toEqual(['anime', 'cats', 'eboys', 'egirls', 'girls', 'roadmen']);
     });
 
     test('fails closed without creating configuration or a webhook', async () => {
         const reply = jest.fn();
         await autopfp.execute({
+            guild: { id: 'guild1' },
             member: { permissions: { has: jest.fn().mockReturnValue(true) } },
             options: { getSubcommand: jest.fn().mockReturnValue('add') },
             reply

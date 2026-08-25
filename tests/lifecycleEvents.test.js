@@ -48,6 +48,18 @@ describe('lifecycle event routing', () => {
         expect(mockSendJoinDm).toHaveBeenCalledWith(target);
     });
 
+    test('does not welcome after a punitive AutoMod join action or failed enforcement', async () => {
+        mockHandleAutomodMemberUpdate.mockResolvedValueOnce({ filter: 'nicknames', action: 'kick' });
+        await joined.execute(member());
+        expect(mockSendLifecycleMessage).not.toHaveBeenCalled();
+        expect(mockSendJoinDm).not.toHaveBeenCalled();
+
+        mockHandleAutomodMemberUpdate.mockRejectedValueOnce(new Error('Discord unavailable'));
+        await joined.execute(member({ id: 'user2' }));
+        expect(mockSendLifecycleMessage).not.toHaveBeenCalled();
+        expect(mockSendJoinDm).not.toHaveBeenCalled();
+    });
+
     test('routes member removals to goodbye messaging', async () => {
         const target = member();
         await removed.execute(target);

@@ -113,7 +113,7 @@ tests. It supersedes the earlier claim that Join DM grammar was unpublished:
 
 The #52, #53, #54, and #57 delivery branches are now ancestors of this
 cumulative branch. Their colliding migrations were serialized as 0034-0037;
-the final drift migration is 0038. The 912-row path inventory is
+the final drift migrations are 0038-0040. The 912-row path inventory is
 [`greed-command-registry-inventory.csv`](greed-command-registry-inventory.csv).
 
 The full delivery audit follows repository history rather than manufacturing

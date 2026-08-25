@@ -15,11 +15,14 @@ module.exports = {
         try {
             const incident = await handleMemberJoin(member);
             if (incident) return;
+            let automodIncident;
             try {
-                await handleAutomodMemberUpdate({ displayName: null, nickname: null }, member);
+                automodIncident = await handleAutomodMemberUpdate({ displayName: null, nickname: null }, member);
             } catch (error) {
                 logger.error(`AutoMod nickname handler failed for joining member ${member.id}: ${error.message}`);
+                return;
             }
+            if (automodIncident && automodIncident.action !== 'delete') return;
             try {
                 await sendLifecycleMessage('welcome', member);
                 await sendJoinDm(member);

@@ -155,7 +155,8 @@ function buttonFor(value, context) {
         danger: ButtonStyle.Danger, red: ButtonStyle.Danger
     }[String(options.style || 'secondary').toLowerCase()];
     if (!style) throw new Error(`Unknown button style: ${options.style}`);
-    return button.setStyle(style).setCustomId(`rich:custom:${custom}`)
+    const guild = context?.customButtonGuildId ? `${context.customButtonGuildId}:` : '';
+    return button.setStyle(style).setCustomId(`rich:custom:${guild}${custom}`)
         .setDisabled(parts.includes('disabled') || !context?.customScripts?.has(custom));
 }
 
@@ -559,18 +560,21 @@ class RichContentService {
     }
 
     async handleCustomButton(interaction) {
-        const name = interaction.customId.slice('rich:custom:'.length);
-        const rule = this.getCustom(interaction.guildId, name);
+        const parts = interaction.customId.slice('rich:custom:'.length).split(':');
+        const boundGuildId = parts.length === 2 ? parts.shift() : interaction.guildId;
+        const name = parts[0];
+        const rule = this.getCustom(boundGuildId, name);
         if (!rule) {
             return interaction.reply({ content: 'That custom response is no longer available.', flags: MessageFlags.Ephemeral });
         }
+        const guild = interaction.guild || this.client.guilds.cache.get(boundGuildId);
         const payload = this.render(configOf(rule).script, {
-            user: interaction.user, member: interaction.member, guild: interaction.guild,
-            channel: interaction.channel
+            user: interaction.user, member: interaction.member, guild,
+            channel: interaction.channel, customButtonGuildId: boundGuildId
         });
         payload.flags = (payload.flags || 0) | MessageFlags.Ephemeral;
         await interaction.reply(payload);
-        this.useCustom(interaction.guildId, name);
+        this.useCustom(boundGuildId, name);
         return true;
     }
 

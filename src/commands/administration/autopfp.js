@@ -8,9 +8,13 @@ module.exports = {
         .setName('autopfp')
         .setDescription('Configure automatic profile-picture posts')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .setDMPermission(false)
         .addSubcommand(sub => sub.setName('add').setDescription('Add an AutoPFP channel')
             .addChannelOption(opt => opt.setName('channel').setDescription('Posting channel').addChannelTypes(ChannelType.GuildText).setRequired(true))
-            .addStringOption(opt => opt.setName('categories').setDescription('Comma-separated image categories').setRequired(true)))
+            .addStringOption(opt => opt.setName('categories').setDescription('Image category').setRequired(true).addChoices(
+                { name: 'Anime', value: 'anime' }, { name: 'Cats', value: 'cats' }, { name: 'Eboys', value: 'eboys' },
+                { name: 'Egirls', value: 'egirls' }, { name: 'Girls', value: 'girls' }, { name: 'Roadmen', value: 'roadmen' }
+            )))
         .addSubcommand(sub => sub.setName('interval').setDescription('Change a channel posting interval')
             .addChannelOption(opt => opt.setName('channel').setDescription('Configured channel').addChannelTypes(ChannelType.GuildText).setRequired(true))
             .addStringOption(opt => opt.setName('duration').setDescription('Between 2 minutes and 1 day').setRequired(true)))
@@ -22,7 +26,7 @@ module.exports = {
     permissions: [PermissionFlagsBits.Administrator],
 
     async execute(interaction) {
-        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        if (!interaction.guild || !interaction.member?.permissions?.has(PermissionFlagsBits.Administrator)) {
             return interaction.reply({ embeds: [embeds.error('Access Denied', 'You need Administrator to manage AutoPFP.')], flags: [MessageFlags.Ephemeral] });
         }
         const list = interaction.options.getSubcommand() === 'list';

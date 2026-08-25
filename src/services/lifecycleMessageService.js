@@ -1,4 +1,4 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags } = require('discord.js');
 const { sqlite } = require('../database');
 const embeds = require('../utils/embeds');
 const logger = require('../utils/logger');
@@ -16,7 +16,7 @@ const MAX_WELCOMES_PER_MINUTE = 20;
 const MAX_JOIN_DMS_PER_MINUTE = 40;
 const MAX_JOIN_DMS_PER_HOUR = 750;
 const welcomeWindows = new Map();
-const EMBED_KEYS = new Set(['embed', 'content', 'title', 'description', 'color', 'url', 'image', 'thumbnail', 'timestamp', 'author', 'field', 'fields', 'footer', 'button']);
+const EMBED_KEYS = new Set(['cv2', 'embed', 'content', 'title', 'description', 'color', 'url', 'image', 'thumbnail', 'timestamp', 'author', 'field', 'fields', 'footer', 'button']);
 
 function ordinal(number) {
     const mod100 = number % 100;
@@ -41,6 +41,13 @@ function valuesFor(member, channel = null) {
     const topRole = member.roles?.highest?.id === guild.id ? null : member.roles?.highest;
     const boostAt = member.premiumSince || null;
     const count = Number(guild.memberCount || 0);
+    const joinedMembers = [...(guild.members?.cache?.values?.() || [])]
+        .filter(item => item.joinedTimestamp != null)
+        .sort((left, right) => left.joinedTimestamp - right.joinedTimestamp);
+    const joinedIndex = joinedMembers.findIndex(item => item.id === (member.id || user.id));
+    const joinPosition = joinedIndex < 0 ? count : joinedIndex + 1;
+    const userTag = user.tag || (user.discriminator && user.discriminator !== '0'
+        ? `${user.username}#${user.discriminator}` : user.username || 'Unknown');
     const guildCreatedAt = guild.createdAt || now;
     const channelCreatedAt = channel?.createdAt || now;
     return {
@@ -48,7 +55,7 @@ function valuesFor(member, channel = null) {
         'user.id': user.id || member.id, 'user.avatar': avatar, 'user.display_avatar': avatar,
         'user.banner': user.bannerURL?.({ size: 1024 }) || '',
         username: user.username || 'Unknown', 'user.name': user.username || 'Unknown',
-        tag: user.discriminator || '0', 'user.tag': user.discriminator || '0',
+        tag: userTag, 'user.tag': userTag,
         displayname: member.displayName || user.displayName || user.username || 'Unknown',
         'user.display_name': member.displayName || user.displayName || user.username || 'Unknown',
         'user.nick': member.nickname || member.displayName || '', 'user.role_count': String(roles.length),
@@ -56,7 +63,7 @@ function valuesFor(member, channel = null) {
         'user.role_list': roles.map(role => role.name).join(', '),
         'user.role_text_list': roles.map(role => `<@&${role.id}>`).join(', '),
         'user.top_role': topRole?.name || 'N/A', 'user.color': topRole?.hexColor || member.displayHexColor || 'N/A',
-        'user.join_position': count ? String(count) : 'N/A', 'user.join_position_suffix': count ? ordinal(count) : 'N/A',
+        'user.join_position': joinPosition ? String(joinPosition) : 'N/A', 'user.join_position_suffix': joinPosition ? ordinal(joinPosition) : 'N/A',
         'user.bot': user.bot ? 'Yes' : 'No', 'user.boost': member.premiumSince ? 'Yes' : 'No',
         'user.created_at': full(createdAt), 'user.created_at_timestamp': String(Math.floor(createdAt.getTime() / 1000)),
         'user.created_at_iso': createdAt.toISOString(), 'user.created_at_date': isoDate(createdAt),
@@ -82,7 +89,7 @@ function valuesFor(member, channel = null) {
         accountAgeDays: String(accountAgeDays), accountagedays: String(accountAgeDays),
         accountAgeMonths: String(Math.floor(accountAgeDays / 30)), accountagemonths: String(Math.floor(accountAgeDays / 30)),
         boostCount: String(guild.premiumSubscriptionCount || 0), boostLevel: String(guild.premiumTier || 0),
-        'guild.boost_count': String(guild.premiumSubscriptionCount || 0), 'guild.boost_tier': String(guild.premiumTier || 0),
+        'guild.boost_count': String(guild.premiumSubscriptionCount || 0), 'guild.boost_tier': guild.premiumTier ? String(guild.premiumTier) : 'No Level',
         channel: channel?.name || '', 'channel.id': channel?.id || '',
         'channel.name': channel?.name || '', 'channel.mention': channel ? `<#${channel.id}>` : '',
         'channel.topic': channel?.topic || '', 'channel.category_id': channel?.parentId || '',
@@ -132,10 +139,17 @@ function renderConditionals(template, values) {
         branches.push({ condition, content: match[2].slice(cursor) });
         const chosen = branches.find(branch => {
             if (branch.condition === null) return true;
-            const comparison = branch.condition.match(/^(.+?)\s*(==|!=)\s*(.+)$/);
+            const comparison = branch.condition.match(/^(.+?)\s*(==|!=|<=|>=|<|>)\s*(.+)$/);
             if (comparison) {
-                const equal = conditionalValue(comparison[1], values).toLowerCase() === conditionalValue(comparison[3], values).toLowerCase();
-                return comparison[2] === '==' ? equal : !equal;
+                const left = conditionalValue(comparison[1], values);
+                const right = conditionalValue(comparison[3], values);
+                const equal = left.toLowerCase() === right.toLowerCase();
+                if (comparison[2] === '==') return equal;
+                if (comparison[2] === '!=') return !equal;
+                const numbers = [Number(left), Number(right)];
+                if (!numbers.every(Number.isFinite)) return false;
+                return { '<': numbers[0] < numbers[1], '<=': numbers[0] <= numbers[1],
+                    '>': numbers[0] > numbers[1], '>=': numbers[0] >= numbers[1] }[comparison[2]];
             }
             return !['', 'false', 'no', '0', 'none', 'null'].includes(conditionalValue(branch.condition, values).toLowerCase());
         });
@@ -182,9 +196,11 @@ function setConfig(guildId, type, changes) {
     }
     return sqlite.transaction(() => {
         const current = getConfig(guildId, type) || {};
+        const promoted = changes.channelId === undefined ? null : sqlite.prepare(`SELECT template FROM lifecycle_message_channels
+            WHERE guild_id = ? AND type = ? AND channel_id = ?`).get(guildId, type, changes.channelId);
         const row = {
             channelId: changes.channelId === undefined ? current.channel_id || null : changes.channelId,
-            template: changes.template === undefined ? current.template || null : changes.template,
+            template: changes.template === undefined ? promoted?.template || current.template || null : changes.template,
             enabled: changes.enabled === undefined ? Number(current.enabled || 0) : Number(changes.enabled),
             format: changes.format === undefined ? current.format || 'embed' : changes.format,
             deleteAfter: changes.deleteAfterSeconds === undefined ? current.delete_after_seconds || null : changes.deleteAfterSeconds
@@ -367,20 +383,19 @@ function buildPayload(config, member, test = false, channel = null, template = c
     const rich = member.client?.richContentService || member.guild.client?.richContentService;
     const expanded = rich?.expandCustom ? rich.expandCustom(template, member.guild.id) : template;
     const rendered = renderTemplate(expanded, member, channel);
-    const content = (test ? `[Test] ${rendered}` : rendered).slice(0, 2000);
+    const content = rendered.slice(0, 2000);
     const allowedMentions = { parse: [], users: [member.id || member.user.id], roles: [], repliedUser: false };
     if (rich && /^\s*\{(?:cv2(?::)?|embed|content\s*:)/i.test(rendered)) {
-        const payload = rich.render(rendered, { user: member.user, member, guild: member.guild, channel });
-        if (test && !payload.flags) payload.content = `[Test]${payload.content ? ` ${payload.content}` : ''}`;
+        const payload = rich.render(rendered, { user: member.user, member, guild: member.guild, channel,
+            customButtonGuildId: member.guild.id });
         return { ...payload, allowedMentions };
     }
     if (/\{embed\}/i.test(rendered)) {
         const payload = parseEmbedScript(rendered);
-        if (test) payload.content = `[Test]${payload.content ? ` ${payload.content}` : ''}`;
         return { ...payload, allowedMentions };
     }
     if (config.format === 'text') return { content, allowedMentions };
-    const embed = embeds.brand(`${test ? 'Test ' : ''}${config.type[0].toUpperCase()}${config.type.slice(1)}`, rendered.slice(0, 4096));
+    const embed = embeds.brand(`${config.type[0].toUpperCase()}${config.type.slice(1)}`, rendered.slice(0, 4096));
     const avatar = member.user?.displayAvatarURL?.({ size: 256 });
     if (avatar) embed.setThumbnail(avatar);
     return { embeds: [embed], allowedMentions };
@@ -412,7 +427,14 @@ async function sendLifecycleMessage(type, member, { test = false } = {}) {
         if (!channel) continue;
         const override = channelId === config.channel_id ? null : sqlite.prepare(`SELECT template FROM lifecycle_message_channels
             WHERE guild_id = ? AND type = ? AND channel_id = ?`).get(member.guild.id, type, channelId)?.template;
-        const message = await safeChannelSend(channel, buildPayload(config, member, test, channel, override || config.template || DEFAULTS[type]), { logContext: `${type}-message` });
+        let payload;
+        try {
+            payload = buildPayload(config, member, test, channel, override || config.template || DEFAULTS[type]);
+        } catch (error) {
+            logger.warn(`Failed to render ${type} message for channel ${channelId}: ${error.message}`);
+            continue;
+        }
+        const message = await safeChannelSend(channel, payload, { logContext: `${type}-message` });
         if (!message) continue;
         sent.push(message);
         if (config.delete_after_seconds) {
@@ -430,7 +452,15 @@ async function sendJoinDm(member, { test = false } = {}) {
     const payloadFor = isTest => {
         const payload = buildPayload(config, member, isTest);
         payload.allowedMentions = { parse: [], users: [], roles: [], repliedUser: false };
-        if ((payload.components?.length || 0) >= 5) throw new Error('Join DM scripts may use at most four component rows because Server Info is always attached.');
+        if (payload.flags === MessageFlags.IsComponentsV2) {
+            const count = component => 1
+                + (component.components || []).reduce((sum, child) => sum + count(child), 0)
+                + (component.accessory ? count(component.accessory) : 0);
+            const total = (payload.components || []).map(component => component.toJSON()).reduce((sum, component) => sum + count(component), 0);
+            if (total > 38) throw new Error('Join DM Components V2 scripts may use at most 38 components because Server Info is always attached.');
+        } else if ((payload.components?.length || 0) >= 5) {
+            throw new Error('Join DM scripts may use at most four component rows because Server Info is always attached.');
+        }
         payload.components = [...(payload.components || []), new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`join_dm:info:${member.guild.id}:${member.id}`).setLabel('Server Info').setStyle(ButtonStyle.Secondary)
         )];

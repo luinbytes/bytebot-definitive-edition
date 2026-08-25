@@ -172,6 +172,11 @@ async function executeLifecycle(interaction) {
                         : lifecycle.removeLifecycleChannel(interaction.guild.id, type, channel.id));
             return interaction.editReply({ embeds: [settingsEmbed(type, lifecycle.getConfig(interaction.guild.id, type))] });
         }
+        if (type === 'boost' && subcommand === 'view') {
+            const result = await lifecycle.sendLifecycleMessage(type, interaction.member, { test: true });
+            if (result.status !== 'sent') throw new Error(`Preview could not be sent: ${result.status}.`);
+            return interaction.editReply({ embeds: [embeds.success('Preview Sent', 'The boost message was rendered in its configured channel.')] });
+        }
         if (subcommand === 'view' || subcommand === 'settings') return interaction.editReply({ embeds: [settingsEmbed(type, lifecycle.getConfig(interaction.guild.id, type))] });
         if (subcommand === 'variables') {
             return interaction.editReply({ embeds: [embeds.brand('Lifecycle Variables', '`{user}` `{username}` `{displayname}` `{server}` `{memberCount}` `{memberNumber}` `{joinedAt}` `{createdAt}` `{accountAgeDays}` `{boostCount}` `{boostLevel}`\nGreed aliases such as `{user.name}`, `{user.mention}`, and `{guild.name}` are also supported.')] });
@@ -184,7 +189,6 @@ async function executeLifecycle(interaction) {
         if (subcommand === 'reset' || subcommand === 'remove') {
             await recorded(interaction, `LIFECYCLE_${type.toUpperCase()}_RESET`, () => {
                 lifecycle.resetConfig(interaction.guild.id, type);
-                if (type === 'welcome') lifecycle.resetConfig(interaction.guild.id, 'join_dm');
             });
         } else {
             const changes = {};

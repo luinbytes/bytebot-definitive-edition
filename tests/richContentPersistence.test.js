@@ -78,6 +78,21 @@ describe('rich-content persistence', () => {
         expect(JSON.parse(service.getCustom('guild1', 'rules').config).useCount).toBe(1);
     });
 
+    test('guild-bound custom buttons resolve from direct messages', async () => {
+        const guild = { id: 'guild1', name: 'Guild' };
+        service.client = { guilds: { cache: new Map([[guild.id, guild]]) } };
+        await service.saveCustom(guild.id, 'admin1', 'rules', '{content: Bound {guild.name}}');
+        const interaction = {
+            customId: 'rich:custom:guild1:rules', guildId: null, guild: null, channel: { id: 'dm1' },
+            user: { id: 'user1', username: 'Ada' }, reply: jest.fn().mockResolvedValue({})
+        };
+
+        await service.handleCustomButton(interaction);
+
+        expect(interaction.reply.mock.calls[0][0].content).toBe('Bound Guild');
+        expect(JSON.parse(service.getCustom(guild.id, 'rules').config).useCount).toBe(1);
+    });
+
     test('saved embeds follow their owner and publishing enforces the highest public cap', async () => {
         await service.saveEmbed('user1', 'Welcome', '{embed}$v{title: Hello}');
         expect(JSON.parse(service.getEmbed('user1', 'welcome').config).script).toContain('Hello');

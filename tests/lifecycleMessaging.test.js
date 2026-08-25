@@ -78,7 +78,7 @@ describe('lifecycle messaging', () => {
             content: expect.stringContaining('<@user1>'),
             allowedMentions: { parse: [], users: ['user1'], roles: [], repliedUser: false }
         }));
-        expect(channel.send.mock.calls[1][0].content).toContain('[Test]');
+        expect(channel.send.mock.calls[1][0].content).toBe(channel.send.mock.calls[0][0].content);
     });
 
     test('welcome and goodbye support four delivery channels', () => {
@@ -99,9 +99,11 @@ describe('lifecycle messaging', () => {
     test('promoting an extra channel removes its duplicate destination row', () => {
         lifecycle.setConfig('guild1', 'welcome', { channelId: 'primary' });
         lifecycle.addLifecycleChannel('guild1', 'welcome', 'extra');
+        lifecycle.setLifecycleChannelTemplate('guild1', 'welcome', 'extra', 'Promoted custom');
         lifecycle.setConfig('guild1', 'welcome', { channelId: 'extra' });
 
         expect(lifecycle.listLifecycleChannels('guild1', 'welcome')).toEqual(['extra']);
+        expect(lifecycle.getConfig('guild1', 'welcome').template).toBe('Promoted custom');
         expect(database.sqlite.prepare(`SELECT COUNT(*) count FROM lifecycle_message_channels
             WHERE guild_id = 'guild1' AND type = 'welcome' AND channel_id = 'extra'`).get().count).toBe(0);
     });
@@ -127,9 +129,17 @@ describe('lifecycle messaging', () => {
         const { value: server } = guild();
         const target = member(server);
         target.user.bot = false;
+        target.user.discriminator = '1234';
+        target.user.tag = null;
+        target.joinedTimestamp = target.joinedAt.getTime();
+        server.premiumTier = 0;
+        server.members.cache = new Map([
+            ['older', { id: 'older', joinedTimestamp: target.joinedTimestamp - 1 }],
+            [target.id, target]
+        ]);
         expect(lifecycle.renderTemplate(
-            '{if {user.bot} == No}{lower(user.name)} joined {guild.name} {user.created_at:R}{else}bot{/if}', target
-        )).toBe('user joined Guild <t:1577836800:R>');
+            '{if {user.join_position} < 100}{lower(user.name)} {user.tag} joined {user.join_position_suffix} at {user.created_at:R} on {guild.boost_tier}{else}full{/if}', target
+        )).toBe('user User#1234 joined 2nd at <t:1577836800:R> on No Level');
     });
 
     test('expands saved custom scripts through the bounded rich-content service', async () => {
@@ -140,6 +150,54 @@ describe('lifecycle messaging', () => {
         expect((await lifecycle.sendLifecycleMessage('welcome', member(server))).status).toBe('sent');
         expect(server.client.richContentService.expandCustom).toHaveBeenCalledWith('{cscript:greeting}', server.id);
         expect(channel.send.mock.calls[0][0].content).toBe('Expanded User');
+    });
+
+    test('accepts Components V2 and reserves two components for Join DM Server Info', async () => {
+        const { value: server } = guild();
+        const rich = require('../src/services/richContentService');
+        server.client = { richContentService: { expandCustom: script => script, render: rich.renderScript } };
+        const target = member(server);
+        target.send = jest.fn().mockResolvedValue({ id: 'dm1' });
+        expect(() => lifecycle.validateTemplate('{cv2}{text: Welcome {user}}')).not.toThrow();
+        lifecycle.setConfig(server.id, 'join_dm', { enabled: true, template: `{cv2}${'{text: x}'.repeat(38)}` });
+        expect((await lifecycle.sendJoinDm(target)).status).toBe('sent');
+        lifecycle.setConfig(server.id, 'join_dm', { template: `{cv2}${'{text: x}'.repeat(39)}` });
+        expect((await lifecycle.sendJoinDm(target)).status).toBe('failed');
+    });
+
+    test('binds Join DM custom-script buttons to their source guild', async () => {
+        const { value: server } = guild();
+        const rich = require('../src/services/richContentService');
+        server.client = { richContentService: {
+            expandCustom: script => script,
+            render: (script, context) => rich.renderScript(script, { ...context, customScripts: new Set(['rules']) })
+        } };
+        const target = member(server);
+        target.send = jest.fn().mockResolvedValue({ id: 'dm1' });
+        lifecycle.setConfig(server.id, 'join_dm', {
+            enabled: true, template: '{cv2}{button: label: Rules && custom: rules}'
+        });
+
+        expect((await lifecycle.sendJoinDm(target)).status).toBe('sent');
+        expect(target.send.mock.calls[0][0].components[0].toJSON().components[0].custom_id)
+            .toBe('rich:custom:guild1:rules');
+    });
+
+    test('a render failure in one destination does not block later channels', async () => {
+        const broken = { id: 'broken', send: jest.fn() };
+        const healthy = { id: 'healthy', send: jest.fn().mockResolvedValue({ delete: jest.fn() }) };
+        const { value: server } = guild();
+        server.channels.fetch = jest.fn(id => Promise.resolve({ broken, healthy }[id]));
+        server.client = { richContentService: {
+            expandCustom: (script, guildId) => script.includes('missing') ? (() => { throw new Error(`Missing script in ${guildId}`); })() : script
+        } };
+        lifecycle.setConfig(server.id, 'welcome', { channelId: broken.id, enabled: true, template: '{cscript:missing}', format: 'text' });
+        lifecycle.addLifecycleChannel(server.id, 'welcome', healthy.id);
+        lifecycle.setLifecycleChannelTemplate(server.id, 'welcome', healthy.id, 'Healthy {user}');
+
+        expect((await lifecycle.sendLifecycleMessage('welcome', member(server))).status).toBe('sent');
+        expect(broken.send).not.toHaveBeenCalled();
+        expect(healthy.send).toHaveBeenCalledTimes(1);
     });
 
     test('welcome and goodbye suppress bots and welcome pauses after 20 human joins per minute', async () => {
@@ -260,5 +318,48 @@ describe('lifecycle messaging', () => {
         expect(lifecycle.getConfig(server.id, 'boost')).toBeNull();
         await command.executeLifecycle(interaction('channel', channel));
         expect(lifecycle.getConfig(server.id, 'boost')).toEqual(expect.objectContaining({ enabled: 1, channel_id: channel.id }));
+    });
+
+    test('Welcome reset leaves separately managed Join DM state intact', async () => {
+        const command = require('../src/utils/lifecycleMessageCommand');
+        const { value: server } = guild();
+        lifecycle.setConfig(server.id, 'welcome', { channelId: 'channel1', enabled: true });
+        lifecycle.setConfig(server.id, 'join_dm', { enabled: true, template: 'Direct' });
+        database.sqlite.prepare("INSERT INTO join_dm_deliveries (guild_id, user_id, sent_at) VALUES ('guild1', 'user1', ?)").run(Date.now());
+        const interaction = {
+            guild: server, user: { id: 'admin1' },
+            member: { permissions: { has: jest.fn().mockReturnValue(true) } },
+            options: {
+                getSubcommandGroup: () => 'welcome', getSubcommand: () => 'reset',
+                getChannel: () => null, getString: () => null, getInteger: () => null
+            },
+            deferReply: jest.fn(), editReply: jest.fn(), reply: jest.fn()
+        };
+
+        await command.executeLifecycle(interaction);
+
+        expect(lifecycle.getConfig(server.id, 'join_dm')).toEqual(expect.objectContaining({ enabled: 1, template: 'Direct' }));
+        expect(database.sqlite.prepare('SELECT COUNT(*) count FROM join_dm_deliveries').get().count).toBe(1);
+    });
+
+    test('Boost view renders the exact configured message while settings remains configuration-only', async () => {
+        const command = require('../src/utils/lifecycleMessageCommand');
+        const { value: server, channel } = guild();
+        lifecycle.setConfig(server.id, 'boost', { channelId: channel.id, enabled: true, template: 'Boost {user}', format: 'text' });
+        const target = member(server);
+        target.permissions = { has: jest.fn().mockReturnValue(true) };
+        const interaction = {
+            guild: server, user: target.user, member: target,
+            options: {
+                getSubcommandGroup: () => 'boost', getSubcommand: () => 'view',
+                getChannel: () => null, getString: () => null, getInteger: () => null
+            },
+            deferReply: jest.fn(), editReply: jest.fn(), reply: jest.fn()
+        };
+
+        await command.executeLifecycle(interaction);
+
+        expect(channel.send.mock.calls[0][0].content).toBe('Boost User');
+        expect(interaction.editReply.mock.calls[0][0].embeds[0].data.title).toContain('Preview Sent');
     });
 });
