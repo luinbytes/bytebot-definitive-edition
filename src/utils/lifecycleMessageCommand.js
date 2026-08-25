@@ -51,6 +51,7 @@ function addMessageGroup(builder, type) {
         }
         if (type === 'boost') {
             group
+                .addSubcommand(sub => sub.setName('preview').setDescription('Preview the boost message'))
                 .addSubcommand(sub => sub.setName('settings').setDescription('View boost settings'))
                 .addSubcommand(sub => sub.setName('remove').setDescription('Remove boost settings'));
         }

@@ -51,7 +51,7 @@ gates.
 
 PR #94's exact head and every remaining reviewed slice are ancestors of the
 final #64 integration branch. The cumulative ancestry, including serialized
-migrations 0034-0038, is recorded in
+migrations 0034-0040, is recorded in
 [`greed-final-reconciliation-contract.md`](greed-final-reconciliation-contract.md).
 
 ## Helper inventory and lifecycle

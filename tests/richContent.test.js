@@ -24,6 +24,25 @@ describe('Greed-compatible rich content', () => {
         expect(payload.allowedMentions).toEqual({ parse: [], repliedUser: false });
     });
 
+    test('renders Greed lifecycle variables consistently in custom responses', () => {
+        const { renderScript } = require('../src/services/richContentService');
+        const member = {
+            id: '10', joinedTimestamp: 2, premiumSince: null, displayHexColor: '#123456',
+            user: { id: '10', username: 'Member', bot: false },
+            roles: { highest: { id: 'role1', name: 'Member', hexColor: '#123456' } }
+        };
+        const guild = {
+            id: '20', name: 'Guild', memberCount: 2, premiumTier: 0,
+            members: { cache: new Map([['older', { id: 'older', joinedTimestamp: 1 }], [member.id, member]]) }
+        };
+        const payload = renderScript(
+            '{content: {user.bot}|{user.boost}|{user.top_role}|{user.color}|{user.join_position}|{guild.boost_tier}|{channel.topic}}',
+            { member, guild, channel: { id: '30' } }
+        );
+
+        expect(payload.content).toBe('No|No|Member|#123456|2|No Level|N/A');
+    });
+
     test('leaves AFK-only variables untouched outside an AFK context', () => {
         const { renderScript } = require('../src/services/richContentService');
 

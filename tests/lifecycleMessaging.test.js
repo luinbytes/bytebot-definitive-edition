@@ -297,7 +297,7 @@ describe('lifecycle messaging', () => {
         const dm = server.options.find(option => option.name === 'welcome').options.find(option => option.name === 'dm');
         expect(dm.options.find(option => option.name === 'action').choices.map(choice => choice.value))
             .toEqual(['enable', 'disable', 'toggle', 'message', 'config', 'view', 'settings', 'show', 'test', 'preview', 'reset', 'clear']);
-        expect(groups.boost).toEqual(expect.arrayContaining(['setup', 'channel', 'settings', 'remove', 'test', 'reset']));
+        expect(groups.boost).toEqual(expect.arrayContaining(['setup', 'channel', 'settings', 'remove', 'test', 'preview', 'reset']));
         expect(groups.system).toEqual(['channel', 'welcome', 'boost', 'sticker']);
     });
 

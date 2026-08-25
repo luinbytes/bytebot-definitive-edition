@@ -16,6 +16,11 @@ function renderVariables(script, context = {}) {
     const subject = member?.user || user || member;
     const mentionerAvatar = mentioner?.displayAvatarURL?.() || mentioner?.avatarURL?.() || '';
     const avatar = subject?.displayAvatarURL?.() || subject?.avatarURL?.() || '';
+    const joinedMembers = [...(guild?.members?.cache?.values?.() || [])]
+        .filter(item => item.joinedTimestamp != null)
+        .sort((left, right) => left.joinedTimestamp - right.joinedTimestamp);
+    const joinedIndex = joinedMembers.findIndex(item => item.id === (member?.id || subject?.id));
+    const joinPosition = joinedIndex < 0 ? Number(guild?.memberCount || 0) : joinedIndex + 1;
     const values = {
         user: subject?.username || '',
         'user.id': subject?.id || member?.id || '',
@@ -25,26 +30,28 @@ function renderVariables(script, context = {}) {
         'user.banner': subject?.bannerURL?.() || '',
         'user.tag': subject?.tag || subject?.username || '',
         'user.created_at': subject?.createdAt?.toISOString?.() || '',
-        'user.bot': String(Boolean(subject?.bot)),
+        'user.bot': subject?.bot ? 'Yes' : 'No',
         'user.display_name': member?.displayName || subject?.displayName || subject?.username || '',
-        'user.top_role': member?.roles?.highest?.id ? `<@&${member.roles.highest.id}>` : '',
-        'user.color': member?.displayHexColor || '',
+        'user.top_role': member?.roles?.highest?.name || 'N/A',
+        'user.color': member?.roles?.highest?.hexColor || member?.displayHexColor || 'N/A',
+        'user.join_position': joinPosition ? String(joinPosition) : 'N/A',
         'member.display_name': member?.displayName || subject?.displayName || subject?.username || '',
         'member.nick': member?.nickname || '',
         'member.roles': member?.roles?.cache?.filter?.(role => role.id !== guild?.id).map?.(role => `<@&${role.id}>`).join(', ') || '',
-        'member.boost': String(Boolean(member?.premiumSince)),
+        'member.boost': member?.premiumSince ? 'Yes' : 'No',
+        'user.boost': member?.premiumSince ? 'Yes' : 'No',
         'guild.id': guild?.id || '',
         'guild.name': guild?.name || '',
         'guild.count': String(guild?.memberCount || 0),
         'guild.member_count': String(guild?.memberCount || 0),
         'guild.boost_count': String(guild?.premiumSubscriptionCount || 0),
-        'guild.boost_tier': String(guild?.premiumTier || 0),
+        'guild.boost_tier': guild?.premiumTier ? String(guild.premiumTier) : 'No Level',
         'guild.owner': guild?.ownerId ? `<@${guild.ownerId}>` : '',
         'guild.icon': guild?.iconURL?.() || '',
         'channel.id': channel?.id || '',
         'channel.name': channel?.name || '',
         'channel.mention': channel?.id ? `<#${channel.id}>` : '',
-        'channel.topic': channel?.topic || '',
+        'channel.topic': channel?.topic || 'N/A',
         ...(message === undefined ? {} : { message }),
         ...(time === undefined ? {} : { time }),
         ...(mentioner ? {
@@ -568,8 +575,10 @@ class RichContentService {
             return interaction.reply({ content: 'That custom response is no longer available.', flags: MessageFlags.Ephemeral });
         }
         const guild = interaction.guild || this.client.guilds.cache.get(boundGuildId);
+        const member = interaction.member || (guild?.members?.fetch
+            ? await guild.members.fetch(interaction.user.id).catch(() => null) : null);
         const payload = this.render(configOf(rule).script, {
-            user: interaction.user, member: interaction.member, guild,
+            user: interaction.user, member, guild,
             channel: interaction.channel, customButtonGuildId: boundGuildId
         });
         payload.flags = (payload.flags || 0) | MessageFlags.Ephemeral;
