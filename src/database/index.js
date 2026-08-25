@@ -160,6 +160,17 @@ const expectedSchema = {
         delete_after_seconds: 'INTEGER',
         updated_at: 'INTEGER NOT NULL'
     },
+    lifecycle_message_channels: {
+        guild_id: 'TEXT NOT NULL',
+        type: 'TEXT NOT NULL',
+        channel_id: 'TEXT NOT NULL'
+    },
+    join_dm_deliveries: {
+        id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        sent_at: 'INTEGER NOT NULL'
+    },
     users: {
         id: 'TEXT PRIMARY KEY',
         guild_id: 'TEXT NOT NULL',

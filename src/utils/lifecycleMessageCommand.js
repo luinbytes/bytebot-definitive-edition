@@ -27,6 +27,21 @@ function addMessageGroup(builder, type) {
         .addSubcommand(sub => sub.setName('test').setDescription(`Send a test ${type} message`))
         .addSubcommand(sub => sub.setName('view').setDescription(`View ${type} settings`))
         .addSubcommand(sub => sub.setName('reset').setDescription(`Reset ${type} settings`));
+        if (type === 'welcome' || type === 'goodbye') {
+            group.addSubcommand(sub => sub.setName('channels').setDescription(`Manage up to four ${type} channels`)
+                .addStringOption(opt => opt.setName('action').setDescription('Channel action').setRequired(true).addChoices(
+                    { name: 'Add', value: 'add' }, { name: 'Remove', value: 'remove' }, { name: 'List', value: 'list' }
+                ))
+                .addChannelOption(opt => opt.setName('channel').setDescription(`${label} channel`).addChannelTypes(ChannelType.GuildText, ChannelType.PublicThread, ChannelType.PrivateThread, ChannelType.AnnouncementThread)));
+        }
+        if (type === 'welcome') {
+            group.addSubcommand(sub => sub.setName('dm').setDescription('Manage join direct messages')
+                .addStringOption(opt => opt.setName('action').setDescription('Join DM action').setRequired(true).addChoices(
+                    { name: 'Enable', value: 'enable' }, { name: 'Disable', value: 'disable' },
+                    { name: 'Message', value: 'message' }, { name: 'View', value: 'view' }
+                ))
+                .addStringOption(opt => opt.setName('text').setDescription('Join DM template').setMinLength(1).setMaxLength(2000)));
+        }
         if (type === 'boost') {
             group
                 .addSubcommand(sub => sub.setName('settings').setDescription('View boost settings'))
@@ -50,9 +65,10 @@ function addLifecycleGroups(builder) {
 }
 
 function settingsEmbed(type, config) {
+    const channels = type === 'join_dm' || !config?.guild_id ? [] : lifecycle.listLifecycleChannels(config.guild_id, type);
     return embeds.brand(`${type[0].toUpperCase()}${type.slice(1)} Settings`, [
         `Status: **${config?.enabled ? 'enabled' : 'disabled'}**`,
-        `Channel: ${config?.channel_id ? `<#${config.channel_id}>` : '**not set**'}`,
+        ...(type === 'join_dm' ? [] : [`Channels: ${channels.length ? channels.map(id => `<#${id}>`).join(', ') : '**not set**'}`]),
         `Format: **${config?.format || 'embed'}**`,
         `Auto-delete: **${config?.delete_after_seconds ? `${config.delete_after_seconds} seconds` : 'off'}**`,
         `Template: ${config?.template ? `\n${config.template}` : '**default**'}`
@@ -96,6 +112,33 @@ async function executeLifecycle(interaction) {
     const subcommand = interaction.options.getSubcommand();
     try {
         if (type === 'system') return executeSystem(interaction, subcommand);
+        if (type === 'welcome' && subcommand === 'dm') {
+            const action = interaction.options.getString('action', true);
+            const dmType = 'join_dm';
+            if (action === 'view') return interaction.editReply({ embeds: [settingsEmbed(dmType, lifecycle.getConfig(interaction.guild.id, dmType))] });
+            const changes = {};
+            if (action === 'enable' || action === 'disable') changes.enabled = action === 'enable';
+            if (action === 'message') changes.template = interaction.options.getString('text', true);
+            await recorded(interaction, `LIFECYCLE_JOIN_DM_${action.toUpperCase()}`, () => lifecycle.setConfig(interaction.guild.id, dmType, changes));
+            return interaction.editReply({ embeds: [settingsEmbed(dmType, lifecycle.getConfig(interaction.guild.id, dmType))] });
+        }
+        if ((type === 'welcome' || type === 'goodbye') && subcommand === 'channels') {
+            const action = interaction.options.getString('action', true);
+            const channel = interaction.options.getChannel('channel');
+            if (action === 'list') {
+                const channels = lifecycle.listLifecycleChannels(interaction.guild.id, type);
+                return interaction.editReply({ embeds: [embeds.brand(`${type} Channels`, channels.length ? channels.map(id => `<#${id}>`).join('\n') : 'No channels configured.')] });
+            }
+            if (!channel) throw new Error('Choose a channel for add or remove.');
+            if (action === 'add' && !interaction.guild.members.me.permissionsIn(channel)
+                .has([PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks])) {
+                throw new Error('I need Send Messages and Embed Links in that lifecycle channel.');
+            }
+            await recorded(interaction, `LIFECYCLE_${type.toUpperCase()}_CHANNEL_${action.toUpperCase()}`, () =>
+                action === 'add' ? lifecycle.addLifecycleChannel(interaction.guild.id, type, channel.id)
+                    : lifecycle.removeLifecycleChannel(interaction.guild.id, type, channel.id));
+            return interaction.editReply({ embeds: [settingsEmbed(type, lifecycle.getConfig(interaction.guild.id, type))] });
+        }
         if (subcommand === 'view' || subcommand === 'settings') return interaction.editReply({ embeds: [settingsEmbed(type, lifecycle.getConfig(interaction.guild.id, type))] });
         if (subcommand === 'variables') {
             return interaction.editReply({ embeds: [embeds.brand('Lifecycle Variables', '`{user}` `{username}` `{displayname}` `{server}` `{memberCount}` `{memberNumber}` `{joinedAt}` `{createdAt}` `{accountAgeDays}` `{boostCount}` `{boostLevel}`\nGreed aliases such as `{user.name}`, `{user.mention}`, and `{guild.name}` are also supported.')] });
@@ -118,7 +161,7 @@ async function executeLifecycle(interaction) {
                 changes.channelId = channel.id;
             }
             if (subcommand === 'message') {
-                if (!lifecycle.getConfig(interaction.guild.id, type)?.channel_id) {
+                if (!lifecycle.listLifecycleChannels(interaction.guild.id, type).length) {
                     throw new Error(`Set the ${type} channel before configuring its message.`);
                 }
                 changes.template = interaction.options.getString('text', true);

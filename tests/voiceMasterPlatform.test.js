@@ -948,7 +948,7 @@ describe('VoiceMaster lifecycle', () => {
         const insert = database.sqlite.prepare(`INSERT INTO voice_master_sources
             (channel_id, guild_id, state, is_primary, owned, created_at)
             VALUES (?, 'guild-1', ?, 0, 0, 1)`);
-        for (let index = 0; index < 24; index++) insert.run(`existing-${index}`, 'active');
+        for (let index = 0; index < 3; index++) insert.run(`existing-${index}`, 'active');
         insert.run('deleted-secondary', 'lost');
         const first = {
             id: 'secondary-a', type: ChannelType.GuildVoice,
@@ -969,7 +969,7 @@ describe('VoiceMaster lifecycle', () => {
 
         expect(first.send.mock.calls.length + second.send.mock.calls.length).toBe(1);
         expect(database.sqlite.prepare(`SELECT COUNT(*) count FROM voice_master_sources
-            WHERE guild_id = ? AND is_primary = 0 AND state IN ('pending','active')`).get(guild.id).count).toBe(25);
+            WHERE guild_id = ? AND state IN ('pending','active')`).get(guild.id).count).toBe(4);
     });
 
     test('preexisting join roles survive exits and reset delete events do not fail resetting config', async () => {

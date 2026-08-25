@@ -284,7 +284,7 @@ class VoiceMasterService {
             if (action === 'list') {
                 const rows = this.sqlite.prepare(`SELECT channel_id, category_id FROM voice_master_sources
                     WHERE guild_id = ? AND is_primary = 0 AND state = 'active'
-                    ORDER BY created_at, channel_id LIMIT 25`)
+                    ORDER BY created_at, channel_id LIMIT 4`)
                     .all(interaction.guildId);
                 const description = rows.length
                     ? rows.map(row => `<#${row.channel_id}>${row.category_id ? ` → <#${row.category_id}>` : ''}`).join('\n')
@@ -300,9 +300,9 @@ class VoiceMasterService {
             if (action === 'add') {
                 this.sqlite.transaction(() => {
                     const count = this.sqlite.prepare(`SELECT COUNT(*) count FROM voice_master_sources
-                        WHERE guild_id = ? AND is_primary = 0 AND state IN ('pending','active')`)
+                        WHERE guild_id = ? AND state IN ('pending','active')`)
                         .get(interaction.guildId).count;
-                    if (count >= 25) throw new Error('This server already has 25 secondary join channels.');
+                    if (count >= 4) throw new Error('This server already has 4 VoiceMaster hubs.');
                     this.sqlite.prepare(`INSERT INTO voice_master_sources
                         (channel_id, guild_id, category_id, state, is_primary, owned, created_at)
                         VALUES (?, ?, ?, 'pending', 0, 0, ?)`)

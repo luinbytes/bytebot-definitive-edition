@@ -81,6 +81,31 @@ describe('lifecycle messaging', () => {
         expect(channel.send.mock.calls[1][0].content).toContain('[Test]');
     });
 
+    test('welcome and goodbye support four delivery channels', () => {
+        lifecycle.setConfig('guild1', 'welcome', { channelId: 'primary', enabled: true });
+        ['second', 'third', 'fourth'].forEach(id => lifecycle.addLifecycleChannel('guild1', 'welcome', id));
+        expect(lifecycle.listLifecycleChannels('guild1', 'welcome')).toEqual(['primary', 'fourth', 'second', 'third']);
+        expect(() => lifecycle.addLifecycleChannel('guild1', 'welcome', 'fifth')).toThrow('At most 4');
+        lifecycle.resetConfig('guild1', 'welcome');
+        expect(lifecycle.listLifecycleChannels('guild1', 'welcome')).toEqual([]);
+    });
+
+    test('Join DMs use a persistent 750-per-hour reservation and release failures', async () => {
+        const { value: server } = guild();
+        const target = member(server);
+        target.send = jest.fn().mockRejectedValue(new Error('closed'));
+        lifecycle.setConfig(server.id, 'join_dm', { enabled: true, template: 'Welcome {displayname}', format: 'text' });
+        expect((await lifecycle.sendJoinDm(target)).status).toBe('failed');
+        expect(database.sqlite.prepare('SELECT COUNT(*) count FROM join_dm_deliveries').get().count).toBe(0);
+
+        const insert = database.sqlite.prepare("INSERT INTO join_dm_deliveries (guild_id, user_id, sent_at) VALUES ('guild1', ?, ?)");
+        database.sqlite.transaction(() => {
+            for (let index = 0; index < 750; index++) insert.run(`user-${index}`, Date.now());
+        })();
+        expect((await lifecycle.sendJoinDm(target)).status).toBe('limited');
+        expect(target.send).toHaveBeenCalledTimes(1);
+    });
+
     test('supports the documented Greed embed script fields and link buttons', () => {
         const payload = lifecycle.parseEmbedScript(
             '{embed}$v{title: Welcome}$v{description: Hello}$v{field: Member && {user.name} && true}$v{footer: Footer}$v{button: Docs && https://example.com}'
@@ -134,8 +159,8 @@ describe('lifecycle messaging', () => {
     test('slash paths preserve pinned channel/settings/remove names and hosted aliases', () => {
         const server = require('../src/commands/administration/server').data.toJSON();
         const groups = Object.fromEntries(server.options.filter(option => option.type === 2).map(option => [option.name, option.options.map(child => child.name)]));
-        expect(groups.welcome).toEqual(expect.arrayContaining(['setup', 'channel', 'message', 'test', 'view', 'reset']));
-        expect(groups.goodbye).toEqual(expect.arrayContaining(['setup', 'channel', 'message', 'test', 'view', 'reset']));
+        expect(groups.welcome).toEqual(expect.arrayContaining(['setup', 'channel', 'channels', 'dm', 'message', 'test', 'view', 'reset']));
+        expect(groups.goodbye).toEqual(expect.arrayContaining(['setup', 'channel', 'channels', 'message', 'test', 'view', 'reset']));
         expect(groups.boost).toEqual(expect.arrayContaining(['setup', 'channel', 'settings', 'remove', 'test', 'reset']));
         expect(groups.system).toEqual(['channel', 'welcome', 'boost', 'sticker']);
     });

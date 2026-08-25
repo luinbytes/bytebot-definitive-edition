@@ -2,7 +2,7 @@ const { Events } = require('discord.js');
 const logger = require('../utils/logger');
 const { handleMemberJoin } = require('../services/antiraidService');
 const { handleMemberUpdate: handleAutomodMemberUpdate } = require('../services/automodService');
-const { sendLifecycleMessage } = require('../services/lifecycleMessageService');
+const { sendJoinDm, sendLifecycleMessage } = require('../services/lifecycleMessageService');
 
 module.exports = {
     name: Events.GuildMemberAdd,
@@ -22,10 +22,11 @@ module.exports = {
             }
             try {
                 await sendLifecycleMessage('welcome', member);
+                await sendJoinDm(member);
             } catch (error) {
                 logger.error(`Welcome delivery failed for joining member ${member.id}: ${error.message}`);
             }
-            if (client.automationService) await client.automationService.handleMemberAdd(member);
+            if (client?.automationService) await client.automationService.handleMemberAdd(member);
         } catch (error) {
             logger.error(`Failed to process member join in guild ${member.guild.id}:`, error);
         }

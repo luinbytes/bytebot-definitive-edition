@@ -4,12 +4,15 @@ const embeds = require('../utils/embeds');
 const logger = require('../utils/logger');
 const { fetchChannel, safeChannelSend } = require('../utils/discordApiUtil');
 
-const TYPES = new Set(['welcome', 'goodbye', 'boost']);
+const TYPES = new Set(['welcome', 'goodbye', 'boost', 'join_dm']);
 const DEFAULTS = {
     welcome: 'Welcome to **{server}**, {user}! You are member #{memberCount}.',
     goodbye: 'Goodbye **{displayname}**. **{server}** now has {memberCount} members.',
-    boost: 'Thank you {user} for boosting **{server}**! We now have {boostCount} boosts.'
+    boost: 'Thank you {user} for boosting **{server}**! We now have {boostCount} boosts.',
+    join_dm: 'Welcome to **{server}**, {displayname}!'
 };
+const MAX_LIFECYCLE_CHANNELS = 4;
+const MAX_JOIN_DMS_PER_HOUR = 750;
 const EMBED_KEYS = new Set(['embed', 'content', 'title', 'description', 'color', 'url', 'image', 'thumbnail', 'timestamp', 'author', 'field', 'fields', 'footer', 'button']);
 
 function ordinal(number) {
@@ -144,6 +147,36 @@ function resetConfig(guildId, type) {
         ON CONFLICT (guild_id, type) DO UPDATE SET channel_id=NULL, template=NULL, enabled=0,
             format='embed', delete_after_seconds=NULL, updated_at=excluded.updated_at
     `).run(guildId, type, Date.now());
+    sqlite.prepare('DELETE FROM lifecycle_message_channels WHERE guild_id = ? AND type = ?').run(guildId, type);
+}
+
+function listLifecycleChannels(guildId, type) {
+    const primary = getConfig(guildId, type)?.channel_id;
+    const extra = sqlite.prepare(`SELECT channel_id FROM lifecycle_message_channels
+        WHERE guild_id = ? AND type = ? ORDER BY channel_id`).all(guildId, type).map(row => row.channel_id);
+    return [...new Set([primary, ...extra].filter(Boolean))];
+}
+
+function addLifecycleChannel(guildId, type, channelId) {
+    assertType(type);
+    return sqlite.transaction(() => {
+        const channels = listLifecycleChannels(guildId, type);
+        if (channels.includes(channelId)) return channels;
+        if (channels.length >= MAX_LIFECYCLE_CHANNELS) throw new Error(`At most ${MAX_LIFECYCLE_CHANNELS} ${type} channels are allowed.`);
+        sqlite.prepare('INSERT INTO lifecycle_message_channels (guild_id, type, channel_id) VALUES (?, ?, ?)')
+            .run(guildId, type, channelId);
+        return listLifecycleChannels(guildId, type);
+    })();
+}
+
+function removeLifecycleChannel(guildId, type, channelId) {
+    if (getConfig(guildId, type)?.channel_id === channelId) {
+        sqlite.prepare('UPDATE lifecycle_messages SET channel_id = NULL, updated_at = ? WHERE guild_id = ? AND type = ?')
+            .run(Date.now(), guildId, type);
+    }
+    sqlite.prepare('DELETE FROM lifecycle_message_channels WHERE guild_id = ? AND type = ? AND channel_id = ?')
+        .run(guildId, type, channelId);
+    return listLifecycleChannels(guildId, type);
 }
 
 function migrateLegacyWelcome() {
@@ -255,16 +288,44 @@ function buildPayload(config, member, test = false, channel = null) {
 async function sendLifecycleMessage(type, member, { test = false } = {}) {
     const config = getConfig(member.guild.id, type);
     if (!config || (!test && !config.enabled)) return { status: 'disabled' };
-    if (!config.channel_id) return { status: 'unconfigured' };
-    const channel = await fetchChannel(member.guild, config.channel_id, { logContext: `${type}-message` });
-    if (!channel) return { status: 'unavailable' };
-    const sent = await safeChannelSend(channel, buildPayload(config, member, test, channel), { logContext: `${type}-message` });
-    if (!sent) return { status: 'failed' };
-    if (config.delete_after_seconds) {
-        const timer = setTimeout(() => sent.delete().catch(error => logger.warn(`Failed to auto-delete ${type} message: ${error.message}`)), config.delete_after_seconds * 1000);
-        timer.unref?.();
+    const channelIds = listLifecycleChannels(member.guild.id, type);
+    if (!channelIds.length) return { status: 'unconfigured' };
+    const sent = [];
+    for (const channelId of channelIds) {
+        const channel = await fetchChannel(member.guild, channelId, { logContext: `${type}-message` });
+        if (!channel) continue;
+        const message = await safeChannelSend(channel, buildPayload(config, member, test, channel), { logContext: `${type}-message` });
+        if (!message) continue;
+        sent.push(message);
+        if (config.delete_after_seconds) {
+            const timer = setTimeout(() => message.delete().catch(error => logger.warn(`Failed to auto-delete ${type} message: ${error.message}`)), config.delete_after_seconds * 1000);
+            timer.unref?.();
+        }
     }
-    return { status: 'sent', message: sent };
+    return sent.length ? { status: 'sent', message: sent[0], messages: sent } : { status: 'failed' };
+}
+
+async function sendJoinDm(member) {
+    const config = getConfig(member.guild.id, 'join_dm');
+    if (!config?.enabled) return { status: 'disabled' };
+    const reservationId = sqlite.transaction(() => {
+        const cutoff = Date.now() - 60 * 60 * 1000;
+        sqlite.prepare('DELETE FROM join_dm_deliveries WHERE guild_id = ? AND sent_at < ?').run(member.guild.id, cutoff);
+        const count = sqlite.prepare('SELECT COUNT(*) count FROM join_dm_deliveries WHERE guild_id = ?').get(member.guild.id).count;
+        if (count >= MAX_JOIN_DMS_PER_HOUR) return null;
+        return Number(sqlite.prepare('INSERT INTO join_dm_deliveries (guild_id, user_id, sent_at) VALUES (?, ?, ?)')
+            .run(member.guild.id, member.id, Date.now()).lastInsertRowid);
+    })();
+    if (!reservationId) return { status: 'limited' };
+    try {
+        const payload = buildPayload(config, member);
+        payload.allowedMentions = { parse: [], users: [], roles: [], repliedUser: false };
+        return { status: 'sent', message: await member.send(payload) };
+    } catch (error) {
+        sqlite.prepare('DELETE FROM join_dm_deliveries WHERE id = ?').run(reservationId);
+        logger.warn(`Join DM delivery failed for ${member.id}: ${error.message}`);
+        return { status: 'failed' };
+    }
 }
 
 function isNewBoost(oldMember, newMember) {
@@ -273,5 +334,6 @@ function isNewBoost(oldMember, newMember) {
 
 module.exports = {
     TYPES, DEFAULTS, validateTemplate, renderTemplate, parseEmbedScript, getConfig, setConfig, resetConfig,
-    migrateLegacyWelcome, sendLifecycleMessage, isNewBoost
+    addLifecycleChannel, listLifecycleChannels, removeLifecycleChannel, migrateLegacyWelcome,
+    sendJoinDm, sendLifecycleMessage, isNewBoost
 };

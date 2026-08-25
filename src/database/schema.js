@@ -111,6 +111,19 @@ const lifecycleMessages = sqliteTable('lifecycle_messages', {
     pk: primaryKey({ columns: [table.guildId, table.type] }),
 }));
 
+const lifecycleMessageChannels = sqliteTable('lifecycle_message_channels', {
+    guildId: text('guild_id').notNull(),
+    type: text('type').notNull(),
+    channelId: text('channel_id').notNull(),
+}, table => ({ pk: primaryKey({ columns: [table.guildId, table.type, table.channelId] }) }));
+
+const joinDmDeliveries = sqliteTable('join_dm_deliveries', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    sentAt: integer('sent_at').notNull(),
+}, table => ({ guildSentIdx: index('join_dm_deliveries_guild_sent_idx').on(table.guildId, table.sentAt) }));
+
 const users = sqliteTable('users', {
     id: text('id').primaryKey(),
     guildId: text('guild_id').notNull(),
@@ -1905,6 +1918,8 @@ module.exports = {
     voiceMasterAccess,
     voiceMasterJoinRoles,
     lifecycleMessages,
+    lifecycleMessageChannels,
+    joinDmDeliveries,
     users,
     moderationLogs,
     moderationCases,
