@@ -4,6 +4,22 @@ const path = require('path');
 const crypto = require('crypto');
 const { PermissionFlagsBits, PermissionsBitField } = require('discord.js');
 
+function roleGrantGuild() {
+    const actor = { id: 'admin1', permissions: new PermissionsBitField([
+        PermissionFlagsBits.ManageGuild, PermissionFlagsBits.ManageRoles
+    ]), roles: { highest: { position: 10 } } };
+    const role = { id: 'role1', name: 'Reward', position: 5, managed: false, editable: true,
+        permissions: new PermissionsBitField(0n) };
+    const guild = { id: 'guild1', ownerId: actor.id,
+        roles: { everyone: { id: 'guild1' }, cache: new Map([[role.id, role]]), create: jest.fn().mockResolvedValue({ id: 'new-role' }) },
+        channels: { cache: new Map(), create: jest.fn() }, emojis: { cache: new Map(), create: jest.fn() },
+        stickers: { cache: new Map(), create: jest.fn() }, members: {
+            me: { permissions: new PermissionsBitField(PermissionFlagsBits.Administrator), roles: { highest: { position: 20 } } },
+            fetch: jest.fn().mockResolvedValue(actor)
+        } };
+    return { guild, actor, role };
+}
+
 describe('guild backups', () => {
     let tempDir;
     let database;
@@ -256,6 +272,262 @@ describe('guild backups', () => {
         expect(database.sqlite.prepare("SELECT enabled FROM antinuke_config WHERE guild_id = 'guild1'").get().enabled).toBe(0);
         database.sqlite.prepare("INSERT INTO antinuke_admins (guild_id, user_id, added_by, created_at) VALUES ('guild1', 'admin1', 'owner1', 1)").run();
         await expect(restore()).resolves.toMatchObject({ created: { bytebot: 1 } });
+    });
+
+    test('ByteBot-only restore cannot reenable another actors autorole without fresh role authority', async () => {
+        const actor = { id: 'admin1', permissions: new PermissionsBitField(PermissionFlagsBits.ManageGuild),
+            roles: { highest: { position: 10 } } };
+        const role = { id: 'role1', name: 'Reward', position: 5, managed: false, editable: true,
+            permissions: new PermissionsBitField(0n) };
+        const guild = { id: 'guild1', ownerId: 'owner1',
+            roles: { everyone: { id: 'guild1' }, cache: new Map([[role.id, role]]), create: jest.fn() },
+            channels: { cache: new Map(), create: jest.fn() }, emojis: { cache: new Map(), create: jest.fn() },
+            stickers: { cache: new Map(), create: jest.fn() }, members: {
+                me: { permissions: new PermissionsBitField(PermissionFlagsBits.Administrator), roles: { highest: { position: 20 } } },
+                fetch: jest.fn().mockResolvedValue(actor)
+            } };
+        database.sqlite.prepare("INSERT INTO antinuke_admins (guild_id, user_id, added_by, created_at) VALUES ('guild1', 'admin1', 'owner1', 1)").run();
+        database.sqlite.prepare(`INSERT INTO automation_rules (guild_id, kind, key, config, enabled, created_by, created_at, updated_at)
+            VALUES ('guild1', 'autorole', 'user:role1', '{"roleId":"role1"}', 1, 'owner1', 1, 1)`).run();
+        service.create({ guild, creatorId: actor.id, name: 'Whole guild snapshot' });
+        database.sqlite.prepare("UPDATE automation_rules SET enabled = 0 WHERE guild_id = 'guild1'").run();
+        const changes = database.sqlite.prepare('SELECT total_changes() count').get().count;
+        const restore = () => service.restore({ guild, creatorId: actor.id, id: 'backup-1', sections: ['bytebot'], confirmed: true });
+
+        await expect(restore()).rejects.toThrow('Manage Roles');
+        actor.permissions.add(PermissionFlagsBits.ManageRoles);
+        actor.roles.highest.position = role.position;
+        await expect(restore()).rejects.toThrow('highest role');
+        expect(database.sqlite.prepare('SELECT total_changes() count').get().count).toBe(changes);
+        for (const section of ['roles', 'channels', 'emojis', 'stickers']) expect(guild[section].create).not.toHaveBeenCalled();
+        expect(guild.members.fetch).toHaveBeenCalledWith({ user: actor.id, force: true });
+
+        actor.roles.highest.position = 10;
+        await expect(restore()).resolves.toMatchObject({ failures: [] });
+        expect(database.sqlite.prepare("SELECT enabled, created_by FROM automation_rules WHERE guild_id = 'guild1'").get())
+            .toEqual({ enabled: 1, created_by: 'owner1' });
+    });
+
+    test.each([
+        ['disabled autorole', 'automation_rules', { kind: 'autorole', key: 'main', config: '{"roleId":"role1"}', enabled: 0 }],
+        ['vanity', 'automation_rules', { kind: 'vanity', key: 'main', config: '{"roleIds":["role1"]}' }],
+        ['button role', 'automation_rules', { kind: 'button-role', key: '100:role1', config: '{"roleId":"role1"}' }],
+        ['reaction role', 'automation_rules', { kind: 'reaction-role', key: '100:emoji', config: '{"roleId":"role1"}' }],
+        ['booster role', 'automation_rules', { kind: 'booster-role', key: 'member1', config: '{"roleId":"role1","shares":["member2"]}' }],
+        ['disabled birthday role', 'birthday_config', { channel_id: 'channel1', role_id: 'role1', enabled: 0 }],
+        ['legacy responder role', 'auto_responses', { trigger: 'legacy', response: 'hello', creator_id: 'owner1', action_role_id: 'role1', action_role_mode: 'add' }],
+        ['legacy responder toggle', 'auto_responses', { trigger: 'toggle', response: 'hello', creator_id: 'owner1', action_role_id: 'role1', action_role_mode: 'toggle' }],
+        ['disabled responder role', 'auto_responses', { trigger: 'array', response: 'hello', creator_id: 'owner1', enabled: 0, action_roles: '[{"roleId":"role1","mode":"add"}]' }],
+        ['responder toggle', 'auto_responses', { trigger: 'array', response: 'hello', creator_id: 'owner1', action_roles: '[{"roleId":"role1","mode":"toggle"}]' }],
+        ['responder default action', 'auto_responses', { trigger: 'array', response: 'hello', creator_id: 'owner1', action_roles: '[{"roleId":"role1"}]' }],
+        ['jail role', 'moderation_config', { jail_role_id: 'role1' }],
+        ['image mute role', 'moderation_config', { image_mute_role_id: 'role1' }],
+        ['reaction mute role', 'moderation_config', { reaction_mute_role_id: 'role1' }],
+        ['disabled achievement rewards', 'achievement_role_config', { enabled: 0 }],
+        ['custom achievement reward', 'custom_achievements', { achievement_id: 'custom1', title: 'Reward', description: 'Reward', emoji: 'x',
+            rarity: 'common', check_type: 'manual', grant_role: 1, points: 1, created_by: 'owner1', enabled: 0 }]
+    ])('preflights %s grants against current roles even in disabled configuration', async (name, table, values) => {
+        const actor = { id: 'admin1', permissions: new PermissionsBitField([
+            PermissionFlagsBits.ManageGuild, PermissionFlagsBits.ManageRoles
+        ]), roles: { highest: { position: 5 } } };
+        const role = { id: 'role1', name: 'Higher reward', position: 3, managed: false, editable: true,
+            permissions: new PermissionsBitField(0n) };
+        const guild = { id: 'guild1', ownerId: 'owner1',
+            roles: { everyone: { id: 'guild1' }, cache: new Map([[role.id, role]]), create: jest.fn() },
+            channels: { cache: new Map(), create: jest.fn() }, emojis: { cache: new Map() }, stickers: { cache: new Map() }, members: {
+                me: { permissions: new PermissionsBitField(PermissionFlagsBits.Administrator), roles: { highest: { position: 20 } } },
+                fetch: jest.fn().mockResolvedValue(actor)
+            } };
+        database.sqlite.prepare("INSERT INTO antinuke_admins (guild_id, user_id, added_by, created_at) VALUES ('guild1', 'admin1', 'owner1', 1)").run();
+        const row = { guild_id: guild.id, ...(table === 'automation_rules' ? { created_by: 'owner1', created_at: 1, updated_at: 1 } : {}), ...values };
+        database.sqlite.prepare(`INSERT INTO ${table} (${Object.keys(row).join(', ')}) VALUES (${Object.keys(row).map(() => '?').join(', ')})`).run(...Object.values(row));
+        if (['achievement_role_config', 'custom_achievements'].includes(table)) {
+            database.sqlite.prepare("INSERT INTO achievement_roles (guild_id, achievement_id, role_id) VALUES ('guild1', 'custom1', 'role1')").run();
+        }
+        service.create({ guild, creatorId: actor.id, name });
+        role.position = 6;
+        const changes = database.sqlite.prepare('SELECT total_changes() count').get().count;
+
+        await expect(service.restore({ guild, creatorId: actor.id, id: 'backup-1', sections: ['bytebot'], confirmed: true }))
+            .rejects.toThrow('highest role');
+        expect(database.sqlite.prepare('SELECT total_changes() count').get().count).toBe(changes);
+        expect(guild.roles.create).not.toHaveBeenCalled();
+        expect(guild.channels.create).not.toHaveBeenCalled();
+        actor.roles.highest.position = 10;
+        await expect(service.restore({ guild, creatorId: actor.id, id: 'backup-1', sections: ['bytebot'], confirmed: true }))
+            .resolves.toMatchObject({ failures: [] });
+    });
+
+    test.each([['merge', true], ['destructive', true], ['merge', false], ['destructive', false]])('authorized actor can %s historical grants with recreated roles, owner exception %s', async (mode, owner) => {
+        const { guild, actor } = roleGrantGuild();
+        if (owner) {
+            actor.permissions = new PermissionsBitField(0n);
+            actor.roles.highest.position = 1;
+        } else {
+            guild.ownerId = 'owner1';
+            service.botOwnerIds = [actor.id];
+        }
+        const config = '{"roleId":"role1","unknown":{"roleId":"leave-this-alone"}}';
+        database.sqlite.prepare(`INSERT INTO automation_rules (guild_id, kind, key, config, created_by, created_at, updated_at)
+            VALUES ('guild1', 'autorole', 'main', ?, 'higher-actor', 1, 1)`).run(config);
+        service.create({ guild, creatorId: actor.id, name: 'Historical reward' });
+        guild.roles.cache.clear();
+        const changes = database.sqlite.prepare('SELECT total_changes() count').get().count;
+        const restore = sections => service.restore({ guild, creatorId: actor.id, id: 'backup-1', mode, sections, confirmed: true });
+
+        await expect(restore(['bytebot'])).rejects.toThrow('missing');
+        expect(database.sqlite.prepare('SELECT total_changes() count').get().count).toBe(changes);
+        expect(guild.roles.create).not.toHaveBeenCalled();
+        await expect(restore(['roles', 'bytebot'])).resolves.toMatchObject({ created: { roles: 1, bytebot: 1 }, failures: [] });
+        expect(JSON.parse(database.sqlite.prepare("SELECT config FROM automation_rules WHERE guild_id = 'guild1'").get().config))
+            .toEqual({ roleId: 'new-role', unknown: { roleId: 'leave-this-alone' } });
+    });
+
+    test.each([
+        ['bot permission', ({ guild }) => guild.members.me.permissions.remove(PermissionFlagsBits.Administrator), 'Manage Roles'],
+        ['bot hierarchy', ({ guild }) => { guild.members.me.roles.highest.position = 5; }, 'highest role'],
+        ['managed role', ({ role }) => { role.managed = true; }, 'managed'],
+        ['uneditable role', ({ role }) => { role.editable = false; }, 'above ByteBot'],
+        ['everyone role', ({ guild }) => { guild.roles.cache.set(guild.id, { id: guild.id }); }, 'managed'],
+        ['current denyperm', ({ role }) => { role.permissions = new PermissionsBitField(PermissionFlagsBits.Administrator); }, 'blocked permission BanMembers']
+    ])('owner grant restore still enforces %s before Discord or database mutations', async (name, change, error) => {
+        const fixture = roleGrantGuild();
+        const { guild, actor } = fixture;
+        database.sqlite.prepare(`INSERT INTO automation_rules (guild_id, kind, key, config, created_by, created_at, updated_at)
+            VALUES ('guild1', 'autorole', 'main', ?, 'owner1', 1, 1)`).run(JSON.stringify({ roleId: name === 'everyone role' ? guild.id : 'role1' }));
+        service.create({ guild, creatorId: actor.id, name });
+        if (name === 'current denyperm') {
+            database.sqlite.prepare("INSERT INTO denied_role_permissions (guild_id, permission) VALUES ('guild1', 'BanMembers')").run();
+        }
+        change(fixture);
+        const changes = database.sqlite.prepare('SELECT total_changes() count').get().count;
+
+        await expect(service.restore({ guild, creatorId: actor.id, id: 'backup-1', mode: 'destructive', sections: ['bytebot'], confirmed: true }))
+            .rejects.toThrow(error);
+        expect(database.sqlite.prepare('SELECT total_changes() count').get().count).toBe(changes);
+        for (const section of ['roles', 'channels', 'emojis', 'stickers']) expect(guild[section].create).not.toHaveBeenCalled();
+    });
+
+    test('snapshot denyperm is preflighted for recreated grant roles before any selected section is mutated', async () => {
+        const { guild, actor, role } = roleGrantGuild();
+        role.permissions = new PermissionsBitField(PermissionFlagsBits.Administrator);
+        const channel = { id: 'old-channel', name: 'general', type: 0, position: 1, delete: jest.fn() };
+        guild.channels.cache.set(channel.id, channel);
+        database.sqlite.prepare(`INSERT INTO automation_rules (guild_id, kind, key, config, created_by, created_at, updated_at)
+            VALUES ('guild1', 'autorole', 'main', '{"roleId":"role1"}', 'owner1', 1, 1)`).run();
+        database.sqlite.prepare("INSERT INTO denied_role_permissions (guild_id, permission) VALUES ('guild1', 'BanMembers')").run();
+        service.create({ guild, creatorId: actor.id, name: 'Snapshot policy' });
+        database.sqlite.prepare("DELETE FROM denied_role_permissions WHERE guild_id = 'guild1'").run();
+        guild.roles.cache.clear();
+        const changes = database.sqlite.prepare('SELECT total_changes() count').get().count;
+
+        await expect(service.restore({ guild, creatorId: actor.id, id: 'backup-1', mode: 'destructive', sections: ['roles', 'channels', 'bytebot'], confirmed: true }))
+            .rejects.toThrow('blocked permission BanMembers');
+        expect(database.sqlite.prepare('SELECT total_changes() count').get().count).toBe(changes);
+        expect(channel.delete).not.toHaveBeenCalled();
+        expect(guild.roles.create).not.toHaveBeenCalled();
+        expect(guild.channels.create).not.toHaveBeenCalled();
+    });
+
+    test('safe non-grant configuration and unknown settings remain restorable by a trusted manager without Manage Roles', async () => {
+        const { guild, actor } = roleGrantGuild();
+        guild.ownerId = 'owner1';
+        actor.permissions.remove(PermissionFlagsBits.ManageRoles);
+        database.sqlite.prepare("INSERT INTO antinuke_admins (guild_id, user_id, added_by, created_at) VALUES ('guild1', 'admin1', 'owner1', 1)").run();
+        database.sqlite.prepare(`INSERT INTO automation_rules (guild_id, kind, key, config, created_by, created_at, updated_at)
+            VALUES ('guild1', 'future-kind', 'main', '{unknown-format', 'owner1', 1, 1),
+            ('guild1', 'autoreact', 'main', '{"roleIds":["missing-filter-role"],"unknown":true}', 'owner1', 1, 1)`).run();
+        database.sqlite.prepare(`INSERT INTO auto_responses (guild_id, trigger, response, creator_id, require_role_id, role_ids, action_roles, action_role_id, action_role_mode)
+            VALUES ('guild1', 'safe', 'Original', 'owner1', 'missing-filter-role', '["missing-filter-role"]',
+            '[{"roleId":"missing-removal-role","mode":"remove"}]', 'legacy-removal-role', 'remove')`).run();
+        const backup = service.create({ guild, creatorId: actor.id, name: 'Safe settings' });
+        database.sqlite.prepare("UPDATE auto_responses SET response = 'Changed' WHERE guild_id = 'guild1'").run();
+
+        await expect(service.restore({ guild, creatorId: actor.id, id: backup.id, sections: ['bytebot'], confirmed: true }))
+            .resolves.toMatchObject({ failures: [] });
+        expect(database.sqlite.prepare("SELECT response, action_roles FROM auto_responses WHERE guild_id = 'guild1'").get())
+            .toEqual({ response: 'Original', action_roles: '[{"roleId":"missing-removal-role","mode":"remove"}]' });
+        expect(database.sqlite.prepare("SELECT config FROM automation_rules WHERE kind = 'future-kind'").get().config).toBe('{unknown-format');
+        expect(database.sqlite.prepare("SELECT config FROM automation_rules WHERE kind = 'autoreact'").get().config)
+            .toBe('{"roleIds":["missing-filter-role"],"unknown":true}');
+    });
+
+    test('restoring achievement role creation requires Manage Roles even without an existing reward role', async () => {
+        const { guild, actor } = roleGrantGuild();
+        guild.ownerId = 'owner1';
+        service.botOwnerIds = [actor.id];
+        actor.permissions.remove(PermissionFlagsBits.ManageRoles);
+        database.sqlite.prepare("INSERT INTO achievement_role_config (guild_id, enabled) VALUES ('guild1', 0)").run();
+        service.create({ guild, creatorId: actor.id, name: 'Dynamic role rewards' });
+        const changes = database.sqlite.prepare('SELECT total_changes() count').get().count;
+        const restore = () => service.restore({ guild, creatorId: actor.id, id: 'backup-1', sections: ['bytebot'], confirmed: true });
+
+        await expect(restore()).rejects.toThrow('Manage Roles');
+        expect(database.sqlite.prepare('SELECT total_changes() count').get().count).toBe(changes);
+        actor.permissions.add(PermissionFlagsBits.ManageRoles);
+        await expect(restore()).resolves.toMatchObject({ failures: [] });
+    });
+
+    test('failed role recreation cannot redirect a validated grant to a now higher current role', async () => {
+        const { guild, actor, role } = roleGrantGuild();
+        guild.ownerId = 'owner1';
+        service.botOwnerIds = [actor.id];
+        database.sqlite.prepare(`INSERT INTO automation_rules (guild_id, kind, key, config, created_by, created_at, updated_at)
+            VALUES ('guild1', 'autorole', 'main', '{"roleId":"role1"}', 'owner1', 1, 1)`).run();
+        service.create({ guild, creatorId: actor.id, name: 'Recreated reward' });
+        role.position = 15;
+        database.sqlite.prepare("UPDATE automation_rules SET enabled = 0 WHERE guild_id = 'guild1'").run();
+        const changes = database.sqlite.prepare('SELECT total_changes() count').get().count;
+        guild.roles.create.mockRejectedValueOnce(new Error('Role limit reached'));
+        const restore = () => service.restore({ guild, creatorId: actor.id, id: 'backup-1', sections: ['roles', 'bytebot'], confirmed: true });
+
+        await expect(restore()).resolves.toMatchObject({ created: { bytebot: 0 }, failures: [
+            { section: 'roles', error: 'Role limit reached' }, { section: 'bytebot', error: expect.stringContaining('was not restored') }
+        ] });
+        expect(database.sqlite.prepare('SELECT total_changes() count').get().count).toBe(changes);
+        expect(database.sqlite.prepare("SELECT enabled FROM automation_rules WHERE guild_id = 'guild1'").get().enabled).toBe(0);
+
+        await expect(restore()).resolves.toMatchObject({ created: { roles: 1, bytebot: 1 }, failures: [] });
+        expect(JSON.parse(database.sqlite.prepare("SELECT config FROM automation_rules WHERE guild_id = 'guild1'").get().config))
+            .toEqual({ roleId: 'new-role' });
+    });
+
+    test('destructive channel restore preflights every live channels effective actor permissions before mutation', async () => {
+        const actor = { id: 'admin1', permissions: new PermissionsBitField([
+            PermissionFlagsBits.ManageGuild, PermissionFlagsBits.ManageChannels
+        ]) };
+        const allowed = { id: 'allowed', name: 'allowed', type: 0, position: 0, delete: jest.fn(),
+            permissionOverwrites: { cache: new Map() }, permissionsFor: jest.fn().mockReturnValue(actor.permissions) };
+        const denied = { id: 'denied', name: 'denied', type: 4, position: 1, delete: jest.fn(),
+            permissionOverwrites: { cache: new Map() }, permissionsFor: jest.fn().mockReturnValue(new PermissionsBitField(0n)) };
+        const guild = { id: 'guild1', ownerId: 'owner1',
+            roles: { everyone: { id: 'guild1' }, cache: new Map(), create: jest.fn() },
+            channels: { cache: new Map(), create: jest.fn() }, emojis: { cache: new Map() }, stickers: { cache: new Map() },
+            members: { me: { permissions: new PermissionsBitField(PermissionFlagsBits.Administrator) }, fetch: jest.fn().mockResolvedValue(actor) } };
+        service.create({ guild, creatorId: actor.id, name: 'Empty channels' });
+        guild.channels.cache.set(allowed.id, allowed).set(denied.id, denied);
+        const changes = database.sqlite.prepare('SELECT total_changes() count').get().count;
+        const restore = () => service.restore({ guild, creatorId: actor.id, id: 'backup-1', mode: 'destructive', sections: ['channels'], confirmed: true });
+
+        await expect(restore()).rejects.toThrow('Manage Channels');
+        expect(allowed.delete).not.toHaveBeenCalled();
+        expect(denied.delete).not.toHaveBeenCalled();
+        expect(guild.channels.create).not.toHaveBeenCalled();
+        expect(guild.roles.create).not.toHaveBeenCalled();
+        expect(database.sqlite.prepare('SELECT total_changes() count').get().count).toBe(changes);
+        expect(denied.permissionsFor).toHaveBeenCalledWith(actor);
+
+        denied.permissionsFor.mockReturnValue(actor.permissions);
+        await expect(restore()).resolves.toMatchObject({ removed: { channels: 2 }, failures: [] });
+        expect(allowed.delete).toHaveBeenCalledTimes(1);
+        expect(denied.delete).toHaveBeenCalledTimes(1);
+
+        guild.ownerId = actor.id;
+        denied.permissionsFor.mockReturnValue(null);
+        await expect(restore()).resolves.toMatchObject({ removed: { channels: 2 }, failures: [] });
+        denied.deletable = false;
+        await expect(restore()).rejects.toThrow('cannot be removed by ByteBot');
+        expect(denied.delete).toHaveBeenCalledTimes(2);
     });
 
     test('destructive restore removes selected structure and reports expression failures', async () => {

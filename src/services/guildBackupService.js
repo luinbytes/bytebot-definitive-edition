@@ -53,7 +53,30 @@ const BYTEBOT_TABLES = [
     { name: 'customization_presets', keys: ['guild_id', 'name'] }
 ];
 const BYTEBOT_TABLE_NAMES = new Set(BYTEBOT_TABLES.map(table => table.name));
+const AUTOMATION_ROLE_FIELDS = {
+    autorole: 'roleId', vanity: 'roleIds', 'button-role': 'roleId', 'reaction-role': 'roleId', 'booster-role': 'roleId'
+};
 const restorePreviews = new Map();
+
+function configuredRoleIds(bytebot) {
+    const ids = [];
+    for (const row of bytebot.moderation_config || []) {
+        ids.push(row.image_mute_role_id, row.reaction_mute_role_id, row.jail_role_id);
+    }
+    for (const row of bytebot.birthday_config || []) ids.push(row.role_id);
+    for (const row of bytebot.auto_responses || []) {
+        if (row.action_role_mode !== 'remove') ids.push(row.action_role_id);
+        for (const action of JSON.parse(row.action_roles || '[]')) {
+            if (action.mode !== 'remove') ids.push(action.roleId);
+        }
+    }
+    for (const rule of bytebot.automation_rules || []) {
+        if (!Object.hasOwn(AUTOMATION_ROLE_FIELDS, rule.kind)) continue;
+        const value = JSON.parse(rule.config || '{}')[AUTOMATION_ROLE_FIELDS[rule.kind]];
+        ids.push(...(Array.isArray(value) ? value : [value]));
+    }
+    return new Set(ids.filter(Boolean));
+}
 
 function sqlIdentifier(value) {
     return `"${value.replaceAll('"', '""')}"`;
@@ -294,6 +317,51 @@ class GuildBackupService {
         return plan;
     }
 
+    requireConfigRolePermissions(guild, sections, backup, actor) {
+        const bytebot = backup.payload.bytebot;
+        const roleIds = configuredRoleIds(bytebot);
+        const achievementConfig = Boolean(bytebot.achievement_role_config?.length);
+        const achievementIds = new Set((bytebot.custom_achievements || []).filter(row => row.grant_role).map(row => row.achievement_id));
+        if (!roleIds.size && !achievementConfig && !achievementIds.size) return;
+        const owner = actor.id === guild.ownerId;
+        if (!owner && !actor.permissions?.has(PermissionFlagsBits.ManageRoles)) {
+            throw new Error('You need Manage Roles to restore role-grant configuration.');
+        }
+        const bot = guild.members.me;
+        if (!bot?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
+            throw new Error('I need Manage Roles to restore role-grant configuration.');
+        }
+        const savedRoles = new Map(sections.includes('roles')
+            ? backup.payload.roles.map(role => [role.sourceId, { ...role, id: role.sourceId }]) : []);
+        const denied = [
+            ...this.sqlite.prepare('SELECT permission FROM denied_role_permissions WHERE guild_id = ?').all(guild.id),
+            ...(bytebot.denied_role_permissions || [])
+        ];
+        const roles = [...roleIds].map(id => ({ id, role: savedRoles.get(id) || guild.roles.cache.get(id) }));
+        if (achievementConfig || achievementIds.size) {
+            const rewards = this.sqlite.prepare('SELECT achievement_id, role_id FROM achievement_roles WHERE guild_id = ?').all(guild.id);
+            for (const reward of rewards) {
+                const role = guild.roles.cache.get(reward.role_id);
+                if (role && (achievementConfig || achievementIds.has(reward.achievement_id))) roles.push({ id: role.id, role });
+            }
+        }
+        for (const { id, role } of roles) {
+            if (!role || role.id === guild.id || role.managed || role.editable === false) {
+                throw new Error(`Role ${id} is missing, managed or above ByteBot.`);
+            }
+            if (!owner && (!Number.isFinite(actor.roles?.highest?.position) || role.position >= actor.roles.highest.position)) {
+                throw new Error(`Role ${role.name} is at or above your highest role.`);
+            }
+            if (!Number.isFinite(bot.roles?.highest?.position) || role.position >= bot.roles.highest.position) {
+                throw new Error(`Role ${role.name} is above ByteBot's highest role.`);
+            }
+            const permissions = new PermissionsBitField(role.permissions.bitfield ?? role.permissions);
+            const blocked = denied.find(({ permission }) => PermissionFlagsBits[permission] !== undefined
+                && permissions.has(PermissionFlagsBits[permission]));
+            if (blocked) throw new Error(`Role ${role.name} carries the blocked permission ${blocked.permission}.`);
+        }
+    }
+
     requirePermissions(guild, sections, mode, backup, actor) {
         const owner = actor.id === guild.ownerId;
         if (!owner && !actor.permissions?.has(PermissionFlagsBits.ManageGuild)) {
@@ -345,6 +413,11 @@ class GuildBackupService {
             if (blocked) throw new Error(`Role ${blocked.name} is above ByteBot and cannot be removed.`);
         }
         if (mode === 'destructive' && sections.includes('channels')) {
+            if (!owner) {
+                const blocked = [...guild.channels.cache.values()].find(channel => RESTORABLE_CHANNEL_TYPES.has(channel.type)
+                    && !channel.permissionsFor(actor)?.has(PermissionFlagsBits.ManageChannels));
+                if (blocked) throw new Error(`You need Manage Channels in channel ${blocked.name} to remove it.`);
+            }
             const blocked = [...guild.channels.cache.values()].find(channel =>
                 RESTORABLE_CHANNEL_TYPES.has(channel.type) && channel.deletable === false);
             if (blocked) throw new Error(`Channel ${blocked.name} cannot be removed by ByteBot.`);
@@ -372,6 +445,7 @@ class GuildBackupService {
                 }
             }
         }
+        if (sections.includes('bytebot')) this.requireConfigRolePermissions(guild, sections, backup, actor);
     }
 
     async restore({ guild, creatorId, id, mode = 'merge', sections = SECTIONS, confirmed = false }) {
@@ -525,6 +599,11 @@ class GuildBackupService {
             };
             let restoredRows = 0;
             const restoreConfig = this.sqlite.transaction(() => {
+                if (plan.sections.includes('roles')) {
+                    const savedRoles = new Set(backup.payload.roles.map(role => role.sourceId));
+                    const missing = [...configuredRoleIds(backup.payload.bytebot)].find(id => savedRoles.has(id) && !roleIds.has(id));
+                    if (missing) throw new Error(`Referenced grant role ${missing} was not restored.`);
+                }
                 for (const table of BYTEBOT_TABLES) {
                     const guildColumn = table.guild || 'guild_id';
                     if (mode === 'destructive') {
