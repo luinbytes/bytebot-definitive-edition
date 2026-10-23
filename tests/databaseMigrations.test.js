@@ -209,6 +209,27 @@ describe('database migrations', () => {
         `).run()).toThrow();
     });
 
+    test.each([
+        ['forced_nicknames', `CREATE TABLE forced_nicknames (guild_id TEXT, user_id TEXT, nickname TEXT, updated_at INTEGER);
+            INSERT INTO forced_nicknames VALUES ('guild1', 'user1', 'first', 1), ('guild1', 'user1', 'second', 2);`],
+        ['bytepod_user_settings', `CREATE TABLE bytepod_user_settings (id INTEGER PRIMARY KEY, user_id TEXT, guild_id TEXT,
+            auto_lock INTEGER, summary_enabled INTEGER, pod_name_style TEXT);
+            INSERT INTO bytepod_user_settings VALUES (1, 'user1', 'guild1', 0, 0, 'username'), (2, 'user1', 'guild1', 1, 1, 'random');`]
+    ])('failed %s compatibility repair rejects startup and preserves existing rows', async (table, setup) => {
+        const seed = new Database(process.env.DATABASE_URL);
+        seed.exec(`${setup}
+            CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL, created_at NUMERIC);`);
+        const record = seed.prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)');
+        for (const migration of readMigrationFiles({ migrationsFolder: './drizzle' })) record.run(migration.hash, migration.folderMillis);
+        const existing = seed.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all();
+        seed.close();
+
+        database = require('../src/database');
+        await expect(database.runMigrations()).rejects.toThrow('UNIQUE constraint failed');
+        expect(database.sqlite.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()).toEqual(existing);
+        expect(database.sqlite.inTransaction).toBe(false);
+    });
+
     test('compatibility-created moderation state keeps composite uniqueness', async () => {
         const seed = new Database(process.env.DATABASE_URL);
         seed.exec(`

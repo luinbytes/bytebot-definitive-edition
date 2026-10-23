@@ -1726,7 +1726,7 @@ function fixBytepodUserSettingsTable() {
             // Ignore rollback errors
         }
         logger.error(`Failed to fix bytepod_user_settings: ${error.message}`, 'Database');
-        return null;
+        throw error;
     }
 }
 
@@ -1897,6 +1897,7 @@ const runMigrations = async () => {
         if (dbLoggingEnabled) {
             logger.error(`Schema validation error: ${error.message}`, 'Database');
         }
+        throw error;
     }
 };
 
