@@ -177,6 +177,34 @@ describe('economy service', () => {
         ]);
     });
 
+    test('shop purchases recheck denied permissions before debiting and before pending delivery', async () => {
+        const { PermissionFlagsBits } = require('discord.js');
+        service.enable('guild1', 'admin1');
+        service.configure('guild1', 'admin1', { startingBalance: 100 });
+        service.open({ guildId: 'guild1', userId: 'user1' });
+        const item = service.addShopItem({ guildId: 'guild1', actorId: 'admin1', roleId: 'reward', roleName: 'Reward', price: 40 });
+        const role = { id: 'reward', position: 1, editable: true, managed: false,
+            permissions: { has: permission => permission === PermissionFlagsBits.ManageChannels } };
+        const member = { roles: { cache: new Map(), add: jest.fn().mockResolvedValue({}) } };
+        const guild = { id: 'guild1', roles: { cache: new Map([[role.id, role]]) },
+            members: { me: { permissions: { has: () => true } }, fetch: jest.fn().mockResolvedValue(member) } };
+        database.sqlite.prepare("INSERT INTO denied_role_permissions (guild_id, permission) VALUES ('guild1', 'ManageChannels')").run();
+        await expect(service.buyShopItem({ guild, userId: 'user1', itemId: item.id, member })).rejects.toThrow('blocked permission');
+        expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(100);
+        expect(member.roles.add).not.toHaveBeenCalled();
+        database.sqlite.prepare("DELETE FROM denied_role_permissions WHERE guild_id = 'guild1'").run();
+        const pending = service.reservePurchase({ guildId: 'guild1', userId: 'user1', item: service.shopItem(guild.id, item.id) });
+        database.sqlite.prepare("INSERT INTO denied_role_permissions (guild_id, permission) VALUES ('guild1', 'ManageChannels')").run();
+        await expect(service.reconcilePurchase(pending, guild, member)).rejects.toThrow('blocked permission');
+        expect(member.roles.add).not.toHaveBeenCalled();
+        expect(service.purchase(pending.id).status).toBe('pending');
+        expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(60);
+        member.roles.cache.set(role.id, role);
+        await expect(service.buyShopItem({ guild, userId: 'user1', itemId: item.id, member })).resolves.toMatchObject({ status: 'delivered' });
+        expect(member.roles.add).not.toHaveBeenCalled();
+        expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(60);
+    });
+
     test('keeps a shop debit when Discord times out after assigning the role', async () => {
         service.enable('guild1', 'admin1');
         service.configure('guild1', 'admin1', { startingBalance: 100 });

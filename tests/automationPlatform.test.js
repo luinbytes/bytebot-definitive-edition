@@ -237,6 +237,55 @@ describe('message and member automation platform', () => {
         }
     });
 
+    test('autorole and vanity configuration require role authority before saving or enabling grants', async () => {
+        const AutomationService = require('../src/services/automationService');
+        service = new AutomationService({ guilds: { cache: new Map() } });
+        const role = { id: 'reward', position: 10, editable: true, managed: false, permissions: { has: () => false } };
+        const actor = { id: 'admin1', roles: { highest: { position: 10 } }, permissions: { has: () => true } };
+        const guild = { id: 'guild1', ownerId: 'owner1', roles: { cache: new Map([[role.id, role]]) } };
+        const interaction = (action, member = actor) => ({
+            guild, member, user: { id: 'admin1' }, editReply: jest.fn(),
+            options: { getSubcommand: () => action, getSubcommandGroup: () => null,
+                getRole: () => role, getString: () => null, getBoolean: () => null, getInteger: () => null }
+        });
+        const command = require('../src/commands/administration/autorole');
+        const denied = interaction('add');
+        await command.execute(denied, { automationService: service });
+        expect(await service.list(guild.id, 'autorole')).toHaveLength(0);
+        expect(denied.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('highest role') }));
+
+        actor.roles.highest = {};
+        await command.execute(interaction('add'), { automationService: service });
+        expect(await service.list(guild.id, 'autorole')).toHaveLength(0);
+        actor.roles.highest.position = 11;
+        role.managed = true;
+        await command.execute(interaction('add'), { automationService: service });
+        expect(await service.list(guild.id, 'autorole')).toHaveLength(0);
+        role.managed = false;
+        role.permissions.has = permission => permission === PermissionFlagsBits.Administrator;
+        database.sqlite.prepare("INSERT INTO denied_role_permissions (guild_id, permission) VALUES ('guild1', 'Administrator')").run();
+        await command.execute(interaction('add'), { automationService: service });
+        expect(await service.list(guild.id, 'autorole')).toHaveLength(0);
+        database.sqlite.prepare("DELETE FROM denied_role_permissions WHERE guild_id = 'guild1'").run();
+        await command.execute(interaction('add'), { automationService: service });
+        expect(await service.list(guild.id, 'autorole')).toHaveLength(1);
+        await service.setEnabled(guild.id, 'autorole', 'member:reward', false);
+        actor.permissions.has = permission => permission === PermissionFlagsBits.ManageGuild;
+        await command.execute(interaction('enable'), { automationService: service });
+        expect((await service.get(guild.id, 'autorole', 'member:reward')).enabled).toBe(false);
+        await command.execute(interaction('enable', null), { automationService: service });
+        expect((await service.get(guild.id, 'autorole', 'member:reward')).enabled).toBe(false);
+
+        await service.upsert({ guildId: guild.id, kind: 'vanity', key: 'main', config: { vanity: 'byte' }, createdBy: actor.id });
+        const vanity = require('../src/commands/administration/vanity');
+        await vanity.execute(interaction('role-add'), { automationService: service });
+        expect(JSON.parse((await service.get(guild.id, 'vanity', 'main')).config).roleIds).toBeUndefined();
+        guild.ownerId = actor.id;
+        role.position = 15;
+        await vanity.execute(interaction('role-add'), { automationService: service });
+        expect(JSON.parse((await service.get(guild.id, 'vanity', 'main')).config).roleIds).toEqual(['reward']);
+    });
+
     test('interval parsing is bounded and unambiguous', () => {
         const { parseInterval } = require('../src/services/automationService');
         expect(parseInterval('30m')).toBe(1800000);
@@ -446,14 +495,40 @@ describe('message and member automation platform', () => {
         await service.upsert({ guildId: 'guild1', kind: 'autorole', key: 'bot:role2', config: { roleId: 'role2' }, createdBy: 'admin1' });
         await service.upsert({ guildId: 'guild1', kind: 'pingonjoin', key: 'main', config: { channelId: 'channel1', message: 'Hi {member.mention}' }, createdBy: 'admin1' });
         const add = jest.fn().mockResolvedValue({});
-        const member = { id: 'user1', user: { bot: false, username: 'User' }, roles: { add }, guild: {
-            id: 'guild1', name: 'Guild', roles: { cache: new Map([['role1', { id: 'role1', editable: true, managed: false }]]) },
+        const member = { id: 'user1', user: { bot: false, username: 'User' }, roles: { add, cache: new Map() }, guild: {
+            id: 'guild1', name: 'Guild', members: { me: { roles: { highest: { position: 10 } } } }, roles: { cache: new Map([['role1', { id: 'role1', editable: true, managed: false, position: 1 }]]) },
             channels: { cache: new Map([['channel1', { id: 'channel1', isTextBased: () => true, send }]]) }
         } };
         await service.handleMemberAdd(member);
-        expect(add).toHaveBeenCalledWith('role1', 'Configured autorole');
+        expect(add).toHaveBeenCalledWith(expect.objectContaining({ id: 'role1' }), 'Configured autorole');
         expect(add).not.toHaveBeenCalledWith('role2', expect.anything());
         expect(send).toHaveBeenCalledWith(expect.objectContaining({ content: 'Hi <@user1>', allowedMentions: { users: ['user1'], parse: [] } }));
+    });
+
+    test('autorole and vanity grants apply current denied-role policy at execution', async () => {
+        const AutomationService = require('../src/services/automationService');
+        service = new AutomationService({ guilds: { cache: new Map() } });
+        const role = { id: 'reward', name: 'Reward', position: 1, editable: true, managed: false,
+            permissions: { has: permission => permission === PermissionFlagsBits.Administrator } };
+        const member = { id: 'user1', user: { bot: false, tag: 'User' }, roles: { cache: new Map(),
+            add: jest.fn().mockResolvedValue({}), remove: jest.fn().mockResolvedValue({}) }, guild: {
+            id: 'guild1', roles: { cache: new Map([[role.id, role]]) },
+            members: { me: { roles: { highest: { position: 10 } } } }, channels: { cache: new Map() }
+        } };
+        await service.upsert({ guildId: 'guild1', kind: 'autorole', key: 'member:reward', config: { roleId: role.id }, createdBy: 'admin1' });
+        await service.upsert({ guildId: 'guild1', kind: 'vanity', key: 'main', config: { vanity: 'byte', roleIds: [role.id] }, createdBy: 'admin1' });
+        database.sqlite.prepare("INSERT INTO denied_role_permissions (guild_id, permission) VALUES ('guild1', 'Administrator')").run();
+        await service.handleMemberAdd(member);
+        await service.handlePresence({ activities: [] }, { member, activities: [{ state: 'byte' }] });
+        expect(member.roles.add).not.toHaveBeenCalled();
+        await service.handlePresence({ activities: [{ state: 'byte' }] }, { member, activities: [] });
+        expect(member.roles.remove).toHaveBeenCalledWith('reward', 'Vanity removed');
+
+        database.sqlite.prepare("DELETE FROM denied_role_permissions WHERE guild_id = 'guild1'").run();
+        await service.handleMemberAdd(member);
+        await service.handlePresence({ activities: [] }, { member, activities: [{ state: 'byte' }] });
+        expect(member.roles.add).toHaveBeenCalledWith(role, 'Configured autorole');
+        expect(member.roles.add).toHaveBeenCalledWith(role, 'Vanity reward');
     });
 
     test('counting channels atomically accept the next number and queue invalid-message cleanup', async () => {

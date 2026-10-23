@@ -1,5 +1,7 @@
 const crypto = require('crypto');
-const { PermissionFlagsBits } = require('discord.js');
+const { PermissionFlagsBits, PermissionsBitField } = require('discord.js');
+
+const { isTrustedManager } = require('./antinukeService');
 
 const SCHEMA_VERSION = 1;
 const MAX_BACKUPS = 5;
@@ -178,6 +180,7 @@ function rowToBackup(row) {
 class GuildBackupService {
     constructor(options) {
         this.sqlite = options.sqlite;
+        this.botOwnerIds = options.botOwnerIds || [];
         this.now = options.now || Date.now;
         this.randomUUID = options.randomUUID || crypto.randomUUID;
         this.sleep = options.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
@@ -291,7 +294,14 @@ class GuildBackupService {
         return plan;
     }
 
-    requirePermissions(guild, sections, mode, backup) {
+    requirePermissions(guild, sections, mode, backup, actor) {
+        const owner = actor.id === guild.ownerId;
+        if (!owner && !actor.permissions?.has(PermissionFlagsBits.ManageGuild)) {
+            throw new Error('You need Manage Server to restore backups.');
+        }
+        if (sections.includes('bytebot') && !isTrustedManager(guild, actor.id, this.botOwnerIds)) {
+            throw new Error('Only a trusted AntiNuke manager can restore ByteBot configuration.');
+        }
         const required = [
             ['roles', PermissionFlagsBits.ManageRoles, 'Manage Roles'],
             ['channels', PermissionFlagsBits.ManageChannels, 'Manage Channels'],
@@ -299,11 +309,38 @@ class GuildBackupService {
             ['stickers', PermissionFlagsBits.ManageGuildExpressions, 'Manage Expressions']
         ];
         for (const [section, permission, name] of required) {
-            if (sections.includes(section) && !guild.members.me.permissions.has(permission)) {
+            if (sections.includes(section) && !owner && !actor.permissions?.has(permission)) {
+                throw new Error(`You need ${name} to restore ${section}.`);
+            }
+            if (sections.includes(section) && !guild.members.me?.permissions?.has(permission)) {
                 throw new Error(`I need ${name} to restore ${section}.`);
             }
         }
+        if (sections.includes('channels')) {
+            for (const channel of backup.payload.channels) {
+                if (channel.overwrites.length && !owner && !actor.permissions?.has(PermissionFlagsBits.ManageRoles)) {
+                    throw new Error('You need Manage Roles to restore channel permission overwrites.');
+                }
+                if (channel.overwrites.length && !guild.members.me?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
+                    throw new Error('I need Manage Roles to restore channel permission overwrites.');
+                }
+                for (const overwrite of channel.overwrites) {
+                    const permissions = BigInt(overwrite.allow) | BigInt(overwrite.deny);
+                    if (!owner && !actor.permissions?.has(permissions)) {
+                        throw new Error(`You cannot restore all permission overwrites on channel ${channel.name}.`);
+                    }
+                    if (!guild.members.me?.permissions?.has(permissions)) {
+                        throw new Error(`ByteBot cannot restore all permission overwrites on channel ${channel.name}.`);
+                    }
+                }
+            }
+        }
         if (mode === 'destructive' && sections.includes('roles')) {
+            if (!owner) {
+                const blocked = [...guild.roles.cache.values()].find(role => role.id !== guild.id && !role.managed
+                    && (!Number.isFinite(actor.roles?.highest?.position) || role.position >= actor.roles.highest.position));
+                if (blocked) throw new Error(`Role ${blocked.name} is at or above your highest role and cannot be removed.`);
+            }
             const blocked = [...guild.roles.cache.values()].find(role => role.id !== guild.id && !role.managed && role.editable === false);
             if (blocked) throw new Error(`Role ${blocked.name} is above ByteBot and cannot be removed.`);
         }
@@ -316,15 +353,21 @@ class GuildBackupService {
             const denied = this.sqlite.prepare('SELECT permission FROM denied_role_permissions WHERE guild_id = ?').all(guild.id);
             for (const role of backup.payload.roles) {
                 const permissions = BigInt(role.permissions);
+                if (!owner && (!Number.isFinite(actor.roles?.highest?.position) || role.position >= actor.roles.highest.position)) {
+                    throw new Error(`Role ${role.name} is at or above your highest role.`);
+                }
+                if (!owner && !actor.permissions?.has(permissions)) {
+                    throw new Error(`You cannot recreate all permissions on role ${role.name}.`);
+                }
                 if (!guild.members.me.permissions.has(permissions)) {
                     throw new Error(`ByteBot cannot recreate all permissions on role ${role.name}.`);
                 }
                 const blocked = denied.find(({ permission }) => {
                     const flag = PermissionFlagsBits[permission];
-                    return flag !== undefined && (permissions & flag) === flag;
+                    return flag !== undefined && new PermissionsBitField(permissions).has(flag);
                 });
                 if (blocked) throw new Error(`Role ${role.name} carries the blocked permission ${blocked.permission}.`);
-                if (guild.members.me.roles?.highest && role.position >= guild.members.me.roles.highest.position) {
+                if (!guild.members.me.roles?.highest || role.position >= guild.members.me.roles.highest.position) {
                     throw new Error(`Role ${role.name} is above ByteBot's highest role.`);
                 }
             }
@@ -335,7 +378,14 @@ class GuildBackupService {
         if (!confirmed) throw new Error('Restore requires explicit confirmation.');
         const plan = this.preview({ guild, creatorId, id, mode, sections });
         const backup = this.view(guild.id, creatorId, id);
-        this.requirePermissions(guild, plan.sections, mode, backup);
+        let actor;
+        try {
+            actor = await guild.members.fetch({ user: creatorId, force: true });
+        } catch {
+            throw new Error('Your current server member state could not be verified.');
+        }
+        if (!actor?.id || actor.id !== creatorId) throw new Error('Your current server member state could not be verified.');
+        this.requirePermissions(guild, plan.sections, mode, backup, actor);
         const created = Object.fromEntries(SECTIONS.map(section => [section, 0]));
         const removed = Object.fromEntries(SECTIONS.map(section => [section, 0]));
         const failures = [];

@@ -1,7 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { PermissionFlagsBits } = require('discord.js');
+const { PermissionFlagsBits, PermissionsBitField } = require('discord.js');
 
 function moderator() {
     return {
@@ -348,7 +348,7 @@ describe('core moderation workflow', () => {
 
     test('configured mute and jail roles are applied, removed, and reversible', async () => {
         const imageRole = { id: 'image-role', name: 'Image Muted', position: 2 };
-        const jailRole = { id: 'jail-role', name: 'Jailed', position: 2 };
+        const jailRole = { id: 'jail-role', name: 'Jailed', position: 2, editable: true };
         const jailChannel = { id: 'jail-channel' };
         guild.roles = { cache: new Map([[imageRole.id, imageRole], [jailRole.id, jailRole]]) };
         target.roles.add = jest.fn().mockResolvedValue({});
@@ -358,7 +358,9 @@ describe('core moderation workflow', () => {
         await mod.execute(interaction({ guild, member: actor, group: 'config', subcommand: 'imuted', values: { role: imageRole } }), {});
         await mod.execute(interaction({ guild, member: actor, group: 'config', subcommand: 'jail', values: { role: jailRole, channel: jailChannel } }), {});
         await mod.execute(interaction({ guild, member: actor, subcommand: 'imute', values: { target, reason: 'image spam' } }), {});
-        target.roles.cache.set('member-role', { id: 'member-role', managed: false });
+        const memberRole = { id: 'member-role', position: 1, editable: true, managed: false };
+        guild.roles.cache.set(memberRole.id, memberRole);
+        target.roles.cache.set(memberRole.id, memberRole);
         await mod.execute(interaction({ guild, member: actor, subcommand: 'jail', values: { target, reason: 'raid review' } }), {});
 
         expect(target.roles.add).toHaveBeenNthCalledWith(1, imageRole, 'image spam');
@@ -379,7 +381,7 @@ describe('core moderation workflow', () => {
     });
 
     test('jail list and confirmed unjail-all operate on current case state', async () => {
-        const jailRole = { id: 'jail-role', name: 'Jailed', position: 2 };
+        const jailRole = { id: 'jail-role', name: 'Jailed', position: 2, editable: true };
         guild.roles = { cache: new Map([[jailRole.id, jailRole]]) };
         target.roles.add = jest.fn().mockResolvedValue({});
         target.roles.remove = jest.fn().mockResolvedValue({});
@@ -530,7 +532,7 @@ describe('core moderation workflow', () => {
 
     test('strip removes dangerous roles as one reversible case', async () => {
         const dangerous = {
-            id: 'dangerous', name: 'Dangerous', position: 2,
+            id: 'dangerous', name: 'Dangerous', position: 2, editable: true,
             permissions: { has: jest.fn(permission => permission === PermissionFlagsBits.Administrator) }
         };
         const harmless = {
@@ -551,9 +553,116 @@ describe('core moderation workflow', () => {
         expect(target.roles.add).toHaveBeenCalledWith(dangerous, 'account recovered');
     });
 
+    test.each(['strip', 'jail'])('%s undo preflights every restored role before changing the case or member', async action => {
+        const safe = { id: 'safe', name: 'Safe', position: 2, editable: true, managed: false,
+            permissions: { has: permission => permission === PermissionFlagsBits.Administrator } };
+        const elevated = { ...safe, id: 'elevated', name: 'Elevated', position: 3 };
+        const jailRole = { id: 'jail-role', position: 1, editable: true, managed: false, permissions: { has: () => false } };
+        guild.roles = { cache: new Map([safe, elevated, jailRole].map(role => [role.id, role])) };
+        target.roles.cache = new Map([safe, elevated].map(role => [role.id, role]));
+        target.roles.add = jest.fn().mockResolvedValue({});
+        target.roles.remove = jest.fn().mockResolvedValue({});
+        target.roles.set = jest.fn().mockResolvedValue({});
+        if (action === 'jail') await mod.execute(interaction({ guild, member: actor, group: 'config', subcommand: 'jail', values: { role: jailRole } }), {});
+        await mod.execute(interaction({ guild, member: actor, subcommand: action, values: { target } }), {});
+        target.roles.cache.clear();
+        target.roles.set.mockClear();
+        elevated.position = actor.roles.highest.position;
+        actor.permissions.has.mockImplementation(() => true);
+
+        const undo = () => require('../src/services/moderationService').undoCase({ guild, executor: actor, caseNumber: 1, reason: 'restore' });
+        await expect(undo()).rejects.toThrow('highest role');
+        expect(target.roles.add).not.toHaveBeenCalled();
+        expect(target.roles.set).not.toHaveBeenCalled();
+        expect(require('../src/services/moderationService').getCase(guild.id, 1).status).toBe('completed');
+        if (action === 'jail') expect(database.sqlite.prepare('SELECT state FROM moderation_jail_state').get().state).toBe('active');
+
+        elevated.position = 3;
+        database.sqlite.prepare("INSERT INTO denied_role_permissions (guild_id, permission) VALUES ('guild1', 'Administrator')").run();
+        await expect(undo()).rejects.toThrow('blocked permission');
+        expect(target.roles.add).not.toHaveBeenCalled();
+        expect(target.roles.set).not.toHaveBeenCalled();
+        expect(require('../src/services/moderationService').getCase(guild.id, 1).status).toBe('completed');
+
+        database.sqlite.prepare("DELETE FROM denied_role_permissions WHERE guild_id = 'guild1'").run();
+        elevated.position = actor.roles.highest.position;
+        guild.ownerId = actor.id;
+        await expect(undo()).resolves.toBeDefined();
+    });
+
+    test('unjail undo rejects elevated, managed or newly denied jail roles without recreating jail state', async () => {
+        const role = { id: 'jail-role', name: 'Jailed', position: 2, editable: true, managed: false, permissions: { has: () => false } };
+        const memberRole = { id: 'member-role', position: 1, editable: true, managed: false, permissions: { has: () => false } };
+        guild.roles = { cache: new Map([role, memberRole].map(value => [value.id, value])) };
+        target.roles.cache.set(memberRole.id, memberRole);
+        target.roles.set = jest.fn().mockResolvedValue({});
+        await mod.execute(interaction({ guild, member: actor, group: 'config', subcommand: 'jail', values: { role } }), {});
+        await mod.execute(interaction({ guild, member: actor, subcommand: 'jail', values: { target } }), {});
+        target.roles.cache = new Map([[role.id, role]]);
+        await mod.execute(interaction({ guild, member: actor, subcommand: 'unjail', values: { target } }), {});
+        target.roles.cache = new Map([[memberRole.id, memberRole]]);
+        target.roles.set.mockClear();
+        const service = require('../src/services/moderationService');
+        const undo = executor => service.undoCase({ guild, executor, caseNumber: 2, reason: 'restore jail' });
+        role.position = actor.roles.highest.position;
+        await expect(undo(actor)).rejects.toThrow('highest role');
+        role.position = 2;
+        role.managed = true;
+        await expect(undo(actor)).rejects.toThrow('managed');
+        role.managed = false;
+        role.permissions.has = permission => permission === PermissionFlagsBits.BanMembers;
+        database.sqlite.prepare("INSERT INTO denied_role_permissions (guild_id, permission) VALUES ('guild1', 'BanMembers')").run();
+        await expect(undo(actor)).rejects.toThrow('blocked permission');
+        await expect(undo({ id: actor.id, permissions: actor.permissions, roles: { highest: {} } })).rejects.toThrow('authority');
+        expect(target.roles.set).not.toHaveBeenCalled();
+        expect(service.getCase(guild.id, 2).status).toBe('completed');
+        expect(database.sqlite.prepare('SELECT * FROM moderation_jail_state').all()).toHaveLength(0);
+    });
+
+    test.each([false, true])('staffstrip undo preserves authorized historical staff roles (owner=%s)', async owner => {
+        const role = { id: 'staff-role', name: 'Staff', position: owner ? 11 : 5, editable: true, managed: false,
+            permissions: new PermissionsBitField([PermissionFlagsBits.Administrator, PermissionFlagsBits.ManageRoles]) };
+        actor.permissions = new PermissionsBitField(owner ? PermissionFlagsBits.Administrator : [PermissionFlagsBits.ManageGuild, PermissionFlagsBits.ManageRoles]);
+        if (owner) guild.ownerId = actor.id;
+        guild.roles = { cache: new Map([[role.id, role]]) };
+        target.roles.cache.set(role.id, role);
+        target.roles.remove = jest.fn().mockResolvedValue({});
+        target.roles.add = jest.fn().mockResolvedValue({});
+        await mod.execute(interaction({ guild, member: actor, group: 'config', subcommand: 'staff-add', values: { role } }), {});
+        await mod.execute(interaction({ guild, member: actor, subcommand: 'staffstrip', values: { target, reason: 'review' } }), {});
+        expect(target.roles.remove).toHaveBeenCalledWith(role, 'review');
+        target.roles.cache.clear();
+        await require('../src/services/moderationService').undoCase({ guild, executor: actor, caseNumber: 1, reason: 'approved restoration' });
+        expect(target.roles.add).toHaveBeenCalledWith(role, 'approved restoration');
+        expect(require('../src/services/moderationService').getCase(guild.id, 1).status).toBe('undone');
+    });
+
+    test.each(['jail', 'unjail'])('normal %s preflights current denyperm before role sets or case creation', async action => {
+        const jailRole = { id: 'jail-role', name: 'Jailed', position: 2, editable: true, managed: false, permissions: new PermissionsBitField() };
+        const memberRole = { id: 'member-role', name: 'Member', position: 1, editable: true, managed: false, permissions: new PermissionsBitField() };
+        guild.roles = { cache: new Map([jailRole, memberRole].map(role => [role.id, role])) };
+        target.roles.cache.set(memberRole.id, memberRole);
+        target.roles.set = jest.fn().mockResolvedValue({});
+        await mod.execute(interaction({ guild, member: actor, group: 'config', subcommand: 'jail', values: { role: jailRole } }), {});
+        if (action === 'unjail') {
+            await mod.execute(interaction({ guild, member: actor, subcommand: 'jail', values: { target } }), {});
+            target.roles.cache = new Map([[jailRole.id, jailRole]]);
+        }
+        const grantedRole = action === 'jail' ? jailRole : memberRole;
+        grantedRole.permissions.add(PermissionFlagsBits.BanMembers);
+        database.sqlite.prepare("INSERT INTO denied_role_permissions (guild_id, permission) VALUES ('guild1', 'BanMembers')").run();
+        target.roles.set.mockClear();
+        await expect(require('../src/services/moderationService').executeMemberAction({
+            guild, executor: actor, target, action: action.toUpperCase(), reason: 'review'
+        })).rejects.toThrow('blocked permission');
+        expect(target.roles.set).not.toHaveBeenCalled();
+        expect(database.sqlite.prepare('SELECT COUNT(*) AS count FROM moderation_cases').get().count).toBe(action === 'jail' ? 0 : 1);
+        expect(database.sqlite.prepare('SELECT state FROM moderation_jail_state').get()?.state).toBe(action === 'jail' ? undefined : 'active');
+    });
+
     test('strip undo records cleanup_required when its rollback is partial', async () => {
         const roles = ['dangerous-1', 'dangerous-2'].map(id => ({
-            id, name: id, position: 2,
+            id, name: id, position: 2, editable: true,
             permissions: { has: jest.fn(permission => permission === PermissionFlagsBits.Administrator) }
         }));
         guild.roles = { cache: new Map(roles.map(role => [role.id, role])) };

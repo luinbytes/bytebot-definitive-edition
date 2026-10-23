@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType, MessageFlags } = require('discord.js');
+const RoleAutomationService = require('../services/roleAutomationService');
 const { parseInterval, payloadFor } = require('../services/automationService');
 
 const OPTION_BUILDERS = {
@@ -142,6 +143,27 @@ function createAutomationCommand({ name, description, kind = name, actions, grou
             }
             const key = keyFor(kind, interaction, action);
             const existing = await service.get(guildId, kind, key);
+            const grantsRoles = kind === 'autorole' && ['add', 'bots-add', 'enable'].includes(action)
+                || kind === 'vanity' && ['set', 'setup', 'enable', 'message', 'channel', 'strict', 'role-add', 'role', 'role-remove', 'removerole'].includes(action)
+                    && (['role-add', 'role'].includes(action) || (existing && JSON.parse(existing.config || '{}').roleIds?.length));
+            if (grantsRoles) {
+                const actor = interaction.member;
+                const owner = actor?.id === interaction.guild.ownerId;
+                if (!actor?.id || (!owner && (!actor.permissions?.has(PermissionFlagsBits.ManageGuild)
+                    || !actor.permissions?.has(PermissionFlagsBits.ManageRoles) || !Number.isFinite(actor.roles?.highest?.position)))) {
+                    return interaction.editReply({ content: 'You need **Manage Server** and **Manage Roles** to configure role grants.', flags: [MessageFlags.Ephemeral] });
+                }
+                const config = existing ? JSON.parse(existing.config || '{}') : {};
+                const selected = interaction.options.getRole('role');
+                const roleIds = kind === 'autorole' ? [selected?.id || config.roleId]
+                    : [...new Set([...(config.roleIds || []), ...(['role-add', 'role'].includes(action) ? [selected?.id] : [])])]
+                        .filter(id => !['role-remove', 'removerole'].includes(action) || id !== selected?.id);
+                const validator = new RoleAutomationService(client, service);
+                for (const roleId of roleIds) {
+                    const invalid = await validator.validateRole(interaction.guild, interaction.guild.roles.cache.get(roleId), actor);
+                    if (invalid) return interaction.editReply({ content: invalid, flags: [MessageFlags.Ephemeral] });
+                }
+            }
             if (kind === 'autoreact' && ['channels-add', 'roles-add'].includes(action) && !existing) {
                 return interaction.editReply({ content: 'Create that autoreaction trigger before adding restrictions.', flags: [MessageFlags.Ephemeral] });
             }

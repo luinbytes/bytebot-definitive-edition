@@ -2,6 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const { PermissionFlagsBits, PermissionsBitField } = require('discord.js');
 
 describe('guild backups', () => {
     let tempDir;
@@ -133,8 +134,8 @@ describe('guild backups', () => {
         const channelCreate = jest.fn(async options => ({ id: options.type === 4 ? 'new-category' : 'new-channel', ...options }));
         let allowed = false;
         const guild = {
-            id: 'guild1',
-            members: { me: { permissions: { has: jest.fn(() => allowed) } } },
+            id: 'guild1', ownerId: 'admin1',
+            members: { fetch: jest.fn().mockResolvedValue({ id: 'admin1' }), me: { permissions: { has: jest.fn(() => allowed) }, roles: { highest: { position: 100 } } } },
             roles: { everyone: { id: 'guild1' }, cache: new Map(), create: roleCreate },
             channels: { cache: new Map(), create: channelCreate },
             emojis: { cache: new Map(), create: jest.fn() },
@@ -160,6 +161,103 @@ describe('guild backups', () => {
         }));
     });
 
+    test('restore rechecks the actors action permissions, role authority and current membership before any mutation', async () => {
+        const role = { id: 'role1', name: 'Helpers', position: 5, managed: false,
+            permissions: { bitfield: PermissionFlagsBits.BanMembers } };
+        const guild = { id: 'guild1', ownerId: 'owner1', roles: { everyone: { id: 'guild1' },
+            cache: new Map([[role.id, role]]), create: jest.fn().mockResolvedValue({ id: 'new-role' }) },
+            channels: { cache: new Map(), create: jest.fn() }, emojis: { cache: new Map() }, stickers: { cache: new Map() },
+            members: { me: { permissions: new PermissionsBitField(PermissionFlagsBits.Administrator), roles: { highest: { position: 20 } } }, fetch: jest.fn() } };
+        const actor = { id: 'admin1', permissions: new PermissionsBitField(PermissionFlagsBits.ManageGuild), roles: { highest: { position: 10 } } };
+        guild.members.fetch.mockResolvedValue(actor);
+        service.create({ guild, creatorId: actor.id, name: 'Authority' });
+        const restore = sections => service.restore({ guild, creatorId: actor.id, id: 'backup-1', sections, confirmed: true });
+        await expect(restore(['roles'])).rejects.toThrow('Manage Roles');
+        actor.permissions.add(PermissionFlagsBits.ManageRoles);
+        await expect(restore(['roles'])).rejects.toThrow('permissions');
+        actor.permissions.add(PermissionFlagsBits.BanMembers);
+        actor.roles.highest.position = role.position;
+        await expect(restore(['roles'])).rejects.toThrow('highest role');
+        expect(guild.roles.create).not.toHaveBeenCalled();
+        actor.roles.highest.position = 10;
+        await expect(restore(['roles'])).resolves.toMatchObject({ created: { roles: 1 } });
+        guild.members.fetch.mockRejectedValue(new Error('Member unavailable'));
+        await expect(restore(['channels'])).rejects.toThrow('member');
+        expect(guild.channels.create).not.toHaveBeenCalled();
+    });
+
+    test.each([
+        ['channels', PermissionFlagsBits.ManageChannels, 'Manage Channels'],
+        ['emojis', PermissionFlagsBits.ManageGuildExpressions, 'Manage Expressions'],
+        ['stickers', PermissionFlagsBits.ManageGuildExpressions, 'Manage Expressions']
+    ])('%s restore requires the actors section permission even with bot authority', async (section, permission, message) => {
+        const actor = { id: 'admin1', permissions: new PermissionsBitField(PermissionFlagsBits.ManageGuild) };
+        const guild = { id: 'guild1', ownerId: 'owner1', roles: { everyone: { id: 'guild1' }, cache: new Map() },
+            channels: { cache: new Map() }, emojis: { cache: new Map() }, stickers: { cache: new Map() },
+            members: { me: { permissions: new PermissionsBitField(PermissionFlagsBits.Administrator) }, fetch: jest.fn().mockResolvedValue(actor) } };
+        service.create({ guild, creatorId: actor.id, name: 'Section permissions' });
+        const restore = () => service.restore({ guild, creatorId: actor.id, id: 'backup-1', sections: [section], confirmed: true });
+        await expect(restore()).rejects.toThrow(message);
+        actor.permissions.add(permission);
+        await expect(restore()).resolves.toMatchObject({ failures: [] });
+    });
+
+    test('channel overwrites and destructive role removals stay within the actors authority', async () => {
+        const actor = { id: 'admin1', permissions: new PermissionsBitField([
+            PermissionFlagsBits.ManageGuild, PermissionFlagsBits.ManageChannels
+        ]), roles: { highest: { position: 5 } } };
+        const oldRole = { id: 'old-role', name: 'Old', position: 5, managed: false, editable: true,
+            permissions: { bitfield: 0n }, delete: jest.fn() };
+        const channel = { id: 'channel1', name: 'general', type: 0, position: 1,
+            permissionOverwrites: { cache: new Map([['guild1', { id: 'guild1', type: 0,
+                allow: { bitfield: PermissionFlagsBits.BanMembers }, deny: { bitfield: 0n } }]]) }, delete: jest.fn() };
+        const guild = { id: 'guild1', ownerId: 'owner1', roles: { everyone: { id: 'guild1' }, cache: new Map([[oldRole.id, oldRole]]) },
+            channels: { cache: new Map([[channel.id, channel]]), create: jest.fn().mockResolvedValue({ id: 'new-channel' }) },
+            emojis: { cache: new Map() }, stickers: { cache: new Map() }, members: {
+                me: { permissions: new PermissionsBitField(PermissionFlagsBits.Administrator), roles: { highest: { position: 20 } } }, fetch: jest.fn().mockResolvedValue(actor)
+            } };
+        service.create({ guild, creatorId: actor.id, name: 'Authority' });
+        const restore = (sections, mode = 'merge') => service.restore({ guild, creatorId: actor.id, id: 'backup-1', sections, mode, confirmed: true });
+        await expect(restore(['channels'])).rejects.toThrow('Manage Roles');
+        actor.permissions.add(PermissionFlagsBits.ManageRoles);
+        await expect(restore(['channels'])).rejects.toThrow('permission overwrites');
+        await expect(restore(['roles', 'channels'], 'destructive')).rejects.toThrow('permission overwrites');
+        expect(channel.delete).not.toHaveBeenCalled();
+        actor.permissions.add(PermissionFlagsBits.BanMembers);
+        await expect(restore(['roles', 'channels'], 'destructive')).rejects.toThrow('highest role');
+        expect(oldRole.delete).not.toHaveBeenCalled();
+        expect(channel.delete).not.toHaveBeenCalled();
+        await expect(restore(['channels'])).resolves.toMatchObject({ created: { channels: 1 } });
+    });
+
+    test('role restore honors denied permissions implied by Administrator even for the owner', async () => {
+        const role = { id: 'admin-role', name: 'Admin', position: 1, managed: false, permissions: { bitfield: PermissionFlagsBits.Administrator } };
+        const guild = { id: 'guild1', ownerId: 'admin1', roles: { everyone: { id: 'guild1' }, cache: new Map([[role.id, role]]), create: jest.fn() },
+            channels: { cache: new Map() }, emojis: { cache: new Map() }, stickers: { cache: new Map() }, members: {
+                me: { permissions: new PermissionsBitField(PermissionFlagsBits.Administrator), roles: { highest: { position: 20 } } },
+                fetch: jest.fn().mockResolvedValue({ id: 'admin1' })
+            } };
+        service.create({ guild, creatorId: 'admin1', name: 'Admin' });
+        database.sqlite.prepare("INSERT INTO denied_role_permissions (guild_id, permission) VALUES ('guild1', 'BanMembers')").run();
+        await expect(service.restore({ guild, creatorId: 'admin1', id: 'backup-1', sections: ['roles'], confirmed: true })).rejects.toThrow('blocked permission BanMembers');
+        expect(guild.roles.create).not.toHaveBeenCalled();
+    });
+
+    test('ByteBot backup config requires the normal trusted AntiNuke manager authority', async () => {
+        const actor = { id: 'admin1', permissions: new PermissionsBitField(PermissionFlagsBits.Administrator), roles: { highest: { position: 10 } } };
+        const guild = { id: 'guild1', ownerId: 'owner1', roles: { everyone: { id: 'guild1' }, cache: new Map() },
+            channels: { cache: new Map() }, emojis: { cache: new Map() }, stickers: { cache: new Map() },
+            members: { me: { permissions: actor.permissions }, fetch: jest.fn().mockResolvedValue(actor) } };
+        database.sqlite.prepare("INSERT INTO antinuke_config (guild_id, enabled) VALUES ('guild1', 1)").run();
+        service.create({ guild, creatorId: actor.id, name: 'Security' });
+        database.sqlite.prepare("UPDATE antinuke_config SET enabled = 0 WHERE guild_id = 'guild1'").run();
+        const restore = () => service.restore({ guild, creatorId: actor.id, id: 'backup-1', sections: ['bytebot'], confirmed: true });
+        await expect(restore()).rejects.toThrow('trusted');
+        expect(database.sqlite.prepare("SELECT enabled FROM antinuke_config WHERE guild_id = 'guild1'").get().enabled).toBe(0);
+        database.sqlite.prepare("INSERT INTO antinuke_admins (guild_id, user_id, added_by, created_at) VALUES ('guild1', 'admin1', 'owner1', 1)").run();
+        await expect(restore()).resolves.toMatchObject({ created: { bytebot: 1 } });
+    });
+
     test('destructive restore removes selected structure and reports expression failures', async () => {
         const source = {
             id: 'guild1', roles: { cache: new Map() }, channels: { cache: new Map() },
@@ -179,7 +277,7 @@ describe('guild backups', () => {
             delete: jest.fn(async () => {}) };
         const oldSticker = { id: 'old-sticker', name: 'old', delete: jest.fn(async () => {}) };
         const guild = {
-            id: 'guild1', members: { me: { permissions: { has: jest.fn(() => true) } } },
+            id: 'guild1', ownerId: 'admin1', members: { fetch: jest.fn().mockResolvedValue({ id: 'admin1' }), me: { permissions: { has: jest.fn(() => true) }, roles: { highest: { position: 100 } } } },
             roles: { everyone: { id: 'guild1' }, cache: new Map([[oldRole.id, oldRole]]), create: jest.fn() },
             channels: { cache: new Map([[oldChannel.id, oldChannel]]), create: jest.fn() },
             emojis: { cache: new Map([[oldEmoji.id, oldEmoji]]), create: jest.fn(async () => ({ id: 'new-emoji' })) },
@@ -211,7 +309,7 @@ describe('guild backups', () => {
         const deleteRole = jest.fn();
         const deleteChannel = jest.fn();
         const guild = {
-            id: 'guild1', members: { me: { permissions: { has: () => true } } },
+            id: 'guild1', ownerId: 'admin1', members: { fetch: jest.fn().mockResolvedValue({ id: 'admin1' }), me: { permissions: { has: () => true }, roles: { highest: { position: 100 } } } },
             roles: { everyone: { id: 'guild1' }, cache: new Map([
                 ['protected', { id: 'protected', name: 'Protected', managed: false, editable: false, position: 1,
                     permissions: { bitfield: 0n }, delete: deleteRole }]
@@ -239,7 +337,7 @@ describe('guild backups', () => {
             (guild_id, target_id, executor_id, action, reason, timestamp)
             VALUES ('guild1', 'member1', 'admin1', 'WARN', 'Keep this', 1)`).run();
         const guild = {
-            id: 'guild1', members: { me: { permissions: { has: jest.fn(() => true) } } },
+            id: 'guild1', ownerId: 'admin1', members: { fetch: jest.fn().mockResolvedValue({ id: 'admin1' }), me: { permissions: { has: jest.fn(() => true) }, roles: { highest: { position: 100 } } } },
             roles: { everyone: { id: 'guild1' }, cache: new Map(), create: jest.fn() },
             channels: { cache: new Map(), create: jest.fn() },
             emojis: { cache: new Map(), create: jest.fn() }, stickers: { cache: new Map(), create: jest.fn() }

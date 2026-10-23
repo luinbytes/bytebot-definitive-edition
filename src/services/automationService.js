@@ -211,7 +211,8 @@ class AutomationService {
             const config = configOf(rule);
             if (rule.kind === 'autorole' && ((rule.key.startsWith('bot:')) === member.user.bot)) {
                 if (editableRole(member.guild, config.roleId)) {
-                    await member.roles.add(config.roleId, 'Configured autorole').catch(error => logger.warn(`Autorole failed: ${error.message}`));
+                    const result = await RoleManager.addRole(member, config.roleId, { reason: 'Configured autorole', logContext: 'autorole' });
+                    if (!result.success) logger.warn(`Autorole failed: ${result.error}`);
                 }
             }
             if (rule.kind === 'pingonjoin' && rule.key === 'main') {
@@ -234,7 +235,7 @@ class AutomationService {
         const oldMatches = config.strict ? oldText === config.vanity : oldText.toLowerCase().includes(String(config.vanity || '').toLowerCase());
         for (const roleId of config.roleIds || []) {
             if (!editableRole(member.guild, roleId)) continue;
-            if (matches) await member.roles.add(roleId, 'Vanity reward').catch(() => null);
+            if (matches) await RoleManager.addRole(member, roleId, { reason: 'Vanity reward', logContext: 'vanity' });
             else await member.roles.remove(roleId, 'Vanity removed').catch(() => null);
         }
         if (matches && !oldMatches && config.channelId) {

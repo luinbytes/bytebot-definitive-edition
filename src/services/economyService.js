@@ -4,6 +4,7 @@ const {
     ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder
 } = require('discord.js');
 const embeds = require('../utils/embeds');
+const RoleAutomationService = require('./roleAutomationService');
 
 const GLOBAL_SCOPE = 'global';
 const MAX_STARTING_BALANCE = 1000000;
@@ -1158,12 +1159,14 @@ class EconomyService {
         return Boolean(this.sqlite.prepare('DELETE FROM economy_shop_items WHERE guild_id = ? AND id = ?').run(guildId, itemId).changes);
     }
 
-    checkShopRole(guild, role) {
+    async checkShopRole(guild, role, actor) {
         if (!guild.members.me?.permissions?.has(PermissionFlagsBits.ManageRoles)) throw new Error('ByteBot needs Manage Roles to deliver shop roles.');
         if (!role || role.id === guild.roles.everyone?.id || role.managed || !role.editable
             || role.permissions?.has(PermissionFlagsBits.Administrator)) {
             throw new Error('That role cannot be managed safely by ByteBot.');
         }
+        const invalid = await new RoleAutomationService(this.client).validateRole(guild, role, actor);
+        if (invalid) throw new Error(invalid);
     }
 
     reservePurchase({ guildId, userId, item }) {
@@ -1238,12 +1241,12 @@ class EconomyService {
         if (!purchase || purchase.status !== 'pending') return purchase;
         const role = guild.roles.cache.get(purchase.roleId);
         if (!role) return this.reversePurchase(purchase.id, 'Shop role no longer exists.');
-        this.checkShopRole(guild, role);
         let member = suppliedMember;
         try { member = await guild.members.fetch(purchase.userId); } catch {
             if (!member) throw new Error('Purchase is pending because member state could not be confirmed.');
         }
         if (member.roles.cache.has(role.id)) return this.markPurchase(purchase.id, 'delivered');
+        await this.checkShopRole(guild, role);
         try {
             await member.roles.add(role, 'Economy shop purchase');
             return this.markPurchase(purchase.id, 'delivered');
@@ -1290,13 +1293,13 @@ class EconomyService {
 
     async buyShopItem({ guild, userId, itemId, member }) {
         const item = this.shopItem(guild.id, itemId);
-        const role = guild.roles.cache.get(item.role_id);
-        this.checkShopRole(guild, role);
         const pending = this.pendingPurchase(guild.id, userId, item.id);
         if (pending) {
             const reconciled = await this.reconcilePurchase(pending, guild, member);
             if (reconciled.status === 'delivered') return reconciled;
         }
+        const role = guild.roles.cache.get(item.role_id);
+        await this.checkShopRole(guild, role);
         if (member.roles.cache.has(role.id)) throw new Error('You already have that role.');
         const purchase = this.reservePurchase({ guildId: guild.id, userId, item });
         const result = await this.reconcilePurchase(purchase, guild, member);
@@ -1723,7 +1726,12 @@ class EconomyService {
                 this.requireManage(interaction);
                 if (subcommand === 'add') {
                     const role = interaction.options.getRole('role');
-                    this.checkShopRole(interaction.guild, role);
+                    const actor = interaction.member;
+                    if (!actor?.id || (actor.id !== interaction.guild.ownerId
+                        && (!actor.permissions?.has(PermissionFlagsBits.ManageRoles) || !Number.isFinite(actor.roles?.highest?.position)))) {
+                        throw new Error('You need Manage Roles to configure shop roles.');
+                    }
+                    await this.checkShopRole(interaction.guild, role, actor);
                     const item = this.addShopItem({
                         guildId, actorId: userId, roleId: role.id, roleName: role.name,
                         price: interaction.options.getInteger('price')
