@@ -661,8 +661,8 @@ class ActivityStreakService {
     }
 
     async reconcileMissedStreakDays(streak, today) {
-        if (!streak.lastActivityDate || streak.lastActivityDate >= today || streak.currentStreak <= 0) return false;
-        const missedDays = this.getDaysBetween(streak.lastActivityDate, today) - 1;
+        if (!streak.streakCoveredThrough || streak.streakCoveredThrough >= today || streak.currentStreak <= 0) return false;
+        const missedDays = this.getDaysBetween(streak.streakCoveredThrough, today) - 1;
         if (missedDays <= 0) return false;
 
         const yesterday = new Date(`${today}T00:00:00Z`);
@@ -672,14 +672,13 @@ class ActivityStreakService {
                 .set({
                     currentStreak: missedDays <= streak.freezesAvailable ? streak.currentStreak : 0,
                     freezesAvailable: Math.max(0, streak.freezesAvailable - missedDays),
-                    // This is the streak coverage cursor. Activity logs retain actual active dates.
-                    lastActivityDate: yesterday.toISOString().slice(0, 10),
+                    streakCoveredThrough: yesterday.toISOString().slice(0, 10),
                     updatedAt: new Date()
                 })
                 .where(and(
                     eq(activityStreaks.userId, streak.userId),
                     eq(activityStreaks.guildId, streak.guildId),
-                    eq(activityStreaks.lastActivityDate, streak.lastActivityDate),
+                    eq(activityStreaks.streakCoveredThrough, streak.streakCoveredThrough),
                     eq(activityStreaks.currentStreak, streak.currentStreak),
                     eq(activityStreaks.freezesAvailable, streak.freezesAvailable)
                 )),
@@ -1020,7 +1019,7 @@ class ActivityStreakService {
                         guildId,
                         currentStreak: 1,
                         longestStreak: 1,
-                        lastActivityDate: today,
+                        streakCoveredThrough: today,
                         totalActiveDays: 1,
                         freezesAvailable: 1,
                         lastFreezeReset: new Date(),
@@ -1036,7 +1035,7 @@ class ActivityStreakService {
             }
 
             // If already active today, streak doesn't change but we still check cumulative achievements
-            if (existing.lastActivityDate === today) {
+            if (existing.streakCoveredThrough === today) {
                 // Streak and total days haven't changed, but cumulative values (messages, voice, commands)
                 // may have increased, so check for achievements that depend on cumulative totals
                 await this.checkAndAwardAchievements(
@@ -1057,7 +1056,7 @@ class ActivityStreakService {
             let newTotalDays = existing.totalActiveDays + 1;
 
             // Check if continuing streak
-            if (existing.lastActivityDate === yesterday) {
+            if (existing.streakCoveredThrough === yesterday) {
                 // Continuing streak
                 newStreak += 1;
             } else {
@@ -1072,14 +1071,14 @@ class ActivityStreakService {
                     .set({
                         currentStreak: newStreak,
                         longestStreak: newLongest,
-                        lastActivityDate: today,
+                        streakCoveredThrough: today,
                         totalActiveDays: newTotalDays,
                         updatedAt: new Date()
                     })
                     .where(and(
                         eq(activityStreaks.userId, userId),
                         eq(activityStreaks.guildId, guildId),
-                        sql`${activityStreaks.lastActivityDate} IS ${existing.lastActivityDate}`,
+                        sql`${activityStreaks.streakCoveredThrough} IS ${existing.streakCoveredThrough}`,
                         eq(activityStreaks.currentStreak, existing.currentStreak),
                         eq(activityStreaks.totalActiveDays, existing.totalActiveDays)
                     )),

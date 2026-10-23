@@ -266,7 +266,6 @@ describe('database migrations', () => {
         seed.close();
 
         database = require('../src/database');
-        // Native SQLite errors may originate in another Jest VM when suites share the addon.
         await expect(database.runMigrations()).rejects.toMatchObject({
             message: expect.stringContaining('UNIQUE constraint failed')
         });
