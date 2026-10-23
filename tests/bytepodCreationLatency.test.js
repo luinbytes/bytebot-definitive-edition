@@ -26,7 +26,8 @@ async function waitForCall(mock) {
     expect(mock).toHaveBeenCalled();
 }
 
-test('moves the creator without waiting for auto-whitelist member fetches', async () => {
+test.each([1, 1200])('moves the creator promptly and bounds %i saved preset entries', async presetCount => {
+    jest.clearAllMocks();
     let resolveMemberFetch;
     const memberFetch = new Promise(resolve => { resolveMemberFetch = resolve; });
     const setChannel = jest.fn().mockResolvedValue(undefined);
@@ -62,7 +63,7 @@ test('moves the creator without waiting for auto-whitelist member fetches', asyn
         guilds: { voiceHubChannelId: 'hub-1', voiceHubCategoryId: 'category-1' },
         bytepodUserSettings: null,
         bytepods: null,
-        bytepodAutoWhitelist: [{ targetUserId: 'friend-1' }]
+        bytepodAutoWhitelist: Array.from({ length: presetCount }, (_, index) => ({ targetUserId: `friend-${index + 1}` }))
     })[table]);
     mockDbLog.insert.mockResolvedValue(undefined);
 
@@ -78,6 +79,8 @@ test('moves the creator without waiting for auto-whitelist member fetches', asyn
 
     resolveMemberFetch({ user: { id: 'friend-1' } });
     await execution;
+    expect(createdChannel.permissionOverwrites.edit).toHaveBeenCalledTimes(Math.min(presetCount, 998));
+    expect(guild.members.fetch).toHaveBeenCalledTimes(Math.min(presetCount, 998));
     expect(createdChannel.permissionOverwrites.edit).toHaveBeenCalledWith(
         { id: 'friend-1' },
         { Connect: true }
