@@ -108,7 +108,7 @@ describe('Auto-Responder System', () => {
 
         test('exact match should work correctly', async () => {
             expect(await service.matchesTrigger('hello', 'hello', 'exact')).toBe(true);
-            expect(await service.matchesTrigger('Hello', 'hello', 'exact')).toBe(true); // Case insensitive
+            expect(await service.matchesTrigger('Hello', 'hello', 'exact')).toBe(true);
             expect(await service.matchesTrigger('hello world', 'hello', 'exact')).toBe(false);
         });
 
@@ -121,7 +121,7 @@ describe('Auto-Responder System', () => {
         test('wildcard match should work correctly', async () => {
             expect(await service.matchesTrigger('hello world', 'hello*', 'wildcard')).toBe(true);
             expect(await service.matchesTrigger('test123', 'test?23', 'wildcard')).toBe(true);
-            expect(await service.matchesTrigger('hello world', 'hello', 'wildcard')).toBe(false); // Must match fully
+            expect(await service.matchesTrigger('hello world', 'hello', 'wildcard')).toBe(false);
         });
 
         test('wildcard match treats regex punctuation as literal text', async () => {

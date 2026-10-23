@@ -322,6 +322,34 @@ describe('AntiRaid and advanced AutoMod', () => {
         expect(automod.getActiveStrikes(server.id, target.id).count).toBe(0);
     });
 
+    test('worker construction failures remove unchecked messages without strikes', async () => {
+        let failedWorkerAutomod;
+        try {
+            jest.doMock('worker_threads', () => ({ Worker: jest.fn(() => { throw new Error('worker unavailable'); }) }));
+            jest.doMock('../src/database', () => database);
+            jest.isolateModules(() => { failedWorkerAutomod = require('../src/services/automodService'); });
+        } finally {
+            jest.dontMock('worker_threads');
+            jest.dontMock('../src/database');
+        }
+        const server = guild();
+        const target = member('target', server);
+        failedWorkerAutomod.ensureConfig(server.id);
+        database.sqlite.prepare('UPDATE automod_config SET enabled = 1, strikes_enabled = 1 WHERE guild_id = ?').run(server.id);
+        failedWorkerAutomod.addRule(server.id, 'regex', '^blocked$', 'blocked');
+        const incoming = message(target, 'blocked');
+        try {
+            const result = await failedWorkerAutomod.handleMessage(incoming);
+            expect(result).toEqual(expect.objectContaining({ filter: 'regex:unavailable', action: 'delete', status: 'applied' }));
+            expect(incoming.delete).toHaveBeenCalledTimes(1);
+            expect(failedWorkerAutomod.getActiveStrikes(server.id, target.id).count).toBe(0);
+            expect(database.sqlite.prepare('SELECT error FROM automod_incidents WHERE message_id = ?').get(incoming.id).error)
+                .toBe('worker unavailable');
+        } finally {
+            await failedWorkerAutomod.cleanup();
+        }
+    });
+
     test.each([
         ['caps', 'THIS IS VERY LOUD', { threshold: 70 }],
         ['emoji', '😀😀', { threshold: 2 }],

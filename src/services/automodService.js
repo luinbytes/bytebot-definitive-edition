@@ -130,7 +130,9 @@ function evaluateRegex(patterns, text, timeoutMs) {
 function queueRegex(task) {
     if (regexPending >= REGEX_QUEUE_LIMIT) return Promise.resolve({ matched: false, error: 'Regex queue is full.' });
     regexPending++;
-    const result = regexQueue.then(task, task);
+    const result = regexQueue.then(task, task).catch(error => ({
+        matched: false, error: error?.message || 'Regex evaluation failed.'
+    }));
     regexQueue = result.catch(() => {});
     return result.finally(() => { regexPending--; });
 }

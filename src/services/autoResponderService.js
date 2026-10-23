@@ -6,8 +6,30 @@ const { dbLog } = require('../utils/dbLogger');
 const { parseEmbedScript } = require('./lifecycleMessageService');
 const AutoResponderMatcher = require('./autoResponderMatcher');
 const { RoleManager } = require('../utils/discordApiUtil');
+const { PermissionFlagsBits } = require('discord.js');
+const RoleAutomationService = require('./roleAutomationService');
 
 const MAX_AUTO_RESPONDERS = 500;
+
+async function validateResponderRoleAuthority(interaction, response, extraRoleIds = []) {
+    const roleIds = new Set([
+        ...JSON.parse(response.actionRoles || '[]').map(action => action.roleId),
+        ...(response.actionRoleId ? [response.actionRoleId] : []),
+        ...extraRoleIds
+    ]);
+    if (!roleIds.size) return null;
+    const actor = interaction.member;
+    if (!actor?.id || (actor.id !== interaction.guild.ownerId
+        && (!actor.permissions?.has(PermissionFlagsBits.ManageRoles) || !Number.isFinite(actor.roles?.highest?.position)))) {
+        return 'You need Manage Roles to configure responder role actions.';
+    }
+    const validator = new RoleAutomationService();
+    for (const roleId of roleIds) {
+        const invalid = await validator.validateRole(interaction.guild, interaction.guild.roles.cache.get(roleId), actor);
+        if (invalid) return invalid;
+    }
+    return null;
+}
 
 function createAutoResponder(values) {
     return db.transaction(tx => {
@@ -268,4 +290,5 @@ class AutoResponderService {
 
 module.exports = AutoResponderService;
 module.exports.createAutoResponder = createAutoResponder;
+module.exports.validateResponderRoleAuthority = validateResponderRoleAuthority;
 module.exports.MAX_AUTO_RESPONDERS = MAX_AUTO_RESPONDERS;

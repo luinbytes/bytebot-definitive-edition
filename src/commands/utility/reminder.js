@@ -247,9 +247,6 @@ async function handleRemindHere(interaction, client) {
     }
 }
 
-/**
- * Handle /me reminder list
- */
 async function handleList(interaction, client) {
     try {
         const userReminders = await db.select()

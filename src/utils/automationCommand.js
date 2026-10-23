@@ -137,6 +137,7 @@ function createAutomationCommand({ name, description, kind = name, actions, grou
             const group = interaction.options.getSubcommandGroup?.(false) || null;
             const subcommand = interaction.options.getSubcommand();
             const action = group ? `${group}-${subcommand}` : subcommand;
+            const removesVanityRole = kind === 'vanity' && ['role-remove', 'removerole'].includes(action);
             const guildId = interaction.guild.id;
             if (publicActions.length && !publicActions.includes(action) && !interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
                 return interaction.editReply({ content: 'You need **Manage Server** to configure server tracking.', flags: [MessageFlags.Ephemeral] });
@@ -144,7 +145,7 @@ function createAutomationCommand({ name, description, kind = name, actions, grou
             const key = keyFor(kind, interaction, action);
             const existing = await service.get(guildId, kind, key);
             const grantsRoles = kind === 'autorole' && ['add', 'bots-add', 'enable'].includes(action)
-                || kind === 'vanity' && ['set', 'setup', 'enable', 'message', 'channel', 'strict', 'role-add', 'role', 'role-remove', 'removerole'].includes(action)
+                || kind === 'vanity' && ['set', 'setup', 'enable', 'message', 'channel', 'strict', 'role-add', 'role'].includes(action)
                     && (['role-add', 'role'].includes(action) || (existing && JSON.parse(existing.config || '{}').roleIds?.length));
             if (grantsRoles) {
                 const actor = interaction.member;
@@ -156,8 +157,7 @@ function createAutomationCommand({ name, description, kind = name, actions, grou
                 const config = existing ? JSON.parse(existing.config || '{}') : {};
                 const selected = interaction.options.getRole('role');
                 const roleIds = kind === 'autorole' ? [selected?.id || config.roleId]
-                    : [...new Set([...(config.roleIds || []), ...(['role-add', 'role'].includes(action) ? [selected?.id] : [])])]
-                        .filter(id => !['role-remove', 'removerole'].includes(action) || id !== selected?.id);
+                    : [...new Set([...(config.roleIds || []), ...(['role-add', 'role'].includes(action) ? [selected?.id] : [])])];
                 const validator = new RoleAutomationService(client, service);
                 for (const roleId of roleIds) {
                     const invalid = await validator.validateRole(interaction.guild, interaction.guild.roles.cache.get(roleId), actor);
@@ -304,13 +304,14 @@ function createAutomationCommand({ name, description, kind = name, actions, grou
                 return interaction.editReply({ content: 'Use an interval such as `30m`, `2h`, or `1d` (minimum 6 seconds, maximum 28 days).', flags: [MessageFlags.Ephemeral] });
             }
             const role = (() => { try { return interaction.options.getRole('role'); } catch { return null; } })();
-            if (role && (!role.editable || role.managed)) {
+            if (role && !removesVanityRole && (!role.editable || role.managed)) {
                 return interaction.editReply({ content: 'That role is managed or above ByteBot and cannot be assigned safely.', flags: [MessageFlags.Ephemeral] });
             }
             const now = Date.now();
             const nextRunAt = kind === 'sticky' && action === 'add' ? now
                 : ['timer', 'revive', 'counter'].includes(kind) ? now + (config.intervalMs || 3600000) : existing?.nextRunAt || null;
-            await service.upsert({ guildId, kind, key, config, enabled: true, nextRunAt, createdBy: interaction.user.id });
+            await service.upsert({ guildId, kind, key, config, enabled: removesVanityRole ? existing.enabled : true,
+                nextRunAt, createdBy: interaction.user.id });
             return interaction.editReply({ content: `${kind} ${existing ? 'updated' : 'configured'} for **${key}**.`, flags: [MessageFlags.Ephemeral] });
         }
     };

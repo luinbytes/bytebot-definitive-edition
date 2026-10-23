@@ -157,6 +157,46 @@ describe('message and member automation platform', () => {
         expect(list.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'None configured.' }));
     });
 
+    test.each(['roles-remove', 'channels-remove', 'enable'])('changing role responder access through %s requires authority over existing actions', async action => {
+        const { actor, role, guild, client, interaction, command, responder } = responderFixture();
+        await command.execute(interaction('role-add'), client);
+        const restriction = { id: 'restricted', editable: true, position: 1 };
+        guild.roles.cache.set(restriction.id, restriction);
+        database.sqlite.prepare('UPDATE auto_responses SET role_ids = ?, channel_ids = ?, enabled = 0 WHERE id = ?')
+            .run(JSON.stringify([restriction.id]), JSON.stringify(['channel1']), responder.id);
+        const before = database.sqlite.prepare('SELECT * FROM auto_responses WHERE id = ?').get(responder.id);
+        const request = interaction(action);
+        request.options.getRole = () => restriction;
+        request.options.getChannel = () => ({ id: 'channel1' });
+        actor.permissions.remove(PermissionFlagsBits.ManageRoles);
+        await command.execute(request, client);
+        expect(database.sqlite.prepare('SELECT * FROM auto_responses WHERE id = ?').get(responder.id)).toEqual(before);
+        actor.permissions.add(PermissionFlagsBits.ManageRoles);
+        actor.roles.highest.position = role.position;
+        await command.execute(request, client);
+        expect(database.sqlite.prepare('SELECT * FROM auto_responses WHERE id = ?').get(responder.id)).toEqual(before);
+        actor.roles.highest.position = role.position + 1;
+        await command.execute(request, client);
+        expect(database.sqlite.prepare('SELECT * FROM auto_responses WHERE id = ?').get(responder.id)).not.toEqual(before);
+    });
+
+    test.each(['legacy', 'actions'])('legacy toggle allows disabling but authorizes re-enabling %s role actions', async storage => {
+        const { actor, role, client, interaction, command, responder } = responderFixture();
+        if (storage === 'legacy') database.sqlite.prepare('UPDATE auto_responses SET action_role_id = ? WHERE id = ?').run(role.id, responder.id);
+        else await command.execute(interaction('role-add'), client);
+        const legacy = require('../src/commands/administration/autorespond');
+        const request = interaction('toggle');
+        request.options.getInteger = () => responder.id;
+        actor.permissions.remove(PermissionFlagsBits.ManageRoles);
+        await legacy.execute(request, client);
+        expect(database.sqlite.prepare('SELECT enabled FROM auto_responses WHERE id = ?').get(responder.id).enabled).toBe(0);
+        await legacy.execute(request, client);
+        expect(database.sqlite.prepare('SELECT enabled FROM auto_responses WHERE id = ?').get(responder.id).enabled).toBe(0);
+        actor.permissions.add(PermissionFlagsBits.ManageRoles);
+        await legacy.execute(request, client);
+        expect(database.sqlite.prepare('SELECT enabled FROM auto_responses WHERE id = ?').get(responder.id).enabled).toBe(1);
+    });
+
     test('runtime role actions recheck the bot hierarchy', async () => {
         const fixture = responderFixture();
         await fixture.command.execute(fixture.interaction('role-add'), fixture.client);
@@ -294,6 +334,28 @@ describe('message and member automation platform', () => {
         expect(parseInterval('5s')).toBeNull();
         expect(parseInterval('29d')).toBeNull();
         expect(parseInterval('tomorrow')).toBeNull();
+    });
+
+    test.each([true, false])('vanity rewards remain removable after policy changes while enabled is %s', async enabled => {
+        const AutomationService = require('../src/services/automationService');
+        service = new AutomationService({ guilds: { cache: new Map() } });
+        const roles = ['one', 'two'].map(id => ({ id, editable: true, position: 1,
+            permissions: new PermissionsBitField(PermissionFlagsBits.Administrator) }));
+        const guild = { id: 'guild1', ownerId: 'owner', roles: { cache: new Map(roles.map(role => [role.id, role])) } };
+        await service.upsert({ guildId: guild.id, kind: 'vanity', key: 'main', enabled,
+            config: { vanity: 'byte', roleIds: roles.map(role => role.id) }, createdBy: 'admin' });
+        database.sqlite.prepare("INSERT INTO denied_role_permissions (guild_id, permission) VALUES ('guild1', 'Administrator')").run();
+        const command = require('../src/commands/administration/vanity');
+        for (const [index, action] of ['role-remove', 'removerole'].entries()) {
+            await command.execute({ guild, user: { id: 'admin' },
+                member: { id: 'admin', permissions: new PermissionsBitField(PermissionFlagsBits.ManageGuild) },
+                editReply: jest.fn(), options: { getSubcommand: () => action, getSubcommandGroup: () => null,
+                    getRole: () => roles[index], getString: () => null, getBoolean: () => null, getInteger: () => null }
+            }, { automationService: service });
+            const saved = await service.get(guild.id, 'vanity', 'main');
+            expect(saved.enabled).toBe(enabled);
+            expect(JSON.parse(saved.config).roleIds).toEqual(roles.slice(index + 1).map(role => role.id));
+        }
     });
 
     test('configuration is guild scoped and upserts instead of duplicating', async () => {
