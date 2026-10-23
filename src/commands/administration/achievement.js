@@ -499,7 +499,7 @@ async function handleAward(interaction, client) {
         }
 
         // Verify achievement exists
-        const achievement = await client.activityStreakService.achievementManager.getById(achievementId);
+        const achievement = await client.activityStreakService.achievementManager.getById(achievementId, interaction.guild.id);
         if (!achievement) {
             return interaction.editReply({
                 embeds: [embeds.error('Not Found', `Achievement \`${achievementId}\` does not exist.`)]
@@ -589,7 +589,7 @@ async function handleRemove(interaction, client) {
         }
 
         // Verify achievement exists
-        const achievement = await client.activityStreakService.achievementManager.getById(achievementId);
+        const achievement = await client.activityStreakService.achievementManager.getById(achievementId, interaction.guild.id);
         if (!achievement) {
             return interaction.editReply({
                 embeds: [embeds.error('Not Found', `Achievement \`${achievementId}\` does not exist.`)]
