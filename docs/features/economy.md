@@ -48,11 +48,18 @@ invoker's real Discord Manage Server permission inside the handler. ByteBot
 RBAC can narrow these paths but cannot substitute a fake permission for the
 real Discord permission.
 
+Adding a shop role also requires the caller's real Manage Roles permission
+and authority over that role. Delivery checks the current server `denyperm`
+policy, including purchases configured before the policy changed.
+
 Role-shop delivery also requires ByteBot's Manage Roles permission and a role
 below ByteBot without Administrator or integration management. A purchase is
 debited and marked pending before delivery. Successful delivery becomes
 durable; a proven failure writes a compensating credit. Uncertain Discord
 timeouts remain pending and are reconciled on startup rather than guessing.
+If a pending delivery is unconfirmed and current role policy blocks it,
+the purchase stays pending until the policy is resolved and reconciliation
+can finish. A confirmed delivery settles without another debit or role grant.
 
 `reset`, `destroy`, and `disable` first return a random confirmation code bound
 to the actor, guild, action, reason, target, amount, and current account plan.
