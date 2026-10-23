@@ -1,6 +1,7 @@
 const { ChannelType, MessageFlags, PermissionFlagsBits, Routes } = require('discord.js');
 const embeds = require('../utils/embeds');
 const logger = require('../utils/logger');
+const { RoleManager } = require('../utils/discordApiUtil');
 const { voiceMasterInterface, voiceMasterRenameModal } = require('../components/voiceMasterControls');
 
 const SETUP_PERMISSIONS = [
@@ -745,7 +746,8 @@ class VoiceMasterService {
                 .run(guild.id, channelId, member.id, roleId,
                     alreadyHadRole ? 'active' : 'pending', addedByBot, this.now());
             if (alreadyHadRole) return;
-            await member.roles.add(roleId, 'VoiceMaster channel joined');
+            const result = await RoleManager.addRole(member, roleId, { reason: 'VoiceMaster channel joined' });
+            if (!result.success) throw new Error(result.error);
             roleAdded = true;
             this.sqlite.prepare(`UPDATE voice_master_join_roles SET state = 'active', updated_at = ?
                 WHERE guild_id = ? AND channel_id = ? AND member_id = ? AND role_id = ? AND state = 'pending'`)
@@ -1475,7 +1477,8 @@ class VoiceMasterService {
         }
         if (grant.state === 'pending') {
             if (!member.roles.cache?.has(grant.role_id)) {
-                await member.roles.add(grant.role_id, 'VoiceMaster join role recovery');
+                const result = await RoleManager.addRole(member, grant.role_id, { reason: 'VoiceMaster join role recovery' });
+                if (!result.success) throw new Error(result.error);
             }
             this.sqlite.prepare(`UPDATE voice_master_join_roles SET state = 'active', updated_at = ?
                 WHERE guild_id = ? AND channel_id = ? AND member_id = ? AND role_id = ? AND state = 'pending'`)

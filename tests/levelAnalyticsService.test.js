@@ -505,7 +505,83 @@ describe('LevelAnalyticsService', () => {
             roles: { cache: new Map(), add, remove: jest.fn() }
         };
         await service.reconcileMemberRoles(member);
-        expect(add).toHaveBeenCalledWith(['reward1'], 'Level reward reconciliation');
+        expect(add).toHaveBeenCalledWith(reward, 'Level reward reconciliation');
+    });
+
+    test('configured level rewards use current denied permissions and keep rejected jobs retryable', async () => {
+        const safe = { id: 'safe', name: 'Safe', position: 1, managed: false, permissions: { has: () => false } };
+        const blocked = { id: 'blocked', name: 'Blocked', position: 2, managed: false,
+            permissions: { has: permission => permission === PermissionFlagsBits.ManageRoles } };
+        const highest = { position: 10, comparePositionTo: () => 1 };
+        const permissions = { has: () => true };
+        const guild = {
+            id: 'guild1', roles: { cache: new Map([[safe.id, safe], [blocked.id, blocked]]) },
+            members: { me: { permissions, roles: { highest } }, cache: new Map() }
+        };
+        for (const [level, role] of [[1, safe], [2, blocked]]) {
+            await service.execute({
+                guildId: guild.id, guild, member: { permissions, roles: { highest } },
+                options: { getSubcommandGroup: () => 'reward', getSubcommand: () => 'add',
+                    getRole: () => role, getInteger: () => level }, reply: jest.fn()
+            });
+        }
+        database.sqlite.prepare(`INSERT INTO level_configs (guild_id, stack_roles, updated_at)
+            VALUES ('guild1', 1, 1)`).run();
+        database.sqlite.prepare(`INSERT INTO member_levels
+            (guild_id, user_id, xp, level, text_xp, updated_at)
+            VALUES ('guild1', 'user1', 400, 2, 400, 1)`).run();
+        database.sqlite.prepare(`INSERT INTO denied_role_permissions (guild_id, permission)
+            VALUES ('guild1', 'ManageRoles')`).run();
+        const member = {
+            id: 'user1', user: { bot: false, tag: 'Member' }, guild,
+            roles: { cache: new Map(), add: jest.fn(async role => member.roles.cache.set(role.id, role)), remove: jest.fn() }
+        };
+        guild.members.cache.set(member.id, member);
+        service.client = { guilds: { cache: new Map([[guild.id, guild]]) } };
+        service.enqueueRoleReconcile(guild.id, member.id);
+
+        const result = await service.processRoleJobs();
+
+        expect(result).toEqual({ processed: 0, failures: [expect.objectContaining({
+            error: expect.stringContaining('blocked permission ManageRoles')
+        })] });
+        expect(member.roles.add).toHaveBeenCalledTimes(1);
+        expect(member.roles.add).toHaveBeenCalledWith(safe, 'Level reward reconciliation');
+        expect(member.roles.cache.has(blocked.id)).toBe(false);
+        expect(database.sqlite.prepare(`SELECT attempts, claim_token FROM level_role_jobs`).get())
+            .toEqual({ attempts: 1, claim_token: null });
+    });
+
+    test.each([false, true])('reward removal compensation respects current policy, blocked=%s', async blocked => {
+        const role = { id: 'reward1', name: 'Reward', managed: false, position: 1,
+            permissions: { has: permission => permission === PermissionFlagsBits.ManageRoles } };
+        const first = {
+            id: 'first', user: { bot: false },
+            roles: { cache: new Map([[role.id, role]]), add: jest.fn(async () => {}),
+                remove: jest.fn(async () => first.roles.cache.delete(role.id)) }
+        };
+        const second = {
+            id: 'second', user: { bot: false }, roles: {
+                cache: new Map([[role.id, role]]), remove: jest.fn(async () => {
+                    if (blocked) database.sqlite.prepare(`INSERT INTO denied_role_permissions (guild_id, permission)
+                        VALUES ('guild1', 'ManageRoles')`).run();
+                    throw new Error('Discord removal failed');
+                })
+            }
+        };
+        const guild = {
+            id: 'guild1', roles: { cache: new Map([[role.id, role]]) }, members: {
+                me: { permissions: { has: () => true }, roles: { highest: { position: 10, comparePositionTo: () => 1 } } },
+                fetch: jest.fn(async () => new Map([[first.id, first], [second.id, second]]))
+            }
+        };
+        first.guild = guild;
+        second.guild = guild;
+
+        await expect(service.removeRewardRole(guild, role.id)).rejects.toThrow('Discord removal failed');
+
+        if (blocked) expect(first.roles.add).not.toHaveBeenCalled();
+        else expect(first.roles.add).toHaveBeenCalledWith(role, 'Restore failed level reward removal');
     });
 
     test('role reconciliation survives a Discord failure and service restart', async () => {
@@ -560,7 +636,9 @@ describe('LevelAnalyticsService', () => {
             VALUES ('guild1', 'user1', 100, 1, 100, 0, 0, 0, 0, 0, 1)
         `).run();
         let finishAdd;
-        const add = jest.fn(() => new Promise(resolve => { finishAdd = resolve; }));
+        let addStarted;
+        const started = new Promise(resolve => { addStarted = resolve; });
+        const add = jest.fn(() => new Promise(resolve => { finishAdd = resolve; addStarted(); }));
         const highest = { comparePositionTo: () => 1 };
         const member = { id: 'user1', user: { bot: false }, roles: { cache: new Map(), add, remove: jest.fn() } };
         const guild = {
@@ -575,7 +653,7 @@ describe('LevelAnalyticsService', () => {
         service.enqueueRoleReconcile('guild1', 'user1');
 
         const processing = service.processRoleJobs();
-        await Promise.resolve();
+        await started;
         now += 5 * 60 * 1000 + 1;
         expect(await service.processRoleJobs()).toEqual({ processed: 0, failures: [] });
         expect(add).toHaveBeenCalledTimes(1);

@@ -8,6 +8,8 @@ const { MAX_IMAGE_PIXELS, ProcessingQueue } = require('./mediaService');
 const { ServerPresentationService } = require('./serverPresentationService');
 const config = require('../utils/config');
 const embeds = require('../utils/embeds');
+const { RoleManager } = require('../utils/discordApiUtil');
+const logger = require('../utils/logger');
 
 const MAX_LEVEL = 999;
 const ANALYTICS_PRUNE_BATCH_SIZE = 1000;
@@ -851,7 +853,10 @@ class LevelAnalyticsService {
         const configured = new Set(rewards.map(reward => reward.role_id));
         const add = [...wanted].filter(id => !member.roles.cache.has(id));
         const remove = [...configured].filter(id => !wanted.has(id) && member.roles.cache.has(id));
-        if (add.length) await member.roles.add(add, 'Level reward reconciliation');
+        for (const roleId of add) {
+            const result = await RoleManager.addRole(member, roleId, { reason: 'Level reward reconciliation' });
+            if (!result.success) throw new Error(result.error);
+        }
         if (remove.length) await member.roles.remove(remove, 'Level reward reconciliation');
         return Boolean(add.length || remove.length);
     }
@@ -872,7 +877,10 @@ class LevelAnalyticsService {
                 removed.push(member);
             }
         } catch (error) {
-            for (const member of removed) await member.roles.add(roleId, 'Restore failed level reward removal').catch(() => null);
+            for (const member of removed) {
+                const result = await RoleManager.addRole(member, roleId, { reason: 'Restore failed level reward removal' });
+                if (!result.success) logger.warn(`Level reward restore failed for ${member.id}: ${result.error}`);
+            }
             throw error;
         }
         return affected;
