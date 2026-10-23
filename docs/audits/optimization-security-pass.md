@@ -22,13 +22,13 @@ Review base `c38e795fa4f94b02e39852f4b1701bdb6091a754`. Delivery is one pull req
 - [x] Make failed compatibility schema repairs stop startup while preserving existing rows.
 - [x] Bound confession admission, ticket transcripts/deletion, and starboard work.
 - [x] Preserve durable Last Active after retention, following independent spec review.
-- [ ] Keep Last Active current when achievement awards are disabled or opted out.
+- [x] Keep Last Active current when achievement awards are disabled or opted out.
 - [x] Repair birthday role ownership, streak freezes, and achievement settings/custom awards.
 - [x] Reduce repeated outbox accounting and activity-history materialization.
 - [x] Reconcile shop supply accounting and bound BytePod preset setup.
 - [x] Validate the startup-recovery scalability candidate and retain recovery correctness.
-- [ ] Close final giveaway recovery ordering and deadline-edit races.
-- [ ] Reconcile remote PR reviews and rerun the completion audit.
+- [x] Close final giveaway recovery ordering and deadline-edit races.
+- [x] Reconcile existing PR feedback and complete the combined local audit.
 
 ## Verified findings
 
@@ -163,6 +163,22 @@ Giveaway draws still wait for VoiceMaster role recovery. An attempted fully para
 
 The completion fixes through `91308c5` pass all 101 suites and 1,174 tests on Node 22.23.2. Commit `2d9e209` removes one redundant comment without changing behavior. The fresh dependency audit reports zero advisories, and the schema check passes with migration `0043`. The serialized command inventory remains unchanged from the initial repairs, with 55 registered roots and 831 runnable paths.
 
-Final Standards review found that interrupted manual endings also need priority over future giveaways. Spec review confirmed that ordering issue and the deadline-edit race during entrant lookup. It also found that Last Active becomes stale when award eligibility returns early despite accepted activity logs. The two bounded repair tasks are in progress. These findings show why a passing suite alone does not close source review.
+Final Standards review found that interrupted manual endings also need priority over future giveaways. Spec review confirmed that ordering issue and the deadline-edit race during entrant lookup. It also found that Last Active becomes stale when award eligibility returns early despite accepted activity logs. Both bounded follow-up repairs are complete. These findings show why a passing suite alone does not close source review.
+
+Commit `e6ae288` repairs both giveaway findings. Automatic expiry checks the current deadline inside the winner-claim transaction. Manual end requests sharing an automatic operation retry if that operation skips an extended deadline. Stored winner rounds remain unchanged, and interrupted endings precede future active rows during recovery. Seven new timing cases and the expanded persisted-round case pass. The combined giveaway/startup run passes 34 tests. Fresh Standards and Spec reviews found no remaining issues in this delta. The comment review found no added comments or suppressions.
+
+Parent review rejected advancing streak counters while achievement tracking is disabled. Commit `59d7210` instead updates durable Last Active without consuming freezes or counting an eligible day. Re-enabling on that same day counts eligible activity once. The existing coverage field distinguishes unknown legacy coverage from no known eligible day. Concurrent first activity reuses the winning row rather than swallowing a uniqueness error. The corrected-contract regressions first failed in eight cases, then passed. Four affected worker suites pass 76 tests, including paused/eligible overlap and pruning. Commit `325b608` removes one redundant comment. Its comment review found no added comments or suppressions. Fresh Standards and Spec reviews found no remaining issues in the final activity-date delta.
+
+The final combined run at `325b608` passes **101 suites and 1,201 tests** on Node 22.23.2. The command is `npm test -- --runInBand --silent`. The fresh dependency audit reports zero advisories and the migration check includes `0043`. These results supersede the intermediate 1,060- and 1,174-test totals. All supported findings in the completed source partitions and follow-up reviews have repairs and relevant regression evidence. PR 96 had no unresolved remote review comments at the pre-publication read; that read covered its earlier `7a828c9` head, not the completion commits. New remote checks are separate from this local verification.
+
+## Completion gates
+
+| Requirement | Authoritative evidence | Local result |
+| --- | --- | --- |
+| Optimize runtime work without changing results | Persisted XP and retention regressions, SQL statement counts, admission limits, lifecycle recovery tests | Passed in the combined suite |
+| Audit security and repair findings | Pinned source scan, completed service partitions, authorization regressions, independent closure reviews, zero package advisories | Supported findings closed; coverage limits retained |
+| Simplify discovery while retaining features | Serialized schemas retain 55 registered roots and 831 runnable paths; help, hub and adapter tests cover canonical paths and arguments | Passed |
+| Include discovered feature gaps | Custom achievement awards, complete reaction counts, bounded full lists, durable reward ownership and activity dates | Passed in the combined suite |
+| Keep tasks updated and deliver verified work | This checklist, the decision log, combined test logs and PR 96 | Local work reviewed and verified for publication |
 
 Historical migration files and archives were not all read line by line. Fresh and representative legacy migrations were exercised in disposable SQLite databases. The completed source partitions extend the initial security scan's coverage without establishing exhaustive security assurance or live Discord behavior.

@@ -51,5 +51,9 @@ boards recover after restarts or message deletion within Discord's nonce
 window; an older ambiguous creation is held for administrator recovery.
 Analytics retention never removes XP balances or level configuration.
 Streaks retain the last actual activity date separately from freeze coverage.
-Pruning activity logs does not remove the Last Active date from `/streak view`,
+Pruning activity logs does not remove the Last Active date from `/me streak view`,
 and a freeze does not advance that date or count as an active day.
+When achievement tracking is disabled or opted out, accepted activity still
+updates Last Active. That activity does not advance streak counters, consume
+freezes, or award achievements. Re-enabling counts eligible activity once even
+if the member was already active that day.
