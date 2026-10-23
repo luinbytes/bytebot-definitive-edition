@@ -1,5 +1,7 @@
+jest.mock('../src/database', () => ({ db: {} }));
+
 const path = require('path');
-const { PermissionFlagsBits } = require('discord.js');
+const { PermissionFlagsBits, MessageFlags } = require('discord.js');
 const { loadCommands } = require('../src/utils/commandDeployer');
 
 function commandJson(commandPath) {
@@ -506,5 +508,81 @@ describe('Intent command hubs', () => {
             'f1',
             'deploy'
         ]));
+    });
+});
+
+describe('bot help discovery forwarding', () => {
+    const bot = require('../src/commands/developer/bot');
+    const help = require('../src/commands/utility/help');
+
+    function interaction(subcommand = 'help', group = null, focus = 'command') {
+        return {
+            commandName: 'bot', user: { id: 'member' },
+            options: {
+                getSubcommand: () => subcommand,
+                getSubcommandGroup: () => group,
+                getFocused: () => ({ name: focus, value: '/ME rem' }),
+                getString: () => 'me reminder add'
+            },
+            reply: jest.fn(), respond: jest.fn()
+        };
+    }
+
+    test('both help command schemas enable full-path autocomplete', () => {
+        const botHelp = bot.data.toJSON().options.find(option => option.name === 'help');
+        const argument = botHelp.options.find(option => option.name === 'command');
+        expect(argument.autocomplete).toBe(true);
+        expect(argument.max_length).toBe(100);
+        expect(help.data.toJSON().options[0].autocomplete).toBe(true);
+        expect(bot.discovery).toEqual({ category: 'Utility', publicPaths: ['help', 'ping', 'stats'] });
+    });
+
+    test.each([true, false])('autocomplete forwards through help with loaded adapter %s', async loaded => {
+        const me = require('../src/commands/utility/me');
+        const client = { commands: new Map([['me', me], ...(loaded ? [['help', help]] : [])]) };
+        const request = interaction();
+        const forward = jest.spyOn(help, 'autocomplete');
+        try {
+            await bot.autocomplete(request, client);
+            expect(forward).toHaveBeenCalledWith(request, client);
+            expect(request.respond).toHaveBeenCalledTimes(1);
+            expect(request.respond.mock.calls[0][0]).toContainEqual({ name: '/me reminder add', value: 'me reminder add' });
+        } finally {
+            forward.mockRestore();
+        }
+    });
+
+    test.each([['ping', null, 'command'], ['help', 'guild', 'command'], ['help', null, 'other']])(
+        'unexpected autocomplete path %s %s %s responds once with no choices', async (subcommand, group, focus) => {
+            const request = interaction(subcommand, group, focus);
+            await bot.autocomplete(request, { commands: new Map() });
+            expect(request.respond).toHaveBeenCalledTimes(1);
+            expect(request.respond).toHaveBeenCalledWith([]);
+        }
+    );
+
+    test('bot help executes the retained adapter and renders a full public leaf', async () => {
+        const request = interaction();
+        const client = { commands: new Map([
+            ['help', help], ['me', require('../src/commands/utility/me')]
+        ]) };
+        await bot.execute(request, client);
+        expect(request.reply).toHaveBeenCalledTimes(1);
+        const result = request.reply.mock.calls[0][0];
+        expect(result.embeds[0].toJSON().title).toContain('/me reminder add');
+        expect(result.flags).toContain(MessageFlags.Ephemeral);
+    });
+
+    test('bot stats keeps its private runtime health reply', async () => {
+        const request = interaction('stats');
+        await bot.execute(request, {
+            commands: new Map(), guilds: { cache: new Map() }, ws: { ping: 42 },
+            helperHealth: { sharp: { ready: true, detail: 'ready' } }
+        });
+        expect(request.reply).toHaveBeenCalledTimes(1);
+        const result = request.reply.mock.calls[0][0];
+        expect(result.embeds[0].toJSON().title).toBe('Bot Runtime Stats');
+        expect(result.embeds[0].toJSON().fields).toContainEqual({ name: 'Heartbeat', value: '42ms', inline: true });
+        expect(result.flags).toContain(MessageFlags.Ephemeral);
     });
 });
