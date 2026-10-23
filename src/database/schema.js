@@ -893,7 +893,7 @@ const activityStreaks = sqliteTable('activity_streaks', {
     currentStreak: integer('current_streak').default(0).notNull(), // Consecutive active days
     longestStreak: integer('longest_streak').default(0).notNull(), // All-time best streak
     lastActivityDate: text('last_activity_date'), // YYYY-MM-DD format
-    streakCoveredThrough: text('streak_covered_through'), // Includes days protected by freezes
+    streakCoveredThrough: text('streak_covered_through'),
     totalActiveDays: integer('total_active_days').default(0).notNull(),
     freezesAvailable: integer('freezes_available').default(1).notNull(), // Streak freeze items (1 per month)
     lastFreezeReset: integer('last_freeze_reset', { mode: 'timestamp' }), // Monthly reset tracker
