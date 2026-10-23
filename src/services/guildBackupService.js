@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { PermissionFlagsBits, PermissionsBitField } = require('discord.js');
+const { ChannelType, PermissionFlagsBits, PermissionsBitField } = require('discord.js');
 
 const { isTrustedManager } = require('./antinukeService');
 
@@ -317,12 +317,13 @@ class GuildBackupService {
         return plan;
     }
 
-    requireConfigRolePermissions(guild, sections, backup, actor) {
+    requireConfigRolePermissions(guild, sections, mode, backup, actor) {
         const bytebot = backup.payload.bytebot;
         const roleIds = configuredRoleIds(bytebot);
-        const achievementConfig = Boolean(bytebot.achievement_role_config?.length);
+        const changesAchievementConfig = Boolean(bytebot.achievement_role_config?.length
+            || (mode === 'destructive' && this.sqlite.prepare('SELECT 1 FROM achievement_role_config WHERE guild_id = ?').get(guild.id)));
         const achievementIds = new Set((bytebot.custom_achievements || []).filter(row => row.grant_role).map(row => row.achievement_id));
-        if (!roleIds.size && !achievementConfig && !achievementIds.size) return;
+        if (!roleIds.size && !changesAchievementConfig && !achievementIds.size) return;
         const owner = actor.id === guild.ownerId;
         if (!owner && !actor.permissions?.has(PermissionFlagsBits.ManageRoles)) {
             throw new Error('You need Manage Roles to restore role-grant configuration.');
@@ -338,11 +339,11 @@ class GuildBackupService {
             ...(bytebot.denied_role_permissions || [])
         ];
         const roles = [...roleIds].map(id => ({ id, role: savedRoles.get(id) || guild.roles.cache.get(id) }));
-        if (achievementConfig || achievementIds.size) {
+        if (changesAchievementConfig || achievementIds.size) {
             const rewards = this.sqlite.prepare('SELECT achievement_id, role_id FROM achievement_roles WHERE guild_id = ?').all(guild.id);
             for (const reward of rewards) {
                 const role = guild.roles.cache.get(reward.role_id);
-                if (role && (achievementConfig || achievementIds.has(reward.achievement_id))) roles.push({ id: role.id, role });
+                if (role && (changesAchievementConfig || achievementIds.has(reward.achievement_id))) roles.push({ id: role.id, role });
             }
         }
         for (const { id, role } of roles) {
@@ -414,9 +415,15 @@ class GuildBackupService {
         }
         if (mode === 'destructive' && sections.includes('channels')) {
             if (!owner) {
-                const blocked = [...guild.channels.cache.values()].find(channel => RESTORABLE_CHANNEL_TYPES.has(channel.type)
-                    && !channel.permissionsFor(actor)?.has(PermissionFlagsBits.ManageChannels));
-                if (blocked) throw new Error(`You need Manage Channels in channel ${blocked.name} to remove it.`);
+                const blocked = [...guild.channels.cache.values()].find(channel => {
+                    if (!RESTORABLE_CHANNEL_TYPES.has(channel.type)) return false;
+                    const permissions = channel.permissionsFor(actor);
+                    if (permissions?.has(PermissionFlagsBits.Administrator, false)) return false;
+                    const required = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ManageChannels];
+                    if ([ChannelType.GuildVoice, ChannelType.GuildStageVoice].includes(channel.type)) required.push(PermissionFlagsBits.Connect);
+                    return actor.communicationDisabledUntilTimestamp > Date.now() || !permissions?.has(required, false);
+                });
+                if (blocked) throw new Error(`To remove ${blocked.name}, you need View Channel and Manage Channels, Connect for voice channels, and no active timeout.`);
             }
             const blocked = [...guild.channels.cache.values()].find(channel =>
                 RESTORABLE_CHANNEL_TYPES.has(channel.type) && channel.deletable === false);
@@ -445,7 +452,7 @@ class GuildBackupService {
                 }
             }
         }
-        if (sections.includes('bytebot')) this.requireConfigRolePermissions(guild, sections, backup, actor);
+        if (sections.includes('bytebot')) this.requireConfigRolePermissions(guild, sections, mode, backup, actor);
     }
 
     async restore({ guild, creatorId, id, mode = 'merge', sections = SECTIONS, confirmed = false }) {

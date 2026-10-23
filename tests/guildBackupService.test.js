@@ -492,9 +492,64 @@ describe('guild backups', () => {
             .toEqual({ roleId: 'new-role' });
     });
 
+    test('destructive configuration restore authorizes achievement defaults before deleting the disabled setting', async () => {
+        const { guild, actor, role } = roleGrantGuild();
+        guild.ownerId = 'owner1';
+        actor.permissions.remove(PermissionFlagsBits.ManageRoles);
+        service.create({ guild, creatorId: actor.id, name: 'Before reward settings' });
+        database.sqlite.prepare("INSERT INTO antinuke_admins (guild_id, user_id, added_by, created_at) VALUES ('guild1', 'admin1', 'owner1', 1)").run();
+        database.sqlite.prepare("INSERT INTO achievement_role_config (guild_id, enabled) VALUES ('guild1', 0)").run();
+        database.sqlite.prepare("INSERT INTO achievement_roles (guild_id, achievement_id, role_id) VALUES ('guild1', 'streak_7', 'role1')").run();
+        const restore = mode => service.restore({ guild, creatorId: actor.id, id: 'backup-1', mode, sections: ['bytebot'], confirmed: true });
+
+        await expect(restore('merge')).resolves.toMatchObject({ failures: [] });
+        const changes = database.sqlite.prepare('SELECT total_changes() count').get().count;
+        await expect(restore('destructive')).rejects.toThrow('Manage Roles');
+        actor.permissions.add(PermissionFlagsBits.ManageRoles);
+        actor.roles.highest.position = role.position;
+        await expect(restore('destructive')).rejects.toThrow('highest role');
+        expect(database.sqlite.prepare('SELECT total_changes() count').get().count).toBe(changes);
+        expect(database.sqlite.prepare("SELECT enabled FROM achievement_role_config WHERE guild_id = 'guild1'").get().enabled).toBe(0);
+        expect(guild.roles.create).not.toHaveBeenCalled();
+
+        actor.roles.highest.position = 10;
+        await expect(restore('destructive')).resolves.toMatchObject({ failures: [] });
+        expect(database.sqlite.prepare("SELECT enabled FROM achievement_role_config WHERE guild_id = 'guild1'").get()).toBeUndefined();
+        expect(database.sqlite.prepare("SELECT role_id FROM achievement_roles WHERE guild_id = 'guild1'").get().role_id).toBe(role.id);
+    });
+
+    test.each([
+        ['hidden text channel', 0, PermissionFlagsBits.ViewChannel, false],
+        ['voice channel without Connect', 2, PermissionFlagsBits.Connect, false],
+        ['stage channel without Connect', 13, PermissionFlagsBits.Connect, false],
+        ['timed-out actor', 0, 0n, true]
+    ])('destructive restore rejects a %s before any channel is deleted', async (name, type, deniedPermission, timedOut) => {
+        const { guild, actor } = roleGrantGuild();
+        guild.ownerId = 'owner1';
+        actor.permissions.add([PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect]);
+        actor.communicationDisabledUntilTimestamp = timedOut ? Date.now() + 60_000 : null;
+        const access = new PermissionsBitField(actor.permissions.bitfield).remove(deniedPermission);
+        const channel = { id: 'channel1', name, type, position: 0, permissionOverwrites: { cache: new Map() },
+            permissionsFor: jest.fn().mockReturnValue(access), delete: jest.fn() };
+        service.create({ guild, creatorId: actor.id, name });
+        guild.channels.cache.set(channel.id, channel);
+        const changes = database.sqlite.prepare('SELECT total_changes() count').get().count;
+        const restore = () => service.restore({ guild, creatorId: actor.id, id: 'backup-1', mode: 'destructive', sections: ['channels'], confirmed: true });
+
+        await expect(restore()).rejects.toThrow('Manage Channels');
+        expect(channel.delete).not.toHaveBeenCalled();
+        expect(guild.channels.create).not.toHaveBeenCalled();
+        expect(database.sqlite.prepare('SELECT total_changes() count').get().count).toBe(changes);
+
+        access.add(deniedPermission);
+        actor.communicationDisabledUntilTimestamp = null;
+        await expect(restore()).resolves.toMatchObject({ removed: { channels: 1 }, failures: [] });
+        expect(channel.delete).toHaveBeenCalledTimes(1);
+    });
+
     test('destructive channel restore preflights every live channels effective actor permissions before mutation', async () => {
         const actor = { id: 'admin1', permissions: new PermissionsBitField([
-            PermissionFlagsBits.ManageGuild, PermissionFlagsBits.ManageChannels
+            PermissionFlagsBits.ManageGuild, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ViewChannel
         ]) };
         const allowed = { id: 'allowed', name: 'allowed', type: 0, position: 0, delete: jest.fn(),
             permissionOverwrites: { cache: new Map() }, permissionsFor: jest.fn().mockReturnValue(actor.permissions) };
