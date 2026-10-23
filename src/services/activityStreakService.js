@@ -19,6 +19,8 @@ const { getOne } = require('../utils/dbUtil');
 const { fetchMember, RoleManager } = require('../utils/discordApiUtil');
 const { ACHIEVEMENT_CHAINS } = require('../data/achievementDefinitions');
 
+const NO_STREAK_COVERAGE = '';
+
 /**
  * Achievement Manager - Loads and caches achievement definitions from database
  * Cache expires every hour to stay fresh with any definition updates
@@ -991,6 +993,29 @@ class ActivityStreakService {
      */
     async updateStreak(userId, guildId, today) {
         try {
+            if (!await this.isAchievementsEnabled(guildId) || await this.isUserOptedOut(userId)) {
+                await dbLog.insert('activityStreaks',
+                    () => db.insert(activityStreaks).values({
+                        userId,
+                        guildId,
+                        lastActivityDate: today,
+                        streakCoveredThrough: NO_STREAK_COVERAGE,
+                        lastFreezeReset: new Date(),
+                        createdAt: new Date(),
+                        updatedAt: new Date()
+                    }).onConflictDoUpdate({
+                        target: [activityStreaks.userId, activityStreaks.guildId],
+                        set: {
+                            streakCoveredThrough: sql`coalesce(${activityStreaks.streakCoveredThrough}, ${activityStreaks.lastActivityDate}, ${NO_STREAK_COVERAGE})`,
+                            lastActivityDate: sql`max(coalesce(${activityStreaks.lastActivityDate}, ''), ${today})`,
+                            updatedAt: new Date()
+                        }
+                    }),
+                    { userId, guildId, operation: 'lastActualActivity' }
+                );
+                return;
+            }
+
             const existing = await dbLog.select('activityStreaks',
                 () => db.select()
                     .from(activityStreaks)
@@ -1030,8 +1055,8 @@ class ActivityStreakService {
                 return;
             }
 
-            // If already active today, streak doesn't change but we still check cumulative achievements
-            if (existing.lastActivityDate === today) {
+            // If already counted today, streak doesn't change but we still check cumulative achievements
+            if ((existing.streakCoveredThrough ?? existing.lastActivityDate) === today) {
                 // Streak and total days haven't changed, but cumulative values (messages, voice, commands)
                 // may have increased, so check for achievements that depend on cumulative totals
                 await this.checkAndAwardAchievements(
@@ -1131,10 +1156,6 @@ class ActivityStreakService {
      */
     async checkAndAwardAchievements(userId, guildId, currentStreak, totalDays) {
         try {
-            if (!await this.isAchievementsEnabled(guildId) || await this.isUserOptedOut(userId)) {
-                return;
-            }
-
             const toAward = [];
 
             // Get activity totals for cumulative/combo checks
