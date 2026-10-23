@@ -3,6 +3,14 @@ const os = require('os');
 const path = require('path');
 const { PermissionFlagsBits } = require('discord.js');
 
+function confessionInteraction(guildId, userId, channel) {
+    return {
+        guildId, user: { id: userId }, fields: { getTextInputValue: () => 'A private confession' },
+        guild: { channels: { fetch: jest.fn().mockResolvedValue(channel) } },
+        deferReply: jest.fn().mockResolvedValue({}), editReply: jest.fn().mockResolvedValue({})
+    };
+}
+
 describe('community utilities', () => {
     let tempDir;
     let database;
@@ -125,6 +133,30 @@ describe('community utilities', () => {
         await expect(second).resolves.toBeDefined();
         expect(database.sqlite.prepare('SELECT number FROM confessions').all()).toEqual([{ number: 1 }]);
         expect(service.confessionConfig('guild1').next_number).toBe(2);
+    });
+
+    test('rejects guild overflow before deferring while a Discord send is unresolved', async () => {
+        service.setConfessionConfig('guild1', 'channel1');
+        let release;
+        const message = { id: 'message1', react: jest.fn().mockResolvedValue({}) };
+        const channel = { isTextBased: () => true, send: jest.fn(() => new Promise(resolve => { release = resolve; })) };
+        const submissions = Array.from({ length: 4 }, (_, index) =>
+            service.submitConfession(confessionInteraction('guild1', `author${index}`, channel), 0).catch(error => error));
+        await new Promise(setImmediate);
+        expect(channel.send).toHaveBeenCalledTimes(1);
+        const overflow = confessionInteraction('guild1', 'overflow', channel);
+        let rejection;
+        const extra = service.submitConfession(overflow, 0).catch(error => { rejection = error; });
+        try {
+            await new Promise(setImmediate);
+            expect(rejection?.message).toMatch(/busy.*try again/i);
+            expect(overflow.deferReply).not.toHaveBeenCalled();
+            expect(channel.send).toHaveBeenCalledTimes(1);
+        } finally {
+            channel.send.mockResolvedValue(message);
+            release(message);
+            await Promise.all([...submissions, extra]);
+        }
     });
 
     test('keeps published confession attribution when acknowledgement fails', async () => {
