@@ -269,6 +269,64 @@ describe('EventLoggingService', () => {
         expect(database.sqlite.prepare("SELECT 1 FROM event_log_outbox WHERE event_key = 'overflow'").get()).toBeUndefined();
     });
 
+    test.each([1, 15])('outbox accounting does not rescan for each of %i destinations', async destinations => {
+        const channels = Array.from({ length: destinations }, (_, index) => ({ id: `channel${index}`, send: jest.fn() }));
+        const server = guild(channels);
+        for (const channel of channels) service.add(server, channel, 'messages');
+        database.sqlite.exec(`INSERT INTO event_log_outbox
+            (guild_id, event_key, channel_id, module, payload, status, next_attempt_at, created_at)
+            VALUES ('guild1', 'retained', 'channel0', 'messages', '{}', 'sent', 0, ${now})`);
+        jest.spyOn(service, 'processOutbox').mockResolvedValue(0);
+        const prepare = jest.spyOn(database.sqlite, 'prepare');
+
+        expect(await service.log(server, 'messages', 'fanout', { description: 'A retained event' })).toBe(destinations);
+        const aggregates = prepare.mock.calls.filter(([sql]) => /SUM\(length\(CAST\(payload/.test(sql));
+        expect(aggregates).toHaveLength(2);
+        expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM event_log_outbox WHERE event_key = 'fanout'").get().count)
+            .toBe(destinations);
+        prepare.mockRestore();
+    });
+
+    test('fan-out respects the remaining row and UTF-8 byte capacity', async () => {
+        const channels = Array.from({ length: 15 }, (_, index) => ({ id: `channel${index}`, send: jest.fn() }));
+        const server = guild(channels);
+        for (const channel of channels) service.add(server, channel, 'messages');
+        jest.spyOn(service, 'processOutbox').mockResolvedValue(0);
+        const insert = database.sqlite.prepare(`INSERT INTO event_log_outbox
+            (guild_id, event_key, channel_id, module, payload, status, next_attempt_at, created_at)
+            VALUES ('guild1', ?, 'channel0', 'messages', ?, 'pending', 0, ?)`);
+        database.sqlite.transaction(() => {
+            for (let index = 0; index < 4998; index++) insert.run(`row:${index}`, '{}', now);
+        })();
+        expect(await service.log(server, 'messages', 'row-bound', {})).toBe(2);
+        expect(database.sqlite.prepare('SELECT COUNT(*) AS count FROM event_log_outbox').get().count).toBe(5000);
+
+        database.sqlite.exec('DELETE FROM event_log_outbox');
+        await service.log(server, 'messages', 'measure', { title: 'Event', description: '🦉'.repeat(500) });
+        const bytes = database.sqlite.prepare("SELECT length(CAST(payload AS BLOB)) AS bytes FROM event_log_outbox LIMIT 1").get().bytes;
+        database.sqlite.exec('DELETE FROM event_log_outbox');
+        insert.run('bytes', 'x'.repeat(16 * 1024 * 1024 - 2 * bytes), now);
+        expect(await service.log(server, 'messages', 'byte-bound', { title: 'Event', description: '🦉'.repeat(500) })).toBe(2);
+        expect(database.sqlite.prepare('SELECT SUM(length(CAST(payload AS BLOB))) AS bytes FROM event_log_outbox').get().bytes)
+            .toBe(16 * 1024 * 1024);
+    });
+
+    test('hourly admission maintenance still prunes expired outbox rows', async () => {
+        const server = guild([{ id: 'channel1', send: jest.fn() }]);
+        service.add(server, server.channels.cache.get('channel1'), 'messages');
+        jest.spyOn(service, 'processOutbox').mockResolvedValue(0);
+        database.sqlite.prepare(`INSERT INTO event_log_outbox
+            (guild_id, event_key, channel_id, module, payload, status, next_attempt_at, created_at)
+            VALUES ('guild1', 'expired', 'channel1', 'messages', '{}', 'sent', 0, ?)`)
+            .run(now - 31 * 86400000);
+        now += 3600000;
+
+        await service.log(server, 'messages', 'new', {});
+
+        expect(database.sqlite.prepare("SELECT 1 FROM event_log_outbox WHERE event_key = 'expired'").get()).toBeUndefined();
+        expect(database.sqlite.prepare("SELECT 1 FROM event_log_outbox WHERE event_key = 'new'").get()).toBeDefined();
+    });
+
     test('guild purge removes durable and interactive event-log state only for that guild', () => {
         const first = guild([{ id: 'channel1', send: jest.fn() }]);
         const second = { ...guild([{ id: 'channel2', send: jest.fn() }]), id: 'guild2' };
