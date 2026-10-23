@@ -78,6 +78,12 @@ describe('BytePod preset admission and browsing', () => {
         expect(database.sqlite.prepare('SELECT COUNT(*) AS count FROM bytepod_autowhitelist').get().count).toBe(998);
     });
 
+    test('preset browsing uses the owner index instead of scanning other members presets', () => {
+        const plan = database.sqlite.prepare(`EXPLAIN QUERY PLAN SELECT target_user_id FROM bytepod_autowhitelist
+            WHERE user_id = ? AND guild_id = ? ORDER BY id LIMIT ? OFFSET ?`).all('owner1', 'guild1', 50, 0);
+        expect(plan.map(row => row.detail).join('\n')).toContain('USING INDEX bytepod_autowhitelist_owner_idx');
+    });
+
     test('concurrent additions cannot exceed capacity and do not consume another guild quota', async () => {
         seed(997);
         await Promise.all([command.execute(interaction('add', 'friend1')), command.execute(interaction('add', 'friend2'))]);

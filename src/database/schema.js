@@ -538,7 +538,9 @@ const bytepodAutoWhitelist = sqliteTable('bytepod_autowhitelist', {
     userId: text('user_id').notNull(),
     targetUserId: text('target_user_id').notNull(),
     guildId: text('guild_id'),
-});
+}, table => ({
+    ownerIdx: index('bytepod_autowhitelist_owner_idx').on(table.userId, table.guildId, table.id),
+}));
 
 const bytepodUserSettings = sqliteTable('bytepod_user_settings', {
     userId: text('user_id').notNull(),

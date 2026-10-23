@@ -1835,6 +1835,9 @@ function validateAndFixSchema() {
     if (tableExists('birthday_role_grants')) {
         sqlite.exec('CREATE INDEX IF NOT EXISTS birthday_role_grants_expiry_idx ON birthday_role_grants (expires_at)');
     }
+    if (tableExists('bytepod_autowhitelist')) {
+        sqlite.exec('CREATE INDEX IF NOT EXISTS bytepod_autowhitelist_owner_idx ON bytepod_autowhitelist (user_id, guild_id, id)');
+    }
     if (tableExists('automation_rules')) {
         sqlite.exec('CREATE INDEX IF NOT EXISTS automation_due_idx ON automation_rules (enabled, next_run_at)');
         sqlite.exec('CREATE INDEX IF NOT EXISTS automation_guild_kind_idx ON automation_rules (guild_id, kind)');
