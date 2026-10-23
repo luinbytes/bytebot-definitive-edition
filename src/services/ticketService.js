@@ -3,6 +3,7 @@ const {
     EmbedBuilder, MessageFlags, PermissionFlagsBits, RoleSelectMenuBuilder, StringSelectMenuBuilder,
     ModalBuilder, TextInputBuilder, TextInputStyle
 } = require('discord.js');
+const { createHash } = require('node:crypto');
 const logger = require('../utils/logger');
 const { renderScript } = require('./richContentService');
 
@@ -22,6 +23,8 @@ const CONFIG_COLUMNS = {
 };
 const SAFE_MENTIONS = { parse: [], repliedUser: false };
 const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
+const TRANSCRIPT_TOO_LARGE = 'This complete transcript exceeds ByteBot’s safe 8 MiB attachment limit; the ticket was not deleted.';
+const DELETE_LOG_UNCERTAIN = 'Transcript log delivery is uncertain; automatic deletion is blocked for staff review.';
 const STYLE = {
     primary: ButtonStyle.Primary, secondary: ButtonStyle.Secondary,
     success: ButtonStyle.Success, danger: ButtonStyle.Danger
@@ -59,6 +62,25 @@ function escapeHtml(value) {
         .replaceAll("'", '&#39;');
 }
 
+function renderTranscriptMessage(message) {
+    const display = message.member?.displayName || message.author?.username || message.author?.id || 'Unknown';
+    const roles = [...(message.member?.roles?.cache?.values?.() || [])].map(role => role.name).filter(Boolean).join(', ');
+    const attachments = [...(message.attachments?.values?.() || [])]
+        .filter(file => /^https:\/\//i.test(file.url || ''))
+        .map(file => `<a href="${escapeHtml(file.url)}">${escapeHtml(file.name || 'attachment')}</a>`).join(' ');
+    return `<article><header>${escapeHtml(display)} (${escapeHtml(message.author?.id || '')}) · ${escapeHtml(new Date(message.createdTimestamp || 0).toISOString())}</header>`
+        + `${roles ? `<small>${escapeHtml(roles)}</small>` : ''}<p>${escapeHtml(message.content)}</p>${attachments}</article>`;
+}
+
+function renderTranscriptDocument(ticket, rows) {
+    const html = '<!doctype html><html><head><meta charset="utf-8"><title>'
+        + `Ticket #${escapeHtml(ticket.number)}</title></head><body><h1>Ticket #${escapeHtml(ticket.number)}</h1>`
+        + `<dl><dt>Opener</dt><dd>${escapeHtml(ticket.openerId)}</dd><dt>Topic</dt><dd>${escapeHtml(ticket.topicName || 'General')}</dd></dl>`
+        + `${rows.join('\n')}</body></html>`;
+    if (Buffer.byteLength(html) > MAX_TRANSCRIPT_BYTES) throw new Error(TRANSCRIPT_TOO_LARGE);
+    return html;
+}
+
 function boundedLines(lines, empty) {
     if (!lines.length) return empty;
     const kept = [];
@@ -78,6 +100,7 @@ class TicketService {
         this.pollMs = options.pollMs || 60000;
         this.interval = null;
         this.running = false;
+        this.deletions = new Map();
     }
 
     start() {
@@ -440,25 +463,32 @@ class TicketService {
         return [new ActionRowBuilder().addComponents(buttons)];
     }
 
-    async log(guildId, content, files = []) {
+    async log(guildId, content, files = [], beforeSend = null) {
         const config = this.getConfig(guildId);
         if (!config?.log_channel_id || !this.client) return null;
         const guild = this.client.guilds.cache.get(guildId) || await this.client.guilds.fetch(guildId).catch(() => null);
         const channel = guild?.channels.cache.get(config.log_channel_id) || await guild?.channels.fetch?.(config.log_channel_id).catch(() => null);
         if (!channel?.send) return null;
+        beforeSend?.();
         return channel.send({ content, files, allowedMentions: SAFE_MENTIONS }).catch(error => {
             logger.warn(`Ticket log delivery failed in guild ${guildId}: ${error.message}`);
             return null;
         });
     }
 
-    async fetchMessages(channel) {
+    async fetchMessages(channel, ticket) {
         const messages = [];
+        let bytes = Buffer.byteLength(renderTranscriptDocument(ticket, []));
         let before;
         while (true) {
             const batch = await channel.messages.fetch({ limit: 100, ...(before && { before }) });
             if (!batch.size) break;
-            messages.push(...batch.values());
+            for (const message of batch.values()) {
+                const html = renderTranscriptMessage(message);
+                bytes += Buffer.byteLength(html) + (messages.length ? 1 : 0);
+                if (bytes > MAX_TRANSCRIPT_BYTES) throw new Error(TRANSCRIPT_TOO_LARGE);
+                messages.push({ createdTimestamp: message.createdTimestamp, html });
+            }
             before = batch.last().id;
             if (batch.size < 100) break;
         }
@@ -466,8 +496,8 @@ class TicketService {
     }
 
     async createTranscript(ticket, channel) {
-        const messages = await this.fetchMessages(channel);
-        const html = this.renderTranscript({ ticket, messages });
+        const messages = await this.fetchMessages(channel, ticket);
+        const html = renderTranscriptDocument(ticket, messages.map(message => message.html));
         const now = this.now();
         this.sqlite.prepare(`INSERT INTO ticket_transcripts (ticket_id, html, created_at, updated_at) VALUES (?, ?, ?, ?)
             ON CONFLICT (ticket_id) DO UPDATE SET html = excluded.html, updated_at = excluded.updated_at`)
@@ -517,32 +547,86 @@ class TicketService {
         return user.send({ content, components, allowedMentions: SAFE_MENTIONS }).then(() => true, () => false);
     }
 
-    async deleteDiscordTicket(ticket, channel, actorId, reason = null) {
+    deleteDiscordTicket(ticket, channel, actorId, reason = null) {
+        const existing = this.deletions.get(ticket.id);
+        if (existing) return existing;
+        const operation = this.performDelete(ticket.id, channel, actorId, reason)
+            .finally(() => this.deletions.delete(ticket.id));
+        this.deletions.set(ticket.id, operation);
+        return operation;
+    }
+
+    async performDelete(ticketId, channel, actorId, reason) {
+        const ticket = this.getTicket(ticketId);
+        if (!ticket) throw new Error('Ticket not found.');
+        if (ticket.status === 'deleted') return ticket;
+        const delivery = this.getDeletionLog(ticket.id);
+        if (delivery?.action === 'delete_log_pending') throw new Error(DELETE_LOG_UNCERTAIN);
+        if (delivery?.action === 'delete_log_delivered' && ticket.status !== 'deleting') {
+            throw new Error('This ticket already has a delivered deletion transcript. Staff must verify it before retrying deletion.');
+        }
         const config = this.getConfig(ticket.guildId);
-        if (!config?.log_channel_id) throw new Error('Set a ticket log channel before deleting tickets so the transcript cannot be lost.');
-        const deleting = this.beginDelete(ticket.id, actorId);
-        let transcript;
-        try {
-            transcript = await this.createTranscript(deleting, channel);
-            const logged = await this.log(ticket.guildId,
-                `Ticket #${ticket.number} deleted by <@${actorId}>${reason ? `: ${reason}` : '.'}`,
-                [transcript.attachment]);
-            if (!logged) throw new Error('The transcript could not be delivered to the configured ticket log.');
-        } catch (error) {
-            const restore = ticket.status === 'deleting' ? 'closed' : ticket.status;
-            this.sqlite.prepare("UPDATE tickets SET status = ?, updated_at = ? WHERE id = ? AND status = 'deleting'").run(restore, this.now(), ticket.id);
-            throw error;
+        if (ticket.status !== 'deleting' && !config?.log_channel_id) {
+            throw new Error('Set a ticket log channel before deleting tickets so the transcript cannot be lost.');
+        }
+        let channelMissing = false;
+        if (ticket.status === 'deleting') {
+            const archived = this.getDeliveredTranscript(ticket.id, delivery);
+            if (!archived) {
+                await this.restoreInterruptedDelete(ticket, channel);
+                throw new Error('This interrupted deletion has no confirmed transcript archive.');
+            }
+            let html;
+            try {
+                const messages = await this.fetchMessages(channel, ticket);
+                html = renderTranscriptDocument(ticket, messages.map(message => message.html));
+            } catch (error) {
+                if (error?.code === 10003 || error?.rawError?.code === 10003) channelMissing = true;
+                else {
+                    if (error.message === TRANSCRIPT_TOO_LARGE) await this.restoreInterruptedDelete(ticket, channel);
+                    throw error;
+                }
+            }
+            if (!channelMissing && html !== archived) {
+                await this.restoreInterruptedDelete(ticket, channel);
+                throw new Error('Ticket history changed after its transcript was logged. The ticket was closed without deleting the channel or sending another transcript.');
+            }
+        } else {
+            const deleting = this.beginDelete(ticket.id, actorId);
+            try {
+                const transcript = await this.createTranscript(deleting, channel);
+                const logged = await this.log(ticket.guildId,
+                    `Ticket #${ticket.number} deleted by <@${actorId}>${reason ? `: ${reason}` : '.'}`,
+                    [transcript.attachment], () => this.recordAction(ticket.id, actorId, 'delete_log_pending'));
+                if (!logged) throw new Error('The transcript could not be delivered to the configured ticket log.');
+                this.recordAction(ticket.id, actorId, 'delete_log_delivered', createHash('sha256').update(transcript.html).digest('hex'));
+            } catch (error) {
+                this.sqlite.prepare("UPDATE tickets SET status = ?, updated_at = ? WHERE id = ? AND status = 'deleting'")
+                    .run(ticket.status, this.now(), ticket.id);
+                if (this.getDeletionLog(ticket.id)?.action === 'delete_log_pending') {
+                    throw new Error(DELETE_LOG_UNCERTAIN, { cause: error });
+                }
+                throw error;
+            }
         }
         try {
-            await channel.delete(`Ticket #${ticket.number} deleted by ${actorId}${reason ? `: ${reason}` : ''}`);
+            if (!channelMissing) await channel.delete(`Ticket #${ticket.number} deleted by ${actorId}${reason ? `: ${reason}` : ''}`);
         } catch (error) {
             if (error?.code !== 10003 && error?.rawError?.code !== 10003) throw error;
         }
         const deleted = this.markDeleted(ticket.id, actorId);
-        const ratingRows = config.ratings_enabled ? [new ActionRowBuilder().addComponents([1, 2, 3, 4, 5].map(stars =>
+        const ratingRows = config?.ratings_enabled ? [new ActionRowBuilder().addComponents([1, 2, 3, 4, 5].map(stars =>
             new ButtonBuilder().setCustomId(`ticket:rating:${ticket.id}:${stars}`).setLabel(`${stars}★`).setStyle(ButtonStyle.Secondary)))] : [];
         await this.notifyOpener(deleted, `Ticket #${ticket.number} was deleted. Transcript ID: ${ticket.id}`, ratingRows);
         return deleted;
+    }
+
+    async restoreInterruptedDelete(ticket, channel) {
+        const closed = this.transition(ticket.id, 'deleting', 'closed', this.client?.user?.id || 'bytebot',
+            'Interrupted deletion restored without replaying delivery.',
+            ', closed_at = COALESCE(closed_at, ?)', [this.now()]);
+        if (closed) await this.syncChannelAccess(closed, channel);
+        return closed;
     }
 
     option(interaction, method, name) {
@@ -1320,11 +1404,21 @@ class TicketService {
     }
 
     beginDelete(id, actorId) {
-        const current = this.getTicket(id);
-        if (current?.status === 'deleting') return current;
         const row = this.transition(id, ['open', 'claimed', 'closed', 'pending'], 'deleting', actorId);
         if (!row) throw new Error('This ticket cannot be deleted.');
         return row;
+    }
+
+    getDeletionLog(id) {
+        return this.sqlite.prepare(`SELECT action, detail FROM ticket_actions WHERE ticket_id = ?
+            AND action IN ('delete_log_pending', 'delete_log_delivered') ORDER BY id DESC LIMIT 1`).get(id);
+    }
+
+    getDeliveredTranscript(id, delivery = this.getDeletionLog(id)) {
+        if (delivery?.action !== 'delete_log_delivered') return null;
+        const archived = this.sqlite.prepare('SELECT html FROM ticket_transcripts WHERE ticket_id = ?').get(id);
+        if (!archived || createHash('sha256').update(archived.html).digest('hex') !== delivery.detail) return null;
+        return archived.html;
     }
 
     markDeleted(id, actorId) {
@@ -1346,23 +1440,7 @@ class TicketService {
     }
 
     renderTranscript({ ticket, messages }) {
-        const rows = messages.map(message => {
-            const display = message.member?.displayName || message.author?.username || message.author?.id || 'Unknown';
-            const roles = [...(message.member?.roles?.cache?.values?.() || [])].map(role => role.name).filter(Boolean).join(', ');
-            const attachments = [...(message.attachments?.values?.() || [])]
-                .filter(file => /^https:\/\//i.test(file.url || ''))
-                .map(file => `<a href="${escapeHtml(file.url)}">${escapeHtml(file.name || 'attachment')}</a>`).join(' ');
-            return `<article><header>${escapeHtml(display)} (${escapeHtml(message.author?.id || '')}) · ${escapeHtml(new Date(message.createdTimestamp || 0).toISOString())}</header>`
-                + `${roles ? `<small>${escapeHtml(roles)}</small>` : ''}<p>${escapeHtml(message.content)}</p>${attachments}</article>`;
-        }).join('\n');
-        const html = '<!doctype html><html><head><meta charset="utf-8"><title>'
-            + `Ticket #${escapeHtml(ticket.number)}</title></head><body><h1>Ticket #${escapeHtml(ticket.number)}</h1>`
-            + `<dl><dt>Opener</dt><dd>${escapeHtml(ticket.openerId)}</dd><dt>Topic</dt><dd>${escapeHtml(ticket.topicName || 'General')}</dd></dl>`
-            + `${rows}</body></html>`;
-        if (Buffer.byteLength(html) > MAX_TRANSCRIPT_BYTES) {
-            throw new Error('This complete transcript exceeds ByteBot’s safe 8 MiB attachment limit; the ticket was not deleted.');
-        }
-        return html;
+        return renderTranscriptDocument(ticket, messages.map(renderTranscriptMessage));
     }
 
     async handleMessage(message) {
@@ -1412,18 +1490,39 @@ class TicketService {
         }
         const active = this.sqlite.prepare("SELECT * FROM tickets WHERE channel_id IS NOT NULL AND status IN ('open', 'claimed', 'closed', 'deleting')").all();
         for (const row of active) {
+            if (this.deletions.has(row.id)) continue;
             const guild = this.client.guilds.cache.get(row.guild_id);
             if (!guild) continue;
             const channel = guild.channels.cache.get(row.channel_id) || await guild.channels.fetch(row.channel_id).catch(error => {
                 if (error?.code === 10003 || error?.rawError?.code === 10003) return null;
                 throw error;
             });
+            if (this.deletions.has(row.id)) continue;
+            const ticket = this.getTicket(row.id);
+            if (!ticket || !['open', 'claimed', 'closed', 'deleting'].includes(ticket.status)) continue;
+            const delivered = ticket.status === 'deleting' && Boolean(this.getDeliveredTranscript(ticket.id));
             if (!channel) {
+                if (delivered) {
+                    this.markDeleted(ticket.id, this.client.user.id);
+                    continue;
+                }
                 this.sqlite.prepare("UPDATE tickets SET status = 'lost', updated_at = ? WHERE id = ?").run(this.now(), row.id);
                 this.recordAction(row.id, this.client.user.id, 'channel_lost');
                 lost++;
-            } else if (['open', 'claimed', 'closed'].includes(row.status)) {
-                await this.syncChannelAccess(rowToTicket(row), channel).catch(error => {
+            } else {
+                if (delivered) {
+                    await this.deleteDiscordTicket(ticket, channel, this.client.user.id).catch(error => {
+                        logger.warn(`Ticket #${ticket.id} deletion recovery failed: ${error.message}`);
+                    });
+                    continue;
+                }
+                if (ticket.status === 'deleting') {
+                    await this.restoreInterruptedDelete(ticket, channel).catch(error => {
+                        logger.warn(`Ticket #${row.id} access reconciliation failed: ${error.message}`);
+                    });
+                    continue;
+                }
+                await this.syncChannelAccess(ticket, channel).catch(error => {
                     logger.warn(`Ticket #${row.id} access reconciliation failed: ${error.message}`);
                 });
             }
