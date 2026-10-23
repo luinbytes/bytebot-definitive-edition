@@ -10,6 +10,19 @@ const { recoverPendingIncidents } = require('../services/antinukeService');
 const { recoverLockdowns, recoverPendingIncidents: recoverPendingAntiraidIncidents } = require('../services/antiraidService');
 const { reconcileNativeRules, recoverPendingIncidents: recoverPendingAutomodIncidents } = require('../services/automodService');
 
+const readyTasks = new WeakMap();
+
+function scheduleReadyTask(client, callback, delay, repeating = false) {
+    const state = readyTasks.get(client);
+    if (!state || state.closed) return;
+    const timer = (repeating ? setInterval : setTimeout)(() => {
+        if (!repeating) state.timers.delete(timer);
+        if (!state.closed) callback();
+    }, delay);
+    timer.unref?.();
+    state.timers.add(timer);
+}
+
 async function fetchDiscordResource(fetch, unknownCode) {
     try {
         return { resource: await fetch(), missing: false };
@@ -28,8 +41,7 @@ async function recoverAntinuke(client) {
         result.failures.forEach(failure => logger.error(`AntiNuke recovery failed for ${failure}`));
         if (result.remaining) {
             logger.warn(`AntiNuke incidents still pending: ${result.remaining}`);
-            const timer = setTimeout(() => recoverAntinuke(client), Math.max(30000, result.retryAfterMs || 0));
-            timer.unref?.();
+            scheduleReadyTask(client, () => recoverAntinuke(client), Math.max(30000, result.retryAfterMs || 0));
         }
     } catch (error) {
         logger.error(`Failed to recover AntiNuke incidents on startup: ${error.message}`);
@@ -41,13 +53,11 @@ async function reconcileAutomod(client) {
         const result = await reconcileNativeRules(client);
         result.failures.forEach(failure => logger.error(`AutoMod migration reconciliation failed for ${failure}`));
         if (result.failures.length) {
-            const timer = setTimeout(() => reconcileAutomod(client), 30000);
-            timer.unref?.();
+            scheduleReadyTask(client, () => reconcileAutomod(client), 30000);
         }
     } catch (error) {
         logger.error(`Failed to reconcile AutoMod migration: ${error.message}`);
-        const timer = setTimeout(() => reconcileAutomod(client), 30000);
-        timer.unref?.();
+        scheduleReadyTask(client, () => reconcileAutomod(client), 30000);
     }
 }
 
@@ -118,6 +128,14 @@ module.exports = {
     name: Events.ClientReady,
     once: true,
     async execute(client) {
+        client.stopReadyTasks?.();
+        const state = { closed: false, timers: new Set() };
+        readyTasks.set(client, state);
+        client.stopReadyTasks = () => {
+            state.closed = true;
+            for (const timer of state.timers) clearTimeout(timer);
+            state.timers.clear();
+        };
         logger.success(`Ready! Logged in as ${client.user.tag}`);
         logger.info(`Bot is active in ${client.guilds.cache.size} guilds.`);
 
@@ -161,11 +179,11 @@ module.exports = {
             logger.success('Activity streak service initialized');
 
             await client.activityStreakService.cleanupOrphanedRoles();
-            setInterval(() => {
+            scheduleReadyTask(client, () => {
                 client.activityStreakService.cleanupOrphanedRoles().catch((error) => {
                     logger.error('Scheduled role cleanup failed:', error);
                 });
-            }, 86400000);
+            }, 86400000, true);
             logger.success('Achievement role cleanup scheduled');
         } catch (e) {
             logger.error(`Failed to initialize activity streak service: ${e}`);
@@ -211,9 +229,8 @@ module.exports = {
             const { sqlite } = require('../database');
             client.eventLoggingService = new EventLoggingService({ sqlite, client });
             await client.eventLoggingService.processOutbox();
-            const eventLogTimer = setInterval(() => client.eventLoggingService.processOutbox()
-                .catch(error => logger.error(`Event log delivery retry failed: ${error.message}`)), 1000);
-            eventLogTimer.unref?.();
+            scheduleReadyTask(client, () => client.eventLoggingService.processOutbox()
+                .catch(error => logger.error(`Event log delivery retry failed: ${error.message}`)), 1000, true);
             logger.success('Event logging service initialized');
         } catch (e) {
             logger.error(`Failed to initialize event logging service: ${e}`);
@@ -481,7 +498,7 @@ module.exports = {
 
         // --- Rich Presence Rotation ---
         let i = 0;
-        setInterval(() => {
+        scheduleReadyTask(client, () => {
             const activities = [
                 { name: 'Doomscrolling (Ranked) 🟣', type: ActivityType.Playing },
                 { name: 'Touch Grass (Any%) 🟣', type: ActivityType.Playing },
@@ -493,6 +510,6 @@ module.exports = {
                 status: 'online',
             });
             i = ++i % activities.length;
-        }, 3_600_000); // 1 hour
+        }, 3_600_000, true);
     },
 };

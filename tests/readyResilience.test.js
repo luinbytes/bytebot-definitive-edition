@@ -130,6 +130,30 @@ describe('ready event recovery', () => {
         );
     });
 
+    test('shutdown stops ready-owned intervals and recovery retries, including in-flight retry completion', async () => {
+        mockDbLog.select.mockResolvedValue([]);
+        mockRecoverPendingIncidents.mockResolvedValueOnce({ recovered: 0, remaining: 1, retryAfterMs: 30000, failures: [] });
+        let finishRecovery;
+        mockRecoverPendingIncidents.mockImplementationOnce(() => new Promise(resolve => { finishRecovery = resolve; }));
+        const client = makeClient(jest.fn());
+        await ready.execute(client);
+        jest.advanceTimersByTime(30000);
+        expect(mockRecoverPendingIncidents).toHaveBeenCalledTimes(2);
+
+        client.stopReadyTasks();
+        client.levelAnalyticsService.cleanup();
+        client.activityStreakService.cleanupOrphanedRoles.mockClear();
+        client.user.setPresence.mockClear();
+        finishRecovery({ recovered: 0, remaining: 1, retryAfterMs: 30000, failures: [] });
+        await Promise.resolve();
+        jest.advanceTimersByTime(24 * 60 * 60 * 1000);
+        await Promise.resolve();
+
+        expect(mockRecoverPendingIncidents).toHaveBeenCalledTimes(2);
+        expect(client.activityStreakService.cleanupOrphanedRoles).not.toHaveBeenCalled();
+        expect(client.user.setPresence).not.toHaveBeenCalled();
+    });
+
     test('does not count bot-offline voice time while finalizing a stale session', async () => {
         const startedAt = Date.now() - 120000;
         mockDbLog.select.mockImplementation(async (table) => {
