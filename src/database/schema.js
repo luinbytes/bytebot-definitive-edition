@@ -629,6 +629,20 @@ const birthdayConfig = sqliteTable('birthday_config', {
     lastCheck: integer('last_check', { mode: 'timestamp' }), // Last midnight check
 });
 
+const birthdayRoleGrants = sqliteTable('birthday_role_grants', {
+    id: text('id').primaryKey(),
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    roleId: text('role_id').notNull(),
+    joinedAt: integer('joined_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    state: text('state').notNull(),
+}, (table) => ({
+    memberRoleUnique: unique().on(table.guildId, table.userId, table.roleId),
+    expiryIdx: index('birthday_role_grants_expiry_idx').on(table.expiresAt),
+    stateCheck: check('birthday_role_grants_state_check', sql`${table.state} IN ('pending', 'granted')`),
+}));
+
 // Message bookmarks (per-user, cross-guild)
 const bookmarks = sqliteTable('bookmarks', {
     id: integer('id').primaryKey({ autoIncrement: true }),
@@ -1968,6 +1982,7 @@ module.exports = {
     bytepodSessionHistory,
     birthdays,
     birthdayConfig,
+    birthdayRoleGrants,
     bookmarks,
     autoResponses,
     automationRules,

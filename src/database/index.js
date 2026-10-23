@@ -603,6 +603,15 @@ const expectedSchema = {
         enabled: 'INTEGER DEFAULT 1 NOT NULL',
         last_check: 'INTEGER'
     },
+    birthday_role_grants: {
+        id: 'TEXT PRIMARY KEY',
+        guild_id: 'TEXT NOT NULL',
+        user_id: 'TEXT NOT NULL',
+        role_id: 'TEXT NOT NULL',
+        joined_at: 'INTEGER NOT NULL',
+        expires_at: 'INTEGER NOT NULL',
+        state: 'TEXT NOT NULL'
+    },
     bookmarks: {
         id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
         user_id: 'TEXT NOT NULL',
@@ -1570,6 +1579,7 @@ const expectedSchema = {
 };
 
 const compatibilityUniqueKeys = {
+    birthday_role_grants: ['guild_id', 'user_id', 'role_id'],
     lifecycle_messages: ['guild_id', 'type'],
     lockdown_ignores: ['guild_id', 'channel_id'],
     lockdown_states: ['guild_id', 'channel_id'],
@@ -1822,6 +1832,9 @@ function validateAndFixSchema() {
         fixes.push(`Added unique key: ${tableName}(${columns.join(', ')})`);
     }
 
+    if (tableExists('birthday_role_grants')) {
+        sqlite.exec('CREATE INDEX IF NOT EXISTS birthday_role_grants_expiry_idx ON birthday_role_grants (expires_at)');
+    }
     if (tableExists('automation_rules')) {
         sqlite.exec('CREATE INDEX IF NOT EXISTS automation_due_idx ON automation_rules (enabled, next_run_at)');
         sqlite.exec('CREATE INDEX IF NOT EXISTS automation_guild_kind_idx ON automation_rules (guild_id, kind)');

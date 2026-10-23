@@ -73,6 +73,47 @@ describe('database migrations', () => {
             VALUES ('bad', 'guild1', 'global', 'global', 'user1', 'coinflip', 9, 'active', 'n', 't', 1, 2)`).run()).toThrow();
     });
 
+    test.each(['fresh', 'journalled', 'unjournalled'])(
+        '%s startup preserves durable birthday grants and legacy birthdays', async mode => {
+            if (mode !== 'fresh') {
+                const seed = new Database(process.env.DATABASE_URL);
+                seed.exec(`CREATE TABLE birthdays (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL, guild_id TEXT NOT NULL, month INTEGER NOT NULL,
+                    day INTEGER NOT NULL, created_at INTEGER);
+                    INSERT INTO birthdays (user_id, guild_id, month, day) VALUES ('legacy-user', 'guild1', 7, 31);`);
+                if (mode === 'journalled') {
+                    seed.exec(`CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY,
+                        hash TEXT NOT NULL, created_at NUMERIC);`);
+                    const record = seed.prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)');
+                    for (const migration of readMigrationFiles({ migrationsFolder: './drizzle' }).slice(0, -1)) {
+                        record.run(migration.hash, migration.folderMillis);
+                    }
+                }
+                seed.close();
+            }
+            database = require('../src/database');
+            await database.runMigrations();
+            const insert = database.sqlite.prepare(`INSERT INTO birthday_role_grants
+                (id, guild_id, user_id, role_id, joined_at, expires_at, state)
+                VALUES (?, 'guild1', 'user1', 'role1', 1000, 86400001, 'granted')`);
+            insert.run('grant1');
+            expect(() => insert.run('duplicate')).toThrow('UNIQUE constraint failed');
+            expect(database.sqlite.prepare("PRAGMA index_list('birthday_role_grants')").all())
+                .toContainEqual(expect.objectContaining({ name: 'birthday_role_grants_expiry_idx' }));
+            database.sqlite.close();
+            database = null;
+            jest.resetModules();
+            database = require('../src/database');
+            await database.runMigrations();
+            expect(database.sqlite.prepare('SELECT * FROM birthday_role_grants').all()).toEqual([{
+                id: 'grant1', guild_id: 'guild1', user_id: 'user1', role_id: 'role1',
+                joined_at: 1000, expires_at: 86400001, state: 'granted'
+            }]);
+            if (mode !== 'fresh') {
+                expect(database.sqlite.prepare('SELECT user_id FROM birthdays').all()).toEqual([{ user_id: 'legacy-user' }]);
+            }
+        });
+
     test('an existing database gains economy scope constraints without data loss', async () => {
         const seed = new Database(process.env.DATABASE_URL);
         seed.exec(`
@@ -225,7 +266,10 @@ describe('database migrations', () => {
         seed.close();
 
         database = require('../src/database');
-        await expect(database.runMigrations()).rejects.toThrow('UNIQUE constraint failed');
+        // Native SQLite errors may originate in another Jest VM when suites share the addon.
+        await expect(database.runMigrations()).rejects.toMatchObject({
+            message: expect.stringContaining('UNIQUE constraint failed')
+        });
         expect(database.sqlite.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()).toEqual(existing);
         expect(database.sqlite.inTransaction).toBe(false);
     });
