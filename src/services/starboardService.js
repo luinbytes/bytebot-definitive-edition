@@ -1,9 +1,15 @@
 const { db } = require('../database');
 const { starboardConfig, starboardMessages } = require('../database/schema');
-const { eq, and } = require('drizzle-orm');
+const { eq } = require('drizzle-orm');
 const embeds = require('../utils/embeds');
 const logger = require('../utils/logger');
 const { dbLog } = require('../utils/dbLogger');
+const { ReactionType, Routes } = require('discord.js');
+
+const UPDATE_DEBOUNCE_MS = 2000;
+const MAX_TRACKED_UPDATES = 500;
+const MAX_CONCURRENT_UPDATES = 4;
+const REACTION_PAGE_SIZE = 100;
 
 /**
  * StarboardService - Handles message starring and starboard management
@@ -18,7 +24,11 @@ const { dbLog } = require('../utils/dbLogger');
 class StarboardService {
     constructor(client) {
         this.client = client;
-        this.updateQueue = new Map(); // messageId -> timeout
+        this.updateQueue = new Map(); // messageId -> { channelId, state, dueAt, dirty }
+        this.runningUpdates = new Set();
+        this.updateTimer = null;
+        this.stopped = false;
+        this.overflowWarned = false;
         this.configCache = new Map(); // guildId -> { config, expiry }
         this.cacheExpiry = 300000; // 5 minutes in ms
     }
@@ -27,6 +37,7 @@ class StarboardService {
      * Get starboard config for a guild (with caching and TTL)
      */
     async getConfig(guildId) {
+        if (this.stopped) return null;
         const now = Date.now();
         const cached = this.configCache.get(guildId);
 
@@ -43,6 +54,7 @@ class StarboardService {
             { guildId }
         );
 
+        if (this.stopped) return null;
         if (config) {
             this.configCache.set(guildId, {
                 config: config,
@@ -108,35 +120,7 @@ class StarboardService {
             const config = await this.getConfig(message.guild.id);
             if (!config || !config.enabled) return;
 
-            // Find starboard entry
-            const entry = await dbLog.select('starboardMessages',
-                () => db.select()
-                    .from(starboardMessages)
-                    .where(eq(starboardMessages.originalMessageId, message.id))
-                    .get(),
-                { messageId: message.id, guildId: message.guild.id }
-            );
-
-            if (!entry) return;
-
-            // Remove from starboard if posted
-            if (entry.starboardMessageId) {
-                const starboardChannel = await this.client.channels.fetch(config.channelId).catch(() => null);
-                if (starboardChannel) {
-                    await starboardChannel.messages.delete(entry.starboardMessageId).catch(() => { });
-                }
-            }
-
-            // Update DB (set star count to 0, remove starboard message ID)
-            await dbLog.update('starboardMessages',
-                () => db.update(starboardMessages)
-                    .set({ starCount: 0, starboardMessageId: null })
-                    .where(eq(starboardMessages.id, entry.id)),
-                { entryId: entry.id, messageId: message.id, operation: 'clearReactions' }
-            );
-
-            logger.info(`Removed message ${message.id} from starboard (all reactions cleared)`);
-
+            this.queueStarboardUpdate(message.id, message.channel.id);
         } catch (error) {
             logger.error('Error in handleReactionRemoveAll:', error);
         }
@@ -190,18 +174,73 @@ class StarboardService {
      * @param {string} channelId - The ID of the channel containing the message
      */
     queueStarboardUpdate(messageId, channelId) {
-        // Clear existing timeout
-        if (this.updateQueue.has(messageId)) {
-            clearTimeout(this.updateQueue.get(messageId).timeout);
+        if (this.stopped) return false;
+
+        let entry = this.updateQueue.get(messageId);
+        if (!entry) {
+            // Reject new keys at capacity. Their next reaction can retry admission.
+            if (this.updateQueue.size >= MAX_TRACKED_UPDATES) {
+                if (!this.overflowWarned) {
+                    logger.warn('Starboard update queue full; new messages wait for another reaction to retry');
+                    this.overflowWarned = true;
+                }
+                return false;
+            }
+            entry = { channelId, state: 'pending', dueAt: 0, dirty: false };
+            this.updateQueue.set(messageId, entry);
         }
 
-        // Set new timeout (2 seconds)
-        const timeout = setTimeout(async () => {
-            await this.updateStarboardMessage(messageId, channelId);
-            this.updateQueue.delete(messageId);
-        }, 2000);
+        entry.channelId = channelId;
+        entry.dueAt = Date.now() + UPDATE_DEBOUNCE_MS;
+        if (entry.state === 'running') entry.dirty = true;
+        this.scheduleUpdates();
+        return true;
+    }
 
-        this.updateQueue.set(messageId, { timeout, channelId });
+    scheduleUpdates() {
+        clearTimeout(this.updateTimer);
+        this.updateTimer = null;
+        if (this.stopped || this.runningUpdates.size >= MAX_CONCURRENT_UPDATES) return;
+
+        let nextDueAt = Infinity;
+        for (const entry of this.updateQueue.values()) {
+            if (entry.state === 'pending') nextDueAt = Math.min(nextDueAt, entry.dueAt);
+        }
+        if (nextDueAt === Infinity) return;
+
+        this.updateTimer = setTimeout(() => {
+            this.updateTimer = null;
+            this.drainUpdates();
+        }, Math.max(0, nextDueAt - Date.now()));
+    }
+
+    drainUpdates() {
+        if (this.stopped) return;
+
+        for (const [messageId, entry] of this.updateQueue) {
+            if (this.runningUpdates.size >= MAX_CONCURRENT_UPDATES) break;
+            if (entry.state !== 'pending' || entry.dueAt > Date.now()) continue;
+
+            entry.state = 'running';
+            entry.dirty = false;
+            const update = this.updateStarboardMessage(messageId, entry.channelId)
+                .finally(() => {
+                    this.runningUpdates.delete(update);
+                    if (this.stopped) return;
+
+                    if (entry.dirty) {
+                        entry.state = 'pending';
+                        this.updateQueue.delete(messageId);
+                        this.updateQueue.set(messageId, entry);
+                    } else {
+                        this.updateQueue.delete(messageId);
+                        this.overflowWarned = false;
+                    }
+                    this.scheduleUpdates();
+                });
+            this.runningUpdates.add(update);
+        }
+        this.scheduleUpdates();
     }
 
     /**
@@ -210,6 +249,7 @@ class StarboardService {
      * @param {string} channelId - The ID of the channel containing the message
      */
     async updateStarboardMessage(messageId, channelId) {
+        if (this.stopped) return;
         try {
             logger.debug(`[Starboard] Processing update for message ${messageId} in channel ${channelId}`);
 
@@ -337,19 +377,30 @@ class StarboardService {
      * Count valid stars on a message (excluding author and bots)
      */
     async countValidStars(message, emoji) {
-        try {
-            const reaction = message.reactions.cache.find(r => r.emoji.name === emoji);
-            if (!reaction) return 0;
+        const reaction = message.reactions.cache.find(r => r.emoji.name === emoji);
+        if (!reaction) return 0;
 
-            const users = await reaction.users.fetch();
-            const validStars = users.filter(user =>
-                !user.bot && user.id !== message.author.id
+        let validStars = 0;
+        let after;
+        while (true) {
+            const query = new URLSearchParams({ limit: String(REACTION_PAGE_SIZE), type: String(ReactionType.Normal) });
+            if (after) query.set('after', after);
+            // Raw pages avoid filling both reaction and client user caches with every voter.
+            const users = await this.client.rest.get(
+                Routes.channelMessageReaction(message.channelId, message.id, reaction.emoji.identifier),
+                { query }
             );
 
-            return validStars.size;
-        } catch (error) {
-            logger.error('Error counting stars:', error);
-            return 0;
+            const previousId = BigInt(after || '0');
+            let nextId = previousId;
+            for (const user of users) {
+                const userId = BigInt(user.id);
+                if (userId <= previousId) throw new Error('Reaction user pagination did not advance');
+                if (userId > nextId) nextId = userId;
+                if (!user.bot && user.id !== message.author.id) validStars++;
+            }
+            if (users.length < REACTION_PAGE_SIZE) return validStars;
+            after = String(nextId);
         }
     }
 
@@ -476,16 +527,17 @@ class StarboardService {
     }
 
     /**
-     * Cleanup method - Clear all pending update timeouts and cache
+     * Stop admission, cancel pending updates, and wait for running updates
      */
-    cleanup() {
+    async cleanup() {
         logger.info('Cleaning up starboard service...');
 
-        // Clear all pending update timeouts
-        for (const [messageId, entry] of this.updateQueue.entries()) {
-            clearTimeout(entry.timeout);
-        }
+        this.stopped = true;
+        clearTimeout(this.updateTimer);
+        this.updateTimer = null;
         this.updateQueue.clear();
+        // Discord requests already sent must settle before shutdown finishes.
+        await Promise.allSettled(this.runningUpdates);
 
         // Clear config cache
         this.configCache.clear();

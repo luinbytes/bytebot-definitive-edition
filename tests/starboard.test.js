@@ -1,4 +1,4 @@
-const { parseTime } = require('../src/utils/timeParser');
+jest.mock('../src/database', () => ({ db: {} }));
 
 describe('Starboard System', () => {
     describe('Service Configuration', () => {
@@ -33,29 +33,27 @@ describe('Starboard System', () => {
     describe('Debouncing', () => {
         let service;
 
-        afterEach(() => {
-            // Clear all pending timeouts to prevent Jest warnings
+        afterEach(async () => {
             if (service && typeof service.cleanup === 'function') {
-                service.cleanup();
+                await service.cleanup();
             }
+            jest.useRealTimers();
         });
 
-        test('should manage update queue correctly', () => {
+        test('coalesces repeated events until two seconds after the latest event', async () => {
+            jest.useFakeTimers();
             const StarboardService = require('../src/services/starboardService');
-            const mockClient = { channels: { cache: new Map() } };
+            const mockClient = { channels: { fetch: jest.fn().mockResolvedValue(null) } };
             service = new StarboardService(mockClient);
 
-            // Queue update should add to queue
-            service.queueStarboardUpdate('msg1');
-            expect(service.updateQueue.has('msg1')).toBe(true);
-
-            // Queueing same message should replace timeout
-            const firstTimeout = service.updateQueue.get('msg1');
-            service.queueStarboardUpdate('msg1');
-            const secondTimeout = service.updateQueue.get('msg1');
-
-            expect(firstTimeout).not.toBe(secondTimeout);
-            expect(service.updateQueue.size).toBe(1);
+            service.queueStarboardUpdate('msg1', 'channel-1');
+            await jest.advanceTimersByTimeAsync(1000);
+            service.queueStarboardUpdate('msg1', 'channel-1');
+            await jest.advanceTimersByTimeAsync(1999);
+            expect(mockClient.channels.fetch).not.toHaveBeenCalled();
+            await jest.advanceTimersByTimeAsync(1);
+            expect(mockClient.channels.fetch).toHaveBeenCalledTimes(1);
+            expect(mockClient.channels.fetch).toHaveBeenCalledWith('channel-1');
         });
     });
 });
