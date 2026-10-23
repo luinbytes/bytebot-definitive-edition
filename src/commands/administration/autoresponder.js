@@ -54,6 +54,9 @@ module.exports = {
     async execute(interaction, client) {
         const action = interaction.options.getSubcommand();
         const guildId = interaction.guild.id;
+        if (action === 'role-add' && !interaction.member.permissions.has(PermissionFlagsBits.ManageRoles)) {
+            return interaction.editReply({ content: 'You need Manage Roles to configure responder role actions.', flags: [MessageFlags.Ephemeral] });
+        }
         if (action === 'add') {
             if (await getResponder(guildId, interaction.options.getString('trigger'))) return interaction.editReply({ content: 'That trigger already has an auto-responder.', flags: [MessageFlags.Ephemeral] });
             let created;
@@ -99,7 +102,10 @@ module.exports = {
             if (action.endsWith('-list')) return interaction.editReply({ content: value.length ? JSON.stringify(value) : 'None configured.', flags: [MessageFlags.Ephemeral] });
             const target = field === 'channelIds' ? interaction.options.getChannel('channel').id : interaction.options.getRole('role').id;
             const selectedRole = field === 'channelIds' ? null : interaction.options.getRole('role');
-            if (selectedRole && (!selectedRole.editable || selectedRole.managed)) {
+            if (field === 'actionRoles' && action === 'role-add') {
+                const invalid = await client.roleAutomationService.validateRole(interaction.guild, selectedRole, interaction.member);
+                if (invalid) return interaction.editReply({ content: invalid, flags: [MessageFlags.Ephemeral] });
+            } else if (selectedRole && action.endsWith('-add') && (!selectedRole.editable || selectedRole.managed)) {
                 return interaction.editReply({ content: 'That role is managed or above ByteBot and cannot be used safely.', flags: [MessageFlags.Ephemeral] });
             }
             const next = field === 'actionRoles'

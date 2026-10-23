@@ -4,6 +4,8 @@ const { eq, and, count, sql } = require('drizzle-orm');
 const logger = require('../utils/logger');
 const { dbLog } = require('../utils/dbLogger');
 const { parseEmbedScript } = require('./lifecycleMessageService');
+const AutoResponderMatcher = require('./autoResponderMatcher');
+const { RoleManager } = require('../utils/discordApiUtil');
 
 const MAX_AUTO_RESPONDERS = 500;
 
@@ -30,6 +32,9 @@ class AutoResponderService {
         this.cooldowns = new Map(); // `${responseId}_${channelId}` -> expiryTimestamp
         this.cache = new Map(); // guildId -> array of active responses
         this.cacheExpiry = new Map(); // guildId -> expiry timestamp
+        this.matcher = new AutoResponderMatcher();
+        this.pendingResponses = new Set();
+        this.closed = false;
 
         // Cleanup stale cooldowns every minute
         this.cleanupInterval = setInterval(() => {
@@ -43,14 +48,16 @@ class AutoResponderService {
     }
 
     /**
-     * Cleanup method - clears interval timer
+     * Stop accepting matches and terminate the matcher worker.
      * Call this when shutting down the service
      */
     cleanup() {
+        this.closed = true;
         if (this.cleanupInterval) {
             clearInterval(this.cleanupInterval);
             this.cleanupInterval = null;
         }
+        return this.matcher.close();
     }
 
     /**
@@ -58,6 +65,7 @@ class AutoResponderService {
      * @param {Message} message - Discord.js Message object
      */
     async checkMessage(message) {
+        if (this.closed) return;
         // Get cached responses for guild (cache for 5 minutes)
         let responses = this.getCachedResponses(message.guild.id);
 
@@ -80,6 +88,7 @@ class AutoResponderService {
 
         // Check each response
         for (const response of responses) {
+            if (this.closed) return;
             const channelIds = JSON.parse(response.channelIds || '[]');
             const roleIds = JSON.parse(response.roleIds || '[]');
             // Channel restriction
@@ -106,14 +115,15 @@ class AutoResponderService {
             }
 
             // Match trigger
-            if (!this.matchesTrigger(message.content, response.trigger, response.matchType)) {
+            if (!await this.matchesTrigger(message.content, response.trigger, response.matchType)) {
                 continue;
             }
+            if (this.closed || this.pendingResponses.has(cooldownKey) || Date.now() < (this.cooldowns.get(cooldownKey) || 0)) continue;
+            this.pendingResponses.add(cooldownKey);
 
             // MATCH FOUND - send response
-            const parsedResponse = this.parseResponse(response.response, message);
-
             try {
+                const parsedResponse = this.parseResponse(response.response, message);
                 const mentionType = ['everyone', 'users', 'roles'].includes(response.mentionPolicy) ? response.mentionPolicy : null;
                 const allowedMentions = { parse: mentionType ? [mentionType] : [], repliedUser: false };
                 const payload = /\{embed\}/i.test(parsedResponse)
@@ -121,20 +131,19 @@ class AutoResponderService {
                     : { content: parsedResponse, allowedMentions };
                 const sent = response.reply ? await message.reply(payload) : await message.channel.send(payload);
                 if (response.deleteTrigger) await message.delete().catch(() => null);
-                if (response.actionRoleId && message.member) {
-                    const actionRole = message.guild.roles.cache.get(response.actionRoleId);
-                    if (actionRole?.editable && !actionRole.managed) {
-                        const hasRole = message.member.roles.cache.has(response.actionRoleId);
-                        const mode = response.actionRoleMode === 'remove' || (response.actionRoleMode === 'toggle' && hasRole) ? 'remove' : 'add';
-                        await message.member.roles[mode](response.actionRoleId, 'Auto-responder role action').catch(() => null);
+                if (message.member) {
+                    const actions = JSON.parse(response.actionRoles || '[]');
+                    if (response.actionRoleId) actions.unshift({ roleId: response.actionRoleId, mode: response.actionRoleMode });
+                    for (const action of actions) {
+                        const actionRole = message.guild.roles.cache.get(action.roleId);
+                        if (!actionRole?.editable || actionRole.managed) continue;
+                        const hasRole = message.member.roles.cache.has(action.roleId);
+                        const removing = action.mode === 'remove' || (action.mode === 'toggle' && hasRole);
+                        const result = await RoleManager[removing ? 'removeRole' : 'addRole'](message.member, actionRole, {
+                            reason: 'Auto-responder role action', logContext: 'auto-responder'
+                        });
+                        if (!result.success) logger.warn(`Auto-responder role action refused: ${result.error}`);
                     }
-                }
-                for (const action of JSON.parse(response.actionRoles || '[]')) {
-                    const actionRole = message.guild.roles.cache.get(action.roleId);
-                    if (!actionRole?.editable || actionRole.managed) continue;
-                    const hasRole = message.member?.roles.cache.has(action.roleId);
-                    const mode = action.mode === 'remove' || (action.mode === 'toggle' && hasRole) ? 'remove' : 'add';
-                    await message.member?.roles[mode](action.roleId, 'Auto-responder role action').catch(() => null);
                 }
                 if (response.selfDestructSeconds) {
                     if (this.client.automationService) {
@@ -150,7 +159,7 @@ class AutoResponderService {
                 }
 
                 // Update cooldown
-                this.cooldowns.set(cooldownKey, now + (response.cooldown * 1000));
+                this.cooldowns.set(cooldownKey, Date.now() + (response.cooldown * 1000));
 
                 // Update stats
                 await dbLog.update('autoResponses',
@@ -175,6 +184,8 @@ class AutoResponderService {
                 } else {
                     logger.error(`Failed to send auto-response ${response.id}:`, error);
                 }
+            } finally {
+                this.pendingResponses.delete(cooldownKey);
             }
         }
     }
@@ -184,9 +195,10 @@ class AutoResponderService {
      * @param {string} content - Message content
      * @param {string} trigger - Trigger pattern
      * @param {string} matchType - Match type (exact, contains, wildcard, regex)
-     * @returns {boolean}
+     * @returns {Promise<boolean>}
      */
-    matchesTrigger(content, trigger, matchType) {
+    async matchesTrigger(content, trigger, matchType) {
+        if (this.closed) return false;
         const contentLower = content.toLowerCase();
         const triggerLower = trigger.toLowerCase();
 
@@ -198,20 +210,8 @@ class AutoResponderService {
                 return contentLower.includes(triggerLower);
 
             case 'wildcard':
-                // Convert wildcard to regex: "test*" -> /^test.*$/
-                const pattern = '^' + triggerLower
-                    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-                    .replace(/\*/g, '.*')
-                    .replace(/\?/g, '.') + '$';
-                return new RegExp(pattern).test(contentLower);
-
             case 'regex':
-                try {
-                    return new RegExp(trigger, 'i').test(content);
-                } catch (error) {
-                    logger.error(`Invalid regex in auto-response: ${trigger}`);
-                    return false;
-                }
+                return this.matcher.match(content, trigger, matchType);
 
             default:
                 return false;

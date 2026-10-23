@@ -1,7 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { Collection, PermissionFlagsBits } = require('discord.js');
+const { Collection, PermissionFlagsBits, PermissionsBitField } = require('discord.js');
 
 describe('message and member automation platform', () => {
     let tempDir;
@@ -16,11 +16,202 @@ describe('message and member automation platform', () => {
         await database.runMigrations();
     });
 
-    afterEach(() => {
-        service?.cleanup();
+    afterEach(async () => {
+        await service?.cleanup();
         database.sqlite.close();
         delete process.env.DATABASE_URL;
         fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    function responderFixture(mode = 'add') {
+        const AutoResponderService = require('../src/services/autoResponderService');
+        const RoleAutomationService = require('../src/services/roleAutomationService');
+        const role = { id: 'role1', name: 'Reward', position: 5, editable: true, managed: false, permissions: new PermissionsBitField() };
+        const guild = {
+            id: 'guild1', name: 'Guild', ownerId: 'owner1', roles: { cache: new Map([[role.id, role]]) },
+            members: { me: { roles: { highest: { position: 100 } } } }
+        };
+        const actor = { id: 'admin1', permissions: new PermissionsBitField([PermissionFlagsBits.ManageGuild, PermissionFlagsBits.ManageRoles]), roles: { highest: { position: 10 } } };
+        const client = { roleAutomationService: new RoleAutomationService({}) };
+        service = new AutoResponderService(client);
+        client.autoResponderService = service;
+        const responder = AutoResponderService.createAutoResponder({ guildId: guild.id, trigger: 'hello', response: 'Hi {user}', creatorId: actor.id });
+        const interaction = action => ({
+            guild, user: { id: actor.id }, member: actor,
+            options: {
+                getSubcommand: () => action,
+                getString: name => ({ trigger: 'hello', mode })[name] || null,
+                getRole: () => role
+            },
+            editReply: jest.fn().mockResolvedValue({})
+        });
+        const command = require('../src/commands/administration/autoresponder');
+        return { role, guild, actor, client, responder, interaction, command };
+    }
+
+    function responderMessage({ guild }) {
+        const member = {
+            id: 'user1', guild, user: { id: 'user1', tag: 'User#0001' },
+            roles: { cache: new Map() }
+        };
+        member.roles.add = jest.fn(async role => member.roles.cache.set(role.id, role));
+        member.roles.remove = jest.fn(async role => member.roles.cache.delete(role.id));
+        const sent = { id: 'reply1', delete: jest.fn().mockResolvedValue({}) };
+        return {
+            id: 'message1', guild, member, author: { id: 'user1', username: 'User' }, content: 'hello',
+            channel: { id: 'channel1', send: jest.fn().mockResolvedValue(sent) },
+            reply: jest.fn().mockResolvedValue(sent), delete: jest.fn().mockResolvedValue({})
+        };
+    }
+
+    test('responder role actions require Manage Roles in addition to Manage Server', async () => {
+        const { actor, client, interaction, command } = responderFixture();
+        actor.permissions.remove(PermissionFlagsBits.ManageRoles);
+        const add = interaction('role-add');
+        await command.execute(add, client);
+        expect(add.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Manage Roles') }));
+        const list = interaction('role-list');
+        await command.execute(list, client);
+        expect(list.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'None configured.' }));
+    });
+
+    test.each(['add', 'toggle'])('responder %s configuration rejects roles at the actor hierarchy', async mode => {
+        const { actor, role, client, interaction, command } = responderFixture(mode);
+        role.position = actor.roles.highest.position;
+        const add = interaction('role-add');
+        await command.execute(add, client);
+        expect(add.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('highest role') }));
+        const list = interaction('role-list');
+        await command.execute(list, client);
+        expect(list.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'None configured.' }));
+    });
+
+    test.each(['add', 'toggle'])('responder %s configuration respects denied permissions', async mode => {
+        const { role, client, interaction, command } = responderFixture(mode);
+        role.permissions.add(PermissionFlagsBits.Administrator);
+        const { deniedRolePermissions } = require('../src/database/schema');
+        database.db.insert(deniedRolePermissions).values({ guildId: 'guild1', permission: 'Administrator' }).run();
+        const add = interaction('role-add');
+        await command.execute(add, client);
+        expect(add.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('blocked permission Administrator') }));
+        const list = interaction('role-list');
+        await command.execute(list, client);
+        expect(list.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'None configured.' }));
+    });
+
+    test.each([
+        ['legacy', 'add'], ['legacy', 'toggle'], ['actions', 'add'], ['actions', 'toggle']
+    ])('%s responder %s refuses a role after denied-permission policy changes', async (storage, mode) => {
+        const fixture = responderFixture(mode);
+        const { role, client, interaction, command, responder } = fixture;
+        const { autoResponses, deniedRolePermissions } = require('../src/database/schema');
+        const { eq } = require('drizzle-orm');
+        if (storage === 'legacy') {
+            database.db.update(autoResponses).set({ actionRoleId: role.id, actionRoleMode: mode }).where(eq(autoResponses.id, responder.id)).run();
+        } else await command.execute(interaction('role-add'), client);
+        role.permissions.add(PermissionFlagsBits.ManageRoles);
+        database.db.insert(deniedRolePermissions).values({ guildId: 'guild1', permission: 'ManageRoles' }).run();
+        const message = responderMessage(fixture);
+        await service.checkMessage(message);
+        expect(message.channel.send).toHaveBeenCalledTimes(1);
+        expect(message.member.roles.add).not.toHaveBeenCalled();
+    });
+
+    test.each([
+        ['legacy', 'add', false, true], ['legacy', 'remove', true, false],
+        ['legacy', 'toggle', false, true], ['legacy', 'toggle', true, false],
+        ['actions', 'add', false, true], ['actions', 'remove', true, false],
+        ['actions', 'toggle', false, true], ['actions', 'toggle', true, false]
+    ])('%s responder %s preserves role actions and cooldowns with prior membership %s', async (storage, mode, hadRole, expected) => {
+        const fixture = responderFixture(mode);
+        const { role, client, interaction, command, responder } = fixture;
+        const { autoResponses, deniedRolePermissions } = require('../src/database/schema');
+        const { eq } = require('drizzle-orm');
+        if (storage === 'legacy') {
+            database.db.update(autoResponses).set({ actionRoleId: role.id, actionRoleMode: mode }).where(eq(autoResponses.id, responder.id)).run();
+        } else await command.execute(interaction('role-add'), client);
+        const message = responderMessage(fixture);
+        if (hadRole) {
+            message.member.roles.cache.set(role.id, role);
+            role.permissions.add(PermissionFlagsBits.ManageRoles);
+            database.db.insert(deniedRolePermissions).values({ guildId: 'guild1', permission: 'ManageRoles' }).run();
+        }
+        await service.checkMessage(message);
+        await service.checkMessage(message);
+        expect(message.member.roles.cache.has(role.id)).toBe(expected);
+        expect(message.channel.send).toHaveBeenCalledTimes(1);
+        expect(message.channel.send).toHaveBeenCalledWith({ content: 'Hi <@user1>', allowedMentions: { parse: [], repliedUser: false } });
+        if (hadRole) expect(message.member.roles.remove).toHaveBeenCalledWith(role, 'Auto-responder role action');
+        else expect(message.member.roles.add).toHaveBeenCalledWith(role, 'Auto-responder role action');
+    });
+
+    test('a responder role action can be removed after the role becomes unmanageable', async () => {
+        const { role, actor, client, interaction, command } = responderFixture();
+        await command.execute(interaction('role-add'), client);
+        role.editable = false;
+        role.managed = true;
+        actor.permissions.remove(PermissionFlagsBits.ManageRoles);
+        await command.execute(interaction('role-remove'), client);
+        const list = interaction('role-list');
+        await command.execute(list, client);
+        expect(list.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'None configured.' }));
+    });
+
+    test('runtime role actions recheck the bot hierarchy', async () => {
+        const fixture = responderFixture();
+        await fixture.command.execute(fixture.interaction('role-add'), fixture.client);
+        fixture.role.position = fixture.guild.members.me.roles.highest.position;
+        const message = responderMessage(fixture);
+        await service.checkMessage(message);
+        expect(message.member.roles.add).not.toHaveBeenCalled();
+        expect(message.channel.send).toHaveBeenCalledTimes(1);
+    });
+
+    test('overlapping asynchronous matches send once and preserve the cooldown', async () => {
+        const fixture = responderFixture();
+        const { autoResponses } = require('../src/database/schema');
+        const { eq } = require('drizzle-orm');
+        database.db.update(autoResponses).set({ matchType: 'regex', trigger: '^hello$' }).where(eq(autoResponses.id, fixture.responder.id)).run();
+        const message = responderMessage(fixture);
+        let release;
+        message.channel.send.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+        const checks = [service.checkMessage(message), service.checkMessage(message)];
+        try {
+            await Promise.race(checks);
+            expect(message.channel.send).toHaveBeenCalledTimes(1);
+        } finally {
+            release?.({ id: 'reply1' });
+            await Promise.all(checks);
+        }
+        await service.checkMessage(message);
+        expect(message.channel.send).toHaveBeenCalledTimes(1);
+    });
+
+    test('responder replies preserve deletion, channel and role scopes, and durable self destruction', async () => {
+        const fixture = responderFixture();
+        const AutomationService = require('../src/services/automationService');
+        fixture.client.automationService = new AutomationService({ guilds: { cache: new Map() } });
+        const { autoResponses } = require('../src/database/schema');
+        const { eq } = require('drizzle-orm');
+        database.db.update(autoResponses).set({
+            reply: true, deleteTrigger: true, selfDestructSeconds: 6, mentionPolicy: 'users',
+            channelIds: JSON.stringify(['channel1']), roleIds: JSON.stringify(['role1'])
+        }).where(eq(autoResponses.id, fixture.responder.id)).run();
+        const message = responderMessage(fixture);
+        await service.checkMessage(message);
+        expect(message.reply).not.toHaveBeenCalled();
+        message.member.roles.cache.set(fixture.role.id, fixture.role);
+        message.channel.id = 'elsewhere';
+        await service.checkMessage(message);
+        expect(message.reply).not.toHaveBeenCalled();
+        message.channel.id = 'channel1';
+        await service.checkMessage(message);
+        expect(message.reply).toHaveBeenCalledWith({ content: 'Hi <@user1>', allowedMentions: { parse: ['users'], repliedUser: false } });
+        expect(message.channel.send).not.toHaveBeenCalled();
+        expect(message.delete).toHaveBeenCalledTimes(1);
+        const deletion = await fixture.client.automationService.get('guild1', 'delete-message', 'reply1');
+        expect(JSON.parse(deletion.config)).toEqual({ channelId: 'channel1', messageId: 'reply1' });
+        expect(deletion.nextRunAt).toBeGreaterThan(Date.now());
     });
 
     test('published command families and aliases render as Manage Server slash commands', () => {
