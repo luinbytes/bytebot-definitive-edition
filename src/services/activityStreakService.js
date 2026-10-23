@@ -1055,7 +1055,6 @@ class ActivityStreakService {
                 return;
             }
 
-            // If already counted today, streak doesn't change but we still check cumulative achievements
             if ((existing.streakCoveredThrough ?? existing.lastActivityDate) === today) {
                 // Streak and total days haven't changed, but cumulative values (messages, voice, commands)
                 // may have increased, so check for achievements that depend on cumulative totals
