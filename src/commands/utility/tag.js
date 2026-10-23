@@ -42,7 +42,7 @@ module.exports = {
             if (action === 'add' && existing) return interaction.editReply(`Tag **${name}** already exists.`);
             if (action === 'edit' && !existing) return interaction.editReply(`Tag **${name}** was not found.`);
             service.render(source, { user: interaction.user, member: interaction.member, guild: interaction.guild, channel: interaction.channel });
-            await service.saveTag(interaction.user.id, name, source, { canManage });
+            await service.saveTag(interaction.user.id, name, source);
             return interaction.editReply(`${action === 'add' ? 'Saved' : 'Updated'} tag **${name.toLowerCase()}**.`);
         }
         if (action === 'list' || action === 'search') {
@@ -68,10 +68,10 @@ module.exports = {
         }
         if (!rule) return interaction.editReply(`Tag **${name}** was not found.`);
         if (action === 'author') return interaction.editReply({ content: `**${rule.key}** was created by <@${rule.createdBy}>.`, allowedMentions: { parse: [] } });
-        if (action === 'remove') { await service.removeTag(interaction.user.id, name, { canManage }); return interaction.editReply(`Removed **${name}**.`); }
+        if (action === 'remove') { await service.removeTag(interaction.user.id, name); return interaction.editReply(`Removed **${name}**.`); }
         if (action === 'rename') {
             const next = interaction.options.getString('new_name');
-            await service.renameTag(interaction.user.id, name, next, { canManage });
+            await service.renameTag(interaction.user.id, name, next);
             return interaction.editReply(`Renamed **${name}** to **${next.toLowerCase()}**.`);
         }
         return interaction.editReply('Unknown tag action.');

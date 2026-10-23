@@ -28,12 +28,33 @@ describe('rich-content persistence', () => {
         fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
-    test('tags are globally discoverable but only their author or server staff may mutate them', async () => {
+    test('global tag mutations require the author or a configured bot developer', async () => {
+        const config = require('../src/utils/config');
+        config.developers = ['developer'];
         await service.saveTag('user1', 'Rules', '{content: Be kind}');
         expect(await service.getTag('rules')).toEqual(expect.objectContaining({ createdBy: 'user1' }));
         await expect(service.saveTag('user2', 'rules', '{content: Be loud}')).rejects.toThrow(/permission/i);
-        await service.saveTag('admin', 'rules', '{content: Be excellent}', { canManage: true });
+        await expect(service.saveTag('server-admin', 'rules', 'changed', { canManage: true })).rejects.toThrow(/permission/i);
+        await expect(service.removeTag('server-admin', 'rules', { canManage: true })).rejects.toThrow(/permission/i);
+        await expect(service.renameTag('server-admin', 'rules', 'stolen', { canManage: true })).rejects.toThrow(/permission/i);
+        expect(JSON.parse((await service.getTag('rules')).config).script).toBe('{content: Be kind}');
+        await service.saveTag('developer', 'rules', '{content: Be excellent}');
         expect(JSON.parse((await service.getTag('RULES')).config).script).toBe('{content: Be excellent}');
+        await service.renameTag('developer', 'rules', 'guidelines');
+        expect((await service.getTag('guidelines')).createdBy).toBe('user1');
+        await service.removeTag('developer', 'guidelines');
+        expect(await service.getTag('guidelines')).toBeUndefined();
+    });
+
+    test('concurrent tag creation cannot overwrite the first author', async () => {
+        const results = await Promise.allSettled([
+            service.saveTag('first', 'shared', 'first content'),
+            service.saveTag('second', 'shared', 'second content')
+        ]);
+        expect(results.map(result => result.status)).toEqual(['fulfilled', 'rejected']);
+        const tag = await service.getTag('shared');
+        expect(tag.createdBy).toBe('first');
+        expect(JSON.parse(tag.config).script).toBe('first content');
     });
 
     test('tag rename, search, removal, and reset preserve other authors', async () => {

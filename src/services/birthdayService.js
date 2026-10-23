@@ -267,7 +267,7 @@ class BirthdayService {
                     await owner.send({
                         embeds: [embeds.warn(
                             'Birthday Announcements Disabled',
-                            `The birthday announcement channel in **${guild.name}** was deleted. The birthday system has been disabled.\n\nUse \`/birthday setup\` to reconfigure.`
+                            `The birthday announcement channel in **${guild.name}** was deleted. The birthday system has been disabled.\n\nUse \`/server birthday setup\` to reconfigure.`
                         )]
                     }).catch(() => {
                         logger.warn(`Could not DM owner of ${guild.name} about birthday channel deletion`);

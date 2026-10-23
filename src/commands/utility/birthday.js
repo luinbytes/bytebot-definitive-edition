@@ -335,7 +335,7 @@ module.exports = {
         await interaction.editReply({
             embeds: [embeds.success(
                 '🎂 Birthday System Configured',
-                `Birthday announcements will be sent to ${channel}.\n\nMembers can now set their birthdays with \`/birthday set\`.`
+                `Birthday announcements will be sent to ${channel}.\n\nMembers can now set their birthdays with \`/me birthday set\`.`
             )]
         });
     },
@@ -363,7 +363,7 @@ module.exports = {
             return interaction.editReply({
                 embeds: [embeds.error(
                     'Setup Required',
-                    'Please configure birthday announcements first using `/birthday setup`.'
+                    'Please configure birthday announcements first using `/server birthday setup`.'
                 )]
             });
         }

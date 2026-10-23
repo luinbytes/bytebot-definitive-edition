@@ -695,7 +695,7 @@ async function handleDisable(interaction) {
             '• No new achievements will be tracked or awarded\n' +
             '• Existing achievements are preserved\n' +
             '• Achievement roles remain on users\n' +
-            '• Users can still view their achievements via `/streak`\n\n' +
+            '• Users can still view their achievements via `/me streak view`\n\n' +
             'Use `/achievement enable` to re-enable the system.'
         );
 

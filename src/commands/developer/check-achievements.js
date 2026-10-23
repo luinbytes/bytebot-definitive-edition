@@ -69,7 +69,7 @@ module.exports = {
                     { name: 'Total Days', value: `${streakData.totalActiveDays} days`, inline: true }
                 );
 
-                embed.setFooter({ text: 'Check /streak view to see awarded achievements' });
+                embed.setFooter({ text: 'Check /me streak view to see awarded achievements' });
 
                 await interaction.editReply({ embeds: [embed] });
 

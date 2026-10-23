@@ -62,7 +62,7 @@ module.exports = {
                     .setDescription('Cancel a reminder')
                     .addIntegerOption(option =>
                         option.setName('id')
-                            .setDescription('Reminder ID (from /reminder manage list)')
+                            .setDescription('Reminder ID (from /me reminder list)')
                             .setRequired(true)
                             .setMinValue(1)
                     )
@@ -129,7 +129,7 @@ async function handleRemindMe(interaction, client) {
         return interaction.editReply({
             embeds: [embeds.error(
                 'Reminder Limit Reached',
-                `You have reached the maximum of ${MAX_REMINDERS_PER_USER} active reminders. Use \`/reminder list\` to manage them.`
+                `You have reached the maximum of ${MAX_REMINDERS_PER_USER} active reminders. Use \`/me reminder list\` to manage them.`
             )]
         });
     }
@@ -155,7 +155,7 @@ async function handleRemindMe(interaction, client) {
             '✅ Reminder Set',
             `I'll remind you **<t:${Math.floor(parsedTime.timestamp / 1000)}:R>** (<t:${Math.floor(parsedTime.timestamp / 1000)}:F>)\n\n**Message:** ${message}`
         );
-        embed.setFooter({ text: `Reminder ID: ${result.id} • Use /reminder cancel ${result.id} to cancel` });
+        embed.setFooter({ text: `Reminder ID: ${result.id} • Use /me reminder cancel id:${result.id} to cancel` });
 
         await interaction.editReply({ embeds: [embed] });
 
@@ -174,7 +174,7 @@ async function handleRemindHere(interaction, client) {
     // Check if in guild
     if (!interaction.guild) {
         return interaction.editReply({
-            embeds: [embeds.error('Guild Only', 'Channel reminders can only be set in servers. Use `/reminder me` for DM reminders.')]
+            embeds: [embeds.error('Guild Only', 'Channel reminders can only be set in servers. Use `/me reminder add delivery:dm` in a server for DM reminders.')]
         });
     }
 
@@ -212,7 +212,7 @@ async function handleRemindHere(interaction, client) {
         return interaction.editReply({
             embeds: [embeds.error(
                 'Reminder Limit Reached',
-                `You have reached the maximum of ${MAX_REMINDERS_PER_USER} active reminders. Use \`/reminder list\` to manage them.`
+                `You have reached the maximum of ${MAX_REMINDERS_PER_USER} active reminders. Use \`/me reminder list\` to manage them.`
             )]
         });
     }
@@ -238,7 +238,7 @@ async function handleRemindHere(interaction, client) {
             '✅ Reminder Set',
             `I'll send a reminder in this channel **<t:${Math.floor(parsedTime.timestamp / 1000)}:R>** (<t:${Math.floor(parsedTime.timestamp / 1000)}:F>)\n\n**Message:** ${message}`
         );
-        embed.setFooter({ text: `Reminder ID: ${result.id} • Use /reminder cancel ${result.id} to cancel` });
+        embed.setFooter({ text: `Reminder ID: ${result.id} • Use /me reminder cancel id:${result.id} to cancel` });
 
         await interaction.editReply({ embeds: [embed] });
 
@@ -248,7 +248,7 @@ async function handleRemindHere(interaction, client) {
 }
 
 /**
- * Handle /reminder list
+ * Handle /me reminder list
  */
 async function handleList(interaction, client) {
     try {
@@ -265,7 +265,7 @@ async function handleList(interaction, client) {
             return interaction.editReply({
                 embeds: [embeds.warn(
                     'No Active Reminders',
-                    'You have no active reminders. Use `/reminder me` or `/reminder here` to create one.'
+                    'You have no active reminders. Use `/me reminder add delivery:dm` or `/me reminder add delivery:channel` to create one.'
                 )]
             });
         }
@@ -287,7 +287,7 @@ async function handleList(interaction, client) {
         }));
 
         embed.setDescription(lines.join('\n\n'));
-        embed.setFooter({ text: `${userReminders.length}/${MAX_REMINDERS_PER_USER} active reminders • Use /reminder cancel [id] to remove` });
+        embed.setFooter({ text: `${userReminders.length}/${MAX_REMINDERS_PER_USER} active reminders • Use /me reminder cancel id:<id> to remove` });
 
         await interaction.editReply({ embeds: [embed] });
 
