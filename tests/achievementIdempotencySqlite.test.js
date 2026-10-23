@@ -147,6 +147,44 @@ describe('streak and achievement behavior with SQLite', () => {
         });
     });
 
+    test.each([
+        ['disabled', false, false],
+        ['opted out', true, true]
+    ])('%s activity persists Last Active and actual day counts without awards', async (_label, enabled, optedOut) => {
+        jest.useFakeTimers().setSystemTime(new Date('2026-10-23T12:00:00Z'));
+        const send = jest.fn();
+        const service = createService(send);
+        service.isAchievementsEnabled = jest.fn().mockResolvedValue(enabled);
+        service.isUserOptedOut = jest.fn().mockResolvedValue(optedOut);
+        await mockDb.insert(activityStreaks).values({
+            userId: 'user-1', guildId: 'guild-1', currentStreak: 2, longestStreak: 2,
+            totalActiveDays: 2, lastActivityDate: '2026-10-22'
+        });
+
+        await Promise.all([
+            service.recordActivity('user-1', 'guild-1', 'message', 50),
+            service.recordActivity('user-1', 'guild-1', 'message', 50)
+        ]);
+
+        expect((await service.getUserTotals('user-1', 'guild-1')).totalMessages).toBe(100);
+        expect(await service.getUserStreak('user-1', 'guild-1')).toMatchObject({
+            lastActivityDate: '2026-10-23', streakCoveredThrough: '2026-10-23',
+            currentStreak: 3, longestStreak: 3, totalActiveDays: 3, freezesAvailable: 1
+        });
+        expect(await mockDb.select().from(activityAchievements)).toHaveLength(0);
+        expect(service.achievementManager.getById).not.toHaveBeenCalled();
+        expect(service.client.users.fetch).not.toHaveBeenCalled();
+        expect(send).not.toHaveBeenCalled();
+        expect(await mockDb.select().from(activityLogs)).toEqual([
+            expect.objectContaining({ textXpAwarded: 0 })
+        ]);
+
+        sqlite.prepare('DELETE FROM activity_logs').run();
+        expect(await service.getUserStreak('user-1', 'guild-1')).toMatchObject({
+            lastActivityDate: '2026-10-23', totalActiveDays: 3
+        });
+    });
+
     test('freeze coverage never supplies an unknown actual activity date', async () => {
         jest.useFakeTimers().setSystemTime(new Date('2026-10-23T12:00:00Z'));
         const service = createService(jest.fn());
