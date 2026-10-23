@@ -991,17 +991,6 @@ class ActivityStreakService {
      */
     async updateStreak(userId, guildId, today) {
         try {
-            // Check if achievements are enabled for this guild
-            const achievementsEnabled = await this.isAchievementsEnabled(guildId);
-            if (!achievementsEnabled) {
-                return;
-            }
-
-            // Check if user has opted out globally
-            if (await this.isUserOptedOut(userId)) {
-                return;
-            }
-
             const existing = await dbLog.select('activityStreaks',
                 () => db.select()
                     .from(activityStreaks)
@@ -1015,7 +1004,7 @@ class ActivityStreakService {
 
             if (!existing) {
                 // Create new streak record
-                await dbLog.insert('activityStreaks',
+                const insertResult = await dbLog.insert('activityStreaks',
                     () => db.insert(activityStreaks).values({
                         userId,
                         guildId,
@@ -1028,9 +1017,13 @@ class ActivityStreakService {
                         lastFreezeReset: new Date(),
                         createdAt: new Date(),
                         updatedAt: new Date()
-                    }),
+                    }).onConflictDoNothing(),
                     { userId, guildId, operation: 'newStreak' }
                 );
+
+                if (insertResult.changes === 0) {
+                    return this.updateStreak(userId, guildId, today);
+                }
 
                 // Award first achievement
                 await this.checkAndAwardAchievements(userId, guildId, 1, 1);
@@ -1138,6 +1131,10 @@ class ActivityStreakService {
      */
     async checkAndAwardAchievements(userId, guildId, currentStreak, totalDays) {
         try {
+            if (!await this.isAchievementsEnabled(guildId) || await this.isUserOptedOut(userId)) {
+                return;
+            }
+
             const toAward = [];
 
             // Get activity totals for cumulative/combo checks
