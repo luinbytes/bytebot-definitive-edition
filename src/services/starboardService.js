@@ -24,7 +24,7 @@ const REACTION_PAGE_SIZE = 100;
 class StarboardService {
     constructor(client) {
         this.client = client;
-        this.updateQueue = new Map(); // messageId -> { channelId, state, dueAt, dirty }
+        this.updateQueue = new Map();
         this.runningUpdates = new Set();
         this.updateTimer = null;
         this.stopped = false;
@@ -178,7 +178,6 @@ class StarboardService {
 
         let entry = this.updateQueue.get(messageId);
         if (!entry) {
-            // Reject new keys at capacity. Their next reaction can retry admission.
             if (this.updateQueue.size >= MAX_TRACKED_UPDATES) {
                 if (!this.overflowWarned) {
                     logger.warn('Starboard update queue full; new messages wait for another reaction to retry');
@@ -526,9 +525,6 @@ class StarboardService {
         return embed;
     }
 
-    /**
-     * Stop admission, cancel pending updates, and wait for running updates
-     */
     async cleanup() {
         logger.info('Cleaning up starboard service...');
 
