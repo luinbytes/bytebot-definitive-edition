@@ -245,7 +245,7 @@ class GiveawayService {
         return winners;
     }
 
-    claimEnd(id, actorId, members) {
+    claimEnd(id, actorId, members, { dueOnly = false } = {}) {
         return this.sqlite.transaction(() => {
             const giveaway = this.getGiveaway(id);
             if (!giveaway) throw new Error('Giveaway not found.');
@@ -255,6 +255,7 @@ class GiveawayService {
                 return { giveaway, round: rowToRound(claimed || existing), created: false, claimed: Boolean(claimed) };
             }
             if (giveaway.status !== 'active') throw new Error('That giveaway is not active.');
+            if (dueOnly && giveaway.endsAt > this.now()) return null;
             const claimed = this.sqlite.prepare(`UPDATE giveaways SET status = 'ending', updated_at = ?
                 WHERE id = ? AND status = 'active' RETURNING *`).get(this.now(), id);
             if (!claimed) throw new Error('That giveaway is already ending.');
@@ -422,7 +423,7 @@ class GiveawayService {
         }
     }
 
-    async finishDiscordGiveaway(id, actorId) {
+    async finishDiscordGiveaway(id, actorId, options = {}) {
         const before = this.getGiveaway(id);
         if (!before) throw new Error('Giveaway not found.');
         if (before.status === 'ended') {
@@ -431,7 +432,8 @@ class GiveawayService {
         }
         const members = await this.membersFor(before);
         if (this.closed) throw new Error('Giveaway service stopped.');
-        const claimed = this.claimEnd(id, actorId, members);
+        const claimed = this.claimEnd(id, actorId, members, options);
+        if (!claimed) return null;
         if (!claimed.claimed) throw new Error('That giveaway is already being finalized.');
         const giveaway = this.getGiveaway(id);
         const { guild, channel, message } = await this.resourceFor(giveaway);
@@ -446,13 +448,18 @@ class GiveawayService {
         return { giveaway: ended, round: claimed.round };
     }
 
-    async endDiscordGiveaway(id, actorId) {
-        if (this.endJobs.has(id)) return this.endJobs.get(id);
-        const job = this.finishDiscordGiveaway(id, actorId);
-        this.endJobs.set(id, job);
-        try { return await job; } finally {
+    async endDiscordGiveaway(id, actorId, options = {}) {
+        let job = this.endJobs.get(id);
+        if (!job) {
+            job = this.finishDiscordGiveaway(id, actorId, options);
+            this.endJobs.set(id, job);
+        }
+        let result;
+        try { result = await job; } finally {
             if (this.endJobs.get(id) === job) this.endJobs.delete(id);
         }
+        if (result === null && !options.dueOnly) return this.endDiscordGiveaway(id, actorId, options);
+        return result;
     }
 
     createReroll(id, actorId, members) {
@@ -678,7 +685,8 @@ class GiveawayService {
             OR (status = 'ended' AND id IN (SELECT giveaway_id FROM giveaway_rounds
                 WHERE round_number > 1 AND announced_at IS NULL
                 AND (delivery_lease_until IS NULL OR delivery_lease_until <= ?)))
-            ORDER BY CASE WHEN status = 'ended' THEN 0 ELSE 1 END, ends_at, id`).all(this.now());
+            ORDER BY CASE WHEN status = 'ended' THEN 0
+                WHEN status = 'ending' OR ends_at <= ? THEN 1 ELSE 2 END, ends_at, id`).all(this.now(), this.now());
         for (const row of rows) {
             if (this.closed) break;
             let giveaway = rowToGiveaway(row);
@@ -710,7 +718,7 @@ class GiveawayService {
             }
             const current = this.getGiveaway(giveaway.id);
             if (current?.status === 'ending' || (current?.status === 'active' && current.endsAt <= this.now())) {
-                await this.endDiscordGiveaway(giveaway.id, this.client.user.id).catch(error => logger.warn(`Giveaway ${giveaway.id} resume failed: ${error.message}`));
+                await this.endDiscordGiveaway(giveaway.id, this.client.user.id, { dueOnly: true }).catch(error => logger.warn(`Giveaway ${giveaway.id} resume failed: ${error.message}`));
                 resumed++;
             }
         }
@@ -726,7 +734,7 @@ class GiveawayService {
                     (SELECT giveaway_id FROM giveaway_rounds WHERE round_number = 1 AND announced_at IS NULL
                      AND (delivery_lease_until IS NULL OR delivery_lease_until <= ?)))
                 ORDER BY ends_at LIMIT 25`).all(this.now(), this.now());
-            for (const row of rows) await this.endDiscordGiveaway(row.id, this.client.user.id)
+            for (const row of rows) await this.endDiscordGiveaway(row.id, this.client.user.id, { dueOnly: true })
                 .catch(error => logger.warn(`Giveaway ${row.id} deadline failed: ${error.message}`));
             for (const row of this.dueRerolls(Math.max(0, 25 - rows.length))) {
                 await this.rerollDiscordGiveaway(row.id, this.client.user.id)
