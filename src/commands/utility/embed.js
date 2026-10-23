@@ -1,16 +1,10 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { boundedList, configOf } = require('../../services/roleAutomationService');
 const { messageToScript, sourceReply } = require('../../services/richContentService');
+const { fetchReadableMessage } = require('../../utils/messageAccess');
 
 const named = option => option.setName('name').setDescription('Saved embed name').setRequired(true).setMaxLength(32);
 const script = option => option.setName('script').setDescription('Message, embed, or Components V2 script').setRequired(true).setMaxLength(6000);
-
-async function fetchMessage(interaction, input) {
-    const match = /(?:channels\/\d+\/(\d+)\/)?(\d+)\/?$/.exec(String(input));
-    if (!match) return null;
-    const channel = match[1] ? await interaction.guild?.channels.fetch(match[1]).catch(() => null) : interaction.channel;
-    return channel?.messages?.fetch(match[2]).catch(() => null);
-}
 
 module.exports = {
     data: new SlashCommandBuilder().setName('embed').setDescription('Create and manage rich messages')
@@ -76,7 +70,7 @@ module.exports = {
                 const savedAs = service.copyPublishedEmbed(interaction.user.id, published, interaction.options.getString('save_as'));
                 return interaction.editReply(`Copied published embed to **${savedAs}**.`);
             }
-            const message = await fetchMessage(interaction, messageInput);
+            const message = await fetchReadableMessage(interaction, messageInput);
             if (!message) return interaction.editReply('That message was not found or is not accessible.');
             return interaction.editReply(sourceReply(messageToScript(message)));
         }

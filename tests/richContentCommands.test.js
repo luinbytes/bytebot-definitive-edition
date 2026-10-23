@@ -1,4 +1,72 @@
-const { PermissionFlagsBits } = require('discord.js');
+const { ChannelType, PermissionFlagsBits, PermissionsBitField } = require('discord.js');
+
+test.each([
+    ['../src/commands/utility/copyembed', null],
+    ['../src/commands/utility/embed', 'copy'],
+    ['../src/commands/administration/pagination', 'set']
+])('%s refuses to fetch messages from channels the caller cannot read', async (commandPath, action) => {
+    const fetch = jest.fn().mockResolvedValue({ content: 'private content', embeds: [], components: [] });
+    const channel = {
+        id: '222222222222222222', guildId: '111111111111111111',
+        permissionsFor: () => ({ has: () => false }), messages: { fetch }
+    };
+    const interaction = {
+        user: { id: '444444444444444444' }, member: { id: '444444444444444444' },
+        guildId: channel.guildId,
+        guild: { id: channel.guildId, channels: { fetch: jest.fn().mockResolvedValue(channel) } },
+        options: {
+            getSubcommand: () => action,
+            getString: name => name === 'message'
+                ? `https://discord.com/channels/${channel.guildId}/${channel.id}/333333333333333333` : null
+        },
+        editReply: jest.fn()
+    };
+    await require(commandPath).execute(interaction, { richContentService: { setupPagination: jest.fn() } });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(interaction.editReply).toHaveBeenCalledWith('That message was not found or is not accessible.');
+});
+
+test.each([
+    ['readable channel', [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory], false, true, true],
+    ['no history access', [PermissionFlagsBits.ViewChannel], false, true, false],
+    ['no channel access', [PermissionFlagsBits.ReadMessageHistory], false, true, false],
+    ['private thread nonmember', [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory], true, false, false],
+    ['private thread member', [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory], true, true, true],
+    ['private thread moderator', [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageThreads], true, false, true]
+])('copyembed respects %s', async (_label, flags, privateThread, joined, allowed) => {
+    const source = { content: 'readable content', embeds: [], components: [] };
+    const fetch = jest.fn().mockResolvedValue(source);
+    const channel = {
+        id: '222222222222222222', guildId: '111111111111111111',
+        type: privateThread ? ChannelType.PrivateThread : ChannelType.GuildText,
+        permissionsFor: () => new PermissionsBitField(flags), messages: { fetch },
+        members: { fetch: jest.fn().mockResolvedValue(joined ? { id: '444444444444444444' } : null) }
+    };
+    const interaction = {
+        guildId: channel.guildId, guild: { id: channel.guildId }, channel,
+        member: { id: '444444444444444444' }, user: { id: '444444444444444444' },
+        options: { getString: () => '333333333333333333' }, editReply: jest.fn()
+    };
+    await require('../src/commands/utility/copyembed').execute(interaction);
+    expect(fetch).toHaveBeenCalledTimes(allowed ? 1 : 0);
+    if (allowed) expect(JSON.stringify(interaction.editReply.mock.calls[0][0])).toContain('readable content');
+    else expect(interaction.editReply).toHaveBeenCalledWith('That message was not found or is not accessible.');
+});
+
+test.each([
+    'https://discord.com/channels/999999999999999999/222222222222222222/333333333333333333',
+    'https://example.com/333333333333333333',
+    'not a message 333333333333333333'
+])('copyembed rejects foreign or malformed message references before fetching %s', async input => {
+    const fetch = jest.fn();
+    const editReply = jest.fn();
+    await require('../src/commands/utility/copyembed').execute({
+        guildId: '111111111111111111', guild: { channels: { fetch } },
+        options: { getString: () => input }, editReply
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(editReply).toHaveBeenCalledWith('That message was not found or is not accessible.');
+});
 
 test('rich-content slash commands expose the frozen public lifecycle and real Discord permissions', () => {
     const commands = {

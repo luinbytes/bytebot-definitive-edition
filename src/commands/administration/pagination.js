@@ -1,16 +1,10 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { boundedList, configOf } = require('../../services/roleAutomationService');
+const { fetchReadableMessage } = require('../../utils/messageAccess');
 
 const message = option => option.setName('message').setDescription('Message link or ID').setRequired(true);
 const script = option => option.setName('script').setDescription('Embed script for the page').setRequired(true).setMaxLength(6000);
 const page = option => option.setName('page').setDescription('One-based page number').setRequired(true).setMinValue(1).setMaxValue(10);
-
-async function fetchMessage(interaction, input) {
-    const match = /(?:channels\/\d+\/(\d+)\/)?(\d+)\/?$/.exec(String(input));
-    if (!match) return null;
-    const channel = match[1] ? await interaction.guild.channels.fetch(match[1]).catch(() => null) : interaction.channel;
-    return channel?.messages?.fetch(match[2]).catch(() => null);
-}
 
 module.exports = {
     data: new SlashCommandBuilder().setName('pagination').setDescription('Manage durable paginated embeds')
@@ -39,7 +33,7 @@ module.exports = {
             if (!interaction.options.getBoolean('confirm')) return interaction.editReply('Reset cancelled; confirmation was not provided.');
             return interaction.editReply(`Removed ${service.resetPagination(interaction.guildId)} pagination(s).`);
         }
-        const target = await fetchMessage(interaction, interaction.options.getString('message'));
+        const target = await fetchReadableMessage(interaction, interaction.options.getString('message'), [PermissionFlagsBits.ManageMessages]);
         if (!target) return interaction.editReply('That message was not found or is not accessible.');
         if (action === 'set') { await service.setupPagination(target, interaction.user.id); return interaction.editReply(`Pagination enabled for ${target.url}.`); }
         if (action === 'add') {

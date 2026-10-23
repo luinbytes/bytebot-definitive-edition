@@ -281,6 +281,47 @@ describe('AntiRaid and advanced AutoMod', () => {
         expect((await Promise.all(queued)).filter(result => result.error === 'Regex queue is full.')).toHaveLength(1);
     });
 
+    test('regex overload removes unchecked messages without assigning strikes or escalating punishment', async () => {
+        const server = guild();
+        const target = member('target', server);
+        automod.ensureConfig(server.id);
+        database.sqlite.prepare('UPDATE automod_config SET enabled = 1, strikes_enabled = 1 WHERE guild_id = ?').run(server.id);
+        automod.setStrikeLevel(server.id, 1, 'timeout', 300000);
+        await automod.addRegex(server.id, 'blocked', '^blocked$');
+        const queued = Array.from({ length: 100 }, () => automod.testRegex('^a$', 'a'));
+        const incoming = message(target, 'blocked');
+        let result;
+        try {
+            result = await automod.handleMessage(incoming);
+        } finally {
+            await Promise.all(queued);
+        }
+
+        expect(result).toEqual(expect.objectContaining({ filter: 'regex:unavailable', action: 'delete', status: 'applied' }));
+        expect(incoming.delete).toHaveBeenCalledTimes(1);
+        expect(target.timeout).not.toHaveBeenCalled();
+        expect(automod.getActiveStrikes(server.id, target.id).count).toBe(0);
+        expect(database.sqlite.prepare('SELECT error FROM automod_incidents WHERE message_id = ?').get(incoming.id).error)
+            .toBe('Regex queue is full.');
+        expect(await automod.handleMessage(incoming)).toBeNull();
+        expect(incoming.delete).toHaveBeenCalledTimes(1);
+    });
+
+    test('regex timeouts cannot let unchecked messages through or penalize the member', async () => {
+        const server = guild();
+        const target = member('target', server);
+        automod.ensureConfig(server.id);
+        database.sqlite.prepare('UPDATE automod_config SET enabled = 1, strikes_enabled = 1 WHERE guild_id = ?').run(server.id);
+        await automod.addRegex(server.id, 'slow', '(a+)+$');
+        const incoming = message(target, `${'a'.repeat(1999)}!`);
+
+        const result = await automod.handleMessage(incoming);
+
+        expect(result).toEqual(expect.objectContaining({ filter: 'regex:unavailable', action: 'delete', status: 'applied' }));
+        expect(incoming.delete).toHaveBeenCalledTimes(1);
+        expect(automod.getActiveStrikes(server.id, target.id).count).toBe(0);
+    });
+
     test.each([
         ['caps', 'THIS IS VERY LOUD', { threshold: 70 }],
         ['emoji', '😀😀', { threshold: 2 }],
