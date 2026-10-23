@@ -78,8 +78,11 @@ scope totals as decimal `BigInt` values in the same transaction. Current
 circulation and ranks remain under a JavaScript-safe per-scope supply ceiling;
 lifetime totals are never read through a lossy numeric `SUM`.
 
-Game wagers and lab purchases are declared burns; returns, refunds, and lab
-collections are declared mints. Robbery is a paired zero-supply transfer.
+Game wagers, shop reservations and lab purchases are declared burns; returns,
+proven shop refunds and lab collections are declared mints. Pending shop
+reservations remain debited until delivery is confirmed or a failure is proven.
+Startup rebuilds totals for older shop entries without changing ledger history.
+Robbery is a paired zero-supply transfer.
 Interactive games and gang invites use durable, actor-bound component state,
 and startup refunds only expired active wagers once. `bal` is recorded as the
 prefix-style alias of `/economy balance`; Discord has no slash alias field.

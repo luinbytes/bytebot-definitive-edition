@@ -18,6 +18,17 @@ Review base `c38e795fa4f94b02e39852f4b1701bdb6091a754`. Delivery is one pull req
 - [x] Apply current denied-role policy to level rewards and VoiceMaster recovery.
 - [x] Run combined tests, independent standards/spec review, and command-inventory comparison.
 - [x] Prepare the reviewed PR, evidence and runtime coverage limits.
+- [x] Complete the deferred service and component source coverage from the initial scan.
+- [x] Make failed compatibility schema repairs stop startup while preserving existing rows.
+- [x] Bound confession admission, ticket transcripts/deletion, and starboard work.
+- [x] Preserve durable Last Active after retention, following independent spec review.
+- [ ] Keep Last Active current when achievement awards are disabled or opted out.
+- [x] Repair birthday role ownership, streak freezes, and achievement settings/custom awards.
+- [x] Reduce repeated outbox accounting and activity-history materialization.
+- [x] Reconcile shop supply accounting and bound BytePod preset setup.
+- [x] Validate the startup-recovery scalability candidate and retain recovery correctness.
+- [ ] Close final giveaway recovery ordering and deadline-edit races.
+- [ ] Reconcile remote PR reviews and rerun the completion audit.
 
 ## Verified findings
 
@@ -101,10 +112,57 @@ Fresh backup Standards and Spec reviews independently found the same two remaini
 
 ## Evidence and limits
 
-The final combined Node 22.23.2 suite passed all 101 suites and 1,060 tests at `23c4732`. The clean dependency audit reports zero advisories. Earlier targeted counts describe intermediate checks and overlap with the combined total.
+The initial combined Node 22.23.2 suite passed all 101 suites and 1,060 tests at `23c4732`. The clean dependency audit reported zero advisories. Earlier targeted counts describe intermediate checks and overlap with the combined total. Completion verification is recorded below.
 
 The complete test command is `npm test -- --runInBand --silent` with Node 22.23.2. Dependency and migration-schema checks use `npm audit --json` and `npx drizzle-kit check`. Tests use temporary databases and mocks; none require a bot login.
 
 No live Discord commands, provider credentials, production database, deployment, or running service restart have been used. All behavior claims above refer to local command/service tests. Command registration changes will need deployment before they appear in Discord.
 
 The append-only [decision log](optimization-security-decisions.tsv) records choices and evidence.
+
+
+## Completion audit
+
+The initial handoff covered the validated findings but left named large services outside the original scan. The completion audit resumed that work. Independent source readers covered the full ticket, giveaway, VoiceMaster, event logging, lifecycle message, starboard, economy, activity streak, level analytics, birthday, reminder, community utility, fun, information lookup, music, moderation, channel moderation, role moderation, moderation setup and moderation template services. A separate reader completed `/mod`, the legacy BytePod command and BytePod controls. Related event/component paths and relevant schema definitions were traced. Source coverage does not establish live behavior or deployed configuration.
+
+### Startup repair and bounded work
+
+Failed compatibility schema repairs now reject startup rather than allowing a bot session without required constraints. Disposable duplicate-row fixtures reproduce both failure paths and retain their original rows. Three affected suites passed 19 tests.
+
+Confession admission occurs before deferral. Each guild permits four active/queued submissions, with 32 globally and one pending submission per author per guild. Busy submissions get private retry guidance. Cleanup and guild purge cancel queued publication; already-started sends retain their slots until settlement. Two worker suites passed 54 tests.
+
+Event-log fan-out reads guild/global outbox totals once inside the admission transaction and updates those totals as rows are inserted. Retention maintenance runs hourly rather than on every event. The 15-destination fixture reduced aggregate statements from 32 to two while retaining all 15 admissions. Tests cover duplicate handling, remaining row capacity, UTF-8 byte capacity, retention and delivery recovery. All 18 tests pass. This is a statement-count result, not an elapsed-time claim; large retained outboxes still require aggregate scans.
+
+BytePod preset admission is atomic and capped at 998 saved users, leaving two channel overwrite entries for the creator and everyone role. This follows the current [Discord overwrite ceiling](https://docs.discord.com/developers/topics/opcodes-and-status-codes). Existing oversized lists remain readable and removable through bounded pages. Pod creation applies at most 998 entries and explicitly reports excess entries; no saved data is discarded. Thirteen BytePod tests cover concurrent admission, guild isolation, large-list rendering and bounded setup work.
+
+### Account and reward correctness
+
+Birthday role removal now relies on durable confirmed grants with expiry and membership identity. Shared roles, preexisting memberships, uncertain grants and members who rejoined are not treated as bot-owned assignments. Failed confirmed removals retry. Untracked legacy assignments are preserved because ownership cannot be reconstructed safely. Upcoming birthday output paginates dates and large same-day groups within embed limits.
+
+Streak freezes now cover each missed day once across both recovery sweeps. Actual active-day totals remain separate from the coverage date. Repeated/concurrent sweeps and overlapping activity are tested. Existing incorrectly consumed historical charges are not reconstructed. Achievement DMs honor the configured notification preference; guild-local custom achievements can be manually awarded and removed, while foreign/disabled IDs reject. SQL totals return one aggregate result instead of materializing all retained daily rows. They still scan retained history; no latency speedup is claimed.
+
+Shop reservations declare supply burns and proven reversals declare matching mints, consistent with wager/refund accounting. Pending purchases remain debited until their existing delivery policy resolves. Repeated reversal cannot duplicate credit or totals. Startup reconciles older shop ledger entries without rewriting their history. Three economy suites passed 29 tests.
+
+Ticket transcript size accounting now runs while pages are fetched and stores rendered rows within the 8 MiB bound. Overlapping deletion calls coalesce. Parent review rejected a proposed permanent delivery-journal gate because staff had no recovery command. Interrupted deletions now close safely without replaying network side effects; an explicit authorized retry saves fresh history. This preserves retries after missing log permissions and uncertain sends, with clear duplicate-log guidance. All 29 ticket tests pass.
+
+Starboard schedules at most 500 tracked messages with four updates running and one timer. Same-message events during an update schedule a later recount instead of a concurrent post. At capacity, new message IDs are rejected until another reaction retries them; admitted entries still coalesce. Paged raw reaction reads count beyond 100 users without growing SDK user caches. Failed reads preserve saved counts and posts. Cleanup cancels pending work and waits for already-started updates. The combined starboard/ticket check passed 50 tests across three suites.
+
+Preset lookup now uses an owner/guild index. The query-plan regression changed from a table scan to the named index; fresh and partial legacy database fixtures pass. No elapsed-time claim follows. Two affected suites passed 20 tests.
+
+The first completion Standards review found no supported issues at `217e2fb`. Spec review found one retained-feature regression: deriving Last Active solely from retained logs loses the display after pruning. Commit `9fc295c` preserves the durable actual activity date and stores freeze coverage separately. Migration `0043` preserves legacy dates and constraints. Regression checks cover pruned logs, freezes, concurrent updates, and fresh, legacy and missing-table startup. The worker's five affected suites passed 53 tests. Two redundant comments from earlier completion fixes were removed.
+
+Both lifecycle reviews found no supported issues in `217e2fb...e971395`. That scope included ticket transcript limits, deletion retries and recovery, starboard scheduling and reaction pagination, and the BytePod index. The reviews inspected source and existing tests without running them.
+
+### Startup recovery ordering
+
+Commit `91308c5` starts ticket recovery independently of VoiceMaster and giveaway recovery. A deferred Discord request previously blocked ticket inactivity polling. The repaired regression issues the warning once while the unrelated request remains pending. Giveaway recovery processes expired draws and pending rerolls before future rows, including a backlog of 26 rerolls. It rereads deadlines changed during resource fetches and prevents late schedulers or new winner claims after cleanup.
+
+Giveaway draws still wait for VoiceMaster role recovery. An attempted fully parallel startup excluded an entrant whose persisted role had not yet been restored. Keeping that dependency preserves eligibility. Recovery scans remain serial and a stalled due-work request can still delay later due work. The fix does not claim a general startup throughput bound or measured latency improvement. Four worker suites passed 66 tests.
+
+### Completion verification
+
+The completion fixes through `91308c5` pass all 101 suites and 1,174 tests on Node 22.23.2. Commit `2d9e209` removes one redundant comment without changing behavior. The fresh dependency audit reports zero advisories, and the schema check passes with migration `0043`. The serialized command inventory remains unchanged from the initial repairs, with 55 registered roots and 831 runnable paths.
+
+Final Standards review found that interrupted manual endings also need priority over future giveaways. Spec review confirmed that ordering issue and the deadline-edit race during entrant lookup. It also found that Last Active becomes stale when award eligibility returns early despite accepted activity logs. The two bounded repair tasks are in progress. These findings show why a passing suite alone does not close source review.
+
+Historical migration files and archives were not all read line by line. Fresh and representative legacy migrations were exercised in disposable SQLite databases. The completed source partitions extend the initial security scan's coverage without establishing exhaustive security assurance or live Discord behavior.
