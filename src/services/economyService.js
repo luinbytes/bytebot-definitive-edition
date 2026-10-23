@@ -1181,9 +1181,10 @@ class EconomyService {
             const account = this.account(scope, userId);
             const transactionId = this.randomUUID();
             this.apply(account, {
-                transactionId, walletDelta: -item.price, bankDelta: 0,
+                transactionId, walletDelta: -item.price, bankDelta: 0, supplyDelta: -item.price,
                 kind: 'shop_purchase', actorId: userId, reason: String(item.id)
             });
+            this.updateTotals(scope, 0n, BigInt(item.price));
             const id = this.randomUUID();
             const now = this.now();
             this.sqlite.prepare(`INSERT INTO economy_shop_purchases
@@ -1227,9 +1228,10 @@ class EconomyService {
             const account = this.account({ scopeType: purchase.scope_type, scopeId: purchase.scope_id }, purchase.user_id);
             const reversalTransactionId = this.randomUUID();
             this.apply(account, {
-                transactionId: reversalTransactionId, walletDelta: purchase.price, bankDelta: 0,
+                transactionId: reversalTransactionId, walletDelta: purchase.price, bankDelta: 0, supplyDelta: purchase.price,
                 kind: 'shop_reversal', actorId: purchase.user_id, reason: String(purchase.item_id)
             });
+            this.updateTotals({ scopeType: purchase.scope_type, scopeId: purchase.scope_id }, BigInt(purchase.price), 0n);
             this.sqlite.prepare(`UPDATE economy_shop_purchases SET status = 'reversed', reversal_transaction_id = ?,
                 error = ?, updated_at = ?, reversed_at = ? WHERE id = ? AND status = 'pending'`)
                 .run(reversalTransactionId, String(error || '').slice(0, 500), this.now(), this.now(), id);
@@ -1262,6 +1264,9 @@ class EconomyService {
     }
 
     async reconcile() {
+        const legacyShopScopes = this.sqlite.prepare(`SELECT DISTINCT scope_type AS scopeType, scope_id AS scopeId
+            FROM economy_ledger WHERE kind IN ('shop_purchase', 'shop_reversal') AND supply_delta = 0`).all();
+        for (const scope of legacyShopScopes) this.reconcileTotals(scope);
         const games = this.reconcileGameSessions();
         if (!this.client) return { reconciled: 0, pending: 0, refundedGames: games.refunded };
         let reconciled = 0;
@@ -1419,7 +1424,9 @@ class EconomyService {
         return this.sqlite.transaction(() => {
             let minted = 0n;
             let destroyed = 0n;
-            for (const { supply_delta: delta } of this.sqlite.prepare(`SELECT supply_delta FROM economy_ledger
+            for (const { delta } of this.sqlite.prepare(`SELECT CASE
+                WHEN kind IN ('shop_purchase', 'shop_reversal') AND supply_delta = 0 THEN wallet_delta
+                ELSE supply_delta END AS delta FROM economy_ledger
                 WHERE scope_type = ? AND scope_id = ? ORDER BY id`).iterate(scopeType, scopeId)) {
                 if (delta > 0) minted += BigInt(delta);
                 if (delta < 0) destroyed += BigInt(-delta);
