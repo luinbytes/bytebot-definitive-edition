@@ -139,6 +139,73 @@ describe('giveaway platform', () => {
         expect(database.sqlite.prepare('SELECT COUNT(*) count FROM giveaway_rounds WHERE giveaway_id = ?').get(giveaway.id).count).toBe(1);
     });
 
+    test('startup finishes an expired giveaway before awaiting unrelated future message recovery', async () => {
+        const futureMessage = { edit: jest.fn().mockResolvedValue({}) };
+        const dueMessage = { edit: jest.fn().mockResolvedValue({}) };
+        let release;
+        let entered;
+        const requested = new Promise(resolve => { entered = resolve; });
+        const futureChannel = { id: 'future', messages: { fetch: jest.fn().mockResolvedValue(futureMessage).mockImplementationOnce(() => {
+            entered();
+            return new Promise(resolve => { release = resolve; });
+        }) } };
+        const dueChannel = { id: 'due', messages: { fetch: jest.fn().mockResolvedValue(dueMessage) } };
+        const guild = { id: 'guild1', channels: { cache: new Map([['future', futureChannel], ['due', dueChannel]]) },
+            members: { cache: new Map() } };
+        service.client = { user: { id: 'bot' }, guilds: { cache: new Map([['guild1', guild]]) } };
+        const futures = Array.from({ length: 26 }, (_, index) => {
+            const future = service.reserveGiveaway({ guildId: guild.id, channelId: 'future', hostId: 'host',
+                duration: '1h', winnerCount: 1, prize: 'Later' });
+            service.attachMessage(future.id, `future-message-${index}`);
+            return future;
+        });
+        const due = service.reserveGiveaway({ guildId: guild.id, channelId: 'due', hostId: 'host',
+            duration: '10s', winnerCount: 1, prize: 'Due' });
+        service.attachMessage(due.id, 'due-message');
+        service.now = () => 12000;
+
+        const recovery = service.reconcile();
+        try {
+            await requested;
+            expect(dueMessage.edit).toHaveBeenCalledTimes(1);
+            expect(service.getGiveaway(due.id).status).toBe('ended');
+        } finally {
+            release(futureMessage);
+            await recovery;
+        }
+        await service.runDue();
+
+        expect(futures.map(future => service.getGiveaway(future.id).status)).toEqual(Array(26).fill('active'));
+        expect(futureChannel.messages.fetch).toHaveBeenCalledTimes(26);
+        expect(futureMessage.edit).not.toHaveBeenCalled();
+        expect(dueMessage.edit).toHaveBeenCalledTimes(1);
+    });
+
+    test('startup respects a deadline extended while message recovery is pending', async () => {
+        const message = { edit: jest.fn().mockResolvedValue({}) };
+        let release;
+        let entered;
+        const requested = new Promise(resolve => { entered = resolve; });
+        const channel = { messages: { fetch: jest.fn().mockResolvedValue(message).mockImplementationOnce(() => {
+            entered();
+            return new Promise(resolve => { release = resolve; });
+        }) } };
+        const guild = { channels: { cache: new Map([['channel1', channel]]) }, members: { cache: new Map() } };
+        service.client = { user: { id: 'bot' }, guilds: { cache: new Map([['guild1', guild]]) } };
+        const giveaway = service.reserveGiveaway({ guildId: 'guild1', channelId: 'channel1', hostId: 'host',
+            duration: '10s', winnerCount: 1, prize: 'Prize' });
+        service.attachMessage(giveaway.id, 'message1');
+        service.now = () => 12000;
+        const recovery = service.reconcile();
+        await requested;
+        service.updateGiveaway(giveaway.id, { endsAt: 3600000 }, 'admin');
+        release(message);
+        await recovery;
+
+        expect(service.getGiveaway(giveaway.id)).toMatchObject({ status: 'active', endsAt: 3600000 });
+        expect(message.edit).not.toHaveBeenCalled();
+    });
+
     test('marks a giveaway lost when its exact message is missing', async () => {
         const channel = { id: 'channel1', messages: { fetch: jest.fn().mockResolvedValue(null) } };
         const guild = { id: 'guild1', channels: { cache: new Map([['channel1', channel]]) },
@@ -189,7 +256,7 @@ describe('giveaway platform', () => {
         expect(service.getGiveaway(giveaway.id).status).toBe('lost');
     });
 
-    test('resumes an unannounced reroll without choosing another winner', async () => {
+    test.each([1, 26])('resumes %i unannounced rerolls before future recovery without choosing another winner', async count => {
         const member = id => ({ id, user: { id, bot: false }, roles: { cache: new Map() } });
         const members = new Map([['user1', member('user1')], ['user2', member('user2')]]);
         const message = { edit: jest.fn().mockResolvedValue({}) };
@@ -204,14 +271,46 @@ describe('giveaway platform', () => {
         service.completeEnd(giveaway.id, 'admin', first.round.deliveryToken);
         const pending = service.createReroll(giveaway.id, 'admin', [...members.values()]);
         database.sqlite.prepare('UPDATE giveaway_rounds SET delivery_lease_until = 0 WHERE id = ?').run(pending.round.id);
+        for (let index = 1; index < count; index++) {
+            const next = service.reserveGiveaway({ guildId: guild.id, channelId: channel.id, hostId: 'admin',
+                duration: '10s', winnerCount: 1, prize: 'Nitro' });
+            service.attachMessage(next.id, `message-${index + 1}`);
+            for (const value of members.values()) service.enter(next.id, value);
+            const ended = service.claimEnd(next.id, 'admin', [...members.values()]);
+            service.completeEnd(next.id, 'admin', ended.round.deliveryToken);
+            const reroll = service.createReroll(next.id, 'admin', [...members.values()]);
+            database.sqlite.prepare('UPDATE giveaway_rounds SET delivery_lease_until = 0 WHERE id = ?').run(reroll.round.id);
+        }
 
-        const result = await service.reconcile();
+        const futureMessage = { edit: jest.fn() };
+        let release;
+        let entered;
+        const requested = new Promise(resolve => { entered = resolve; });
+        guild.channels.cache.set('future', { messages: { fetch: jest.fn(() => {
+            entered();
+            return new Promise(resolve => { release = resolve; });
+        }) } });
+        const future = service.reserveGiveaway({ guildId: guild.id, channelId: 'future', hostId: 'admin',
+            duration: '1h', winnerCount: 1, prize: 'Later' });
+        service.attachMessage(future.id, 'future-message');
+        const recovery = service.reconcile();
+        let result;
+        try {
+            await requested;
+            expect(message.edit).toHaveBeenCalledTimes(count);
+        } finally {
+            release(futureMessage);
+            result = await recovery;
+        }
         const resumed = database.sqlite.prepare('SELECT * FROM giveaway_rounds WHERE id = ?').get(pending.round.id);
 
-        expect(result.resumed).toBe(1);
+        expect(result.resumed).toBe(count);
         expect(resumed.announced_at).toBe(1000);
+        expect(JSON.parse(resumed.winners_snapshot)).toEqual(pending.round.winnerIds);
         expect(JSON.parse(resumed.winners_snapshot)).not.toEqual(first.round.winnerIds);
         expect(database.sqlite.prepare('SELECT COUNT(*) count FROM giveaway_rounds WHERE giveaway_id = ?').get(giveaway.id).count).toBe(2);
+        await service.runDue();
+        expect(message.edit).toHaveBeenCalledTimes(count);
     });
 
     test('stops retrying a reroll whose exact message is gone', async () => {

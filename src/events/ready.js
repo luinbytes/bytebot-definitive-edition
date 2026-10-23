@@ -139,12 +139,26 @@ module.exports = {
         logger.success(`Ready! Logged in as ${client.user.tag}`);
         logger.info(`Bot is active in ${client.guilds.cache.size} guilds.`);
 
+        const ticketReady = (async () => {
+            try {
+                const { TicketService } = require('../services/ticketService');
+                const service = client.ticketService = new TicketService(client);
+                await service.reconcile();
+                if (state.closed) return;
+                service.start();
+                logger.success('Ticket service initialized');
+            } catch (e) {
+                logger.error(`Failed to initialize ticket service: ${e}`);
+            }
+        })();
+
         try {
             const { VoiceMasterService } = require('../services/voiceMasterService');
             const { sqlite } = require('../database');
-            client.voiceMasterService = new VoiceMasterService({ client, sqlite });
-            const recovery = await client.voiceMasterService.reconcile();
-            client.voiceMasterService.startCleanup();
+            const service = client.voiceMasterService = new VoiceMasterService({ client, sqlite });
+            const recovery = await service.reconcile();
+            if (state.closed) return;
+            service.startCleanup();
             if (recovery.active || recovery.deleted || recovery.lost || recovery.ambiguous) {
                 logger.info(`VoiceMaster recovery: ${recovery.active} active, ${recovery.deleted} deleted, ${recovery.lost} lost, ${recovery.ambiguous} ambiguous`);
             }
@@ -153,6 +167,7 @@ module.exports = {
         } catch (error) {
             logger.error(`Failed to initialize VoiceMaster service: ${error.message}`);
         }
+        if (state.closed) return;
 
         await recoverAntinuke(client);
 
@@ -398,13 +413,15 @@ module.exports = {
 
         try {
             const { GiveawayService } = require('../services/giveawayService');
-            client.giveawayService = new GiveawayService(client);
-            await client.giveawayService.reconcile();
-            client.giveawayService.start();
+            const service = client.giveawayService = new GiveawayService(client);
+            await service.reconcile();
+            if (state.closed) return;
+            service.start();
             logger.success('Giveaway service initialized');
         } catch (e) {
             logger.error(`Failed to initialize giveaway service: ${e}`);
         }
+        if (state.closed) return;
 
         try {
             const { CommunityUtilityService } = require('../services/communityUtilityService');
@@ -467,15 +484,8 @@ module.exports = {
             logger.error(`Failed to initialize Last.fm service: ${e}`);
         }
 
-        try {
-            const { TicketService } = require('../services/ticketService');
-            client.ticketService = new TicketService(client);
-            await client.ticketService.reconcile();
-            client.ticketService.start();
-            logger.success('Ticket service initialized');
-        } catch (e) {
-            logger.error(`Failed to initialize ticket service: ${e}`);
-        }
+        await ticketReady;
+        if (state.closed) return;
 
         // --- Initialize Starboard Service ---
         try {
