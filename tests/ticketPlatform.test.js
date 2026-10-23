@@ -323,23 +323,7 @@ describe('ticket platform', () => {
         expect(opener.send).toHaveBeenCalledTimes(1);
     });
 
-    test('retries channel deletion after an acknowledged log without sending another transcript or DM', async () => {
-        const { ticket, channel, log, opener } = deletionFixture();
-        channel.delete.mockRejectedValueOnce(new Error('Discord unavailable'));
-
-        await expect(service.deleteDiscordTicket(ticket, channel, 'staff1')).rejects.toThrow('Discord unavailable');
-        expect(service.getTicket(ticket.id).status).toBe('deleting');
-        expect(opener.send).not.toHaveBeenCalled();
-
-        await expect(service.deleteDiscordTicket(ticket, channel, 'staff2')).resolves.toMatchObject({ status: 'deleted' });
-
-        expect(channel.messages.fetch).toHaveBeenCalledTimes(2);
-        expect(log.send).toHaveBeenCalledTimes(1);
-        expect(channel.delete).toHaveBeenCalledTimes(2);
-        expect(opener.send).toHaveBeenCalledTimes(1);
-    });
-
-    test.each([false, true])('preserves messages added after log delivery even when the archive was replaced %s', async replaceArchive => {
+    test('an explicit retry archives current history after a failed channel deletion', async () => {
         const { Collection } = require('discord.js');
         const { ticket, channel, log, opener } = deletionFixture();
         channel.delete.mockRejectedValueOnce(new Error('Discord unavailable'));
@@ -347,16 +331,14 @@ describe('ticket platform', () => {
         channel.messages.fetch.mockResolvedValue(new Collection([
             ['new', { id: 'new', createdTimestamp: 3000, content: 'later message' }]
         ]));
-        if (replaceArchive) await service.createTranscript(ticket, channel);
 
-        await expect(service.deleteDiscordTicket(ticket, channel, 'staff2')).rejects.toThrow('transcript');
+        await expect(service.deleteDiscordTicket(ticket, channel, 'staff2')).resolves.toMatchObject({ status: 'deleted' });
 
-        expect(service.getTicket(ticket.id).status).toBe('closed');
-        expect(channel.permissionOverwrites.edit).toHaveBeenCalledWith('user1',
-            { ViewChannel: false, SendMessages: false, ReadMessageHistory: false }, expect.any(Object));
-        expect(log.send).toHaveBeenCalledTimes(1);
-        expect(channel.delete).toHaveBeenCalledTimes(1);
-        expect(opener.send).not.toHaveBeenCalled();
+        expect(database.sqlite.prepare('SELECT html FROM ticket_transcripts WHERE ticket_id = ?').get(ticket.id).html)
+            .toContain('later message');
+        expect(log.send).toHaveBeenCalledTimes(2);
+        expect(channel.delete).toHaveBeenCalledTimes(2);
+        expect(opener.send).toHaveBeenCalledTimes(1);
     });
 
     test('closes a resumed deletion if its current complete transcript has grown oversized', async () => {
@@ -384,19 +366,20 @@ describe('ticket platform', () => {
         expect(opener.send).not.toHaveBeenCalled();
     });
 
-    test('does not replay a transcript whose Discord delivery outcome is uncertain', async () => {
-        const { ticket, channel, log, opener } = deletionFixture();
-        log.send.mockRejectedValueOnce(new Error('response lost after send'));
+    test.each([new Error('response lost after send'), Object.assign(new Error('Missing Permissions'), { status: 403 })])(
+        'a failed transcript send permits an explicit retry after staff resolves the failure', async error => {
+            const { ticket, channel, log, opener } = deletionFixture();
+            log.send.mockRejectedValueOnce(error);
+            await expect(service.deleteDiscordTicket(ticket, channel, 'staff1')).rejects.toThrow();
+            await service.reconcile();
+            expect(log.send).toHaveBeenCalledTimes(1);
+            expect(channel.delete).not.toHaveBeenCalled();
 
-        await expect(service.deleteDiscordTicket(ticket, channel, 'staff1')).rejects.toThrow();
-        await expect(service.deleteDiscordTicket(ticket, channel, 'staff2')).rejects.toThrow('uncertain');
-
-        expect(log.send).toHaveBeenCalledTimes(1);
-        expect(channel.messages.fetch).toHaveBeenCalledTimes(1);
-        expect(channel.delete).not.toHaveBeenCalled();
-        expect(opener.send).not.toHaveBeenCalled();
-        expect(service.getTicket(ticket.id).status).toBe('open');
-    });
+            await expect(service.deleteDiscordTicket(ticket, channel, 'staff2')).resolves.toMatchObject({ status: 'deleted' });
+            expect(log.send).toHaveBeenCalledTimes(2);
+            expect(channel.delete).toHaveBeenCalledTimes(1);
+            expect(opener.send).toHaveBeenCalledTimes(1);
+        });
 
     test.each([false, true])('recovery closes a surviving interrupted deletion and syncs access with uncertain delivery %s', async uncertain => {
         const { ticket, channel, log, opener } = deletionFixture();
@@ -416,13 +399,11 @@ describe('ticket platform', () => {
         expect(channel.delete).not.toHaveBeenCalled();
         expect(opener.send).not.toHaveBeenCalled();
         expect(channel.messages.fetch).not.toHaveBeenCalled();
-        if (uncertain) {
-            await expect(service.deleteDiscordTicket(ticket, channel, 'staff2')).rejects.toThrow('uncertain');
-            expect(log.send).not.toHaveBeenCalled();
-        }
+        await expect(service.deleteDiscordTicket(ticket, channel, 'staff2')).resolves.toMatchObject({ status: 'deleted' });
+        expect(log.send).toHaveBeenCalledTimes(1);
     });
 
-    test('recovery resumes only the channel deletion when the transcript delivery was acknowledged', async () => {
+    test('recovery closes an interrupted deletion without repeating an acknowledged log or deleting the channel', async () => {
         const { ticket, channel, log, opener } = deletionFixture();
         channel.delete.mockRejectedValueOnce(new Error('Discord unavailable'));
         await expect(service.deleteDiscordTicket(ticket, channel, 'staff1')).rejects.toThrow('Discord unavailable');
@@ -432,11 +413,11 @@ describe('ticket platform', () => {
 
         await service.reconcile();
 
-        expect(service.getTicket(ticket.id).status).toBe('deleted');
+        expect(service.getTicket(ticket.id).status).toBe('closed');
         expect(log.send).toHaveBeenCalledTimes(1);
-        expect(channel.messages.fetch).toHaveBeenCalledTimes(2);
-        expect(channel.delete).toHaveBeenCalledTimes(2);
-        expect(opener.send).toHaveBeenCalledTimes(1);
+        expect(channel.messages.fetch).toHaveBeenCalledTimes(1);
+        expect(channel.delete).toHaveBeenCalledTimes(1);
+        expect(opener.send).not.toHaveBeenCalled();
     });
 
     test.each(['none', 'pending', 'delivered'])('recovery records a missing channel without replaying %s delivery', async delivery => {
@@ -456,7 +437,7 @@ describe('ticket platform', () => {
         await service.reconcile();
         await service.reconcile();
 
-        expect(service.getTicket(ticket.id).status).toBe(delivery === 'delivered' ? 'deleted' : 'lost');
+        expect(service.getTicket(ticket.id).status).toBe('lost');
         expect(log.send).toHaveBeenCalledTimes(delivery === 'delivered' ? 1 : 0);
         expect(channel.delete).toHaveBeenCalledTimes(delivery === 'delivered' ? 1 : 0);
         expect(opener.send).not.toHaveBeenCalled();
