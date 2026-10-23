@@ -779,6 +779,7 @@ const expectedSchema = {
         current_streak: 'INTEGER DEFAULT 0 NOT NULL',
         longest_streak: 'INTEGER DEFAULT 0 NOT NULL',
         last_activity_date: 'TEXT',
+        streak_covered_through: 'TEXT',
         total_active_days: 'INTEGER DEFAULT 0 NOT NULL',
         freezes_available: 'INTEGER DEFAULT 1 NOT NULL',
         last_freeze_reset: 'INTEGER',

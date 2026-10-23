@@ -79,7 +79,7 @@ describe('streak and achievement behavior with SQLite', () => {
         sqlite.exec(`CREATE TABLE activity_streaks (
             id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, guild_id TEXT NOT NULL,
             current_streak INTEGER NOT NULL DEFAULT 0, longest_streak INTEGER NOT NULL DEFAULT 0,
-            last_activity_date TEXT, total_active_days INTEGER NOT NULL DEFAULT 0,
+            last_activity_date TEXT, streak_covered_through TEXT, total_active_days INTEGER NOT NULL DEFAULT 0,
             freezes_available INTEGER NOT NULL DEFAULT 1, last_freeze_reset INTEGER,
             created_at INTEGER, updated_at INTEGER, UNIQUE (user_id, guild_id)
         );
@@ -131,6 +131,61 @@ describe('streak and achievement behavior with SQLite', () => {
         expect(send).toHaveBeenCalledTimes(1);
     });
 
+    test('Last Active survives pruning the last retained activity log', async () => {
+        jest.useFakeTimers().setSystemTime(new Date('2022-10-21T12:00:00Z'));
+        const service = createService(jest.fn());
+        service.isAchievementsEnabled = jest.fn().mockResolvedValue(true);
+        service.isUserOptedOut = jest.fn().mockResolvedValue(false);
+        service.checkAndAwardAchievements = jest.fn();
+        await service.recordActivity('user-1', 'guild-1', 'message');
+
+        jest.setSystemTime(new Date('2026-10-23T12:00:00Z'));
+        sqlite.prepare('DELETE FROM activity_logs WHERE activity_date < ?').run('2023-10-24');
+
+        expect(await service.getUserStreak('user-1', 'guild-1')).toMatchObject({
+            lastActivityDate: '2022-10-21', totalActiveDays: 1
+        });
+    });
+
+    test('freeze coverage never supplies an unknown actual activity date', async () => {
+        jest.useFakeTimers().setSystemTime(new Date('2026-10-23T12:00:00Z'));
+        const service = createService(jest.fn());
+        await mockDb.insert(activityStreaks).values({
+            userId: 'user-1', guildId: 'guild-1', currentStreak: 7,
+            streakCoveredThrough: '2026-10-21', freezesAvailable: 1
+        });
+
+        await service.processDailyStreaks();
+
+        expect(await service.getUserStreak('user-1', 'guild-1')).toMatchObject({
+            currentStreak: 7, lastActivityDate: null, streakCoveredThrough: '2026-10-22', freezesAvailable: 0
+        });
+    });
+
+    test.each([
+        ['2026-10-22', 8, 26, '2026-10-23'],
+        ['2026-10-23', 7, 25, null],
+        [null, 1, 26, '2026-10-23']
+    ])('activity on legacy last active %s counts today once', async (lastActivityDate, currentStreak, totalActiveDays, streakCoveredThrough) => {
+        jest.useFakeTimers().setSystemTime(new Date('2026-10-23T12:00:00Z'));
+        const service = createService(jest.fn());
+        service.isAchievementsEnabled = jest.fn().mockResolvedValue(true);
+        service.isUserOptedOut = jest.fn().mockResolvedValue(false);
+        service.checkAndAwardAchievements = jest.fn();
+        await mockDb.insert(activityStreaks).values({
+            userId: 'user-1', guildId: 'guild-1', currentStreak: 7, totalActiveDays: 25, lastActivityDate
+        });
+
+        await Promise.all([
+            service.recordActivity('user-1', 'guild-1', 'message'),
+            service.recordActivity('user-1', 'guild-1', 'message')
+        ]);
+
+        expect(await service.getUserStreak('user-1', 'guild-1')).toMatchObject({
+            currentStreak, totalActiveDays, lastActivityDate: '2026-10-23', streakCoveredThrough
+        });
+    });
+
     test.each(['checkMissedDays', 'processDailyStreaks'])('%s protects a missed day exactly once without adding activity', async (sweep) => {
         jest.useFakeTimers().setSystemTime(new Date('2026-10-23T12:00:00Z'));
         const service = createService(jest.fn());
@@ -140,25 +195,25 @@ describe('streak and achievement behavior with SQLite', () => {
         service.checkAndAwardAchievements = jest.fn();
         await mockDb.insert(activityStreaks).values({
             userId: 'user-1', guildId: 'guild-1', currentStreak: 7, longestStreak: 10,
-            totalActiveDays: 25, streakCoveredThrough: '2026-10-21', freezesAvailable: 1
+            totalActiveDays: 25, lastActivityDate: '2026-10-21', freezesAvailable: 1
         });
         await mockDb.insert(activityLogs).values({
             userId: 'user-1', guildId: 'guild-1', activityDate: '2026-10-21', messageCount: 100
         });
 
-        await service[sweep]();
+        await Promise.all([service[sweep](), service[sweep]()]);
         await service[sweep]();
 
         expect(await service.getUserStreak('user-1', 'guild-1')).toMatchObject({
             currentStreak: 7, longestStreak: 10, totalActiveDays: 25,
-            freezesAvailable: 0, lastActivityDate: '2026-10-21'
+            freezesAvailable: 0, lastActivityDate: '2026-10-21', streakCoveredThrough: '2026-10-22'
         });
         expect(await mockDb.select().from(activityLogs)).toHaveLength(1);
         await service.recordActivity('user-1', 'guild-1', 'message');
         await service.recordActivity('user-1', 'guild-1', 'message');
         expect(await service.getUserStreak('user-1', 'guild-1')).toMatchObject({
             currentStreak: 8, longestStreak: 10, totalActiveDays: 26,
-            freezesAvailable: 0, streakCoveredThrough: '2026-10-23'
+            freezesAvailable: 0, lastActivityDate: '2026-10-23', streakCoveredThrough: '2026-10-23'
         });
         expect((await service.getUserTotals('user-1', 'guild-1')).totalMessages).toBe(102);
     });
@@ -172,9 +227,9 @@ describe('streak and achievement behavior with SQLite', () => {
         service.isUserOptedOut = jest.fn().mockResolvedValue(false);
         await mockDb.insert(activityStreaks).values([
             { userId: 'covered', guildId: 'guild-1', currentStreak: 7, longestStreak: 10,
-                totalActiveDays: 25, streakCoveredThrough: '2026-10-21', freezesAvailable: 4 },
+                totalActiveDays: 25, lastActivityDate: '2026-10-21', streakCoveredThrough: '2026-10-21', freezesAvailable: 4 },
             { userId: 'short', guildId: 'guild-1', currentStreak: 7, longestStreak: 10,
-                totalActiveDays: 25, streakCoveredThrough: '2026-10-21', freezesAvailable: 2 }
+                totalActiveDays: 25, lastActivityDate: '2026-10-21', streakCoveredThrough: '2026-10-21', freezesAvailable: 2 }
         ]);
         await Promise.all([service[sweep](), service[sweep]()]);
         await service[sweep]();
@@ -368,7 +423,8 @@ describe('streak and achievement behavior with SQLite', () => {
             insert.run('2026-10-23', 1);
         })();
         await mockDb.insert(activityStreaks).values({
-            userId: 'user-1', guildId: 'guild-1', currentStreak: 1, totalActiveDays: 2, streakCoveredThrough: '2026-10-23'
+            userId: 'user-1', guildId: 'guild-1', currentStreak: 1, totalActiveDays: 2,
+            lastActivityDate: '2026-10-23', streakCoveredThrough: '2026-10-23'
         });
         const { dbLog } = require('../src/utils/dbLogger');
         const previousSelect = dbLog.select.getMockImplementation();
@@ -410,7 +466,7 @@ describe('streak and achievement behavior with SQLite', () => {
         expect(await service.hasAchievement('user-1', 'guild-1', 'custom-local')).toBe(true);
     });
 
-    test('activity overlapping a daily freeze keeps the protected streak', async () => {
+    test.each(['activity', 'sweep'])('%s overlapping a daily freeze keeps the protected streak', async first => {
         jest.useFakeTimers().setSystemTime(new Date('2026-10-23T12:00:00Z'));
         const service = createService(jest.fn());
         service.isAchievementsEnabled = jest.fn().mockResolvedValue(true);
@@ -418,26 +474,37 @@ describe('streak and achievement behavior with SQLite', () => {
         service.checkAndAwardAchievements = jest.fn();
         await mockDb.insert(activityStreaks).values({
             userId: 'user-1', guildId: 'guild-1', currentStreak: 7, totalActiveDays: 25,
-            streakCoveredThrough: '2026-10-21', freezesAvailable: 1
+            lastActivityDate: '2026-10-21', freezesAvailable: 1
         });
         const { dbLog } = require('../src/utils/dbLogger');
         const previousSelect = dbLog.select.getMockImplementation();
         let overlap = true;
         dbLog.select.mockImplementation(async (table, operation) => {
             const result = await operation();
-            if (table === 'activityStreaks' && !Array.isArray(result) && overlap) {
+            if (table === 'activityStreaks' && Array.isArray(result) === (first === 'sweep') && overlap) {
                 overlap = false;
-                await service.processDailyStreaks();
+                if (first === 'activity') {
+                    await service.processDailyStreaks();
+                } else {
+                    await service.recordActivity('user-1', 'guild-1', 'message');
+                }
             }
             return result;
         });
         try {
-            await service.recordActivity('user-1', 'guild-1', 'message');
+            if (first === 'activity') {
+                await service.recordActivity('user-1', 'guild-1', 'message');
+            } else {
+                await service.processDailyStreaks();
+            }
         } finally {
             dbLog.select.mockImplementation(previousSelect);
         }
         expect(await mockDb.select().from(activityStreaks)).toEqual([
-            expect.objectContaining({ currentStreak: 8, totalActiveDays: 26, freezesAvailable: 0 })
+            expect.objectContaining({
+                currentStreak: 8, totalActiveDays: 26, freezesAvailable: 0,
+                lastActivityDate: '2026-10-23', streakCoveredThrough: '2026-10-23'
+            })
         ]);
     });
 
@@ -449,14 +516,15 @@ describe('streak and achievement behavior with SQLite', () => {
         service.checkAndAwardAchievements = jest.fn();
         await mockDb.insert(activityStreaks).values({
             userId: 'user-1', guildId: 'guild-1', currentStreak: 7, longestStreak: 10, totalActiveDays: 25,
-            streakCoveredThrough: '2026-10-21', freezesAvailable
+            lastActivityDate: '2026-10-21', freezesAvailable
         });
         await Promise.all([
             service.recordActivity('user-1', 'guild-1', 'message'),
             service.recordActivity('user-1', 'guild-1', 'message')
         ]);
         expect(await service.getUserStreak('user-1', 'guild-1')).toMatchObject({
-            currentStreak, longestStreak: 10, totalActiveDays: 26, freezesAvailable: 0, streakCoveredThrough: '2026-10-23'
+            currentStreak, longestStreak: 10, totalActiveDays: 26, freezesAvailable: 0,
+            lastActivityDate: '2026-10-23', streakCoveredThrough: '2026-10-23'
         });
         expect((await service.getUserTotals('user-1', 'guild-1')).totalMessages).toBe(2);
     });

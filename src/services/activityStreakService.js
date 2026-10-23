@@ -661,8 +661,9 @@ class ActivityStreakService {
     }
 
     async reconcileMissedStreakDays(streak, today) {
-        if (!streak.streakCoveredThrough || streak.streakCoveredThrough >= today || streak.currentStreak <= 0) return false;
-        const missedDays = this.getDaysBetween(streak.streakCoveredThrough, today) - 1;
+        const coveredThrough = streak.streakCoveredThrough ?? streak.lastActivityDate;
+        if (!coveredThrough || coveredThrough >= today || streak.currentStreak <= 0) return false;
+        const missedDays = this.getDaysBetween(coveredThrough, today) - 1;
         if (missedDays <= 0) return false;
 
         const yesterday = new Date(`${today}T00:00:00Z`);
@@ -678,7 +679,8 @@ class ActivityStreakService {
                 .where(and(
                     eq(activityStreaks.userId, streak.userId),
                     eq(activityStreaks.guildId, streak.guildId),
-                    eq(activityStreaks.streakCoveredThrough, streak.streakCoveredThrough),
+                    sql`${activityStreaks.streakCoveredThrough} IS ${streak.streakCoveredThrough}`,
+                    sql`${activityStreaks.lastActivityDate} IS ${streak.lastActivityDate}`,
                     eq(activityStreaks.currentStreak, streak.currentStreak),
                     eq(activityStreaks.freezesAvailable, streak.freezesAvailable)
                 )),
@@ -1019,6 +1021,7 @@ class ActivityStreakService {
                         guildId,
                         currentStreak: 1,
                         longestStreak: 1,
+                        lastActivityDate: today,
                         streakCoveredThrough: today,
                         totalActiveDays: 1,
                         freezesAvailable: 1,
@@ -1035,7 +1038,7 @@ class ActivityStreakService {
             }
 
             // If already active today, streak doesn't change but we still check cumulative achievements
-            if (existing.streakCoveredThrough === today) {
+            if (existing.lastActivityDate === today) {
                 // Streak and total days haven't changed, but cumulative values (messages, voice, commands)
                 // may have increased, so check for achievements that depend on cumulative totals
                 await this.checkAndAwardAchievements(
@@ -1056,7 +1059,7 @@ class ActivityStreakService {
             let newTotalDays = existing.totalActiveDays + 1;
 
             // Check if continuing streak
-            if (existing.streakCoveredThrough === yesterday) {
+            if ((existing.streakCoveredThrough ?? existing.lastActivityDate) === yesterday) {
                 // Continuing streak
                 newStreak += 1;
             } else {
@@ -1071,6 +1074,7 @@ class ActivityStreakService {
                     .set({
                         currentStreak: newStreak,
                         longestStreak: newLongest,
+                        lastActivityDate: today,
                         streakCoveredThrough: today,
                         totalActiveDays: newTotalDays,
                         updatedAt: new Date()
@@ -1079,6 +1083,7 @@ class ActivityStreakService {
                         eq(activityStreaks.userId, userId),
                         eq(activityStreaks.guildId, guildId),
                         sql`${activityStreaks.streakCoveredThrough} IS ${existing.streakCoveredThrough}`,
+                        sql`${activityStreaks.lastActivityDate} IS ${existing.lastActivityDate}`,
                         eq(activityStreaks.currentStreak, existing.currentStreak),
                         eq(activityStreaks.totalActiveDays, existing.totalActiveDays)
                     )),
@@ -1918,17 +1923,8 @@ class ActivityStreakService {
                 }
             }
 
-            const lastActivity = await dbLog.select('activityLogs',
-                () => db.select({ date: sql`max(${activityLogs.activityDate})` })
-                    .from(activityLogs)
-                    .where(and(eq(activityLogs.userId, userId), eq(activityLogs.guildId, guildId)))
-                    .get(),
-                { userId, guildId, operation: 'last-active-date' }
-            );
-
             return {
                 ...streak,
-                lastActivityDate: lastActivity.date,
                 achievements: achievementDefs
             };
         } catch (error) {
