@@ -7,6 +7,7 @@ const mockDbLog = {
 const mockRecordActivity = jest.fn();
 const mockScheduleOwnershipTransfer = jest.fn();
 const mockRecoverPendingIncidents = jest.fn().mockResolvedValue({ recovered: 0, remaining: 0, retryAfterMs: null, failures: [] });
+const mockAnalyticsInstances = [];
 
 jest.mock('../src/database', () => ({ db: {} }));
 jest.mock('../src/utils/dbLogger', () => ({ dbLog: mockDbLog }));
@@ -24,7 +25,7 @@ jest.mock('../src/services/reminderService', () => jest.fn().mockImplementation(
 })));
 jest.mock('../src/services/activityStreakService', () => jest.fn().mockImplementation(() => ({
     startDailyCheck: jest.fn(),
-    cleanupOrphanedRoles: jest.fn(),
+    cleanupOrphanedRoles: jest.fn().mockResolvedValue(undefined),
     recordActivity: mockRecordActivity
 })));
 jest.mock('../src/events/voiceStateUpdate', () => ({
@@ -41,6 +42,19 @@ jest.mock('../src/services/automodService', () => ({
     reconcileNativeRules: jest.fn().mockResolvedValue({ reconciled: 0, failures: [] }),
     recoverPendingIncidents: jest.fn().mockReturnValue(0)
 }));
+jest.mock('../src/services/levelAnalyticsService', () => {
+    const LevelAnalyticsService = jest.requireActual('../src/services/levelAnalyticsService');
+    return jest.fn().mockImplementation(options => {
+        const service = new LevelAnalyticsService(options);
+        service.reconcileStartup = jest.fn().mockResolvedValue({ failures: [] });
+        service.refreshLiveBoards = jest.fn().mockResolvedValue({ failures: [] });
+        service.processRoleJobs = jest.fn().mockResolvedValue({ failures: [] });
+        service.pruneAnalytics = jest.fn().mockReturnValue({ daily: 0, activity: 0, dedupe: 0, reactions: 0 });
+        service.drainAnalytics = jest.fn().mockResolvedValue({ daily: 0, activity: 0, dedupe: 0, reactions: 0 });
+        mockAnalyticsInstances.push(service);
+        return service;
+    });
+});
 
 const ready = require('../src/events/ready');
 
@@ -62,7 +76,44 @@ describe('ready event recovery', () => {
         mockRecoverPendingIncidents.mockResolvedValue({ recovered: 0, remaining: 0, retryAfterMs: null, failures: [] });
     });
 
-    afterEach(() => jest.useRealTimers());
+    afterEach(() => {
+        mockAnalyticsInstances.splice(0).forEach(service => service.cleanup());
+        jest.useRealTimers();
+    });
+
+    test('startup and daily retention drain asynchronously and analytics cleanup stops its scheduled work', async () => {
+        mockDbLog.select.mockResolvedValue([]);
+        const client = makeClient(jest.fn());
+
+        await ready.execute(client);
+
+        const analytics = client.levelAnalyticsService;
+        const confirmationPrune = jest.spyOn(analytics, 'pruneConfirmations');
+        expect(analytics.drainAnalytics).toHaveBeenCalledTimes(1);
+        expect(analytics.pruneAnalytics).not.toHaveBeenCalled();
+        jest.advanceTimersByTime(24 * 60 * 60 * 1000);
+        await Promise.resolve();
+        expect(analytics.drainAnalytics).toHaveBeenCalledTimes(2);
+        expect(analytics.refreshLiveBoards).toHaveBeenCalledTimes(289);
+        expect(analytics.processRoleJobs).toHaveBeenCalledTimes(2881);
+        expect(confirmationPrune).toHaveBeenCalledTimes(1440);
+        analytics.drainAnalytics.mockClear();
+        analytics.refreshLiveBoards.mockClear();
+        analytics.processRoleJobs.mockClear();
+        confirmationPrune.mockClear();
+
+        analytics.cleanup();
+        const lateTask = jest.fn();
+        analytics.scheduleInterval(lateTask, 60 * 60 * 1000);
+        jest.advanceTimersByTime(24 * 60 * 60 * 1000);
+        await Promise.resolve();
+
+        expect(analytics.drainAnalytics).not.toHaveBeenCalled();
+        expect(analytics.refreshLiveBoards).not.toHaveBeenCalled();
+        expect(analytics.processRoleJobs).not.toHaveBeenCalled();
+        expect(confirmationPrune).not.toHaveBeenCalled();
+        expect(lateTask).not.toHaveBeenCalled();
+    });
 
     test('keeps BytePod state when Discord guild lookup fails transiently', async () => {
         mockDbLog.select.mockImplementation(async (table) => {

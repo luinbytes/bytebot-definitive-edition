@@ -24,9 +24,48 @@ describe('LevelAnalyticsService', () => {
     });
 
     afterEach(() => {
+        service?.cleanup();
         database?.sqlite.close();
         delete process.env.DATABASE_URL;
         fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    test('a role-heavy message uses one boost query and awards only the largest guild-scoped typed boost', () => {
+        database.sqlite.prepare(`
+            INSERT INTO level_configs (guild_id, base_multiplier, updated_at) VALUES ('guild1', 1.5, 1)
+        `).run();
+        const insertBoost = database.sqlite.prepare(`
+            INSERT INTO level_boosts (guild_id, target_type, target_id, multiplier, created_at)
+            VALUES (?, ?, ?, ?, 1)
+        `);
+        insertBoost.run('guild1', 'channel', 'channel1', 2);
+        insertBoost.run('guild1', 'role', 'role79', 3);
+        insertBoost.run('guild1', 'role', 'role0', 1.25);
+        insertBoost.run('guild2', 'role', 'role79', 10);
+        insertBoost.run('guild2', 'channel', 'channel1', 10);
+        insertBoost.run('guild1', 'role', 'channel1', 9);
+        insertBoost.run('guild1', 'channel', 'role79', 8);
+        const message = {
+            id: 'role-heavy', content: 'eligible', guild: { id: 'guild1' }, channelId: 'channel1',
+            author: { id: 'user1', bot: false },
+            member: { roles: { cache: new Map(Array.from({ length: 80 }, (_, index) => [`role${index}`, {}])) } }
+        };
+        const statements = [];
+        const traced = new (require('better-sqlite3'))(database.sqlite.name, { verbose: sql => statements.push(sql) });
+        service.sqlite = traced;
+        try {
+            const result = service.recordMessage(message);
+            const messageStatements = [...statements];
+            expect(result.xpAwarded).toBe(90);
+            expect(traced.prepare(`SELECT xp, text_xp FROM member_levels WHERE guild_id = 'guild1'`).get())
+                .toEqual({ xp: 90, text_xp: 90 });
+            const boostQueries = messageStatements.filter(sql => /SELECT[\s\S]*FROM level_boosts/i.test(sql));
+            console.info(`Role-heavy SQL: ${messageStatements.length} statements, ${boostQueries.length} boost SELECTs, 90 XP`);
+            expect(boostQueries).toHaveLength(1);
+        } finally {
+            service.sqlite = database.sqlite;
+            traced.close();
+        }
     });
 
     test('a message is counted and awarded once even when Discord replays the event', () => {
@@ -62,6 +101,42 @@ describe('LevelAnalyticsService', () => {
         expect(database.sqlite.prepare(`
             SELECT message_count FROM server_daily_metrics WHERE guild_id = 'guild1'
         `).get().message_count).toBe(1);
+    });
+
+    test.each([
+        ['channel wins', 4, 3, 1.5, null, 120],
+        ['boosts below one retain the default', 0.5, 0.75, 1, null, 20],
+        ['combined multiplier is capped', 4, 3, 4, null, 200],
+        ['cooldown blocks boosted XP', 4, 3, 1, 'cooldown', 0],
+        ['ignored channel blocks boosted XP', 4, 3, 1, 'channel', 0],
+        ['ignored role blocks boosted XP', 4, 3, 1, 'role', 0],
+        ['daily cap limits boosted XP', 4, 3, 1, 'daily-cap', 7]
+    ])('boost accounting preserves the existing rules when %s', (_label, channelBoost, roleBoost, base, restriction, xp) => {
+        service.recordMessage({
+            id: 'seed', content: 'seed', guild: { id: 'guild1' }, channelId: 'channel1',
+            author: { id: 'user1', bot: false }, member: { roles: { cache: new Map() } }
+        });
+        database.sqlite.prepare(`UPDATE level_configs SET base_multiplier = ? WHERE guild_id = 'guild1'`).run(base);
+        database.sqlite.prepare(`
+            INSERT INTO level_boosts (guild_id, target_type, target_id, multiplier, created_at)
+            VALUES ('guild1', 'channel', 'channel1', ?, 1), ('guild1', 'role', 'role1', ?, 1)
+        `).run(channelBoost, roleBoost);
+        if (restriction === 'channel' || restriction === 'role') {
+            database.sqlite.prepare(`
+                INSERT INTO level_ignores (guild_id, target_type, target_id, created_at) VALUES ('guild1', ?, ?, 1)
+            `).run(restriction, restriction === 'channel' ? 'channel1' : 'role1');
+        }
+        if (restriction === 'daily-cap') {
+            database.sqlite.prepare(`UPDATE activity_logs SET text_xp_awarded = 19993`).run();
+        }
+        if (restriction !== 'cooldown') now += 60_000;
+
+        expect(service.recordMessage({
+            id: 'boosted', content: 'eligible', guild: { id: 'guild1' }, channelId: 'channel1',
+            author: { id: 'user1', bot: false }, member: { roles: { cache: new Map([['role1', {}]]) } }
+        }).xpAwarded).toBe(xp);
+        expect(database.sqlite.prepare(`SELECT xp, message_count FROM member_levels WHERE guild_id = 'guild1'`).get())
+            .toEqual({ xp: 20 + xp, message_count: 2 });
     });
 
     test('text XP stops at the fixed daily cap while analytics keeps counting', () => {
@@ -465,6 +540,7 @@ describe('LevelAnalyticsService', () => {
         expect((await service.processRoleJobs()).failures).toHaveLength(1);
         now += 3000;
         const LevelAnalyticsService = require('../src/services/levelAnalyticsService');
+        service.cleanup();
         service = new LevelAnalyticsService({ sqlite: database.sqlite, client: service.client, now: () => now });
         expect((await service.processRoleJobs()).processed).toBe(1);
         expect(add).toHaveBeenCalledTimes(2);
@@ -821,5 +897,111 @@ describe('LevelAnalyticsService', () => {
 
         expect(service.pruneAnalytics()).toEqual({ daily: 1, activity: 1, dedupe: 1, reactions: 0 });
         expect(database.sqlite.prepare(`SELECT xp FROM member_levels WHERE guild_id = 'guild1'`).get().xp).toBe(20);
+    });
+
+    function seedRetentionBacklog() {
+        const cutoffAt = now - 1095 * 86400000;
+        const cutoffDate = new Date(cutoffAt).toISOString().slice(0, 10);
+        const daily = database.sqlite.prepare(`
+            INSERT INTO server_daily_metrics (guild_id, activity_date, message_count, updated_at) VALUES ('guild1', ?, 1, ?)
+        `);
+        const activity = database.sqlite.prepare(`
+            INSERT INTO activity_logs (guild_id, user_id, activity_date, message_count, updated_at) VALUES ('guild1', 'user1', ?, 1, ?)
+        `);
+        const dedupe = database.sqlite.prepare(`
+            INSERT INTO analytics_events (guild_id, event_type, event_id, occurred_at) VALUES ('guild1', 'message', ?, ?)
+        `);
+        const reactions = database.sqlite.prepare(`
+            INSERT INTO reaction_placements (guild_id, message_id, user_id, emoji, added_at) VALUES ('guild1', ?, 'user1', '👍', ?)
+        `);
+        database.sqlite.transaction(() => {
+            for (let index = 0; index < 2505; index += 1) {
+                const expiredAt = Date.UTC(2010, 0, 1) + index * 86400000;
+                const day = new Date(expiredAt).toISOString().slice(0, 10);
+                daily.run(day, expiredAt);
+                activity.run(day, expiredAt);
+                dedupe.run(`old-${index}`, expiredAt);
+                reactions.run(`old-${index}`, expiredAt);
+            }
+            for (const retainedAt of [cutoffAt, now]) {
+                const day = new Date(retainedAt).toISOString().slice(0, 10);
+                daily.run(day, retainedAt);
+                activity.run(day, retainedAt);
+                dedupe.run(`retained-${retainedAt}`, retainedAt);
+                reactions.run(`retained-${retainedAt}`, retainedAt);
+            }
+            database.sqlite.prepare(`
+                INSERT INTO member_levels (guild_id, user_id, xp, level, text_xp, voice_xp, manual_adjustment, updated_at)
+                VALUES ('guild1', 'user1', 4321, 6, 3000, 1000, 321, ?)
+            `).run(now);
+        })();
+        const retention = [
+            ['server_daily_metrics', 'activity_date', cutoffDate],
+            ['activity_logs', 'activity_date', cutoffDate],
+            ['analytics_events', 'occurred_at', cutoffAt],
+            ['reaction_placements', 'added_at', cutoffAt]
+        ];
+        const tables = retention.map(([table]) => table);
+        const counts = () => tables.map(table => database.sqlite.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count);
+        const retained = retention.map(([table, column, cutoff]) => database.sqlite.prepare(
+            `SELECT * FROM ${table} WHERE ${column} >= ? ORDER BY rowid`
+        ).all(cutoff));
+        const balance = database.sqlite.prepare(`SELECT * FROM member_levels`).get();
+        return { counts, retained, balance, tables };
+    }
+
+    test('asynchronous retention coalesces callers and yields between bounded transactions until the backlog is drained', async () => {
+        const { counts, retained, balance, tables } = seedRetentionBacklog();
+        const first = service.drainAnalytics();
+        const second = service.drainAnalytics();
+        const betweenBatches = new Promise(resolve => setImmediate(() => resolve({
+            counts: counts(), inTransaction: database.sqlite.inTransaction
+        })));
+        expect(second).toBe(first);
+        expect(await betweenBatches).toEqual({ counts: [1507, 1507, 1507, 1507], inTransaction: false });
+        await expect(first).resolves.toEqual({ daily: 2505, activity: 2505, dedupe: 2505, reactions: 2505 });
+        await expect(second).resolves.toEqual({ daily: 2505, activity: 2505, dedupe: 2505, reactions: 2505 });
+        expect(counts()).toEqual([2, 2, 2, 2]);
+        expect(tables.map(table => database.sqlite.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())).toEqual(retained);
+        expect(database.sqlite.prepare(`SELECT * FROM member_levels`).get()).toEqual(balance);
+        await expect(service.drainAnalytics()).resolves.toEqual({ daily: 0, activity: 0, dedupe: 0, reactions: 0 });
+    });
+
+    test('the synchronous retention API still deletes just one batch and accepts a smaller limit', () => {
+        const { counts, balance } = seedRetentionBacklog();
+
+        expect(service.pruneAnalytics()).toEqual({ daily: 1000, activity: 1000, dedupe: 1000, reactions: 1000 });
+        expect(counts()).toEqual([1507, 1507, 1507, 1507]);
+        expect(service.pruneAnalytics(10)).toEqual({ daily: 10, activity: 10, dedupe: 10, reactions: 10 });
+        expect(counts()).toEqual([1497, 1497, 1497, 1497]);
+        expect(database.sqlite.prepare(`SELECT * FROM member_levels`).get()).toEqual(balance);
+    });
+
+    test('cleanup before the first retention batch prevents all database work', async () => {
+        const { counts } = seedRetentionBacklog();
+        const drain = service.drainAnalytics();
+
+        service.cleanup();
+
+        await expect(drain).resolves.toEqual({ daily: 0, activity: 0, dedupe: 0, reactions: 0 });
+        expect(counts()).toEqual([2507, 2507, 2507, 2507]);
+    });
+
+    test('cleanup cancels a yielded retention drain, settles overlapping callers and prevents later pruning', async () => {
+        const { counts, balance } = seedRetentionBacklog();
+        const first = service.drainAnalytics();
+        const second = service.drainAnalytics();
+        await Promise.resolve();
+        expect(counts()).toEqual([1507, 1507, 1507, 1507]);
+
+        service.cleanup();
+
+        await expect(first).resolves.toEqual({ daily: 1000, activity: 1000, dedupe: 1000, reactions: 1000 });
+        await expect(second).resolves.toEqual({ daily: 1000, activity: 1000, dedupe: 1000, reactions: 1000 });
+        await new Promise(resolve => setImmediate(resolve));
+        expect(counts()).toEqual([1507, 1507, 1507, 1507]);
+        await expect(service.drainAnalytics()).resolves.toEqual({ daily: 0, activity: 0, dedupe: 0, reactions: 0 });
+        expect(counts()).toEqual([1507, 1507, 1507, 1507]);
+        expect(database.sqlite.prepare(`SELECT * FROM member_levels`).get()).toEqual(balance);
     });
 });

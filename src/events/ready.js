@@ -177,33 +177,30 @@ module.exports = {
             client.levelAnalyticsService = new LevelAnalyticsService({
                 sqlite, client, imageQueue: client.imageProcessingQueue
             });
-            const recovery = await client.levelAnalyticsService.reconcileStartup(client);
+            const analytics = client.levelAnalyticsService;
+            const recovery = await analytics.reconcileStartup(client);
             recovery.failures.forEach(failure => logger.error(
                 `Level analytics baseline failed for ${failure.guildId}: ${failure.error}`
             ));
-            const boards = await client.levelAnalyticsService.refreshLiveBoards();
+            const boards = await analytics.refreshLiveBoards();
             boards.failures.forEach(failure => logger.error(
                 `Live level board recovery failed for ${failure.guildId}/${failure.channelId}/${failure.metric}: ${failure.error}`
             ));
-            const liveBoardTimer = setInterval(() => client.levelAnalyticsService.refreshLiveBoards()
+            analytics.scheduleInterval(() => analytics.refreshLiveBoards()
                 .then(result => result.failures.forEach(failure => logger.error(
                     `Live level board refresh failed for ${failure.guildId}/${failure.channelId}/${failure.metric}: ${failure.error}`
                 )))
                 .catch(error => logger.error(`Live level board refresh failed: ${error.message}`)), 5 * 60 * 1000);
-            liveBoardTimer.unref?.();
-            await client.levelAnalyticsService.processRoleJobs();
-            const roleJobTimer = setInterval(() => client.levelAnalyticsService.processRoleJobs()
+            await analytics.processRoleJobs();
+            analytics.scheduleInterval(() => analytics.processRoleJobs()
                 .catch(error => logger.error(`Level role reconciliation retry failed: ${error.message}`)), 30 * 1000);
-            roleJobTimer.unref?.();
-            const prune = () => {
-                const removed = client.levelAnalyticsService.pruneAnalytics();
+            const prune = () => analytics.drainAnalytics().then(removed => {
                 if (removed.daily || removed.activity || removed.dedupe || removed.reactions) logger.info(
                     `Analytics retention pruned ${removed.daily} daily, ${removed.activity} member, ${removed.dedupe} dedupe, and ${removed.reactions} reaction rows`
                 );
-            };
+            }).catch(error => logger.error(`Analytics retention prune failed: ${error.message}`));
             prune();
-            const analyticsPruneTimer = setInterval(prune, 24 * 60 * 60 * 1000);
-            analyticsPruneTimer.unref?.();
+            analytics.scheduleInterval(prune, 24 * 60 * 60 * 1000);
             logger.success('Level analytics service initialized');
         } catch (e) {
             logger.error(`Failed to initialize level analytics service: ${e}`);
