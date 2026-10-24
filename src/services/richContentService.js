@@ -4,6 +4,7 @@ const {
     SeparatorSpacingSize, StringSelectMenuBuilder, TextDisplayBuilder, ThumbnailBuilder
 } = require('discord.js');
 const crypto = require('crypto');
+const config = require('../utils/config');
 const { and, eq } = require('drizzle-orm');
 const { db } = require('../database');
 const { automationRules } = require('../database/schema');
@@ -449,14 +450,18 @@ class RichContentService {
         return this.automation.get('global', 'tag', normalizedName(name));
     }
 
-    async saveTag(authorId, name, script, { canManage = false } = {}) {
+    async saveTag(authorId, name, script) {
         const key = normalizedName(name);
-        const existing = await this.getTag(key);
-        if (existing && existing.createdBy !== authorId && !canManage) throw new Error('You do not have permission to edit this tag.');
         if (!String(script || '').trim()) throw new Error('Tag content cannot be empty.');
-        return this.automation.upsert({
-            guildId: 'global', kind: 'tag', key, config: { script: String(script) },
-            createdBy: existing?.createdBy || authorId
+        return db.transaction(() => {
+            const existing = this.getTag(key);
+            if (existing && existing.createdBy !== authorId && !config.developers.includes(authorId)) {
+                throw new Error('You do not have permission to edit this tag.');
+            }
+            return this.automation.upsert({
+                guildId: 'global', kind: 'tag', key, config: { script: String(script) },
+                createdBy: existing?.createdBy || authorId
+            });
         });
     }
 
@@ -465,14 +470,18 @@ class RichContentService {
         return this.automation.list('global', 'tag').filter(rule => !needle || rule.key.includes(needle));
     }
 
-    async removeTag(actorId, name, { canManage = false } = {}) {
-        const existing = await this.getTag(name);
-        if (!existing) return null;
-        if (existing.createdBy !== actorId && !canManage) throw new Error('You do not have permission to remove this tag.');
-        return this.automation.remove('global', 'tag', existing.key);
+    async removeTag(actorId, name) {
+        return db.transaction(() => {
+            const existing = this.getTag(name);
+            if (!existing) return null;
+            if (existing.createdBy !== actorId && !config.developers.includes(actorId)) {
+                throw new Error('You do not have permission to remove this tag.');
+            }
+            return this.automation.remove('global', 'tag', existing.key);
+        });
     }
 
-    async renameTag(actorId, name, newName, { canManage = false } = {}) {
+    async renameTag(actorId, name, newName) {
         const oldKey = normalizedName(name);
         const nextKey = normalizedName(newName);
         return db.transaction(tx => {
@@ -480,7 +489,7 @@ class RichContentService {
                 eq(automationRules.guildId, 'global'), eq(automationRules.kind, 'tag'), eq(automationRules.key, oldKey)
             )).get();
             if (!existing) throw new Error(`Tag ${oldKey} was not found.`);
-            if (existing.createdBy !== actorId && !canManage) throw new Error('You do not have permission to rename this tag.');
+            if (existing.createdBy !== actorId && !config.developers.includes(actorId)) throw new Error('You do not have permission to rename this tag.');
             const collision = tx.select({ id: automationRules.id }).from(automationRules).where(and(
                 eq(automationRules.guildId, 'global'), eq(automationRules.kind, 'tag'), eq(automationRules.key, nextKey)
             )).get();

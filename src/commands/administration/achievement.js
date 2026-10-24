@@ -499,7 +499,7 @@ async function handleAward(interaction, client) {
         }
 
         // Verify achievement exists
-        const achievement = await client.activityStreakService.achievementManager.getById(achievementId);
+        const achievement = await client.activityStreakService.achievementManager.getById(achievementId, interaction.guild.id);
         if (!achievement) {
             return interaction.editReply({
                 embeds: [embeds.error('Not Found', `Achievement \`${achievementId}\` does not exist.`)]
@@ -589,7 +589,7 @@ async function handleRemove(interaction, client) {
         }
 
         // Verify achievement exists
-        const achievement = await client.activityStreakService.achievementManager.getById(achievementId);
+        const achievement = await client.activityStreakService.achievementManager.getById(achievementId, interaction.guild.id);
         if (!achievement) {
             return interaction.editReply({
                 embeds: [embeds.error('Not Found', `Achievement \`${achievementId}\` does not exist.`)]
@@ -695,7 +695,7 @@ async function handleDisable(interaction) {
             '• No new achievements will be tracked or awarded\n' +
             '• Existing achievements are preserved\n' +
             '• Achievement roles remain on users\n' +
-            '• Users can still view their achievements via `/streak`\n\n' +
+            '• Users can still view their achievements via `/me streak view`\n\n' +
             'Use `/achievement enable` to re-enable the system.'
         );
 

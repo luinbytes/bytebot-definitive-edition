@@ -21,6 +21,7 @@ describe('/stats server', () => {
     let sqlite;
 
     beforeEach(() => {
+        jest.useFakeTimers({ now: Date.UTC(2026, 7, 1) });
         sqlite = new Database(':memory:');
         sqlite.exec(`
             CREATE TABLE users (
@@ -94,7 +95,10 @@ describe('/stats server', () => {
         mockDb = drizzle(sqlite);
     });
 
-    afterEach(() => sqlite.close());
+    afterEach(() => {
+        sqlite.close();
+        jest.useRealTimers();
+    });
 
     test('reports command activity from only the current guild', async () => {
         const channels = new Collection([

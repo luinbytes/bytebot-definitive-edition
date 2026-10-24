@@ -37,6 +37,7 @@ async function handleGuildDelete(guild) {
         ['music service', () => guild.client.musicService?.purgeGuild(guild.id)],
         ['music config', () => db.delete(musicConfig).where(eq(musicConfig.guildId, guild.id))],
         ['community utilities', () => guild.client.communityUtilityService?.purgeGuild(guild.id)],
+        ['birthdays', () => purgeServiceOrTables(guild.client.birthdayService, guild.id, ['birthday_role_grants', 'birthdays', 'birthday_config'])],
         ['fun state', () => guild.client.funService?.purgeGuild(guild.id)],
         ['levels and analytics', () => purgeServiceOrTables(guild.client.levelAnalyticsService, guild.id, LEVEL_TABLES)],
         ['event logs', () => purgeServiceOrTables(guild.client.eventLoggingService, guild.id, LOG_TABLES)],

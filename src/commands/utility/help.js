@@ -1,346 +1,251 @@
 const { SlashCommandBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, MessageFlags } = require('discord.js');
+const { createHash } = require('crypto');
 const embeds = require('../../utils/embeds');
+const { shouldRegisterCommand } = require('../../utils/commandRegistration');
 
-const categoryMetadata = {
-    'Administration': { icon: '⚙️', description: 'Configure bot settings for your server.' },
-    'Moderation': { icon: '🛡️', description: 'Commands to manage and protect your server.' },
-    'Utility': { icon: '🔧', description: 'Useful tools and information commands.' },
-    'Fun': { icon: '🎉', description: 'Games and entertainment for everyone.' },
-    'Games': { icon: '🎮', description: 'Game-specific statistics and tools.' },
-    'Music': { icon: '🎵', description: 'Self-hosted voice playback and DJ controls.' },
-    'Voice': { icon: '🔊', description: 'Temporary voice channels and owner controls.' },
-    'Economy': { icon: '🪙', description: 'Earn, bank, spend, and manage virtual currency.' },
-    'LastFM': { icon: '🎵', description: 'Last.fm listening, charts, collages, and community.' },
-    'Developer': { icon: '💻', description: 'Specialized tools for bot developers.' },
+const categoryOrder = ['Administration', 'Moderation', 'Utility', 'Fun', 'Games', 'Music', 'Voice', 'Economy', 'LastFM', 'Developer'];
+const optionTypes = { 3: 'String', 4: 'Integer', 5: 'Boolean', 6: 'User', 7: 'Channel', 8: 'Role', 9: 'Mentionable', 10: 'Number', 11: 'Attachment' };
+const footer = 'Use /bot help command:<path> for details. Availability depends on permissions and server rules.';
+const providerNote = 'Unavailable provider features: AI chat/STT/generation, persistent social feeds/downloads/provider-backed behavior, Rolimons, Valorant, Minecraft, Spotify search, Reddit, YouTube downloads, Telegram, bio providers.';
+const notes = {
+    economy: {
+        name: 'Compatibility',
+        value: '`bal` is a text compatibility alias for `/economy balance`. Games use the public 10–1,000,000 bet bound. Odds, crime/rob cooldowns, gang limits, and lab progression are ByteBot-owned rules. Member areas include games, crime, rob, leaderboards, gangs, and labs. Gang owner/admin checks apply inside their exact paths.'
+    },
+    fun: {
+        name: 'Safety and availability',
+        value: 'Snipe keeps at most 10 entries per kind/channel for 15 minutes and honors global self-protection. Roleplay exposes 40 provider-backed actions; `fuck`, `spank`, and `nutkick` are policy-excluded. `howgay`, `pp`, `bitches`, `nword`, and `nwordlb` are policy-excluded. Image/media subjects use the bounded media service.'
+    }
 };
+
+function normalizePath(raw) {
+    if (typeof raw !== 'string' || raw.length > 100) return null;
+    const path = raw.trim().replace(/^\//, '').trim().replace(/\s+/g, ' ').toLowerCase();
+    return /^[\p{L}\p{N}_-]+(?: [\p{L}\p{N}_-]+){0,2}$/u.test(path) ? path : null;
+}
+
+function snapshot(commands) {
+    const roots = [];
+    for (const command of commands.values()) {
+        if (!shouldRegisterCommand(command) || command.devOnly || !command.data) continue;
+        const data = command.data.toJSON?.() || command.data;
+        if (data.type !== undefined && data.type !== 1) continue;
+        const category = command.discovery?.category || command.category || 'Other';
+        const publicPaths = command.discovery?.publicPaths;
+        function walk(schema, path, relative) {
+            const routes = (schema.options || []).filter(option => option.type === 1 || option.type === 2);
+            if (!routes.length) {
+                if (publicPaths && !publicPaths.includes(relative)) return null;
+                return { path, description: schema.description, category, options: schema.options || [] };
+            }
+            const children = routes.map(route => walk(route, `${path} ${route.name}`, relative ? `${relative} ${route.name}` : route.name))
+                .filter(Boolean).sort((a, b) => a.path.localeCompare(b.path));
+            if (!children.length) return null;
+            return {
+                path, category, children,
+                description: publicPaths ? 'Browse public command paths.' : schema.description
+            };
+        }
+        const root = walk(data, data.name, '');
+        if (root) roots.push({ ...root, cooldown: command.cooldown ?? 3 });
+    }
+    roots.sort((a, b) => a.path.localeCompare(b.path));
+    const byPath = new Map();
+    function index(node) {
+        byPath.set(node.path, node);
+        node.children?.forEach(index);
+    }
+    roots.forEach(index);
+    const topics = [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path));
+    const revision = createHash('sha256').update(JSON.stringify({ version: 1, roots, notes, providerNote, footer })).digest('hex').slice(0, 16);
+    return { roots, byPath, topics, revision };
+}
+
+function optionField(option) {
+    const lines = [
+        `${option.required ? 'required' : 'optional'} • ${optionTypes[option.type] || `Type ${option.type}`}`,
+        option.description
+    ];
+    if (option.autocomplete) lines.push('Autocomplete available.');
+    for (const [key, label] of Object.entries({
+        min_value: 'Minimum value', max_value: 'Maximum value',
+        min_length: 'Minimum length', max_length: 'Maximum length'
+    })) {
+        if (option[key] !== undefined) lines.push(`${label}: ${option[key]}`);
+    }
+    if (option.channel_types?.length) lines.push(`Channel types: ${option.channel_types.join(', ')}`);
+    if (option.choices?.length) lines.push('Choices:', ...option.choices.map(choice => `${choice.name}: ${choice.value}`));
+    return { name: `Argument: ${option.name}`, value: lines.filter(Boolean).join('\n') };
+}
+
+function viewContent(book, view) {
+    if (view > 0) {
+        const node = book.topics[view - 1];
+        const fields = [{ name: 'Description', value: node.description || 'No description available.' }];
+        fields.push({ name: 'Category', value: node.category });
+        if (node.children) {
+            fields.push({ name: 'Browse topic', value: 'Choose a full child path to inspect its usage.' });
+            fields.push(...node.children.map(child => ({
+                name: child.children ? 'Browse topic' : 'Runnable command',
+                value: `/${child.path}\n${child.description || ''}`
+            })));
+        } else {
+            fields.push({ name: 'Usage', value: `/${node.path}` });
+            fields.push(...node.options.map(optionField));
+        }
+        if (node.cooldown !== undefined) fields.push({ name: 'Hub cooldown', value: `${node.cooldown} seconds. Delegated commands may have their own cooldowns.` });
+        if (notes[node.path]) fields.push(notes[node.path]);
+        return { title: `Command: /${node.path}`, fields };
+    }
+    const leaves = book.topics.filter(node => !node.children);
+    const categories = [...new Set(book.roots.map(root => root.category))].sort((a, b) => {
+        const rank = category => categoryOrder.includes(category) ? categoryOrder.indexOf(category) : categoryOrder.length;
+        return rank(a) - rank(b) || a.localeCompare(b);
+    });
+    const fields = [{
+        name: 'Registered commands',
+        value: `${book.roots.length} registered roots • ${leaves.length} runnable paths • ${categories.length} categories`
+    }];
+    if (!leaves.length) fields.push({ name: 'No commands available', value: 'No public slash commands are registered in this catalog.' });
+    for (const category of categories) {
+        fields.push(...leaves.filter(node => node.category === category).map(node => ({
+            name: category, value: `/${node.path}\n${node.description || ''}`
+        })));
+    }
+    fields.push({ name: 'Provider availability', value: providerNote });
+    const levelAliases = [
+        ['levels rank', '`level`, `rank`, `xp`, `lvl`'],
+        ['levels leaderboard', '`levels lb`, `levels top`'],
+        ['levels rankcard view', '`rankcard`, `rc`'],
+        ['levels rankcard color', '`rankcard colour`, `rankcard accent`']
+    ].filter(([path]) => book.byPath.has(path));
+    if (levelAliases.length) fields.push({ name: 'Text compatibility aliases', value: levelAliases.map(([path, aliases]) => `${aliases} → /${path}`).join('\n') });
+    return { title: 'ByteBot Help', fields };
+}
+
+function splitText(text, limit) {
+    const parts = [];
+    let remaining = String(text || 'No description available.');
+    while (remaining.length > limit) {
+        let end = remaining.lastIndexOf('\n', limit - 1) + 1;
+        if (!end) end = limit;
+        const code = remaining.charCodeAt(end - 1);
+        if (code >= 0xD800 && code <= 0xDBFF) end--;
+        parts.push(remaining.slice(0, end));
+        remaining = remaining.slice(end);
+    }
+    if (remaining) parts.push(remaining);
+    return parts;
+}
+
+function heading(text) {
+    return text.length <= 256 ? text : `${splitText(text, 255)[0]}…`;
+}
+
+function pagesFor(book, view) {
+    const content = viewContent(book, view);
+    const title = heading(content.title);
+    const pages = [];
+    let fields = [];
+    // Reserve space for the footer and its final page numbers before packing fields.
+    const budget = 6000 - title.length - footer.length - 64;
+    let used = 0;
+    for (const field of content.fields) {
+        const values = splitText(field.value, 1024);
+        for (let index = 0; index < values.length; index++) {
+            const name = heading(`${field.name}${index ? ' (continued)' : ''}`);
+            const value = values[index];
+            if (fields.length === 25 || used + name.length + value.length > budget) {
+                pages.push({ title, fields });
+                fields = [];
+                used = 0;
+            }
+            fields.push({ name, value });
+            used += name.length + value.length;
+        }
+    }
+    pages.push({ title, fields });
+    return pages;
+}
+
+function payloadFor(book, view, page, pages) {
+    const content = pages[page];
+    const embed = embeds.brand(content.title).setFields(content.fields)
+        .setFooter({ text: `${footer} Page ${page + 1}/${pages.length}.` });
+    const button = (action, label, targetView, targetPage, disabled = false) => new ButtonBuilder()
+        .setCustomId(action === 'i' ? 'help_page_indicator' : `help_page_v1_${action}_${book.revision}_${targetView}_${targetPage}`)
+        .setLabel(label).setStyle(ButtonStyle.Secondary).setDisabled(disabled);
+    const row = new ActionRowBuilder().addComponents(
+        button('p', 'Previous', view, Math.max(0, page - 1), page === 0),
+        button('i', `${page + 1}/${pages.length}`, view, page, true),
+        button('n', 'Next', view, Math.min(pages.length - 1, page + 1), page === pages.length - 1),
+        button('o', 'Overview', 0, 0, view === 0 && page === 0)
+    );
+    return { embeds: [embed], components: [row], allowedMentions: { parse: [] } };
+}
+
+function parseCursor(customId, book) {
+    if (customId.length > 100) return null;
+    const match = /^help_page_v1_[pno]_([a-f0-9]{16})_(0|[1-9][0-9]{0,8})_(0|[1-9][0-9]{0,8})$/.exec(customId);
+    if (!match || match[1] !== book.revision) return null;
+    const view = Number(match[2]);
+    const page = Number(match[3]);
+    if (!Number.isSafeInteger(view) || !Number.isSafeInteger(page) || view > book.topics.length) return null;
+    return { view, page };
+}
+
+function unavailable(interaction, title = 'Help page unavailable', message = 'Run /bot help again to open the current command catalog.') {
+    return interaction.reply({
+        embeds: [embeds.brand(title, message).setFooter({ text: footer })],
+        flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] }
+    });
+}
 
 module.exports = {
     register: false,
     data: new SlashCommandBuilder()
         .setName('help')
         .setDescription('Browse all commands or get info about a specific command')
-        .addStringOption(option =>
-            option.setName('command')
-                .setDescription('The command to get more info about')
-                .setRequired(false)),
-
+        .addStringOption(option => option.setName('command').setDescription('Full command path to inspect')
+            .setRequired(false).setAutocomplete(true).setMaxLength(100)),
     cooldown: 5,
 
-    async execute(interaction, client) {
-        const commandName = interaction.options.getString('command');
-
-        // If specific command requested, show command details
-        if (commandName) {
-            return await showCommandDetails(interaction, client, commandName);
-        }
-
-        // Show overview page (page 0) with navigation
-        await showHelpPage(interaction, client, 0);
+    async autocomplete(interaction, client) {
+        const focused = interaction.options.getFocused(true);
+        if (focused.name !== 'command') return interaction.respond([]);
+        const raw = focused.value;
+        const query = normalizePath(raw);
+        if (raw.trim() && query === null && raw.trim() !== '/') return interaction.respond([]);
+        const book = snapshot(client.commands);
+        const match = path => !query || path.includes(query);
+        const rank = path => path === query ? 0 : path.startsWith(query || '') ? 1 : 2;
+        const choices = book.topics.filter(node => node.path.length <= 99 && match(node.path))
+            .sort((a, b) => rank(a.path) - rank(b.path) || a.path.localeCompare(b.path))
+            .slice(0, 25).map(node => ({ name: `/${node.path}`, value: node.path }));
+        return interaction.respond(choices);
     },
 
-    // Handle button interactions for pagination
-    async handleInteraction(interaction, client) {
-        if (interaction.isButton() && interaction.customId.startsWith('help_page_')) {
-            // Parse customId: help_page_{pageNumber}
-            const pageNumber = parseInt(interaction.customId.split('_')[2]);
-
-            await interaction.deferUpdate();
-            await showHelpPage(interaction, client, pageNumber);
+    async execute(interaction, client) {
+        const raw = interaction.options.getString('command');
+        const book = snapshot(client.commands);
+        const path = normalizePath(raw);
+        if (raw?.trim() && !book.byPath.has(path)) {
+            return unavailable(interaction, 'Command Not Found', 'No public command path matches. Use /bot help to browse available paths.');
         }
+        const view = path ? book.topics.findIndex(node => node.path === path) + 1 : 0;
+        const payload = payloadFor(book, view, 0, pagesFor(book, view));
+        if (view > 0) payload.flags = [MessageFlags.Ephemeral];
+        return interaction.reply(payload);
+    },
+
+    async handleInteraction(interaction, client) {
+        if (!interaction.isButton() || !interaction.customId.startsWith('help_page_')) return;
+        const book = snapshot(client.commands);
+        const cursor = parseCursor(interaction.customId, book);
+        if (!cursor) return unavailable(interaction);
+        const pages = pagesFor(book, cursor.view);
+        if (cursor.page >= pages.length) return unavailable(interaction);
+        await interaction.deferUpdate();
+        return interaction.editReply(payloadFor(book, cursor.view, cursor.page, pages));
     }
 };
-
-/**
- * Show specific command details
- */
-async function showCommandDetails(interaction, client, commandName) {
-    const command = client.commands.get(commandName.toLowerCase());
-
-    if (!command) {
-        return interaction.reply({
-            embeds: [embeds.error('Command Not Found', `The command \`/${commandName}\` does not exist.`)],
-            flags: [MessageFlags.Ephemeral]
-        });
-    }
-
-    const commandData = command.data.toJSON?.() || command.data;
-    const embed = embeds.brand(`Command: /${commandData.name}`, commandData.description)
-        .addFields(
-            { name: 'Category', value: `${categoryMetadata[command.category]?.icon || '📁'} ${command.category}`, inline: true },
-            { name: 'Cooldown', value: `${command.cooldown || 3} seconds`, inline: true }
-        );
-
-    if (commandData.options && commandData.options.length > 0) {
-        const groups = commandData.options.filter(opt => opt.type === 2);
-        if (groups.length > 0) {
-            const groupList = groups.map(group => {
-                const subcommands = (group.options || [])
-                    .filter(opt => opt.type === 1)
-                    .map(sub => sub.name)
-                    .join(', ');
-                return `\`${group.name}\`: ${subcommands}`;
-            }).join('\n');
-            embed.addFields({ name: 'Command Groups', value: groupList });
-            const direct = commandData.options.filter(opt => opt.type === 1).map(sub => sub.name);
-            if (direct.length) embed.addFields({ name: 'Direct Subcommands', value: direct.map(name => `\`${name}\``).join(', ') });
-        } else {
-            const optionsList = commandData.options.map(opt => {
-                const required = opt.required ? '(required)' : '(optional)';
-                return `\`${opt.name}\` ${required} - ${opt.description}`;
-            }).join('\n');
-            embed.addFields({ name: 'Options', value: optionsList });
-        }
-    }
-
-    if (commandData.name === 'economy') {
-        embed.addFields({
-            name: 'Compatibility',
-            value: '`bal` maps to `/economy balance`. Games use the public 10–1,000,000 bet bound; odds, crime/rob cooldowns, gang limits, and lab progression are documented ByteBot-owned rules. Member paths include `/economy game`, `crime`, `rob`, `leaderboard`, `gang`, and `lab`; gang owner/admin checks apply inside their exact paths.'
-        });
-    }
-
-    if (commandData.name === 'fun') {
-        embed.addFields({
-            name: 'Public parity and safety',
-            value: 'Snipe keeps at most 10 entries per kind/channel for 15 minutes and honors global self-protection. Roleplay exposes 40 provider-backed actions; `fuck`, `spank`, and `nutkick` are visibly policy-excluded. `howgay`, `pp`, `bitches`, `nword`, and `nwordlb` are policy-excluded. Image/media subjects remain mapped to the bounded #56 media seam.'
-        });
-    }
-
-    return interaction.reply({
-        embeds: [embed],
-        flags: [MessageFlags.Ephemeral]
-    });
-}
-
-/**
- * Show help page (overview or category)
- */
-async function showHelpPage(interaction, client, pageNumber) {
-    const commands = client.commands;
-
-    // Group commands by category
-    const categories = {};
-    commands.forEach(command => {
-        const category = command.category || 'Other';
-        if (!categories[category]) categories[category] = [];
-        categories[category].push(command);
-    });
-
-    // Sort categories in a specific order
-    const categoryOrder = ['Administration', 'Moderation', 'Utility', 'Fun', 'Games', 'Music', 'Voice', 'Economy', 'LastFM', 'Developer'];
-    const sortedCategories = Object.keys(categories).sort((a, b) => {
-        return categoryOrder.indexOf(a) - categoryOrder.indexOf(b);
-    });
-
-    const totalPages = sortedCategories.length + 1; // +1 for overview page
-
-    let embed;
-
-    if (pageNumber === 0) {
-        // Overview page
-        embed = buildOverviewEmbed(client, commands, sortedCategories, categories);
-    } else {
-        // Category page
-        const categoryIndex = pageNumber - 1;
-        const categoryName = sortedCategories[categoryIndex];
-        const categoryCommands = categories[categoryName];
-        embed = buildCategoryEmbed(categoryName, categoryCommands);
-    }
-
-    // Add navigation buttons
-    const buttons = new ActionRowBuilder();
-
-    buttons.addComponents(
-        new ButtonBuilder()
-            .setCustomId(`help_page_${pageNumber - 1}`)
-            .setLabel('◀ Previous')
-            .setStyle(ButtonStyle.Primary)
-            .setDisabled(pageNumber === 0)
-    );
-
-    buttons.addComponents(
-        new ButtonBuilder()
-            .setCustomId('help_page_indicator')
-            .setLabel(`${pageNumber + 1}/${totalPages}`)
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(true)
-    );
-
-    buttons.addComponents(
-        new ButtonBuilder()
-            .setCustomId(`help_page_${pageNumber + 1}`)
-            .setLabel('Next ▶')
-            .setStyle(ButtonStyle.Primary)
-            .setDisabled(pageNumber === totalPages - 1)
-    );
-
-    // Update or reply
-    if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({
-            embeds: [embed],
-            components: [buttons]
-        });
-    } else {
-        await interaction.reply({
-            embeds: [embed],
-            components: [buttons]
-        });
-    }
-}
-
-/**
- * Build overview embed (page 0)
- */
-function buildOverviewEmbed(client, commands, sortedCategories, categories) {
-    const totalCommands = commands.size;
-
-    const embed = embeds.brand('ByteBot Help', 'Your feature-rich Discord companion!')
-        .setThumbnail(client.user.displayAvatarURL())
-        .setDescription(
-            '**Welcome to ByteBot!**\n\n' +
-            'Start with an intent hub: `/community`, `/me`, `/server`, `/lookup`, `/pod`, `/mod`, `/economy`, `/lastfm`, `/game`, `/fun`, `/image`, or `/bot`.\n\n' +
-            `📊 **${totalCommands}** commands • **${sortedCategories.length}** categories`
-        )
-        .addFields(
-            {
-                name: 'Intent Hubs',
-                value:
-                    '`/community` member progress, achievements, BytePods, and community features\n' +
-                    '`/me` personal settings, reminders, bookmarks, birthdays, streaks\n' +
-                    '`/server` setup, lifecycle messages, suggestions, starboard, achievements, security\n' +
-                    '`/lookup` calculations, translation, web images, weather, definitions, and GitHub\n' +
-                    '`/pod` BytePod actions and settings\n' +
-                    '`/mod` member actions, cases, invoke templates, setup, logs, and channel controls\n' +
-                    '`/economy` balances, games, crime, gangs, labs, role shops, and administration\n' +
-                    '`/game` F1, War Thunder, and public Roblox lookups\n' +
-                    '`/lastfm` listening, charts, collages, library tools, and community rankings\n' +
-                    '`/image` transforms, local effects, memes, and color inspection\n' +
-                    '`/bot` help, health, deployment, and developer tools',
-                inline: false
-            },
-            {
-                name: 'Common Paths',
-                value:
-                    '`/me reminder add` • `/me bookmark search` • `/pod panel`\n' +
-                    '`/server welcome setup` • `/server goodbye setup` • `/server boost setup`\n' +
-                    '`/server security antinuke-settings` • `/server security antinuke-module`\n' +
-                    '`/server antiraid settings` • `/server antiraid module`\n' +
-                    '`/server automod settings` • `/server automod filter`\n' +
-                    '`/server permissions disable` • `/server permissions denyperm` • `/server permissions protect`\n' +
-                    '`/ticket setup` • `/ticket panel manage` • `/ticket settings view`\n' +
-                    '`/giveaway start` • `/giveaway edit prize` • `/counter add`\n' +
-                    '`/economy balance` • `/economy game coinflip` • `/economy gang info` • `/economy lab status`\n' +
-                    '`/lastfm now` • `/lastfm charts collage` • `/lastfm community taste`\n' +
-                    '`/game warthunder stats`\n' +
-                    '`/fun uwuify` • `/fun uwulock add` • `/fun snipe protect` • `/fun roleplay action`\n' +
-                    '`/fun game tictactoe` • `/fun game blacktea` • `/image effect apply`',
-                inline: false
-            },
-            {
-                name: 'More Common Paths',
-                value:
-                    '`/reactionrole add` • `/buttonrole add` • `/temprole add` • `/boosterrole create`\n' +
-                    '`/server backup create` • `/server customize preset` • `/server discovery publish`\n' +
-                    '`/server stats days:60` • `/mod user warn` • `/mod case view` • `/mod config setup`\n' +
-                    '`/mod template set` • `/server role info` • `/server logs add`\n' +
-                    '`/lookup weather` • `/lookup github user` • `/game roblox profile`\n' +
-                    '`/repost` • `/ai ocr` • `/ai tts`',
-                inline: false
-            },
-            {
-                name: 'Greed Text Aliases',
-                value: '`level`, `rank`, `xp`, `lvl` → `/levels rank` • `levels lb`, `levels top` → `/levels leaderboard`\n' +
-                    '`rankcard`, `rc` → `/levels rankcard view` • `rankcard colour`, `rankcard accent` → `/levels rankcard color`',
-                inline: false
-            },
-            {
-                name: 'Public Parity Map',
-                value:
-                    'Greed source categories route through ByteBot\'s existing hubs as features land:\n' +
-                    '`/levels` Levels • `/community` Socials • `/analytics` Analytics\n' +
-                    '`/me` Information • `/lookup` Information, Utility • `/repost` Socials, Utility • `/ai` Information, Utility\n' +
-                    '`/game` Games\n' +
-                    '`/server` Auto, Logs, Security, Server, Settings • `/ticket` Tickets • `/mod` Moderation\n' +
-                    '`/fun` Fun, Roleplay, Snipe • `/image` Manipulation • `/boosterrole` Boosters • `/economy` Economy • `/lastfm` LastFM\n' +
-                    '`/music` Music • `/voicemaster` Voice\n' +
-                    '**Provider-blocked:** AI chat/STT/generation, persistent social feeds/downloads/provider-backed behavior, Rolimons, Valorant, Minecraft, Spotify search, Reddit, YouTube downloads, Telegram, bio providers\n' +
-                    '**Registry-only evidence gaps:** Developer',
-                inline: false
-            }
-        );
-
-    // Add category overview
-    if (sortedCategories.length > 0) {
-        const categoryList = sortedCategories.map(categoryName => {
-            const meta = categoryMetadata[categoryName] || { icon: '📁', description: '' };
-            const count = categories[categoryName]?.length || 0;
-            return `${meta.icon} **${categoryName}** - ${count} command${count !== 1 ? 's' : ''}`;
-        }).join('\n');
-
-        embed.addFields({
-            name: '📂 Browse Commands by Category',
-            value: categoryList + '\n\n💡 Legacy commands remain available while the hub layout rolls out.',
-            inline: false
-        });
-    }
-
-    embed.setFooter({ text: 'Type /bot help command:me for detailed command info' });
-
-    return embed;
-}
-
-/**
- * Build category embed
- */
-function buildCategoryEmbed(categoryName, categoryCommands) {
-    const meta = categoryMetadata[categoryName] || { icon: '📁', description: 'Commands in this category.' };
-
-    const embed = embeds.brand(
-        `${meta.icon} ${categoryName}`,
-        meta.description
-    );
-
-    // Add each command with its description
-    const commandList = categoryCommands
-        .map(cmd => {
-            // Get command description
-            let desc = cmd.data.description || 'No description available.';
-
-            // Truncate if too long
-            if (desc.length > 100) {
-                desc = desc.substring(0, 97) + '...';
-            }
-
-            const hasGroups = cmd.data.options && cmd.data.options.some(opt => opt.type === 2);
-
-            if (hasGroups) {
-                const groups = cmd.data.options
-                    .filter(opt => opt.type === 2)
-                    .map(group => `${group.name}: ${(group.options || []).filter(opt => opt.type === 1).map(sub => sub.name).join(', ')}`)
-                    .join(' • ');
-                const direct = cmd.data.options.filter(opt => opt.type === 1).map(sub => sub.name).join(', ');
-                return `**/${cmd.data.name}** \`${groups}${direct ? ` • direct: ${direct}` : ''}\`\n${desc}`;
-            }
-
-            const hasSubcommands = cmd.data.options && cmd.data.options.some(opt => opt.type === 1);
-
-            if (hasSubcommands) {
-                const subcommands = cmd.data.options
-                    .filter(opt => opt.type === 1)
-                    .map(sub => sub.name)
-                    .join(', ');
-                return `**/${cmd.data.name}** \`${subcommands}\`\n${desc}`;
-            }
-
-            return `**/${cmd.data.name}**\n${desc}`;
-        })
-        .join('\n\n');
-
-    embed.setDescription(commandList || 'No commands in this category.');
-
-    embed.setFooter({
-        text: `${categoryCommands.length} command${categoryCommands.length !== 1 ? 's' : ''} • Type /help [command] for detailed info`
-    });
-
-    return embed;
-}

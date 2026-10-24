@@ -61,6 +61,7 @@ const shutdown = async (signal) => {
     logger.info(`Received ${signal} signal, shutting down gracefully...`);
 
     try {
+        client.stopReadyTasks?.();
         // Cleanup services
         if (client.reminderService && client.reminderService.cleanup) {
             await client.reminderService.cleanup();

@@ -13,6 +13,9 @@ const SAFE_MENTIONS = { parse: [], repliedUser: false };
 const LINK_PATTERN = /(?:https?:\/\/|www\.|discord(?:app)?\.com\/invite|discord\.gg\/)/i;
 const POLL_MIN_MS = 10000;
 const POLL_MAX_MS = 7 * 86400000;
+const CONFESSION_GUILD_LIMIT = 4;
+const CONFESSION_GLOBAL_LIMIT = 32;
+const CONFESSION_CANCELLED = 'Confession submission was cancelled. Please try again when confessions are available.';
 
 function parsePollDuration(value) {
     const match = /^\s*(\d+)\s*([smhd])\s*$/i.exec(String(value || ''));
@@ -86,10 +89,13 @@ class CommunityUtilityService {
         this.nextPendingReconcileAt = 0;
         this.memberRefreshes = new Map();
         this.confessionSubmissions = new Map();
+        this.confessionSubmissionCount = 0;
+        this.confessionsClosed = false;
     }
 
     start() {
         if (this.interval) return;
+        this.confessionsClosed = false;
         this.interval = setInterval(() => this.reconcilePendingPublications().then(() => this.runDuePolls())
             .catch(error => logger.error(`Community scheduler failed: ${error.message}`)), 5000);
         this.interval.unref?.();
@@ -99,7 +105,8 @@ class CommunityUtilityService {
         if (this.interval) clearInterval(this.interval);
         this.interval = null;
         this.memberRefreshes.clear();
-        this.confessionSubmissions.clear();
+        this.confessionsClosed = true;
+        for (const guildId of this.confessionSubmissions.keys()) this.cancelConfessionSubmissions(guildId);
     }
 
     async reconcile() {
@@ -290,19 +297,80 @@ class CommunityUtilityService {
     }
 
     async submitConfession(interaction, categoryId) {
-        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-        const prior = this.confessionSubmissions.get(interaction.guildId) || Promise.resolve();
-        // ponytail: per-guild serialization keeps public numbering gap-free; add a distributed lock only for multi-process deployment.
-        const submission = prior.catch(() => null).then(() => this.publishConfession(interaction, categoryId));
-        this.confessionSubmissions.set(interaction.guildId, submission);
+        const guildId = interaction.guildId;
+        const userId = interaction.user.id;
+        let queue = this.confessionSubmissions.get(guildId);
+        if (this.confessionsClosed || queue?.cancelled) throw new Error(CONFESSION_CANCELLED);
+        if (queue?.entries.has(userId)) throw new Error('You already have a pending confession. Please wait for it to finish before submitting again.');
+        if (queue?.entries.size >= CONFESSION_GUILD_LIMIT || this.confessionSubmissionCount >= CONFESSION_GLOBAL_LIMIT) {
+            throw new Error('Confessions are busy. Please try again in a minute.');
+        }
+        if (!queue) {
+            queue = { entries: new Map(), active: null, cancelled: false };
+            this.confessionSubmissions.set(guildId, queue);
+        }
+        const entry = { interaction, categoryId, userId, ready: false };
+        const completion = new Promise((resolve, reject) => {
+            entry.resolve = resolve;
+            entry.reject = reject;
+        });
+        queue.entries.set(userId, entry);
+        this.confessionSubmissionCount++;
+        let acknowledgement;
         try {
-            return await submission;
-        } finally {
-            if (this.confessionSubmissions.get(interaction.guildId) === submission) this.confessionSubmissions.delete(interaction.guildId);
+            acknowledgement = interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+        } catch (error) {
+            acknowledgement = Promise.reject(error);
+        }
+        Promise.resolve(acknowledgement).then(() => {
+            if (!entry.interaction) return;
+            entry.ready = true;
+            this.drainConfessionSubmissions(guildId, queue);
+        }, error => {
+            if (!entry.interaction) return;
+            this.releaseConfessionSubmission(guildId, queue, entry);
+            entry.reject(error);
+            this.drainConfessionSubmissions(guildId, queue);
+        });
+        return completion;
+    }
+
+    releaseConfessionSubmission(guildId, queue, entry) {
+        if (!entry.interaction) return;
+        queue.entries.delete(entry.userId);
+        this.confessionSubmissionCount--;
+        entry.interaction = null;
+        if (!queue.entries.size && this.confessionSubmissions.get(guildId) === queue) this.confessionSubmissions.delete(guildId);
+    }
+
+    cancelConfessionSubmissions(guildId) {
+        const queue = this.confessionSubmissions.get(guildId);
+        if (!queue) return;
+        queue.cancelled = true;
+        for (const entry of queue.entries.values()) {
+            if (entry === queue.active) continue;
+            this.releaseConfessionSubmission(guildId, queue, entry);
+            entry.reject(new Error(CONFESSION_CANCELLED));
         }
     }
 
-    async publishConfession(interaction, categoryId) {
+    async drainConfessionSubmissions(guildId, queue) {
+        if (queue.active || queue.cancelled) return;
+        const entry = queue.entries.values().next().value;
+        if (!entry?.ready) return;
+        queue.active = entry;
+        try {
+            entry.resolve(await this.publishConfession(entry.interaction, entry.categoryId, queue));
+        } catch (error) {
+            entry.reject(error);
+        } finally {
+            this.releaseConfessionSubmission(guildId, queue, entry);
+            queue.active = null;
+            this.drainConfessionSubmissions(guildId, queue);
+        }
+    }
+
+    async publishConfession(interaction, categoryId, queue) {
         const config = this.confessionConfig(interaction.guildId);
         if (!config?.enabled) throw new Error('Confessions are not configured in this server.');
         const content = this.validateConfessionText(interaction.guildId, interaction.user.id, interaction.fields.getTextInputValue('content'));
@@ -310,6 +378,7 @@ class CommunityUtilityService {
         if (categoryId && !category) throw new Error('That confession category no longer exists.');
         const channelId = category?.channel_id || config.channel_id;
         const channel = await interaction.guild.channels.fetch(channelId).catch(() => null);
+        if (queue?.cancelled) throw new Error(CONFESSION_CANCELLED);
         if (!channel?.isTextBased()) throw new Error('The confession channel is unavailable.');
         const row = this.sqlite.transaction(() => {
             const current = this.confessionConfig(interaction.guildId);
@@ -635,7 +704,7 @@ class CommunityUtilityService {
 
     purgeGuild(guildId) {
         this.memberRefreshes.delete(guildId);
-        this.confessionSubmissions.delete(guildId);
+        this.cancelConfessionSubmissions(guildId);
         this.sqlite.transaction(() => {
             const pollIds = this.sqlite.prepare('SELECT id FROM community_polls WHERE guild_id = ?').all(guildId).map(row => row.id);
             if (pollIds.length) this.sqlite.prepare(`DELETE FROM community_poll_votes WHERE poll_id IN (${pollIds.map(() => '?').join(',')})`).run(...pollIds);

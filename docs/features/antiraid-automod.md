@@ -54,6 +54,10 @@ Custom regex runs in one lazy Node worker, never on the gateway thread. The
 worker receives at most ten 260-character patterns and 2,000 content
 characters; a short deadline kills and recreates a stuck worker. Invalid or
 timed-out patterns cannot block unrelated gateway work.
+When configured regex rules cannot run because the worker times out, fails, or
+has a full queue, ByteBot deletes the unchecked message and records the reason
+as a `regex:unavailable` incident. This does not add a strike or trigger a
+member punishment. Exempt members and channels keep their existing exemptions.
 
 Discord migration creates or updates only the exact rule IDs ByteBot records.
 It migrates up to 1,000 keywords, 100 allowed terms, 20 exempt roles, and 50

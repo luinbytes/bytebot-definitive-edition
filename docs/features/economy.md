@@ -48,11 +48,18 @@ invoker's real Discord Manage Server permission inside the handler. ByteBot
 RBAC can narrow these paths but cannot substitute a fake permission for the
 real Discord permission.
 
+Adding a shop role also requires the caller's real Manage Roles permission
+and authority over that role. Delivery checks the current server `denyperm`
+policy, including purchases configured before the policy changed.
+
 Role-shop delivery also requires ByteBot's Manage Roles permission and a role
 below ByteBot without Administrator or integration management. A purchase is
 debited and marked pending before delivery. Successful delivery becomes
 durable; a proven failure writes a compensating credit. Uncertain Discord
 timeouts remain pending and are reconciled on startup rather than guessing.
+If a pending delivery is unconfirmed and current role policy blocks it,
+the purchase stays pending until the policy is resolved and reconciliation
+can finish. A confirmed delivery settles without another debit or role grant.
 
 `reset`, `destroy`, and `disable` first return a random confirmation code bound
 to the actor, guild, action, reason, target, amount, and current account plan.
@@ -71,8 +78,11 @@ scope totals as decimal `BigInt` values in the same transaction. Current
 circulation and ranks remain under a JavaScript-safe per-scope supply ceiling;
 lifetime totals are never read through a lossy numeric `SUM`.
 
-Game wagers and lab purchases are declared burns; returns, refunds, and lab
-collections are declared mints. Robbery is a paired zero-supply transfer.
+Game wagers, shop reservations and lab purchases are declared burns; returns,
+proven shop refunds and lab collections are declared mints. Pending shop
+reservations remain debited until delivery is confirmed or a failure is proven.
+Startup rebuilds totals for older shop entries without changing ledger history.
+Robbery is a paired zero-supply transfer.
 Interactive games and gang invites use durable, actor-bound component state,
 and startup refunds only expired active wagers once. `bal` is recorded as the
 prefix-style alias of `/economy balance`; Discord has no slash alias field.

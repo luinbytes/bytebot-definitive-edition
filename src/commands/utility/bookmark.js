@@ -58,7 +58,7 @@ module.exports = {
 
     cooldown: 3,
     longRunning: true,
-    // All bookmark operations are private - handled in execute via flags: [MessageFlags.Ephemeral]
+    deferEphemeral: true,
 
     async execute(interaction, client) {
         const subcommand = interaction.options.getSubcommand();
@@ -152,7 +152,7 @@ async function handleList(interaction, userId) {
     // Add navigation hint
     if (totalPages > 1) {
         listEmbed.setFooter({
-            text: `Use /bookmark list page:${page + 1} to view the next page`
+            text: `Use /me bookmark list page:${page + 1} to view the next page`
         });
     }
 

@@ -6,7 +6,9 @@ const embeds = require('../../utils/embeds');
 const logger = require('../../utils/logger');
 const { handleCommandError } = require('../../utils/errorHandlerUtil');
 const { getControlPanel, getRenameModal, getLimitModal } = require('../../components/bytepodControls');
-const { upsert, insertIfNotExists } = require('../../utils/dbUtil');
+const { upsert } = require('../../utils/dbUtil');
+const { countPresets, listPresets, addPreset } = require('../../utils/bytepodPresets');
+const { sendPaginatedMessage } = require('../../utils/paginationUtil');
 
 // Helper to format seconds into human-readable time
 function formatDuration(totalSeconds) {
@@ -250,26 +252,8 @@ module.exports = {
 
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
-                // Insert if not duplicate
-                const result = await insertIfNotExists(
-                    bytepodAutoWhitelist,
-                    () => and(
-                        eq(bytepodAutoWhitelist.userId, interaction.user.id),
-                        eq(bytepodAutoWhitelist.guildId, interaction.guild.id),
-                        eq(bytepodAutoWhitelist.targetUserId, target.id)
-                    ),
-                    {
-                        userId: interaction.user.id,
-                        guildId: interaction.guild.id,
-                        targetUserId: target.id
-                    },
-                    { userId: interaction.user.id, targetUserId: target.id, operation: 'add-auto-whitelist' },
-                    `${target} is already in your preset.`
-                );
-
-                if (!result.success) {
-                    return interaction.editReply({ content: result.error });
-                }
+                const error = addPreset(interaction.user.id, interaction.guild.id, target.id);
+                if (error) return interaction.editReply({ content: error });
 
                 return interaction.editReply({ embeds: [embeds.success('Preset Added', `Added ${target} to your auto-whitelist.`)] });
             }
@@ -286,13 +270,14 @@ module.exports = {
             }
             if (subdomain === 'list') {
                 await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
-                const presets = await db.select().from(bytepodAutoWhitelist)
-                    .where(and(
-                        eq(bytepodAutoWhitelist.userId, interaction.user.id),
-                        eq(bytepodAutoWhitelist.guildId, interaction.guild.id)
-                    ));
-                const names = presets.map(p => `<@${p.targetUserId}>`).join(', ') || 'No users.';
-                return interaction.editReply({ embeds: [embeds.info('Auto-Whitelist Presets', names)] });
+                const count = countPresets(interaction.user.id, interaction.guild.id);
+                return sendPaginatedMessage({
+                    interaction, deferred: true, totalPages: Math.max(1, Math.ceil(count / 50)), customIdPrefix: 'pod_presets',
+                    renderPage: page => {
+                        const presets = listPresets(interaction.user.id, interaction.guild.id, 50, page * 50);
+                        return embeds.info('Auto-Whitelist Presets', presets.map(p => `<@${p.targetUserId}>`).join(', ') || 'No users.');
+                    }
+                });
             }
         }
 

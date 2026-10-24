@@ -49,10 +49,10 @@ async function fetchGuildStructure(guild) {
 }
 
 async function executeBackup(interaction) {
-    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+    if (!interaction.member?.permissions?.has(PermissionFlagsBits.ManageGuild)) {
         return respond(interaction, 'You need **Manage Server** to manage backups.');
     }
-    const service = new GuildBackupService({ sqlite });
+    const service = new GuildBackupService({ sqlite, botOwnerIds: require('./config').developers || [] });
     const action = interaction.options.getSubcommand();
     const id = interaction.options.getString('backup_id');
     try {

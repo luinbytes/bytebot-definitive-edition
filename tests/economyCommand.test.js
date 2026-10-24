@@ -30,6 +30,41 @@ describe('economy command', () => {
         expect(PermissionFlagsBits.ManageGuild).toBeDefined();
     });
 
+    test('shop setup rejects roles outside the configuring actors authority', async () => {
+        jest.resetModules();
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bytebot-shop-auth-'));
+        process.env.DATABASE_URL = path.join(tempDir, 'sqlite.db');
+        const database = require('../src/database');
+        try {
+            await database.runMigrations();
+            const { EconomyService } = require('../src/services/economyService');
+            const service = new EconomyService({ sqlite: database.sqlite });
+            service.enable('guild1', 'admin1');
+            const role = { id: 'reward', name: 'VIP', position: 10, editable: true, managed: false, permissions: { has: () => false } };
+            const actor = { id: 'admin1', roles: { highest: { position: 10 } }, permissions: { has: () => true } };
+            const guild = { id: 'guild1', ownerId: 'owner1', members: { me: { permissions: { has: () => true } } },
+                roles: { cache: new Map([[role.id, role]]) } };
+            const interaction = { guildId: guild.id, guild, user: { id: actor.id }, member: actor,
+                options: { getSubcommandGroup: () => 'shop', getSubcommand: () => 'add', getRole: () => role, getInteger: () => 10 },
+                reply: jest.fn() };
+            const command = require('../src/commands/economy/economy');
+            await command.execute(interaction, { economyService: service });
+            expect(service.listShopItems(guild.id)).toHaveLength(0);
+            expect(interaction.reply.mock.calls[0][0].embeds[0].data.description).toContain('highest role');
+            actor.roles.highest.position = 11;
+            actor.permissions.has = permission => permission === PermissionFlagsBits.ManageGuild;
+            await command.execute(interaction, { economyService: service });
+            expect(service.listShopItems(guild.id)).toHaveLength(0);
+            actor.permissions.has = () => true;
+            await command.execute(interaction, { economyService: service });
+            expect(service.listShopItems(guild.id)).toHaveLength(1);
+        } finally {
+            database.sqlite.close();
+            delete process.env.DATABASE_URL;
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+
     test('keeps balance public while requiring real Manage Server for config mutation', async () => {
         jest.resetModules();
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bytebot-economy-command-'));

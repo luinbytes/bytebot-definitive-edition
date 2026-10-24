@@ -342,17 +342,18 @@ class EventLoggingService {
         `).get(guild.id, actorId, channelId);
         if (ignored) return 0;
         const now = this.now();
-        this.pruneOutbox();
+        if (now - this.lastOutboxPrune >= 3600000) this.pruneOutbox();
         const rows = this.sqlite.prepare(`SELECT channel_id, color FROM event_log_channels WHERE guild_id = ? AND module = ?`)
             .all(guild.id, module);
         const inserted = this.sqlite.transaction(() => {
+            if (!rows.length) return 0;
+            const guildStats = this.sqlite.prepare(`SELECT COUNT(*) AS rows, COALESCE(SUM(length(CAST(payload AS BLOB))), 0) AS bytes FROM event_log_outbox WHERE guild_id = ?`).get(guild.id);
+            const globalStats = this.sqlite.prepare(`SELECT COUNT(*) AS rows, COALESCE(SUM(length(CAST(payload AS BLOB))), 0) AS bytes FROM event_log_outbox`).get();
             let count = 0;
             for (const row of rows) {
                 const duplicate = this.sqlite.prepare(`SELECT 1 FROM event_log_outbox WHERE guild_id = ? AND event_key = ? AND channel_id = ?`)
                     .get(guild.id, eventKey, row.channel_id);
                 if (duplicate) continue;
-                const guildStats = this.sqlite.prepare(`SELECT COUNT(*) AS rows, COALESCE(SUM(length(CAST(payload AS BLOB))), 0) AS bytes FROM event_log_outbox WHERE guild_id = ?`).get(guild.id);
-                const globalStats = this.sqlite.prepare(`SELECT COUNT(*) AS rows, COALESCE(SUM(length(CAST(payload AS BLOB))), 0) AS bytes FROM event_log_outbox`).get();
                 const payload = JSON.stringify({
                     title: String(title || `${module} event`).slice(0, 256),
                     description: String(description || 'No details available.').slice(0, 4096),
@@ -362,11 +363,16 @@ class EventLoggingService {
                 if (guildStats.rows >= MAX_GUILD_OUTBOX_ROWS || globalStats.rows >= MAX_OUTBOX_ROWS
                     || guildStats.bytes + payloadBytes > MAX_GUILD_OUTBOX_BYTES
                     || globalStats.bytes + payloadBytes > MAX_OUTBOX_BYTES) break;
-                count += this.sqlite.prepare(`
+                const changes = this.sqlite.prepare(`
                     INSERT INTO event_log_outbox
                         (guild_id, event_key, channel_id, module, payload, attempts, next_attempt_at, status, created_at)
                     VALUES (?, ?, ?, ?, ?, 0, ?, 'pending', ?)
                 `).run(guild.id, eventKey, row.channel_id, module, payload, now, now).changes;
+                count += changes;
+                guildStats.rows += changes;
+                globalStats.rows += changes;
+                guildStats.bytes += payloadBytes * changes;
+                globalStats.bytes += payloadBytes * changes;
             }
             return count;
         })();

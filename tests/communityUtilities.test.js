@@ -3,6 +3,24 @@ const os = require('os');
 const path = require('path');
 const { PermissionFlagsBits } = require('discord.js');
 
+function confessionInteraction(guildId, userId, channel) {
+    return {
+        guildId, user: { id: userId }, fields: { getTextInputValue: () => 'A private confession' },
+        guild: { channels: { fetch: jest.fn().mockResolvedValue(channel) } },
+        deferReply: jest.fn().mockResolvedValue({}), editReply: jest.fn().mockResolvedValue({})
+    };
+}
+
+function pendingOperation() {
+    let resolve;
+    let reject;
+    const promise = new Promise((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise;
+        reject = rejectPromise;
+    });
+    return { promise, resolve, reject };
+}
+
 describe('community utilities', () => {
     let tempDir;
     let database;
@@ -125,6 +143,276 @@ describe('community utilities', () => {
         await expect(second).resolves.toBeDefined();
         expect(database.sqlite.prepare('SELECT number FROM confessions').all()).toEqual([{ number: 1 }]);
         expect(service.confessionConfig('guild1').next_number).toBe(2);
+    });
+
+    test('rejects guild overflow before deferring while a Discord send is unresolved', async () => {
+        service.setConfessionConfig('guild1', 'channel1');
+        let release;
+        const message = { id: 'message1', react: jest.fn().mockResolvedValue({}) };
+        const channel = { isTextBased: () => true, send: jest.fn(() => new Promise(resolve => { release = resolve; })) };
+        const submissions = Array.from({ length: 4 }, (_, index) =>
+            service.submitConfession(confessionInteraction('guild1', `author${index}`, channel), 0).catch(error => error));
+        await new Promise(setImmediate);
+        expect(channel.send).toHaveBeenCalledTimes(1);
+        const overflow = confessionInteraction('guild1', 'overflow', channel);
+        let rejection;
+        const extra = service.submitConfession(overflow, 0).catch(error => { rejection = error; });
+        try {
+            await new Promise(setImmediate);
+            expect(rejection?.message).toMatch(/busy.*try again/i);
+            expect(overflow.deferReply).not.toHaveBeenCalled();
+            expect(channel.send).toHaveBeenCalledTimes(1);
+        } finally {
+            channel.send.mockResolvedValue(message);
+            release(message);
+            await Promise.all([...submissions, extra]);
+        }
+    });
+
+    test('rejects a duplicate pending author without blocking that author in another guild', async () => {
+        service.setConfessionConfig('guild1', 'channel1');
+        service.setConfessionConfig('guild2', 'channel2');
+        const blocked = pendingOperation();
+        const message = { id: 'message1', react: jest.fn().mockResolvedValue({}) };
+        const slowChannel = { isTextBased: () => true, send: jest.fn(() => blocked.promise) };
+        const otherChannel = { isTextBased: () => true, send: jest.fn().mockResolvedValue(message) };
+        const first = service.submitConfession(confessionInteraction('guild1', 'author1', slowChannel), 0);
+        const duplicate = confessionInteraction('guild1', 'author1', slowChannel);
+        try {
+            await expect(service.submitConfession(duplicate, 0)).rejects.toThrow(/pending confession.*wait/i);
+            expect(duplicate.deferReply).not.toHaveBeenCalled();
+            const otherGuild = confessionInteraction('guild2', 'author1', otherChannel);
+            await service.submitConfession(otherGuild, 0);
+            expect(otherGuild.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Confession #1 was posted anonymously.' }));
+            expect(slowChannel.send).toHaveBeenCalledTimes(1);
+        } finally {
+            blocked.resolve(message);
+            await first;
+        }
+    });
+
+    test('bounds admission globally and restores capacity after sends fail', async () => {
+        const blocked = pendingOperation();
+        const channel = { isTextBased: () => true, send: jest.fn(() => blocked.promise) };
+        const submissions = [];
+        for (let guild = 0; guild < 8; guild++) {
+            const guildId = `guild${guild}`;
+            service.setConfessionConfig(guildId, 'channel1');
+            for (let user = 0; user < 4; user++) {
+                submissions.push(service.submitConfession(confessionInteraction(guildId, `author${user}`, channel), 0).catch(error => error));
+            }
+        }
+        service.setConfessionConfig('overflow', 'channel1');
+        const overflow = confessionInteraction('overflow', 'author1', channel);
+        try {
+            await expect(service.submitConfession(overflow, 0)).rejects.toThrow(/busy.*try again/i);
+            expect(overflow.deferReply).not.toHaveBeenCalled();
+            await new Promise(setImmediate);
+            expect(channel.send).toHaveBeenCalledTimes(8);
+        } finally {
+            blocked.reject(new Error('Discord unavailable'));
+            const results = await Promise.all(submissions);
+            expect(results.every(error => error.message === 'Discord unavailable')).toBe(true);
+        }
+        const message = { id: 'message1', react: jest.fn().mockResolvedValue({}) };
+        channel.send.mockResolvedValue(message);
+        const retries = [];
+        for (let guild = 0; guild < 8; guild++) {
+            for (let user = 0; user < 4; user++) {
+                const interaction = confessionInteraction(`guild${guild}`, `author${user}`, channel);
+                retries.push(service.submitConfession(interaction, 0));
+            }
+        }
+        await Promise.all(retries);
+        for (let guild = 0; guild < 8; guild++) {
+            expect(service.confessionConfig(`guild${guild}`).next_number).toBe(5);
+        }
+    });
+
+    test('releases admission after defer rejection and preserves admission order across slow defers', async () => {
+        service.setConfessionConfig('guild1', 'channel1');
+        const blocked = pendingOperation();
+        const message = { id: 'message1', react: jest.fn().mockResolvedValue({}) };
+        const channel = { isTextBased: () => true, send: jest.fn().mockResolvedValue(message) };
+        const first = confessionInteraction('guild1', 'author1', channel);
+        first.deferReply.mockReturnValue(blocked.promise);
+        const failed = service.submitConfession(first, 0).catch(error => error);
+        const queued = Array.from({ length: 3 }, (_, index) => {
+            const interaction = confessionInteraction('guild1', `queued${index}`, channel);
+            return { interaction, result: service.submitConfession(interaction, 0) };
+        });
+        await new Promise(setImmediate);
+        expect(channel.send).not.toHaveBeenCalled();
+        blocked.reject(new Error('defer failed'));
+        expect((await failed).message).toBe('defer failed');
+        const retry = confessionInteraction('guild1', 'author1', channel);
+        await service.submitConfession(retry, 0);
+        await Promise.all(queued.map(entry => entry.result));
+        expect(queued[0].interaction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Confession #1 was posted anonymously.' }));
+        expect(retry.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Confession #4 was posted anonymously.' }));
+    });
+
+    test('publishes in admission order even when a later modal defers first', async () => {
+        service.setConfessionConfig('guild1', 'channel1');
+        const deferred = pendingOperation();
+        const message = { id: 'message1', react: jest.fn().mockResolvedValue({}) };
+        const channel = { isTextBased: () => true, send: jest.fn().mockResolvedValue(message) };
+        const first = confessionInteraction('guild1', 'author1', channel);
+        first.deferReply.mockReturnValue(deferred.promise);
+        const second = confessionInteraction('guild1', 'author2', channel);
+        const submissions = [service.submitConfession(first, 0), service.submitConfession(second, 0)];
+        try {
+            await new Promise(setImmediate);
+            expect(channel.send).not.toHaveBeenCalled();
+        } finally {
+            deferred.resolve({});
+            await Promise.all(submissions);
+        }
+        expect(first.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Confession #1 was posted anonymously.' }));
+        expect(second.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Confession #2 was posted anonymously.' }));
+    });
+
+    test.each(['cleanup', 'purgeGuild'])('%s cancels queued confessions before an in-flight send settles', async operation => {
+        service.setConfessionConfig('guild1', 'channel1');
+        const blocked = pendingOperation();
+        const message = { id: 'message1', react: jest.fn().mockResolvedValue({}) };
+        const channel = { isTextBased: () => true, send: jest.fn(() => blocked.promise) };
+        const first = service.submitConfession(confessionInteraction('guild1', 'active', channel), 0);
+        const cancellations = [];
+        const queued = Array.from({ length: 3 }, (_, index) =>
+            service.submitConfession(confessionInteraction('guild1', `queued${index}`, channel), 0).catch(error => { cancellations.push(error); }));
+        await new Promise(setImmediate);
+        expect(channel.send).toHaveBeenCalledTimes(1);
+        service[operation]('guild1');
+        service[operation]('guild1');
+        try {
+            await new Promise(setImmediate);
+            expect(cancellations).toHaveLength(3);
+            expect(cancellations.every(error => /cancelled.*try again/i.test(error.message))).toBe(true);
+            expect(channel.send).toHaveBeenCalledTimes(1);
+        } finally {
+            channel.send.mockResolvedValue(message);
+            blocked.resolve(message);
+            await Promise.all([first, ...queued]);
+        }
+        expect(channel.send).toHaveBeenCalledTimes(1);
+        if (operation === 'purgeGuild') {
+            service.setConfessionConfig('guild1', 'channel1');
+            const retry = confessionInteraction('guild1', 'queued0', channel);
+            await service.submitConfession(retry, 0);
+            expect(retry.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Confession #1 was posted anonymously.' }));
+        } else {
+            const retry = confessionInteraction('guild1', 'new', channel);
+            await expect(service.submitConfession(retry, 0)).rejects.toThrow('cancelled');
+            expect(retry.deferReply).not.toHaveBeenCalled();
+        }
+    });
+
+    test.each(['cleanup', 'purgeGuild'])('%s prevents publication after a pending channel fetch', async operation => {
+        service.setConfessionConfig('guild1', 'channel1');
+        const blocked = pendingOperation();
+        const channel = { isTextBased: () => true, send: jest.fn() };
+        const interaction = confessionInteraction('guild1', 'author1', channel);
+        interaction.guild.channels.fetch.mockReturnValue(blocked.promise);
+        const result = service.submitConfession(interaction, 0).catch(error => error);
+        await new Promise(setImmediate);
+        service[operation]('guild1');
+        blocked.resolve(channel);
+        expect((await result).message).toMatch(/cancelled/);
+        expect(channel.send).not.toHaveBeenCalled();
+    });
+
+    test('purge releases queued slots and late defer rejection cannot release a new submission', async () => {
+        service.setConfessionConfig('guild1', 'channel1');
+        const deferred = pendingOperation();
+        const channel = { isTextBased: () => true, send: jest.fn() };
+        const interaction = confessionInteraction('guild1', 'author1', channel);
+        interaction.deferReply.mockReturnValue(deferred.promise);
+        const cancelled = service.submitConfession(interaction, 0).catch(error => error);
+        service.purgeGuild('guild1');
+        expect((await cancelled).message).toMatch(/cancelled/);
+
+        const acknowledgement = pendingOperation();
+        const submissions = Array.from({ length: 32 }, (_, index) => {
+            const next = confessionInteraction(`guild${index}`, 'author1', channel);
+            next.deferReply.mockReturnValue(acknowledgement.promise);
+            return service.submitConfession(next, 0).catch(error => error);
+        });
+        try {
+            const overflow = confessionInteraction('overflow', 'author1', channel);
+            await expect(service.submitConfession(overflow, 0)).rejects.toThrow('busy');
+            deferred.reject(new Error('token expired'));
+            await new Promise(setImmediate);
+            await expect(service.submitConfession(overflow, 0)).rejects.toThrow('busy');
+            expect(overflow.deferReply).not.toHaveBeenCalled();
+            expect(channel.send).not.toHaveBeenCalled();
+        } finally {
+            service.cleanup();
+            acknowledgement.resolve({});
+            const results = await Promise.all(submissions);
+            expect(results.every(error => /cancelled/.test(error.message))).toBe(true);
+        }
+        await new Promise(setImmediate);
+        expect(channel.send).not.toHaveBeenCalled();
+    });
+
+    test('purge keeps an in-flight send counted until it settles and releases queued capacity', async () => {
+        service.setConfessionConfig('guild1', 'channel1');
+        const blocked = pendingOperation();
+        const message = { id: 'message1', react: jest.fn().mockResolvedValue({}) };
+        const channel = { isTextBased: () => true, send: jest.fn(() => blocked.promise) };
+        const first = service.submitConfession(confessionInteraction('guild1', 'active', channel), 0);
+        const queued = Array.from({ length: 3 }, (_, index) =>
+            service.submitConfession(confessionInteraction('guild1', `queued${index}`, channel), 0).catch(error => error));
+        await new Promise(setImmediate);
+        service.purgeGuild('guild1');
+        await Promise.all(queued);
+        const deferred = pendingOperation();
+        const replacements = Array.from({ length: 31 }, (_, index) => {
+            const interaction = confessionInteraction(`other${index}`, 'author1', channel);
+            interaction.deferReply.mockReturnValue(deferred.promise);
+            return service.submitConfession(interaction, 0).catch(error => error);
+        });
+        try {
+            const overflow = confessionInteraction('overflow', 'author1', channel);
+            await expect(service.submitConfession(overflow, 0)).rejects.toThrow('busy');
+            blocked.resolve(message);
+            await first;
+            service.setConfessionConfig('overflow', 'channel1');
+            await service.submitConfession(overflow, 0);
+            expect(overflow.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Confession #1 was posted anonymously.' }));
+        } finally {
+            blocked.resolve(message);
+            await first;
+            service.cleanup();
+            deferred.resolve({});
+            const results = await Promise.all(replacements);
+            expect(results.every(error => /cancelled/.test(error.message))).toBe(true);
+        }
+    });
+
+    test('preserves category routing, anonymous output, numbering and the 60 second cooldown', async () => {
+        let now = 100000;
+        service.now = () => now;
+        service.setConfessionConfig('guild1', 'general');
+        const [category] = service.configureCategory('guild1', 'add', 'Life', 'life-channel');
+        const message = { id: 'message1', react: jest.fn().mockResolvedValue({}) };
+        const channel = { isTextBased: () => true, send: jest.fn().mockResolvedValue(message) };
+        const first = confessionInteraction('guild1', 'secret-author', channel);
+        await service.submitConfession(first, category.id);
+        expect(first.guild.channels.fetch).toHaveBeenCalledWith('life-channel');
+        const payload = channel.send.mock.calls[0][0];
+        expect(payload.embeds[0].data.footer.text).toBe('Life');
+        expect(JSON.stringify(payload)).not.toContain('secret-author');
+        await expect(service.submitConfession(confessionInteraction('guild1', 'secret-author', channel), 0)).rejects.toThrow('60 seconds');
+        now = 159999;
+        await expect(service.submitConfession(confessionInteraction('guild1', 'secret-author', channel), 0)).rejects.toThrow('60 seconds');
+        now = 160000;
+        const next = confessionInteraction('guild1', 'secret-author', channel);
+        await service.submitConfession(next, 0);
+        expect(next.guild.channels.fetch).toHaveBeenCalledWith('general');
+        expect(channel.send.mock.calls[1][0].embeds[0].data.footer.text).toBe('General');
+        expect(next.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Confession #2 was posted anonymously.' }));
     });
 
     test('keeps published confession attribution when acknowledgement fails', async () => {

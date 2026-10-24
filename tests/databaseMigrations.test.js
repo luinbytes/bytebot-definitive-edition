@@ -21,6 +21,73 @@ describe('database migrations', () => {
         fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
+    test.each(['fresh', 'legacy', 'missing-table'])(
+        '%s startup separates actual activity from freeze coverage durably', async mode => {
+            const migrations = readMigrationFiles({ migrationsFolder: './drizzle' });
+            let previousRow;
+            if (mode !== 'fresh') {
+                const seed = new Database(process.env.DATABASE_URL);
+                seed.exec(`CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY,
+                    hash TEXT NOT NULL, created_at NUMERIC);
+                    CREATE TABLE legacy_sentinel (value TEXT NOT NULL);
+                    INSERT INTO legacy_sentinel VALUES ('keep me');`);
+                const record = seed.prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)');
+                for (const migration of migrations.filter(entry => entry.folderMillis < 1787745600000)) {
+                    record.run(migration.hash, migration.folderMillis);
+                }
+                if (mode === 'legacy') {
+                    seed.exec(`CREATE TABLE activity_streaks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, user_id TEXT NOT NULL, guild_id TEXT NOT NULL,
+                        current_streak INTEGER NOT NULL DEFAULT 0, longest_streak INTEGER NOT NULL DEFAULT 0,
+                        last_activity_date TEXT, total_active_days INTEGER NOT NULL DEFAULT 0,
+                        freezes_available INTEGER NOT NULL DEFAULT 1, last_freeze_reset INTEGER,
+                        created_at INTEGER DEFAULT 123, updated_at INTEGER DEFAULT 456,
+                        UNIQUE (user_id, guild_id));
+                        INSERT INTO activity_streaks VALUES
+                            (7, 'legacy-user', 'guild1', 3, 10, '2022-10-21', 25, 1, 100, 200, 300);`);
+                    previousRow = seed.prepare('SELECT * FROM activity_streaks').get();
+                }
+                seed.close();
+            }
+
+            database = require('../src/database');
+            await database.runMigrations();
+
+            expect(database.sqlite.prepare('SELECT MAX(created_at) AS applied FROM __drizzle_migrations').get().applied)
+                .toBe(1787745600000);
+            expect(database.sqlite.prepare("PRAGMA table_info('activity_streaks')").all())
+                .toEqual(expect.arrayContaining([
+                    expect.objectContaining({ name: 'last_activity_date', notnull: 0 }),
+                    expect.objectContaining({ name: 'streak_covered_through', notnull: 0, dflt_value: null })
+                ]));
+            const insert = database.sqlite.prepare(`INSERT INTO activity_streaks (user_id, guild_id)
+                VALUES ('new-user', 'guild1')`);
+            insert.run();
+            expect(() => insert.run()).toThrow('UNIQUE constraint failed');
+            expect(database.sqlite.prepare("PRAGMA index_list('activity_streaks')").all().map(index => index.name))
+                .toEqual(expect.arrayContaining([
+                    'streaks_guild_current_idx', 'streaks_guild_longest_idx', 'streaks_user_guild_idx'
+                ]));
+
+            database.sqlite.close();
+            database = null;
+            jest.resetModules();
+            database = require('../src/database');
+            await database.runMigrations();
+            if (mode === 'legacy') {
+                expect(database.sqlite.prepare("SELECT * FROM activity_streaks WHERE user_id = 'legacy-user'").get())
+                    .toEqual({ ...previousRow, streak_covered_through: null });
+                expect(database.sqlite.prepare("PRAGMA table_info('activity_streaks')").all())
+                    .toEqual(expect.arrayContaining([
+                        expect.objectContaining({ name: 'created_at', dflt_value: '123' }),
+                        expect.objectContaining({ name: 'updated_at', dflt_value: '456' })
+                    ]));
+            }
+            if (mode !== 'fresh') {
+                expect(database.sqlite.prepare('SELECT * FROM legacy_sentinel').all()).toEqual([{ value: 'keep me' }]);
+            }
+        });
+
     test('a fresh database preserves migration constraints', async () => {
         database = require('../src/database');
 
@@ -72,6 +139,47 @@ describe('database migrations', () => {
             (id, guild_id, scope_type, scope_id, user_id, game, bet, status, nonce, transaction_id, created_at, expires_at)
             VALUES ('bad', 'guild1', 'global', 'global', 'user1', 'coinflip', 9, 'active', 'n', 't', 1, 2)`).run()).toThrow();
     });
+
+    test.each(['fresh', 'journalled', 'unjournalled'])(
+        '%s startup preserves durable birthday grants and legacy birthdays', async mode => {
+            if (mode !== 'fresh') {
+                const seed = new Database(process.env.DATABASE_URL);
+                seed.exec(`CREATE TABLE birthdays (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL, guild_id TEXT NOT NULL, month INTEGER NOT NULL,
+                    day INTEGER NOT NULL, created_at INTEGER);
+                    INSERT INTO birthdays (user_id, guild_id, month, day) VALUES ('legacy-user', 'guild1', 7, 31);`);
+                if (mode === 'journalled') {
+                    seed.exec(`CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY,
+                        hash TEXT NOT NULL, created_at NUMERIC);`);
+                    const record = seed.prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)');
+                    for (const migration of readMigrationFiles({ migrationsFolder: './drizzle' }).slice(0, -1)) {
+                        record.run(migration.hash, migration.folderMillis);
+                    }
+                }
+                seed.close();
+            }
+            database = require('../src/database');
+            await database.runMigrations();
+            const insert = database.sqlite.prepare(`INSERT INTO birthday_role_grants
+                (id, guild_id, user_id, role_id, joined_at, expires_at, state)
+                VALUES (?, 'guild1', 'user1', 'role1', 1000, 86400001, 'granted')`);
+            insert.run('grant1');
+            expect(() => insert.run('duplicate')).toThrow('UNIQUE constraint failed');
+            expect(database.sqlite.prepare("PRAGMA index_list('birthday_role_grants')").all())
+                .toContainEqual(expect.objectContaining({ name: 'birthday_role_grants_expiry_idx' }));
+            database.sqlite.close();
+            database = null;
+            jest.resetModules();
+            database = require('../src/database');
+            await database.runMigrations();
+            expect(database.sqlite.prepare('SELECT * FROM birthday_role_grants').all()).toEqual([{
+                id: 'grant1', guild_id: 'guild1', user_id: 'user1', role_id: 'role1',
+                joined_at: 1000, expires_at: 86400001, state: 'granted'
+            }]);
+            if (mode !== 'fresh') {
+                expect(database.sqlite.prepare('SELECT user_id FROM birthdays').all()).toEqual([{ user_id: 'legacy-user' }]);
+            }
+        });
 
     test('an existing database gains economy scope constraints without data loss', async () => {
         const seed = new Database(process.env.DATABASE_URL);
@@ -207,6 +315,29 @@ describe('database migrations', () => {
             INSERT INTO denied_role_permissions (guild_id, permission)
             VALUES ('guild1', 'Administrator')
         `).run()).toThrow();
+    });
+
+    test.each([
+        ['forced_nicknames', `CREATE TABLE forced_nicknames (guild_id TEXT, user_id TEXT, nickname TEXT, updated_at INTEGER);
+            INSERT INTO forced_nicknames VALUES ('guild1', 'user1', 'first', 1), ('guild1', 'user1', 'second', 2);`],
+        ['bytepod_user_settings', `CREATE TABLE bytepod_user_settings (id INTEGER PRIMARY KEY, user_id TEXT, guild_id TEXT,
+            auto_lock INTEGER, summary_enabled INTEGER, pod_name_style TEXT);
+            INSERT INTO bytepod_user_settings VALUES (1, 'user1', 'guild1', 0, 0, 'username'), (2, 'user1', 'guild1', 1, 1, 'random');`]
+    ])('failed %s compatibility repair rejects startup and preserves existing rows', async (table, setup) => {
+        const seed = new Database(process.env.DATABASE_URL);
+        seed.exec(`${setup}
+            CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL, created_at NUMERIC);`);
+        const record = seed.prepare('INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)');
+        for (const migration of readMigrationFiles({ migrationsFolder: './drizzle' })) record.run(migration.hash, migration.folderMillis);
+        const existing = seed.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all();
+        seed.close();
+
+        database = require('../src/database');
+        await expect(database.runMigrations()).rejects.toMatchObject({
+            message: expect.stringContaining('UNIQUE constraint failed')
+        });
+        expect(database.sqlite.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()).toEqual(existing);
+        expect(database.sqlite.inTransaction).toBe(false);
     });
 
     test('compatibility-created moderation state keeps composite uniqueness', async () => {

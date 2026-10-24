@@ -18,7 +18,7 @@ The public-source contract and source discrepancies are recorded in
   `/server logs recover` path explicitly lists, retries, or abandons uncertain
   sends.
 
-Greed's text aliases are displayed in `/help`; Discord slash commands do not
+Greed's text aliases are displayed in `/bot help`; Discord slash commands do not
 support aliases. Formerly paid capabilities have no billing, entitlement, or
 vote check. Analytics retains at most 1,095 days, event logging accepts at
 most 15 distinct destination channels, and rank-card customization is
@@ -50,3 +50,10 @@ and voice state as a baseline without fabricating offline activity. Live
 boards recover after restarts or message deletion within Discord's nonce
 window; an older ambiguous creation is held for administrator recovery.
 Analytics retention never removes XP balances or level configuration.
+Streaks retain the last actual activity date separately from freeze coverage.
+Pruning activity logs does not remove the Last Active date from `/me streak view`,
+and a freeze does not advance that date or count as an active day.
+When achievement tracking is disabled or opted out, accepted activity still
+updates Last Active. That activity does not advance streak counters, consume
+freezes, or award achievements. Re-enabling counts eligible activity once even
+if the member was already active that day.

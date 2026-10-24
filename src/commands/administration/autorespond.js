@@ -5,7 +5,7 @@ const { autoResponses } = require('../../database/schema');
 const { eq, and, count } = require('drizzle-orm');
 const config = require('../../utils/config');
 const { dbLog } = require('../../utils/dbLogger');
-const { createAutoResponder, MAX_AUTO_RESPONDERS } = require('../../services/autoResponderService');
+const { createAutoResponder, MAX_AUTO_RESPONDERS, validateResponderRoleAuthority } = require('../../services/autoResponderService');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -364,6 +364,10 @@ async function handleToggle(interaction, client) {
 
     // Toggle
     const newState = !response.enabled;
+    if (newState) {
+        const invalid = await validateResponderRoleAuthority(interaction, response);
+        if (invalid) return interaction.editReply({ content: invalid, flags: [MessageFlags.Ephemeral] });
+    }
     await dbLog.update('autoResponses',
         () => db.update(autoResponses)
             .set({ enabled: newState })
@@ -408,6 +412,9 @@ async function handleEdit(interaction, client) {
             flags: [MessageFlags.Ephemeral]
         });
     }
+
+    const invalid = await validateResponderRoleAuthority(interaction, response);
+    if (invalid) return interaction.editReply({ content: invalid, flags: [MessageFlags.Ephemeral] });
 
     // Update
     await dbLog.update('autoResponses',

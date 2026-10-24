@@ -2,6 +2,7 @@ const { sqlite } = require('../database');
 const { PermissionFlagsBits } = require('discord.js');
 const { validateHierarchy, validateProtectedTarget, validateManageableRole } = require('../utils/moderationUtil');
 const { RoleManager } = require('../utils/discordApiUtil');
+const RoleAutomationService = require('./roleAutomationService');
 const { deliverTemplates } = require('./moderationTemplateService');
 
 const ROLE_ACTIONS = {
@@ -42,11 +43,27 @@ const ACTION_PERMISSIONS = {
 
 function validateActionPermissions(guild, executor, action, { actor = true } = {}) {
     const permission = ACTION_PERMISSIONS[action];
-    if (actor && permission && !executor.permissions.has(permission)) {
+    if (actor && permission && (!executor?.id || (executor.id !== guild.ownerId && !executor.permissions?.has(permission)))) {
         throw new Error('Your Discord permissions do not allow this moderation action.');
     }
     if (action !== 'WARN' && permission && !guild.members.me.permissions?.has(permission)) {
         throw new Error('My Discord permissions do not allow this moderation action.');
+    }
+}
+
+async function validateRoleAdditions(guild, executor, target, roleIds) {
+    if (!executor?.id || (executor.id !== guild.ownerId && !Number.isFinite(executor.roles?.highest?.position))) {
+        throw new Error('Your member role authority could not be verified.');
+    }
+    const validator = new RoleAutomationService();
+    for (const roleId of roleIds) {
+        if (target.roles.cache.has(roleId)) continue;
+        const role = guild.roles.cache.get(roleId);
+        const invalid = await validator.validateRole(guild, role, executor);
+        if (invalid) throw new Error(invalid);
+        if (!RoleManager.canManageRole(guild, role)) throw new Error('That role is higher than or equal to my highest role.');
+        const protection = validateProtectedTarget(guild.id, '', [role.id]);
+        if (!protection.valid) throw new Error(protection.error);
     }
 }
 
@@ -155,6 +172,9 @@ async function executeMemberAction({ guild, executor, target, action, reason, du
         : action === 'STAFFSTRIP'
             ? [...target.roles.cache.values()].filter(role => staffRoleIds.has(role.id))
             : [];
+
+    if (action === 'JAIL') await validateRoleAdditions(guild, executor, target, [jailConfig.jail_role_id]);
+    if (action === 'UNJAIL') await validateRoleAdditions(guild, executor, target, previousRoleIds);
 
     const caseNumber = createPendingCase({
         guildId: guild.id,
@@ -466,6 +486,10 @@ async function undoCase({ guild, executor, caseNumber, reason }) {
         const protection = validateProtectedTarget(guild.id, moderationCase.target_id);
         if (!protection.valid) throw new Error(protection.error);
     }
+
+    const restoredRoleIds = moderationCase.action === 'JAIL' ? metadata.previousRoleIds
+        : moderationCase.action === 'UNJAIL' ? [metadata.jailRoleId] : metadata.strippedRoleIds;
+    if (restoredRoleIds) await validateRoleAdditions(guild, executor, target, restoredRoleIds);
 
     const claimed = sqlite.prepare(`
         UPDATE moderation_cases SET status = 'undo_pending', updated_at = ?

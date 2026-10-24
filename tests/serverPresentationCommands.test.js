@@ -50,6 +50,38 @@ describe('server presentation commands', () => {
         expect(publicReply.mock.calls[0][0].flags).toBeUndefined();
     });
 
+    test('backup restore trusts bot owners from the merged runtime configuration', async () => {
+        const config = require('../src/utils/config');
+        const originalDevelopers = config.developers;
+        config.developers = ['local-owner'];
+        try {
+            const { PermissionFlagsBits, PermissionsBitField } = require('discord.js');
+            const actor = { id: 'local-owner', permissions: new PermissionsBitField(PermissionFlagsBits.ManageGuild) };
+            const guild = { id: 'guild1', ownerId: 'server-owner', roles: { everyone: { id: 'guild1' }, cache: new Map() },
+                channels: { cache: new Map() }, emojis: { cache: new Map() }, stickers: { cache: new Map() },
+                members: { fetch: jest.fn().mockResolvedValue(actor) } };
+            database.sqlite.prepare(`INSERT INTO lifecycle_messages (guild_id, type, template, updated_at)
+                VALUES ('guild1', 'welcome', 'Original', 1)`).run();
+            const { GuildBackupService } = require('../src/services/guildBackupService');
+            const service = new GuildBackupService({ sqlite: database.sqlite, setTimeout: () => ({ unref() {} }) });
+            const backup = service.create({ guild, creatorId: actor.id, name: 'Merged owner configuration' });
+            database.sqlite.prepare("UPDATE lifecycle_messages SET template = 'Changed' WHERE guild_id = 'guild1'").run();
+            const preview = service.issuePreview({ guild, creatorId: actor.id, id: backup.id, sections: ['bytebot'] });
+            const interaction = { guild, user: { id: actor.id }, member: actor, deferred: true,
+                deferReply: jest.fn(), editReply: jest.fn(), options: {
+                    getSubcommand: () => 'restore', getBoolean: name => name === 'bytebot' ? true : null,
+                    getString: name => ({ backup_id: backup.id, confirmation: preview.confirmationCode }[name] || null)
+                } };
+
+            await executeBackup(interaction);
+
+            expect(interaction.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Restore finished') }));
+            expect(database.sqlite.prepare("SELECT template FROM lifecycle_messages WHERE guild_id = 'guild1'").get().template).toBe('Original');
+        } finally {
+            config.developers = originalDevelopers;
+        }
+    });
+
     test('owner customization edits the current guild member rather than the global bot user', async () => {
         const editMe = jest.fn(async () => ({}));
         const reply = jest.fn();

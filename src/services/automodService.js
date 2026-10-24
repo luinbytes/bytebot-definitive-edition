@@ -130,7 +130,9 @@ function evaluateRegex(patterns, text, timeoutMs) {
 function queueRegex(task) {
     if (regexPending >= REGEX_QUEUE_LIMIT) return Promise.resolve({ matched: false, error: 'Regex queue is full.' });
     regexPending++;
-    const result = regexQueue.then(task, task);
+    const result = regexQueue.then(task, task).catch(error => ({
+        matched: false, error: error?.message || 'Regex evaluation failed.'
+    }));
     regexQueue = result.catch(() => {});
     return result.finally(() => { regexPending--; });
 }
@@ -293,7 +295,12 @@ async function handleMessage(message, now = Date.now()) {
         const patterns = rules.filter(rule => rule.kind === 'regex').map(rule => ({ name: rule.name, pattern: rule.value }));
         if (patterns.length) {
             const regex = await testRegexRules(patterns, message.content || '');
-            if (regex.matched) matched = { filter: `regex:${regex.name}`, action: 'delete' };
+            if (regex.timedOut || regex.error) {
+                matched = {
+                    filter: 'regex:unavailable', action: 'delete',
+                    evaluationError: regex.error || 'Regex evaluation timed out.'
+                };
+            } else if (regex.matched) matched = { filter: `regex:${regex.name}`, action: 'delete' };
         }
     }
     if (!matched) return null;
@@ -305,7 +312,7 @@ async function handleMessage(message, now = Date.now()) {
     if (!inserted.changes) return null;
     let action = matched.action;
     let durationMs = config.timeout_ms;
-    if (config.strikes_enabled) {
+    if (config.strikes_enabled && !matched.evaluationError) {
         const count = addStrike(message.guild.id, message.author.id, now);
         const level = sqlite.prepare('SELECT * FROM automod_strike_levels WHERE guild_id = ? AND level = ?').get(message.guild.id, count);
         if (level) {
@@ -314,7 +321,7 @@ async function handleMessage(message, now = Date.now()) {
         }
     }
     let status = 'applied';
-    let error = null;
+    let error = matched.evaluationError || null;
     try {
         await applyAction(message, action, durationMs, `AutoMod ${matched.filter} filter`);
     } catch (caught) {

@@ -59,17 +59,19 @@ class GiveawayService {
         this.now = options.now || Date.now;
         this.randomInt = options.randomInt || crypto.randomInt;
         this.interval = null;
+        this.closed = false;
         this.running = false;
         this.endJobs = new Map();
     }
 
     cleanup() {
+        this.closed = true;
         if (this.interval) clearInterval(this.interval);
         this.interval = null;
     }
 
     start() {
-        if (this.interval) return;
+        if (this.closed || this.interval) return;
         this.interval = setInterval(() => this.runDue().catch(error => logger.error(`Giveaway scheduler failed: ${error.message}`)), 30000);
         this.interval.unref?.();
     }
@@ -243,7 +245,7 @@ class GiveawayService {
         return winners;
     }
 
-    claimEnd(id, actorId, members) {
+    claimEnd(id, actorId, members, { dueOnly = false } = {}) {
         return this.sqlite.transaction(() => {
             const giveaway = this.getGiveaway(id);
             if (!giveaway) throw new Error('Giveaway not found.');
@@ -253,6 +255,7 @@ class GiveawayService {
                 return { giveaway, round: rowToRound(claimed || existing), created: false, claimed: Boolean(claimed) };
             }
             if (giveaway.status !== 'active') throw new Error('That giveaway is not active.');
+            if (dueOnly && giveaway.endsAt > this.now()) return null;
             const claimed = this.sqlite.prepare(`UPDATE giveaways SET status = 'ending', updated_at = ?
                 WHERE id = ? AND status = 'active' RETURNING *`).get(this.now(), id);
             if (!claimed) throw new Error('That giveaway is already ending.');
@@ -420,7 +423,7 @@ class GiveawayService {
         }
     }
 
-    async finishDiscordGiveaway(id, actorId) {
+    async finishDiscordGiveaway(id, actorId, options = {}) {
         const before = this.getGiveaway(id);
         if (!before) throw new Error('Giveaway not found.');
         if (before.status === 'ended') {
@@ -428,7 +431,9 @@ class GiveawayService {
             return { giveaway: before, round };
         }
         const members = await this.membersFor(before);
-        const claimed = this.claimEnd(id, actorId, members);
+        if (this.closed) throw new Error('Giveaway service stopped.');
+        const claimed = this.claimEnd(id, actorId, members, options);
+        if (!claimed) return null;
         if (!claimed.claimed) throw new Error('That giveaway is already being finalized.');
         const giveaway = this.getGiveaway(id);
         const { guild, channel, message } = await this.resourceFor(giveaway);
@@ -443,13 +448,18 @@ class GiveawayService {
         return { giveaway: ended, round: claimed.round };
     }
 
-    async endDiscordGiveaway(id, actorId) {
-        if (this.endJobs.has(id)) return this.endJobs.get(id);
-        const job = this.finishDiscordGiveaway(id, actorId);
-        this.endJobs.set(id, job);
-        try { return await job; } finally {
+    async endDiscordGiveaway(id, actorId, options = {}) {
+        let job = this.endJobs.get(id);
+        if (!job) {
+            job = this.finishDiscordGiveaway(id, actorId, options);
+            this.endJobs.set(id, job);
+        }
+        let result;
+        try { result = await job; } finally {
             if (this.endJobs.get(id) === job) this.endJobs.delete(id);
         }
+        if (result === null && !options.dueOnly) return this.endDiscordGiveaway(id, actorId, options);
+        return result;
     }
 
     createReroll(id, actorId, members) {
@@ -481,7 +491,9 @@ class GiveawayService {
     async rerollDiscordGiveaway(id, actorId) {
         const giveaway = this.getGiveaway(id);
         if (!giveaway) throw new Error('Giveaway not found.');
-        const delivery = this.createReroll(id, actorId, await this.membersFor(giveaway));
+        const members = await this.membersFor(giveaway);
+        if (this.closed) throw new Error('Giveaway service stopped.');
+        const delivery = this.createReroll(id, actorId, members);
         if (!delivery.claimed) throw new Error('That reroll is already being announced.');
         const { round } = delivery;
         const { guild, channel, message } = await this.resourceFor(giveaway);
@@ -665,16 +677,30 @@ class GiveawayService {
     }
 
     async reconcile() {
-        if (!this.client) return { adopted: 0, lost: 0, resumed: 0 };
+        if (!this.client || this.closed) return { adopted: 0, lost: 0, resumed: 0 };
         let adopted = 0;
         let lost = 0;
         let resumed = 0;
-        const rows = this.sqlite.prepare("SELECT * FROM giveaways WHERE status IN ('pending', 'active', 'ending') ORDER BY id").all();
+        const rows = this.sqlite.prepare(`SELECT * FROM giveaways WHERE status IN ('pending', 'active', 'ending')
+            OR (status = 'ended' AND id IN (SELECT giveaway_id FROM giveaway_rounds
+                WHERE round_number > 1 AND announced_at IS NULL
+                AND (delivery_lease_until IS NULL OR delivery_lease_until <= ?)))
+            ORDER BY CASE WHEN status = 'ended' THEN 0
+                WHEN status = 'ending' OR ends_at <= ? THEN 1 ELSE 2 END, ends_at, id`).all(this.now(), this.now());
         for (const row of rows) {
+            if (this.closed) break;
             let giveaway = rowToGiveaway(row);
+            if (giveaway.status === 'ended') {
+                await this.rerollDiscordGiveaway(giveaway.id, this.client.user.id)
+                    .catch(error => logger.warn(`Giveaway ${giveaway.id} reroll resume failed: ${error.message}`));
+                resumed++;
+                continue;
+            }
             const { channel, message } = await this.resourceFor(giveaway);
+            if (this.closed) break;
             if (giveaway.status === 'pending' && channel) {
                 const recent = await channel.messages.fetch({ limit: 25 }).catch(() => new Map());
+                if (this.closed) break;
                 const matches = [...recent.values()].filter(item => item.components?.some(group => group.components?.some(component => component.customId === `giveaway:enter:${giveaway.id}`)));
                 if (matches.length === 1) {
                     giveaway = this.attachMessage(giveaway.id, matches[0].id);
@@ -690,21 +716,17 @@ class GiveawayService {
                 lost++;
                 continue;
             }
-            if (giveaway.status === 'ending') {
-                await this.endDiscordGiveaway(giveaway.id, this.client.user.id).catch(error => logger.warn(`Giveaway ${giveaway.id} resume failed: ${error.message}`));
+            const current = this.getGiveaway(giveaway.id);
+            if (current?.status === 'ending' || (current?.status === 'active' && current.endsAt <= this.now())) {
+                await this.endDiscordGiveaway(giveaway.id, this.client.user.id, { dueOnly: true }).catch(error => logger.warn(`Giveaway ${giveaway.id} resume failed: ${error.message}`));
                 resumed++;
             }
-        }
-        for (const row of this.dueRerolls()) {
-            await this.rerollDiscordGiveaway(row.id, this.client.user.id)
-                .catch(error => logger.warn(`Giveaway ${row.id} reroll resume failed: ${error.message}`));
-            resumed++;
         }
         return { adopted, lost, resumed };
     }
 
     async runDue() {
-        if (!this.client || this.running) return;
+        if (!this.client || this.closed || this.running) return;
         this.running = true;
         try {
             const rows = this.sqlite.prepare(`SELECT id FROM giveaways WHERE
@@ -712,7 +734,7 @@ class GiveawayService {
                     (SELECT giveaway_id FROM giveaway_rounds WHERE round_number = 1 AND announced_at IS NULL
                      AND (delivery_lease_until IS NULL OR delivery_lease_until <= ?)))
                 ORDER BY ends_at LIMIT 25`).all(this.now(), this.now());
-            for (const row of rows) await this.endDiscordGiveaway(row.id, this.client.user.id)
+            for (const row of rows) await this.endDiscordGiveaway(row.id, this.client.user.id, { dueOnly: true })
                 .catch(error => logger.warn(`Giveaway ${row.id} deadline failed: ${error.message}`));
             for (const row of this.dueRerolls(Math.max(0, 25 - rows.length))) {
                 await this.rerollDiscordGiveaway(row.id, this.client.user.id)

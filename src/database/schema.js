@@ -538,7 +538,9 @@ const bytepodAutoWhitelist = sqliteTable('bytepod_autowhitelist', {
     userId: text('user_id').notNull(),
     targetUserId: text('target_user_id').notNull(),
     guildId: text('guild_id'),
-});
+}, table => ({
+    ownerIdx: index('bytepod_autowhitelist_owner_idx').on(table.userId, table.guildId, table.id),
+}));
 
 const bytepodUserSettings = sqliteTable('bytepod_user_settings', {
     userId: text('user_id').notNull(),
@@ -628,6 +630,20 @@ const birthdayConfig = sqliteTable('birthday_config', {
     enabled: integer('enabled', { mode: 'boolean' }).default(true).notNull(),
     lastCheck: integer('last_check', { mode: 'timestamp' }), // Last midnight check
 });
+
+const birthdayRoleGrants = sqliteTable('birthday_role_grants', {
+    id: text('id').primaryKey(),
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    roleId: text('role_id').notNull(),
+    joinedAt: integer('joined_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    state: text('state').notNull(),
+}, (table) => ({
+    memberRoleUnique: unique().on(table.guildId, table.userId, table.roleId),
+    expiryIdx: index('birthday_role_grants_expiry_idx').on(table.expiresAt),
+    stateCheck: check('birthday_role_grants_state_check', sql`${table.state} IN ('pending', 'granted')`),
+}));
 
 // Message bookmarks (per-user, cross-guild)
 const bookmarks = sqliteTable('bookmarks', {
@@ -877,6 +893,7 @@ const activityStreaks = sqliteTable('activity_streaks', {
     currentStreak: integer('current_streak').default(0).notNull(), // Consecutive active days
     longestStreak: integer('longest_streak').default(0).notNull(), // All-time best streak
     lastActivityDate: text('last_activity_date'), // YYYY-MM-DD format
+    streakCoveredThrough: text('streak_covered_through'),
     totalActiveDays: integer('total_active_days').default(0).notNull(),
     freezesAvailable: integer('freezes_available').default(1).notNull(), // Streak freeze items (1 per month)
     lastFreezeReset: integer('last_freeze_reset', { mode: 'timestamp' }), // Monthly reset tracker
@@ -1968,6 +1985,7 @@ module.exports = {
     bytepodSessionHistory,
     birthdays,
     birthdayConfig,
+    birthdayRoleGrants,
     bookmarks,
     autoResponses,
     automationRules,

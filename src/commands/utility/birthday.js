@@ -5,6 +5,7 @@ const { eq, and } = require('drizzle-orm');
 const embeds = require('../../utils/embeds');
 const { shouldBeEphemeral } = require('../../utils/ephemeralHelper');
 const { upsert } = require('../../utils/dbUtil');
+const { paginateArray, sendPaginatedMessage } = require('../../utils/paginationUtil');
 
 module.exports = {
     register: false,
@@ -264,11 +265,6 @@ module.exports = {
         const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
             'July', 'August', 'September', 'October', 'November', 'December'];
 
-        const embed = embeds.brand(
-            `🎂 Upcoming Birthdays (Next ${days} Days)`,
-            null
-        );
-
         // Group by days until
         const grouped = {};
         for (const birthday of upcomingBirthdays) {
@@ -278,22 +274,35 @@ module.exports = {
             grouped[birthday.daysUntil].push(birthday);
         }
 
-        // Add fields for each day
+        const fields = [];
         for (const [daysUntil, birthdayList] of Object.entries(grouped)) {
-            const userMentions = birthdayList.map(b => `<@${b.userId}>`).join(', ');
             const sample = birthdayList[0];
             const dateStr = `${monthNames[sample.month - 1]} ${sample.day}`;
-
             const dayLabel = daysUntil === '1' ? 'Tomorrow' : `In ${daysUntil} days`;
-
-            embed.addFields({
-                name: `${dayLabel} • ${dateStr}`,
-                value: userMentions,
-                inline: false
-            });
+            const name = `${dayLabel} • ${dateStr}`;
+            let value = '';
+            for (const birthday of birthdayList) {
+                const mention = `<@${birthday.userId}>`;
+                if (value.length + mention.length + 2 > 1024) {
+                    fields.push({ name, value, inline: false });
+                    value = '';
+                }
+                value += `${value ? ', ' : ''}${mention}`;
+            }
+            if (value) fields.push({ name, value, inline: false });
         }
 
-        await interaction.editReply({ embeds: [embed] });
+        // Five full fields leave room for labels and footer within the 6000-character limit.
+        const pages = paginateArray(fields, 5);
+        await sendPaginatedMessage({
+            interaction,
+            deferred: true,
+            customIdPrefix: 'birthday_upcoming',
+            totalPages: pages.length,
+            renderPage: async page => embeds.brand(`🎂 Upcoming Birthdays (Next ${days} Days)`, null)
+                .addFields(pages[page])
+                .setFooter({ text: `Page ${page + 1} of ${pages.length}` })
+        });
     },
 
     /**
@@ -335,7 +344,7 @@ module.exports = {
         await interaction.editReply({
             embeds: [embeds.success(
                 '🎂 Birthday System Configured',
-                `Birthday announcements will be sent to ${channel}.\n\nMembers can now set their birthdays with \`/birthday set\`.`
+                `Birthday announcements will be sent to ${channel}.\n\nMembers can now set their birthdays with \`/me birthday set\`.`
             )]
         });
     },
@@ -363,7 +372,7 @@ module.exports = {
             return interaction.editReply({
                 embeds: [embeds.error(
                     'Setup Required',
-                    'Please configure birthday announcements first using `/birthday setup`.'
+                    'Please configure birthday announcements first using `/server birthday setup`.'
                 )]
             });
         }

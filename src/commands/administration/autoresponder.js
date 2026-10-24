@@ -2,7 +2,7 @@ const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags, ChannelType } = 
 const { and, count, eq } = require('drizzle-orm');
 const { db } = require('../../database');
 const { autoResponses } = require('../../database/schema');
-const { createAutoResponder } = require('../../services/autoResponderService');
+const { createAutoResponder, validateResponderRoleAuthority } = require('../../services/autoResponderService');
 
 const data = new SlashCommandBuilder().setName('autoresponder').setDescription('Greed-compatible automated responders')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).setDMPermission(false);
@@ -90,6 +90,11 @@ module.exports = {
         }
         const row = await getResponder(guildId, interaction.options.getString('trigger'));
         if (!row) return interaction.editReply({ content: 'That auto-responder does not exist.', flags: [MessageFlags.Ephemeral] });
+        if (!['remove', 'disable', 'role-remove'].includes(action) && !action.endsWith('-list')) {
+            const invalid = await validateResponderRoleAuthority(interaction, row,
+                action === 'role-add' ? [interaction.options.getRole('role')?.id] : []);
+            if (invalid) return interaction.editReply({ content: invalid, flags: [MessageFlags.Ephemeral] });
+        }
         if (action === 'remove') await db.delete(autoResponses).where(eq(autoResponses.id, row.id));
         else if (action === 'enable' || action === 'disable') await db.update(autoResponses).set({ enabled: action === 'enable' }).where(eq(autoResponses.id, row.id));
         else if (action === 'update') await db.update(autoResponses).set({ response: interaction.options.getString('response') }).where(eq(autoResponses.id, row.id));
@@ -99,7 +104,7 @@ module.exports = {
             if (action.endsWith('-list')) return interaction.editReply({ content: value.length ? JSON.stringify(value) : 'None configured.', flags: [MessageFlags.Ephemeral] });
             const target = field === 'channelIds' ? interaction.options.getChannel('channel').id : interaction.options.getRole('role').id;
             const selectedRole = field === 'channelIds' ? null : interaction.options.getRole('role');
-            if (selectedRole && (!selectedRole.editable || selectedRole.managed)) {
+            if (selectedRole && action.endsWith('-add') && (!selectedRole.editable || selectedRole.managed)) {
                 return interaction.editReply({ content: 'That role is managed or above ByteBot and cannot be used safely.', flags: [MessageFlags.Ephemeral] });
             }
             const next = field === 'actionRoles'

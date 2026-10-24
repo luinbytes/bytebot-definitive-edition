@@ -1,5 +1,7 @@
 const crypto = require('crypto');
-const { PermissionFlagsBits } = require('discord.js');
+const { ChannelType, PermissionFlagsBits, PermissionsBitField } = require('discord.js');
+
+const { isTrustedManager } = require('./antinukeService');
 
 const SCHEMA_VERSION = 1;
 const MAX_BACKUPS = 5;
@@ -51,7 +53,30 @@ const BYTEBOT_TABLES = [
     { name: 'customization_presets', keys: ['guild_id', 'name'] }
 ];
 const BYTEBOT_TABLE_NAMES = new Set(BYTEBOT_TABLES.map(table => table.name));
+const AUTOMATION_ROLE_FIELDS = {
+    autorole: 'roleId', vanity: 'roleIds', 'button-role': 'roleId', 'reaction-role': 'roleId', 'booster-role': 'roleId'
+};
 const restorePreviews = new Map();
+
+function configuredRoleIds(bytebot) {
+    const ids = [];
+    for (const row of bytebot.moderation_config || []) {
+        ids.push(row.image_mute_role_id, row.reaction_mute_role_id, row.jail_role_id);
+    }
+    for (const row of bytebot.birthday_config || []) ids.push(row.role_id);
+    for (const row of bytebot.auto_responses || []) {
+        if (row.action_role_mode !== 'remove') ids.push(row.action_role_id);
+        for (const action of JSON.parse(row.action_roles || '[]')) {
+            if (action.mode !== 'remove') ids.push(action.roleId);
+        }
+    }
+    for (const rule of bytebot.automation_rules || []) {
+        if (!Object.hasOwn(AUTOMATION_ROLE_FIELDS, rule.kind)) continue;
+        const value = JSON.parse(rule.config || '{}')[AUTOMATION_ROLE_FIELDS[rule.kind]];
+        ids.push(...(Array.isArray(value) ? value : [value]));
+    }
+    return new Set(ids.filter(Boolean));
+}
 
 function sqlIdentifier(value) {
     return `"${value.replaceAll('"', '""')}"`;
@@ -178,6 +203,7 @@ function rowToBackup(row) {
 class GuildBackupService {
     constructor(options) {
         this.sqlite = options.sqlite;
+        this.botOwnerIds = options.botOwnerIds || [];
         this.now = options.now || Date.now;
         this.randomUUID = options.randomUUID || crypto.randomUUID;
         this.sleep = options.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
@@ -291,7 +317,60 @@ class GuildBackupService {
         return plan;
     }
 
-    requirePermissions(guild, sections, mode, backup) {
+    requireConfigRolePermissions(guild, sections, mode, backup, actor) {
+        const bytebot = backup.payload.bytebot;
+        const roleIds = configuredRoleIds(bytebot);
+        const changesAchievementConfig = Boolean(bytebot.achievement_role_config?.length
+            || (mode === 'destructive' && this.sqlite.prepare('SELECT 1 FROM achievement_role_config WHERE guild_id = ?').get(guild.id)));
+        const achievementIds = new Set((bytebot.custom_achievements || []).filter(row => row.grant_role).map(row => row.achievement_id));
+        if (!roleIds.size && !changesAchievementConfig && !achievementIds.size) return;
+        const owner = actor.id === guild.ownerId;
+        if (!owner && !actor.permissions?.has(PermissionFlagsBits.ManageRoles)) {
+            throw new Error('You need Manage Roles to restore role-grant configuration.');
+        }
+        const bot = guild.members.me;
+        if (!bot?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
+            throw new Error('I need Manage Roles to restore role-grant configuration.');
+        }
+        const savedRoles = new Map(sections.includes('roles')
+            ? backup.payload.roles.map(role => [role.sourceId, { ...role, id: role.sourceId }]) : []);
+        const denied = [
+            ...this.sqlite.prepare('SELECT permission FROM denied_role_permissions WHERE guild_id = ?').all(guild.id),
+            ...(bytebot.denied_role_permissions || [])
+        ];
+        const roles = [...roleIds].map(id => ({ id, role: savedRoles.get(id) || guild.roles.cache.get(id) }));
+        if (changesAchievementConfig || achievementIds.size) {
+            const rewards = this.sqlite.prepare('SELECT achievement_id, role_id FROM achievement_roles WHERE guild_id = ?').all(guild.id);
+            for (const reward of rewards) {
+                const role = guild.roles.cache.get(reward.role_id);
+                if (role && (changesAchievementConfig || achievementIds.has(reward.achievement_id))) roles.push({ id: role.id, role });
+            }
+        }
+        for (const { id, role } of roles) {
+            if (!role || role.id === guild.id || role.managed || role.editable === false) {
+                throw new Error(`Role ${id} is missing, managed or above ByteBot.`);
+            }
+            if (!owner && (!Number.isFinite(actor.roles?.highest?.position) || role.position >= actor.roles.highest.position)) {
+                throw new Error(`Role ${role.name} is at or above your highest role.`);
+            }
+            if (!Number.isFinite(bot.roles?.highest?.position) || role.position >= bot.roles.highest.position) {
+                throw new Error(`Role ${role.name} is above ByteBot's highest role.`);
+            }
+            const permissions = new PermissionsBitField(role.permissions.bitfield ?? role.permissions);
+            const blocked = denied.find(({ permission }) => PermissionFlagsBits[permission] !== undefined
+                && permissions.has(PermissionFlagsBits[permission]));
+            if (blocked) throw new Error(`Role ${role.name} carries the blocked permission ${blocked.permission}.`);
+        }
+    }
+
+    requirePermissions(guild, sections, mode, backup, actor) {
+        const owner = actor.id === guild.ownerId;
+        if (!owner && !actor.permissions?.has(PermissionFlagsBits.ManageGuild)) {
+            throw new Error('You need Manage Server to restore backups.');
+        }
+        if (sections.includes('bytebot') && !isTrustedManager(guild, actor.id, this.botOwnerIds)) {
+            throw new Error('Only a trusted AntiNuke manager can restore ByteBot configuration.');
+        }
         const required = [
             ['roles', PermissionFlagsBits.ManageRoles, 'Manage Roles'],
             ['channels', PermissionFlagsBits.ManageChannels, 'Manage Channels'],
@@ -299,15 +378,53 @@ class GuildBackupService {
             ['stickers', PermissionFlagsBits.ManageGuildExpressions, 'Manage Expressions']
         ];
         for (const [section, permission, name] of required) {
-            if (sections.includes(section) && !guild.members.me.permissions.has(permission)) {
+            if (sections.includes(section) && !owner && !actor.permissions?.has(permission)) {
+                throw new Error(`You need ${name} to restore ${section}.`);
+            }
+            if (sections.includes(section) && !guild.members.me?.permissions?.has(permission)) {
                 throw new Error(`I need ${name} to restore ${section}.`);
             }
         }
+        if (sections.includes('channels')) {
+            for (const channel of backup.payload.channels) {
+                if (channel.overwrites.length && !owner && !actor.permissions?.has(PermissionFlagsBits.ManageRoles)) {
+                    throw new Error('You need Manage Roles to restore channel permission overwrites.');
+                }
+                if (channel.overwrites.length && !guild.members.me?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
+                    throw new Error('I need Manage Roles to restore channel permission overwrites.');
+                }
+                for (const overwrite of channel.overwrites) {
+                    const permissions = BigInt(overwrite.allow) | BigInt(overwrite.deny);
+                    if (!owner && !actor.permissions?.has(permissions)) {
+                        throw new Error(`You cannot restore all permission overwrites on channel ${channel.name}.`);
+                    }
+                    if (!guild.members.me?.permissions?.has(permissions)) {
+                        throw new Error(`ByteBot cannot restore all permission overwrites on channel ${channel.name}.`);
+                    }
+                }
+            }
+        }
         if (mode === 'destructive' && sections.includes('roles')) {
+            if (!owner) {
+                const blocked = [...guild.roles.cache.values()].find(role => role.id !== guild.id && !role.managed
+                    && (!Number.isFinite(actor.roles?.highest?.position) || role.position >= actor.roles.highest.position));
+                if (blocked) throw new Error(`Role ${blocked.name} is at or above your highest role and cannot be removed.`);
+            }
             const blocked = [...guild.roles.cache.values()].find(role => role.id !== guild.id && !role.managed && role.editable === false);
             if (blocked) throw new Error(`Role ${blocked.name} is above ByteBot and cannot be removed.`);
         }
         if (mode === 'destructive' && sections.includes('channels')) {
+            if (!owner) {
+                const blocked = [...guild.channels.cache.values()].find(channel => {
+                    if (!RESTORABLE_CHANNEL_TYPES.has(channel.type)) return false;
+                    const permissions = channel.permissionsFor(actor);
+                    if (permissions?.has(PermissionFlagsBits.Administrator, false)) return false;
+                    const required = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ManageChannels];
+                    if ([ChannelType.GuildVoice, ChannelType.GuildStageVoice].includes(channel.type)) required.push(PermissionFlagsBits.Connect);
+                    return actor.communicationDisabledUntilTimestamp > Date.now() || !permissions?.has(required, false);
+                });
+                if (blocked) throw new Error(`To remove ${blocked.name}, you need View Channel and Manage Channels, Connect for voice channels, and no active timeout.`);
+            }
             const blocked = [...guild.channels.cache.values()].find(channel =>
                 RESTORABLE_CHANNEL_TYPES.has(channel.type) && channel.deletable === false);
             if (blocked) throw new Error(`Channel ${blocked.name} cannot be removed by ByteBot.`);
@@ -316,26 +433,40 @@ class GuildBackupService {
             const denied = this.sqlite.prepare('SELECT permission FROM denied_role_permissions WHERE guild_id = ?').all(guild.id);
             for (const role of backup.payload.roles) {
                 const permissions = BigInt(role.permissions);
+                if (!owner && (!Number.isFinite(actor.roles?.highest?.position) || role.position >= actor.roles.highest.position)) {
+                    throw new Error(`Role ${role.name} is at or above your highest role.`);
+                }
+                if (!owner && !actor.permissions?.has(permissions)) {
+                    throw new Error(`You cannot recreate all permissions on role ${role.name}.`);
+                }
                 if (!guild.members.me.permissions.has(permissions)) {
                     throw new Error(`ByteBot cannot recreate all permissions on role ${role.name}.`);
                 }
                 const blocked = denied.find(({ permission }) => {
                     const flag = PermissionFlagsBits[permission];
-                    return flag !== undefined && (permissions & flag) === flag;
+                    return flag !== undefined && new PermissionsBitField(permissions).has(flag);
                 });
                 if (blocked) throw new Error(`Role ${role.name} carries the blocked permission ${blocked.permission}.`);
-                if (guild.members.me.roles?.highest && role.position >= guild.members.me.roles.highest.position) {
+                if (!guild.members.me.roles?.highest || role.position >= guild.members.me.roles.highest.position) {
                     throw new Error(`Role ${role.name} is above ByteBot's highest role.`);
                 }
             }
         }
+        if (sections.includes('bytebot')) this.requireConfigRolePermissions(guild, sections, mode, backup, actor);
     }
 
     async restore({ guild, creatorId, id, mode = 'merge', sections = SECTIONS, confirmed = false }) {
         if (!confirmed) throw new Error('Restore requires explicit confirmation.');
         const plan = this.preview({ guild, creatorId, id, mode, sections });
         const backup = this.view(guild.id, creatorId, id);
-        this.requirePermissions(guild, plan.sections, mode, backup);
+        let actor;
+        try {
+            actor = await guild.members.fetch({ user: creatorId, force: true });
+        } catch {
+            throw new Error('Your current server member state could not be verified.');
+        }
+        if (!actor?.id || actor.id !== creatorId) throw new Error('Your current server member state could not be verified.');
+        this.requirePermissions(guild, plan.sections, mode, backup, actor);
         const created = Object.fromEntries(SECTIONS.map(section => [section, 0]));
         const removed = Object.fromEntries(SECTIONS.map(section => [section, 0]));
         const failures = [];
@@ -475,6 +606,11 @@ class GuildBackupService {
             };
             let restoredRows = 0;
             const restoreConfig = this.sqlite.transaction(() => {
+                if (plan.sections.includes('roles')) {
+                    const savedRoles = new Set(backup.payload.roles.map(role => role.sourceId));
+                    const missing = [...configuredRoleIds(backup.payload.bytebot)].find(id => savedRoles.has(id) && !roleIds.has(id));
+                    if (missing) throw new Error(`Referenced grant role ${missing} was not restored.`);
+                }
                 for (const table of BYTEBOT_TABLES) {
                     const guildColumn = table.guild || 'guild_id';
                     if (mode === 'destructive') {

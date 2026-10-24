@@ -7,3 +7,5 @@ Start with `/giveaway start duration:1h winners:1 prize:Nitro`. Optional role, d
 Templates and named presets reuse ByteBot's rich-message scripts. They may provide content and embeds, while ByteBot retains the entry/view controls. `/giveaway variables` lists the supported giveaway fields. Creator and winner DMs are explicit server settings, and failed DMs are audited without changing the result.
 
 Winner claims, candidate/exclusion snapshots, and rounds are persisted transactionally. Deadline polling and startup reconciliation reuse the stored first round, so retries cannot choose a second first winner. Missing exact messages are marked lost rather than guessed. The complete source mapping and limits are in [the giveaway and counter compatibility contract](../research/greed-giveaway-counter-contract.md).
+
+Startup processes expired giveaways and pending rerolls before future giveaways. Draws wait for VoiceMaster role recovery so restored role memberships count toward eligibility. Ticket recovery runs independently. Recovery remains serial within each service, so a slow Discord request can delay later work in that service.

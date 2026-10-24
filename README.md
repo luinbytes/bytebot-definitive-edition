@@ -118,8 +118,9 @@ The project uses **Drizzle ORM**.
 - **Generate Migrations**: `npm run db:generate`.
 - **Sync Changes**: `npm run db:push`.
 
-## Help System & Icons
-The `/help` command in `src/commands/utility/help.js` uses a `categoryMetadata` object to map folder names to icons and descriptions. When adding a new command category folder, update this mapping to maintain visual polish.
+## Command help
+
+Use `/bot help` to browse public commands or `/bot help command:me reminder add` to inspect a complete path and its arguments. Help derives paths from registered command schemas, so compatibility adapters are not advertised as separate slash commands. See [command help](docs/features/command-help.md) for discovery metadata and pagination behavior.
 
 ---
 *Empowering communities, one command at a time.*

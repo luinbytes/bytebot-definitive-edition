@@ -35,5 +35,10 @@
   "devDependencies": {
     "drizzle-kit": "^0.31.8",
     "jest": "^30.2.0"
+  },
+  "overrides": {
+    "@esbuild-kit/core-utils": {
+      "esbuild": "^0.25.12"
+    }
   }
 }

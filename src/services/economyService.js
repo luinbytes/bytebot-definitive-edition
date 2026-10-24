@@ -4,6 +4,7 @@ const {
     ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder
 } = require('discord.js');
 const embeds = require('../utils/embeds');
+const RoleAutomationService = require('./roleAutomationService');
 
 const GLOBAL_SCOPE = 'global';
 const MAX_STARTING_BALANCE = 1000000;
@@ -1158,12 +1159,14 @@ class EconomyService {
         return Boolean(this.sqlite.prepare('DELETE FROM economy_shop_items WHERE guild_id = ? AND id = ?').run(guildId, itemId).changes);
     }
 
-    checkShopRole(guild, role) {
+    async checkShopRole(guild, role, actor) {
         if (!guild.members.me?.permissions?.has(PermissionFlagsBits.ManageRoles)) throw new Error('ByteBot needs Manage Roles to deliver shop roles.');
         if (!role || role.id === guild.roles.everyone?.id || role.managed || !role.editable
             || role.permissions?.has(PermissionFlagsBits.Administrator)) {
             throw new Error('That role cannot be managed safely by ByteBot.');
         }
+        const invalid = await new RoleAutomationService(this.client).validateRole(guild, role, actor);
+        if (invalid) throw new Error(invalid);
     }
 
     reservePurchase({ guildId, userId, item }) {
@@ -1178,9 +1181,10 @@ class EconomyService {
             const account = this.account(scope, userId);
             const transactionId = this.randomUUID();
             this.apply(account, {
-                transactionId, walletDelta: -item.price, bankDelta: 0,
+                transactionId, walletDelta: -item.price, bankDelta: 0, supplyDelta: -item.price,
                 kind: 'shop_purchase', actorId: userId, reason: String(item.id)
             });
+            this.updateTotals(scope, 0n, BigInt(item.price));
             const id = this.randomUUID();
             const now = this.now();
             this.sqlite.prepare(`INSERT INTO economy_shop_purchases
@@ -1224,9 +1228,10 @@ class EconomyService {
             const account = this.account({ scopeType: purchase.scope_type, scopeId: purchase.scope_id }, purchase.user_id);
             const reversalTransactionId = this.randomUUID();
             this.apply(account, {
-                transactionId: reversalTransactionId, walletDelta: purchase.price, bankDelta: 0,
+                transactionId: reversalTransactionId, walletDelta: purchase.price, bankDelta: 0, supplyDelta: purchase.price,
                 kind: 'shop_reversal', actorId: purchase.user_id, reason: String(purchase.item_id)
             });
+            this.updateTotals({ scopeType: purchase.scope_type, scopeId: purchase.scope_id }, BigInt(purchase.price), 0n);
             this.sqlite.prepare(`UPDATE economy_shop_purchases SET status = 'reversed', reversal_transaction_id = ?,
                 error = ?, updated_at = ?, reversed_at = ? WHERE id = ? AND status = 'pending'`)
                 .run(reversalTransactionId, String(error || '').slice(0, 500), this.now(), this.now(), id);
@@ -1238,12 +1243,12 @@ class EconomyService {
         if (!purchase || purchase.status !== 'pending') return purchase;
         const role = guild.roles.cache.get(purchase.roleId);
         if (!role) return this.reversePurchase(purchase.id, 'Shop role no longer exists.');
-        this.checkShopRole(guild, role);
         let member = suppliedMember;
         try { member = await guild.members.fetch(purchase.userId); } catch {
             if (!member) throw new Error('Purchase is pending because member state could not be confirmed.');
         }
         if (member.roles.cache.has(role.id)) return this.markPurchase(purchase.id, 'delivered');
+        await this.checkShopRole(guild, role);
         try {
             await member.roles.add(role, 'Economy shop purchase');
             return this.markPurchase(purchase.id, 'delivered');
@@ -1259,6 +1264,9 @@ class EconomyService {
     }
 
     async reconcile() {
+        const legacyShopScopes = this.sqlite.prepare(`SELECT DISTINCT scope_type AS scopeType, scope_id AS scopeId
+            FROM economy_ledger WHERE kind IN ('shop_purchase', 'shop_reversal') AND supply_delta = 0`).all();
+        for (const scope of legacyShopScopes) this.reconcileTotals(scope);
         const games = this.reconcileGameSessions();
         if (!this.client) return { reconciled: 0, pending: 0, refundedGames: games.refunded };
         let reconciled = 0;
@@ -1290,13 +1298,13 @@ class EconomyService {
 
     async buyShopItem({ guild, userId, itemId, member }) {
         const item = this.shopItem(guild.id, itemId);
-        const role = guild.roles.cache.get(item.role_id);
-        this.checkShopRole(guild, role);
         const pending = this.pendingPurchase(guild.id, userId, item.id);
         if (pending) {
             const reconciled = await this.reconcilePurchase(pending, guild, member);
             if (reconciled.status === 'delivered') return reconciled;
         }
+        const role = guild.roles.cache.get(item.role_id);
+        await this.checkShopRole(guild, role);
         if (member.roles.cache.has(role.id)) throw new Error('You already have that role.');
         const purchase = this.reservePurchase({ guildId: guild.id, userId, item });
         const result = await this.reconcilePurchase(purchase, guild, member);
@@ -1416,7 +1424,9 @@ class EconomyService {
         return this.sqlite.transaction(() => {
             let minted = 0n;
             let destroyed = 0n;
-            for (const { supply_delta: delta } of this.sqlite.prepare(`SELECT supply_delta FROM economy_ledger
+            for (const { delta } of this.sqlite.prepare(`SELECT CASE
+                WHEN kind IN ('shop_purchase', 'shop_reversal') AND supply_delta = 0 THEN wallet_delta
+                ELSE supply_delta END AS delta FROM economy_ledger
                 WHERE scope_type = ? AND scope_id = ? ORDER BY id`).iterate(scopeType, scopeId)) {
                 if (delta > 0) minted += BigInt(delta);
                 if (delta < 0) destroyed += BigInt(-delta);
@@ -1723,7 +1733,12 @@ class EconomyService {
                 this.requireManage(interaction);
                 if (subcommand === 'add') {
                     const role = interaction.options.getRole('role');
-                    this.checkShopRole(interaction.guild, role);
+                    const actor = interaction.member;
+                    if (!actor?.id || (actor.id !== interaction.guild.ownerId
+                        && (!actor.permissions?.has(PermissionFlagsBits.ManageRoles) || !Number.isFinite(actor.roles?.highest?.position)))) {
+                        throw new Error('You need Manage Roles to configure shop roles.');
+                    }
+                    await this.checkShopRole(interaction.guild, role, actor);
                     const item = this.addShopItem({
                         guildId, actorId: userId, roleId: role.id, roleName: role.name,
                         price: interaction.options.getInteger('price')

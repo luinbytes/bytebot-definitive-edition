@@ -1,7 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { Collection, PermissionFlagsBits } = require('discord.js');
+const { Collection, PermissionFlagsBits, PermissionsBitField } = require('discord.js');
 
 describe('message and member automation platform', () => {
     let tempDir;
@@ -16,11 +16,242 @@ describe('message and member automation platform', () => {
         await database.runMigrations();
     });
 
-    afterEach(() => {
-        service?.cleanup();
+    afterEach(async () => {
+        await service?.cleanup();
         database.sqlite.close();
         delete process.env.DATABASE_URL;
         fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    function responderFixture(mode = 'add') {
+        const AutoResponderService = require('../src/services/autoResponderService');
+        const RoleAutomationService = require('../src/services/roleAutomationService');
+        const role = { id: 'role1', name: 'Reward', position: 5, editable: true, managed: false, permissions: new PermissionsBitField() };
+        const guild = {
+            id: 'guild1', name: 'Guild', ownerId: 'owner1', roles: { cache: new Map([[role.id, role]]) },
+            members: { me: { roles: { highest: { position: 100 } } } }
+        };
+        const actor = { id: 'admin1', permissions: new PermissionsBitField([PermissionFlagsBits.ManageGuild, PermissionFlagsBits.ManageRoles]), roles: { highest: { position: 10 } } };
+        const client = { roleAutomationService: new RoleAutomationService({}) };
+        service = new AutoResponderService(client);
+        client.autoResponderService = service;
+        const responder = AutoResponderService.createAutoResponder({ guildId: guild.id, trigger: 'hello', response: 'Hi {user}', creatorId: actor.id });
+        const interaction = action => ({
+            guild, user: { id: actor.id }, member: actor,
+            options: {
+                getSubcommand: () => action,
+                getString: name => ({ trigger: 'hello', mode })[name] || null,
+                getRole: () => role
+            },
+            editReply: jest.fn().mockResolvedValue({})
+        });
+        const command = require('../src/commands/administration/autoresponder');
+        return { role, guild, actor, client, responder, interaction, command };
+    }
+
+    function responderMessage({ guild }) {
+        const member = {
+            id: 'user1', guild, user: { id: 'user1', tag: 'User#0001' },
+            roles: { cache: new Map() }
+        };
+        member.roles.add = jest.fn(async role => member.roles.cache.set(role.id, role));
+        member.roles.remove = jest.fn(async role => member.roles.cache.delete(role.id));
+        const sent = { id: 'reply1', delete: jest.fn().mockResolvedValue({}) };
+        return {
+            id: 'message1', guild, member, author: { id: 'user1', username: 'User' }, content: 'hello',
+            channel: { id: 'channel1', send: jest.fn().mockResolvedValue(sent) },
+            reply: jest.fn().mockResolvedValue(sent), delete: jest.fn().mockResolvedValue({})
+        };
+    }
+
+    test('responder role actions require Manage Roles in addition to Manage Server', async () => {
+        const { actor, client, interaction, command } = responderFixture();
+        actor.permissions.remove(PermissionFlagsBits.ManageRoles);
+        const add = interaction('role-add');
+        await command.execute(add, client);
+        expect(add.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Manage Roles') }));
+        const list = interaction('role-list');
+        await command.execute(list, client);
+        expect(list.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'None configured.' }));
+    });
+
+    test.each(['add', 'toggle'])('responder %s configuration rejects roles at the actor hierarchy', async mode => {
+        const { actor, role, client, interaction, command } = responderFixture(mode);
+        role.position = actor.roles.highest.position;
+        const add = interaction('role-add');
+        await command.execute(add, client);
+        expect(add.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('highest role') }));
+        const list = interaction('role-list');
+        await command.execute(list, client);
+        expect(list.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'None configured.' }));
+    });
+
+    test.each(['add', 'toggle'])('responder %s configuration respects denied permissions', async mode => {
+        const { role, client, interaction, command } = responderFixture(mode);
+        role.permissions.add(PermissionFlagsBits.Administrator);
+        const { deniedRolePermissions } = require('../src/database/schema');
+        database.db.insert(deniedRolePermissions).values({ guildId: 'guild1', permission: 'Administrator' }).run();
+        const add = interaction('role-add');
+        await command.execute(add, client);
+        expect(add.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('blocked permission Administrator') }));
+        const list = interaction('role-list');
+        await command.execute(list, client);
+        expect(list.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'None configured.' }));
+    });
+
+    test.each([
+        ['legacy', 'add'], ['legacy', 'toggle'], ['actions', 'add'], ['actions', 'toggle']
+    ])('%s responder %s refuses a role after denied-permission policy changes', async (storage, mode) => {
+        const fixture = responderFixture(mode);
+        const { role, client, interaction, command, responder } = fixture;
+        const { autoResponses, deniedRolePermissions } = require('../src/database/schema');
+        const { eq } = require('drizzle-orm');
+        if (storage === 'legacy') {
+            database.db.update(autoResponses).set({ actionRoleId: role.id, actionRoleMode: mode }).where(eq(autoResponses.id, responder.id)).run();
+        } else await command.execute(interaction('role-add'), client);
+        role.permissions.add(PermissionFlagsBits.ManageRoles);
+        database.db.insert(deniedRolePermissions).values({ guildId: 'guild1', permission: 'ManageRoles' }).run();
+        const message = responderMessage(fixture);
+        await service.checkMessage(message);
+        expect(message.channel.send).toHaveBeenCalledTimes(1);
+        expect(message.member.roles.add).not.toHaveBeenCalled();
+    });
+
+    test.each([
+        ['legacy', 'add', false, true], ['legacy', 'remove', true, false],
+        ['legacy', 'toggle', false, true], ['legacy', 'toggle', true, false],
+        ['actions', 'add', false, true], ['actions', 'remove', true, false],
+        ['actions', 'toggle', false, true], ['actions', 'toggle', true, false]
+    ])('%s responder %s preserves role actions and cooldowns with prior membership %s', async (storage, mode, hadRole, expected) => {
+        const fixture = responderFixture(mode);
+        const { role, client, interaction, command, responder } = fixture;
+        const { autoResponses, deniedRolePermissions } = require('../src/database/schema');
+        const { eq } = require('drizzle-orm');
+        if (storage === 'legacy') {
+            database.db.update(autoResponses).set({ actionRoleId: role.id, actionRoleMode: mode }).where(eq(autoResponses.id, responder.id)).run();
+        } else await command.execute(interaction('role-add'), client);
+        const message = responderMessage(fixture);
+        if (hadRole) {
+            message.member.roles.cache.set(role.id, role);
+            role.permissions.add(PermissionFlagsBits.ManageRoles);
+            database.db.insert(deniedRolePermissions).values({ guildId: 'guild1', permission: 'ManageRoles' }).run();
+        }
+        await service.checkMessage(message);
+        await service.checkMessage(message);
+        expect(message.member.roles.cache.has(role.id)).toBe(expected);
+        expect(message.channel.send).toHaveBeenCalledTimes(1);
+        expect(message.channel.send).toHaveBeenCalledWith({ content: 'Hi <@user1>', allowedMentions: { parse: [], repliedUser: false } });
+        if (hadRole) expect(message.member.roles.remove).toHaveBeenCalledWith(role, 'Auto-responder role action');
+        else expect(message.member.roles.add).toHaveBeenCalledWith(role, 'Auto-responder role action');
+    });
+
+    test('a responder role action can be removed after the role becomes unmanageable', async () => {
+        const { role, actor, client, interaction, command } = responderFixture();
+        await command.execute(interaction('role-add'), client);
+        role.editable = false;
+        role.managed = true;
+        actor.permissions.remove(PermissionFlagsBits.ManageRoles);
+        await command.execute(interaction('role-remove'), client);
+        const list = interaction('role-list');
+        await command.execute(list, client);
+        expect(list.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: 'None configured.' }));
+    });
+
+    test.each(['roles-remove', 'channels-remove', 'enable'])('changing role responder access through %s requires authority over existing actions', async action => {
+        const { actor, role, guild, client, interaction, command, responder } = responderFixture();
+        await command.execute(interaction('role-add'), client);
+        const restriction = { id: 'restricted', editable: true, position: 1 };
+        guild.roles.cache.set(restriction.id, restriction);
+        database.sqlite.prepare('UPDATE auto_responses SET role_ids = ?, channel_ids = ?, enabled = 0 WHERE id = ?')
+            .run(JSON.stringify([restriction.id]), JSON.stringify(['channel1']), responder.id);
+        const before = database.sqlite.prepare('SELECT * FROM auto_responses WHERE id = ?').get(responder.id);
+        const request = interaction(action);
+        request.options.getRole = () => restriction;
+        request.options.getChannel = () => ({ id: 'channel1' });
+        actor.permissions.remove(PermissionFlagsBits.ManageRoles);
+        await command.execute(request, client);
+        expect(database.sqlite.prepare('SELECT * FROM auto_responses WHERE id = ?').get(responder.id)).toEqual(before);
+        actor.permissions.add(PermissionFlagsBits.ManageRoles);
+        actor.roles.highest.position = role.position;
+        await command.execute(request, client);
+        expect(database.sqlite.prepare('SELECT * FROM auto_responses WHERE id = ?').get(responder.id)).toEqual(before);
+        actor.roles.highest.position = role.position + 1;
+        await command.execute(request, client);
+        expect(database.sqlite.prepare('SELECT * FROM auto_responses WHERE id = ?').get(responder.id)).not.toEqual(before);
+    });
+
+    test.each(['legacy', 'actions'])('legacy toggle allows disabling but authorizes re-enabling %s role actions', async storage => {
+        const { actor, role, client, interaction, command, responder } = responderFixture();
+        if (storage === 'legacy') database.sqlite.prepare('UPDATE auto_responses SET action_role_id = ? WHERE id = ?').run(role.id, responder.id);
+        else await command.execute(interaction('role-add'), client);
+        const legacy = require('../src/commands/administration/autorespond');
+        const request = interaction('toggle');
+        request.options.getInteger = () => responder.id;
+        actor.permissions.remove(PermissionFlagsBits.ManageRoles);
+        await legacy.execute(request, client);
+        expect(database.sqlite.prepare('SELECT enabled FROM auto_responses WHERE id = ?').get(responder.id).enabled).toBe(0);
+        await legacy.execute(request, client);
+        expect(database.sqlite.prepare('SELECT enabled FROM auto_responses WHERE id = ?').get(responder.id).enabled).toBe(0);
+        actor.permissions.add(PermissionFlagsBits.ManageRoles);
+        await legacy.execute(request, client);
+        expect(database.sqlite.prepare('SELECT enabled FROM auto_responses WHERE id = ?').get(responder.id).enabled).toBe(1);
+    });
+
+    test('runtime role actions recheck the bot hierarchy', async () => {
+        const fixture = responderFixture();
+        await fixture.command.execute(fixture.interaction('role-add'), fixture.client);
+        fixture.role.position = fixture.guild.members.me.roles.highest.position;
+        const message = responderMessage(fixture);
+        await service.checkMessage(message);
+        expect(message.member.roles.add).not.toHaveBeenCalled();
+        expect(message.channel.send).toHaveBeenCalledTimes(1);
+    });
+
+    test('overlapping asynchronous matches send once and preserve the cooldown', async () => {
+        const fixture = responderFixture();
+        const { autoResponses } = require('../src/database/schema');
+        const { eq } = require('drizzle-orm');
+        database.db.update(autoResponses).set({ matchType: 'regex', trigger: '^hello$' }).where(eq(autoResponses.id, fixture.responder.id)).run();
+        const message = responderMessage(fixture);
+        let release;
+        message.channel.send.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+        const checks = [service.checkMessage(message), service.checkMessage(message)];
+        try {
+            await Promise.race(checks);
+            expect(message.channel.send).toHaveBeenCalledTimes(1);
+        } finally {
+            release?.({ id: 'reply1' });
+            await Promise.all(checks);
+        }
+        await service.checkMessage(message);
+        expect(message.channel.send).toHaveBeenCalledTimes(1);
+    });
+
+    test('responder replies preserve deletion, channel and role scopes, and durable self destruction', async () => {
+        const fixture = responderFixture();
+        const AutomationService = require('../src/services/automationService');
+        fixture.client.automationService = new AutomationService({ guilds: { cache: new Map() } });
+        const { autoResponses } = require('../src/database/schema');
+        const { eq } = require('drizzle-orm');
+        database.db.update(autoResponses).set({
+            reply: true, deleteTrigger: true, selfDestructSeconds: 6, mentionPolicy: 'users',
+            channelIds: JSON.stringify(['channel1']), roleIds: JSON.stringify(['role1'])
+        }).where(eq(autoResponses.id, fixture.responder.id)).run();
+        const message = responderMessage(fixture);
+        await service.checkMessage(message);
+        expect(message.reply).not.toHaveBeenCalled();
+        message.member.roles.cache.set(fixture.role.id, fixture.role);
+        message.channel.id = 'elsewhere';
+        await service.checkMessage(message);
+        expect(message.reply).not.toHaveBeenCalled();
+        message.channel.id = 'channel1';
+        await service.checkMessage(message);
+        expect(message.reply).toHaveBeenCalledWith({ content: 'Hi <@user1>', allowedMentions: { parse: ['users'], repliedUser: false } });
+        expect(message.channel.send).not.toHaveBeenCalled();
+        expect(message.delete).toHaveBeenCalledTimes(1);
+        const deletion = await fixture.client.automationService.get('guild1', 'delete-message', 'reply1');
+        expect(JSON.parse(deletion.config)).toEqual({ channelId: 'channel1', messageId: 'reply1' });
+        expect(deletion.nextRunAt).toBeGreaterThan(Date.now());
     });
 
     test('published command families and aliases render as Manage Server slash commands', () => {
@@ -46,6 +277,55 @@ describe('message and member automation platform', () => {
         }
     });
 
+    test('autorole and vanity configuration require role authority before saving or enabling grants', async () => {
+        const AutomationService = require('../src/services/automationService');
+        service = new AutomationService({ guilds: { cache: new Map() } });
+        const role = { id: 'reward', position: 10, editable: true, managed: false, permissions: { has: () => false } };
+        const actor = { id: 'admin1', roles: { highest: { position: 10 } }, permissions: { has: () => true } };
+        const guild = { id: 'guild1', ownerId: 'owner1', roles: { cache: new Map([[role.id, role]]) } };
+        const interaction = (action, member = actor) => ({
+            guild, member, user: { id: 'admin1' }, editReply: jest.fn(),
+            options: { getSubcommand: () => action, getSubcommandGroup: () => null,
+                getRole: () => role, getString: () => null, getBoolean: () => null, getInteger: () => null }
+        });
+        const command = require('../src/commands/administration/autorole');
+        const denied = interaction('add');
+        await command.execute(denied, { automationService: service });
+        expect(await service.list(guild.id, 'autorole')).toHaveLength(0);
+        expect(denied.editReply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('highest role') }));
+
+        actor.roles.highest = {};
+        await command.execute(interaction('add'), { automationService: service });
+        expect(await service.list(guild.id, 'autorole')).toHaveLength(0);
+        actor.roles.highest.position = 11;
+        role.managed = true;
+        await command.execute(interaction('add'), { automationService: service });
+        expect(await service.list(guild.id, 'autorole')).toHaveLength(0);
+        role.managed = false;
+        role.permissions.has = permission => permission === PermissionFlagsBits.Administrator;
+        database.sqlite.prepare("INSERT INTO denied_role_permissions (guild_id, permission) VALUES ('guild1', 'Administrator')").run();
+        await command.execute(interaction('add'), { automationService: service });
+        expect(await service.list(guild.id, 'autorole')).toHaveLength(0);
+        database.sqlite.prepare("DELETE FROM denied_role_permissions WHERE guild_id = 'guild1'").run();
+        await command.execute(interaction('add'), { automationService: service });
+        expect(await service.list(guild.id, 'autorole')).toHaveLength(1);
+        await service.setEnabled(guild.id, 'autorole', 'member:reward', false);
+        actor.permissions.has = permission => permission === PermissionFlagsBits.ManageGuild;
+        await command.execute(interaction('enable'), { automationService: service });
+        expect((await service.get(guild.id, 'autorole', 'member:reward')).enabled).toBe(false);
+        await command.execute(interaction('enable', null), { automationService: service });
+        expect((await service.get(guild.id, 'autorole', 'member:reward')).enabled).toBe(false);
+
+        await service.upsert({ guildId: guild.id, kind: 'vanity', key: 'main', config: { vanity: 'byte' }, createdBy: actor.id });
+        const vanity = require('../src/commands/administration/vanity');
+        await vanity.execute(interaction('role-add'), { automationService: service });
+        expect(JSON.parse((await service.get(guild.id, 'vanity', 'main')).config).roleIds).toBeUndefined();
+        guild.ownerId = actor.id;
+        role.position = 15;
+        await vanity.execute(interaction('role-add'), { automationService: service });
+        expect(JSON.parse((await service.get(guild.id, 'vanity', 'main')).config).roleIds).toEqual(['reward']);
+    });
+
     test('interval parsing is bounded and unambiguous', () => {
         const { parseInterval } = require('../src/services/automationService');
         expect(parseInterval('30m')).toBe(1800000);
@@ -54,6 +334,28 @@ describe('message and member automation platform', () => {
         expect(parseInterval('5s')).toBeNull();
         expect(parseInterval('29d')).toBeNull();
         expect(parseInterval('tomorrow')).toBeNull();
+    });
+
+    test.each([true, false])('vanity rewards remain removable after policy changes while enabled is %s', async enabled => {
+        const AutomationService = require('../src/services/automationService');
+        service = new AutomationService({ guilds: { cache: new Map() } });
+        const roles = ['one', 'two'].map(id => ({ id, editable: true, position: 1,
+            permissions: new PermissionsBitField(PermissionFlagsBits.Administrator) }));
+        const guild = { id: 'guild1', ownerId: 'owner', roles: { cache: new Map(roles.map(role => [role.id, role])) } };
+        await service.upsert({ guildId: guild.id, kind: 'vanity', key: 'main', enabled,
+            config: { vanity: 'byte', roleIds: roles.map(role => role.id) }, createdBy: 'admin' });
+        database.sqlite.prepare("INSERT INTO denied_role_permissions (guild_id, permission) VALUES ('guild1', 'Administrator')").run();
+        const command = require('../src/commands/administration/vanity');
+        for (const [index, action] of ['role-remove', 'removerole'].entries()) {
+            await command.execute({ guild, user: { id: 'admin' },
+                member: { id: 'admin', permissions: new PermissionsBitField(PermissionFlagsBits.ManageGuild) },
+                editReply: jest.fn(), options: { getSubcommand: () => action, getSubcommandGroup: () => null,
+                    getRole: () => roles[index], getString: () => null, getBoolean: () => null, getInteger: () => null }
+            }, { automationService: service });
+            const saved = await service.get(guild.id, 'vanity', 'main');
+            expect(saved.enabled).toBe(enabled);
+            expect(JSON.parse(saved.config).roleIds).toEqual(roles.slice(index + 1).map(role => role.id));
+        }
     });
 
     test('configuration is guild scoped and upserts instead of duplicating', async () => {
@@ -255,14 +557,40 @@ describe('message and member automation platform', () => {
         await service.upsert({ guildId: 'guild1', kind: 'autorole', key: 'bot:role2', config: { roleId: 'role2' }, createdBy: 'admin1' });
         await service.upsert({ guildId: 'guild1', kind: 'pingonjoin', key: 'main', config: { channelId: 'channel1', message: 'Hi {member.mention}' }, createdBy: 'admin1' });
         const add = jest.fn().mockResolvedValue({});
-        const member = { id: 'user1', user: { bot: false, username: 'User' }, roles: { add }, guild: {
-            id: 'guild1', name: 'Guild', roles: { cache: new Map([['role1', { id: 'role1', editable: true, managed: false }]]) },
+        const member = { id: 'user1', user: { bot: false, username: 'User' }, roles: { add, cache: new Map() }, guild: {
+            id: 'guild1', name: 'Guild', members: { me: { roles: { highest: { position: 10 } } } }, roles: { cache: new Map([['role1', { id: 'role1', editable: true, managed: false, position: 1 }]]) },
             channels: { cache: new Map([['channel1', { id: 'channel1', isTextBased: () => true, send }]]) }
         } };
         await service.handleMemberAdd(member);
-        expect(add).toHaveBeenCalledWith('role1', 'Configured autorole');
+        expect(add).toHaveBeenCalledWith(expect.objectContaining({ id: 'role1' }), 'Configured autorole');
         expect(add).not.toHaveBeenCalledWith('role2', expect.anything());
         expect(send).toHaveBeenCalledWith(expect.objectContaining({ content: 'Hi <@user1>', allowedMentions: { users: ['user1'], parse: [] } }));
+    });
+
+    test('autorole and vanity grants apply current denied-role policy at execution', async () => {
+        const AutomationService = require('../src/services/automationService');
+        service = new AutomationService({ guilds: { cache: new Map() } });
+        const role = { id: 'reward', name: 'Reward', position: 1, editable: true, managed: false,
+            permissions: { has: permission => permission === PermissionFlagsBits.Administrator } };
+        const member = { id: 'user1', user: { bot: false, tag: 'User' }, roles: { cache: new Map(),
+            add: jest.fn().mockResolvedValue({}), remove: jest.fn().mockResolvedValue({}) }, guild: {
+            id: 'guild1', roles: { cache: new Map([[role.id, role]]) },
+            members: { me: { roles: { highest: { position: 10 } } } }, channels: { cache: new Map() }
+        } };
+        await service.upsert({ guildId: 'guild1', kind: 'autorole', key: 'member:reward', config: { roleId: role.id }, createdBy: 'admin1' });
+        await service.upsert({ guildId: 'guild1', kind: 'vanity', key: 'main', config: { vanity: 'byte', roleIds: [role.id] }, createdBy: 'admin1' });
+        database.sqlite.prepare("INSERT INTO denied_role_permissions (guild_id, permission) VALUES ('guild1', 'Administrator')").run();
+        await service.handleMemberAdd(member);
+        await service.handlePresence({ activities: [] }, { member, activities: [{ state: 'byte' }] });
+        expect(member.roles.add).not.toHaveBeenCalled();
+        await service.handlePresence({ activities: [{ state: 'byte' }] }, { member, activities: [] });
+        expect(member.roles.remove).toHaveBeenCalledWith('reward', 'Vanity removed');
+
+        database.sqlite.prepare("DELETE FROM denied_role_permissions WHERE guild_id = 'guild1'").run();
+        await service.handleMemberAdd(member);
+        await service.handlePresence({ activities: [] }, { member, activities: [{ state: 'byte' }] });
+        expect(member.roles.add).toHaveBeenCalledWith(role, 'Configured autorole');
+        expect(member.roles.add).toHaveBeenCalledWith(role, 'Vanity reward');
     });
 
     test('counting channels atomically accept the next number and queue invalid-message cleanup', async () => {

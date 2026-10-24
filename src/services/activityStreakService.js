@@ -19,6 +19,8 @@ const { getOne } = require('../utils/dbUtil');
 const { fetchMember, RoleManager } = require('../utils/discordApiUtil');
 const { ACHIEVEMENT_CHAINS } = require('../data/achievementDefinitions');
 
+const NO_STREAK_COVERAGE = '';
+
 /**
  * Achievement Manager - Loads and caches achievement definitions from database
  * Cache expires every hour to stay fresh with any definition updates
@@ -192,9 +194,13 @@ class AchievementManager {
      * @param {string} id - Achievement ID
      * @returns {Object|null} - Achievement definition or null
      */
-    async getById(id) {
+    async getById(id, guildId) {
         await this.loadDefinitions();
-        return this.achievements.get(id) || null;
+        const core = this.achievements.get(id);
+        if (core) return core;
+        if (!guildId) return null;
+        const custom = await this.getCustomAchievements(guildId);
+        return custom.find(achievement => achievement.id === id) || null;
     }
 
     /**
@@ -265,6 +271,7 @@ class AchievementManager {
 
                 return {
                     ...ach,
+                    id: ach.achievementId,
                     criteria
                 };
             });
@@ -484,41 +491,10 @@ class ActivityStreakService {
             );
 
             const today = this.getTodayDateString();
-            const yesterday = this.getYesterdayDateString();
             let processedCount = 0;
 
             for (const streak of allStreaks) {
-                // If lastActivityDate is neither today nor yesterday, streak may have broken
-                if (streak.lastActivityDate &&
-                    streak.lastActivityDate !== today &&
-                    streak.lastActivityDate !== yesterday &&
-                    streak.currentStreak > 0) {
-
-                    const daysSinceActivity = this.getDaysBetween(streak.lastActivityDate, today);
-
-                    // If more than 1 day gap and no freeze, streak broke
-                    if (daysSinceActivity > 1 && streak.freezesAvailable === 0) {
-                        logger.info(`Streak broken for user ${streak.userId} in guild ${streak.guildId} (${daysSinceActivity} days inactive)`);
-                        await this.breakStreak(streak.userId, streak.guildId);
-                        processedCount++;
-                    } else if (daysSinceActivity > 1 && streak.freezesAvailable > 0) {
-                        // Auto-use freeze for missed days
-                        logger.info(`Auto-using freeze for user ${streak.userId} in guild ${streak.guildId}`);
-                        await dbLog.update('activityStreaks',
-                            () => db.update(activityStreaks)
-                                .set({
-                                    freezesAvailable: streak.freezesAvailable - 1,
-                                    updatedAt: new Date()
-                                })
-                                .where(and(
-                                    eq(activityStreaks.userId, streak.userId),
-                                    eq(activityStreaks.guildId, streak.guildId)
-                                )),
-                            { userId: streak.userId, guildId: streak.guildId, operation: 'auto-freeze' }
-                        );
-                        processedCount++;
-                    }
-                }
+                if (await this.reconcileMissedStreakDays(streak, today)) processedCount++;
             }
 
             if (processedCount > 0) {
@@ -671,46 +647,10 @@ class ActivityStreakService {
             );
 
             const today = this.getTodayDateString();
-            const yesterday = this.getYesterdayDateString();
             let updatedCount = 0;
 
             for (const streak of allStreaks) {
-                // Skip if user was active today (already updated)
-                if (streak.lastActivityDate === today) {
-                    continue;
-                }
-
-                // Check if user was active yesterday
-                if (streak.lastActivityDate === yesterday) {
-                    // User maintained their streak but hasn't been active today yet
-                    // No action needed - wait for them to be active
-                    continue;
-                }
-
-                // User missed yesterday - check for streak break
-                if (streak.currentStreak > 0) {
-                    if (streak.freezesAvailable > 0) {
-                        // Auto-use freeze
-                        logger.debug(`Auto-using freeze for user ${streak.userId} in guild ${streak.guildId}`);
-                        await dbLog.update('activityStreaks',
-                            () => db.update(activityStreaks)
-                                .set({
-                                    freezesAvailable: streak.freezesAvailable - 1,
-                                    updatedAt: new Date()
-                                })
-                                .where(and(
-                                    eq(activityStreaks.userId, streak.userId),
-                                    eq(activityStreaks.guildId, streak.guildId)
-                                )),
-                            { userId: streak.userId, guildId: streak.guildId, operation: 'daily-auto-freeze' }
-                        );
-                        updatedCount++;
-                    } else {
-                        // Break streak
-                        await this.breakStreak(streak.userId, streak.guildId);
-                        updatedCount++;
-                    }
-                }
+                if (await this.reconcileMissedStreakDays(streak, today)) updatedCount++;
             }
 
             // Reset monthly freezes (1st of each month)
@@ -720,6 +660,35 @@ class ActivityStreakService {
         } catch (error) {
             logger.error('Error during daily streak check:', error);
         }
+    }
+
+    async reconcileMissedStreakDays(streak, today) {
+        const coveredThrough = streak.streakCoveredThrough ?? streak.lastActivityDate;
+        if (!coveredThrough || coveredThrough >= today || streak.currentStreak <= 0) return false;
+        const missedDays = this.getDaysBetween(coveredThrough, today) - 1;
+        if (missedDays <= 0) return false;
+
+        const yesterday = new Date(`${today}T00:00:00Z`);
+        yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+        const result = await dbLog.update('activityStreaks',
+            () => db.update(activityStreaks)
+                .set({
+                    currentStreak: missedDays <= streak.freezesAvailable ? streak.currentStreak : 0,
+                    freezesAvailable: Math.max(0, streak.freezesAvailable - missedDays),
+                    streakCoveredThrough: yesterday.toISOString().slice(0, 10),
+                    updatedAt: new Date()
+                })
+                .where(and(
+                    eq(activityStreaks.userId, streak.userId),
+                    eq(activityStreaks.guildId, streak.guildId),
+                    sql`${activityStreaks.streakCoveredThrough} IS ${streak.streakCoveredThrough}`,
+                    sql`${activityStreaks.lastActivityDate} IS ${streak.lastActivityDate}`,
+                    eq(activityStreaks.currentStreak, streak.currentStreak),
+                    eq(activityStreaks.freezesAvailable, streak.freezesAvailable)
+                )),
+            { userId: streak.userId, guildId: streak.guildId, operation: 'reconcile-missed-days' }
+        );
+        return result.changes > 0;
     }
 
     /**
@@ -1024,14 +993,26 @@ class ActivityStreakService {
      */
     async updateStreak(userId, guildId, today) {
         try {
-            // Check if achievements are enabled for this guild
-            const achievementsEnabled = await this.isAchievementsEnabled(guildId);
-            if (!achievementsEnabled) {
-                return;
-            }
-
-            // Check if user has opted out globally
-            if (await this.isUserOptedOut(userId)) {
+            if (!await this.isAchievementsEnabled(guildId) || await this.isUserOptedOut(userId)) {
+                await dbLog.insert('activityStreaks',
+                    () => db.insert(activityStreaks).values({
+                        userId,
+                        guildId,
+                        lastActivityDate: today,
+                        streakCoveredThrough: NO_STREAK_COVERAGE,
+                        lastFreezeReset: new Date(),
+                        createdAt: new Date(),
+                        updatedAt: new Date()
+                    }).onConflictDoUpdate({
+                        target: [activityStreaks.userId, activityStreaks.guildId],
+                        set: {
+                            streakCoveredThrough: sql`coalesce(${activityStreaks.streakCoveredThrough}, ${activityStreaks.lastActivityDate}, ${NO_STREAK_COVERAGE})`,
+                            lastActivityDate: sql`max(coalesce(${activityStreaks.lastActivityDate}, ''), ${today})`,
+                            updatedAt: new Date()
+                        }
+                    }),
+                    { userId, guildId, operation: 'lastActualActivity' }
+                );
                 return;
             }
 
@@ -1048,29 +1029,33 @@ class ActivityStreakService {
 
             if (!existing) {
                 // Create new streak record
-                await dbLog.insert('activityStreaks',
+                const insertResult = await dbLog.insert('activityStreaks',
                     () => db.insert(activityStreaks).values({
                         userId,
                         guildId,
                         currentStreak: 1,
                         longestStreak: 1,
                         lastActivityDate: today,
+                        streakCoveredThrough: today,
                         totalActiveDays: 1,
                         freezesAvailable: 1,
                         lastFreezeReset: new Date(),
                         createdAt: new Date(),
                         updatedAt: new Date()
-                    }),
+                    }).onConflictDoNothing(),
                     { userId, guildId, operation: 'newStreak' }
                 );
+
+                if (insertResult.changes === 0) {
+                    return this.updateStreak(userId, guildId, today);
+                }
 
                 // Award first achievement
                 await this.checkAndAwardAchievements(userId, guildId, 1, 1);
                 return;
             }
 
-            // If already active today, streak doesn't change but we still check cumulative achievements
-            if (existing.lastActivityDate === today) {
+            if ((existing.streakCoveredThrough ?? existing.lastActivityDate) === today) {
                 // Streak and total days haven't changed, but cumulative values (messages, voice, commands)
                 // may have increased, so check for achievements that depend on cumulative totals
                 await this.checkAndAwardAchievements(
@@ -1082,12 +1067,16 @@ class ActivityStreakService {
                 return;
             }
 
+            if (await this.reconcileMissedStreakDays(existing, today)) {
+                return this.updateStreak(userId, guildId, today);
+            }
+
             const yesterday = this.getYesterdayDateString();
             let newStreak = existing.currentStreak;
             let newTotalDays = existing.totalActiveDays + 1;
 
             // Check if continuing streak
-            if (existing.lastActivityDate === yesterday) {
+            if ((existing.streakCoveredThrough ?? existing.lastActivityDate) === yesterday) {
                 // Continuing streak
                 newStreak += 1;
             } else {
@@ -1097,21 +1086,30 @@ class ActivityStreakService {
 
             const newLongest = Math.max(existing.longestStreak, newStreak);
 
-            await dbLog.update('activityStreaks',
+            const updateResult = await dbLog.update('activityStreaks',
                 () => db.update(activityStreaks)
                     .set({
                         currentStreak: newStreak,
                         longestStreak: newLongest,
                         lastActivityDate: today,
+                        streakCoveredThrough: today,
                         totalActiveDays: newTotalDays,
                         updatedAt: new Date()
                     })
                     .where(and(
                         eq(activityStreaks.userId, userId),
-                        eq(activityStreaks.guildId, guildId)
+                        eq(activityStreaks.guildId, guildId),
+                        sql`${activityStreaks.streakCoveredThrough} IS ${existing.streakCoveredThrough}`,
+                        sql`${activityStreaks.lastActivityDate} IS ${existing.lastActivityDate}`,
+                        eq(activityStreaks.currentStreak, existing.currentStreak),
+                        eq(activityStreaks.totalActiveDays, existing.totalActiveDays)
                     )),
                 { userId, guildId, newStreak, newTotalDays }
             );
+
+            if (updateResult.changes === 0) {
+                return this.updateStreak(userId, guildId, today);
+            }
 
             // Check for achievements
             await this.checkAndAwardAchievements(userId, guildId, newStreak, newTotalDays);
@@ -1399,49 +1397,34 @@ class ActivityStreakService {
      */
     async getUserTotals(userId, guildId) {
         try {
-            const logs = await dbLog.select('activityLogs',
-                () => db.select()
+            const totals = await dbLog.select('activityLogs',
+                () => db.select({
+                    totalMessages: sql`coalesce(sum(${activityLogs.messageCount}), 0)`,
+                    totalVoiceMinutes: sql`coalesce(sum(${activityLogs.voiceMinutes}), 0)`,
+                    totalCommands: sql`coalesce(sum(${activityLogs.commandsRun}), 0)`,
+                    totalReactions: sql`coalesce(sum(${activityLogs.reactionsGiven}), 0)`,
+                    totalChannelsJoined: sql`coalesce(sum(${activityLogs.channelsJoined}), 0)`,
+                    totalBytepods: sql`coalesce(sum(${activityLogs.bytepodsCreated}), 0)`,
+                    uniqueCommands: sql`(
+                        SELECT json_group_array(DISTINCT command.value)
+                        FROM ${activityLogs} AS command_logs,
+                            json_each(CASE WHEN json_valid(command_logs.unique_commands_used)
+                                THEN CASE WHEN json_type(command_logs.unique_commands_used) = 'array'
+                                    THEN command_logs.unique_commands_used ELSE '[]' END
+                                ELSE '[]' END) AS command
+                        WHERE command_logs.user_id = ${userId} AND command_logs.guild_id = ${guildId}
+                    )`
+                })
                     .from(activityLogs)
                     .where(and(
                         eq(activityLogs.userId, userId),
                         eq(activityLogs.guildId, guildId)
-                    )),
+                    ))
+                    .get(),
                 { userId, guildId }
             );
-
-            const totals = {
-                totalMessages: 0,
-                totalVoiceMinutes: 0,
-                totalCommands: 0,
-                totalReactions: 0,
-                totalChannelsJoined: 0,
-                totalBytepods: 0,
-                uniqueCommands: new Set()
-            };
-
-            for (const log of logs) {
-                totals.totalMessages += log.messageCount || 0;
-                totals.totalVoiceMinutes += log.voiceMinutes || 0;
-                totals.totalCommands += log.commandsRun || 0;
-                totals.totalReactions += log.reactionsGiven || 0;
-                totals.totalChannelsJoined += log.channelsJoined || 0;
-                totals.totalBytepods += log.bytepodsCreated || 0;
-
-                // Parse unique commands JSON
-                if (log.uniqueCommandsUsed) {
-                    try {
-                        const commands = JSON.parse(log.uniqueCommandsUsed);
-                        commands.forEach(cmd => totals.uniqueCommands.add(cmd));
-                    } catch (e) {
-                        // Invalid JSON, skip
-                    }
-                }
-            }
-
-            return {
-                ...totals,
-                uniqueCommandCount: totals.uniqueCommands.size
-            };
+            const uniqueCommands = new Set(JSON.parse(totals.uniqueCommands));
+            return { ...totals, uniqueCommands, uniqueCommandCount: uniqueCommands.size };
 
         } catch (error) {
             logger.error(`Error getting user totals for ${userId}:`, error);
@@ -1588,7 +1571,7 @@ class ActivityStreakService {
                 return null;
             }
 
-            const achievement = await this.achievementManager.getById(achievementId);
+            const achievement = await this.achievementManager.getById(achievementId, guildId);
             if (!achievement) {
                 logger.warn(`Achievement ${achievementId} not found in definitions`);
                 return null;
@@ -1673,12 +1656,21 @@ class ActivityStreakService {
         try {
             if (!Array.isArray(achievements) || achievements.length === 0) return;
 
+            const config = await dbLog.select('achievementRoleConfig',
+                () => db.select({ notifyOnEarn: achievementRoleConfig.notifyOnEarn })
+                    .from(achievementRoleConfig)
+                    .where(eq(achievementRoleConfig.guildId, guildId))
+                    .get(),
+                { guildId, operation: 'achievement-notification-preference' }
+            );
+            if (config?.notifyOnEarn === false) return;
+
             const resolved = [];
             for (const entry of achievements) {
                 if (entry && typeof entry === 'object' && entry.id) {
                     resolved.push(entry);
                 } else if (typeof entry === 'string') {
-                    const def = await this.achievementManager.getById(entry);
+                    const def = await this.achievementManager.getById(entry, guildId);
                     if (def) resolved.push(def);
                 }
             }
@@ -1745,7 +1737,7 @@ class ActivityStreakService {
     async removeAchievement(userId, guildId, achievementId) {
         try {
             // Get achievement definition before deletion (for role cleanup)
-            const achievement = await this.achievementManager.getById(achievementId);
+            const achievement = await this.achievementManager.getById(achievementId, guildId);
             if (!achievement) {
                 logger.warn(`Achievement ${achievementId} not found in definitions`);
                 return;
@@ -1808,8 +1800,14 @@ class ActivityStreakService {
             if (!member) return;
 
             // Get role configuration
-            const config = await this.getRoleConfig(guildId);
-            if (!config.enabled) return;
+            const config = await dbLog.select('achievementRoleConfig',
+                () => db.select()
+                    .from(achievementRoleConfig)
+                    .where(eq(achievementRoleConfig.guildId, guildId))
+                    .get(),
+                { guildId }
+            );
+            if (config?.enabled === false) return;
 
             // Find the achievement role
             const roleRecord = await dbLog.select('achievementRoles',
@@ -1931,7 +1929,7 @@ class ActivityStreakService {
             // Load achievement definitions
             const achievementDefs = [];
             for (const ach of achievements) {
-                const def = await this.achievementManager.getById(ach.achievementId);
+                const def = await this.achievementManager.getById(ach.achievementId, guildId);
                 if (def) {
                     achievementDefs.push({
                         ...def,
@@ -1994,7 +1992,7 @@ class ActivityStreakService {
      */
     getYesterdayDateString() {
         const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
+        yesterday.setUTCDate(yesterday.getUTCDate() - 1);
         return yesterday.toISOString().split('T')[0];
     }
 

@@ -88,7 +88,7 @@ module.exports = {
 
                 if (!nickname) {
                     return interaction.editReply({
-                        embeds: [embeds.error('No Account Bound', 'Please provide a nickname or bind your account first using `/warthunder bind`.')]
+                        embeds: [embeds.error('No Account Bound', 'Please provide a nickname or bind your account first using `/game warthunder bind`.')]
                     });
                 }
             }

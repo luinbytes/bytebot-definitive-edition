@@ -27,6 +27,6 @@ Discord permissions are checked before ByteBot policy. Neither a role allowlist 
 
 Fake-permission `add` accepts one or more comma-separated Discord permission names. `remove` clears one role and `reset` clears the server, matching Greed's documented lifecycle. Fake permissions affect only commands that explicitly declare a `virtualPermissions` policy. `/server community view` uses a virtual Administrator policy because it is read-only. Mutating administration and moderation commands retain real Discord permission requirements.
 
-`denyperm` is the opposite guardrail: when ByteBot assigns a role, the assignment is rejected if that role carries any permission blocked for the server. Removal remains possible. This applies at the shared role-assignment seam, including automated birthday and achievement roles.
+`denyperm` is the opposite guardrail: when ByteBot assigns a role, the assignment is rejected if that role carries any permission blocked for the server. Removal remains possible. Current policy applies to automated birthday and achievement roles, autorole and vanity rewards, responder actions, shop delivery, level rewards, VoiceMaster recovery, and roles added by moderation undo.
 
 Protected members and members holding a protected role are rejected by the shared moderation hierarchy check. This covers `/mod user ban`, `/mod user kick`, `/mod user warn`, and the public **Moderate User** context-menu flow. Protection does not alter Discord roles or permissions; an administrator can remove it through `/server permissions protect action:remove`.

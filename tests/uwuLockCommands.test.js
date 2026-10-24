@@ -123,6 +123,7 @@ describe('UwU Lock commands', () => {
 
         const client = {
             giveawayService: { purgeGuild: jest.fn(() => { throw new Error('broken cleanup'); }) },
+            birthdayService: { purgeGuild: jest.fn() },
             levelAnalyticsService: { purgeGuild: jest.fn() },
             eventLoggingService: { purgeGuild: jest.fn() }
         };
@@ -132,16 +133,26 @@ describe('UwU Lock commands', () => {
         expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM uwu_roulette_configs WHERE guild_id = 'guild1'").get().count).toBe(0);
         expect(client.levelAnalyticsService.purgeGuild).toHaveBeenCalledWith('guild1');
         expect(client.eventLoggingService.purgeGuild).toHaveBeenCalledWith('guild1');
+        expect(client.birthdayService.purgeGuild).toHaveBeenCalledWith('guild1');
     });
 
     test('guild removal directly purges level and log rows when services did not initialize', async () => {
         database.sqlite.prepare("INSERT INTO level_configs (guild_id, updated_at) VALUES ('guild1', 1)").run();
         database.sqlite.prepare("INSERT INTO event_log_channels (guild_id, module, channel_id, created_at) VALUES ('guild1', 'member', 'channel1', 1)").run();
+        for (const guildId of ['guild1', 'guild2']) {
+            database.sqlite.prepare("INSERT INTO birthday_config (guild_id, channel_id) VALUES (?, 'birthday-channel')").run(guildId);
+            database.sqlite.prepare('INSERT INTO birthdays (user_id, guild_id, month, day, created_at) VALUES (?, ?, 1, 1, 1)').run('user1', guildId);
+            database.sqlite.prepare(`INSERT INTO birthday_role_grants (id, guild_id, user_id, role_id, joined_at, expires_at, state)
+                VALUES (?, ?, 'user1', 'role1', 1, 2, 'granted')`).run(guildId, guildId);
+        }
 
         await require('../src/events/guildDelete').execute({ id: 'guild1', name: 'Guild', client: {} });
 
         expect(database.sqlite.prepare("SELECT COUNT(*) count FROM level_configs WHERE guild_id = 'guild1'").get().count).toBe(0);
         expect(database.sqlite.prepare("SELECT COUNT(*) count FROM event_log_channels WHERE guild_id = 'guild1'").get().count).toBe(0);
+        for (const table of ['birthday_role_grants', 'birthdays', 'birthday_config']) {
+            expect(database.sqlite.prepare(`SELECT guild_id FROM ${table}`).all()).toEqual([{ guild_id: 'guild2' }]);
+        }
     });
 
     test('/fun uwuify transforms supplied text without enabling mentions', async () => {

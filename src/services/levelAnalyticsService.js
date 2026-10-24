@@ -8,8 +8,11 @@ const { MAX_IMAGE_PIXELS, ProcessingQueue } = require('./mediaService');
 const { ServerPresentationService } = require('./serverPresentationService');
 const config = require('../utils/config');
 const embeds = require('../utils/embeds');
+const { RoleManager } = require('../utils/discordApiUtil');
+const logger = require('../utils/logger');
 
 const MAX_LEVEL = 999;
+const ANALYTICS_PRUNE_BATCH_SIZE = 1000;
 
 function levelForXp(xp) {
     return Math.min(MAX_LEVEL, Math.floor(Math.sqrt(Math.max(0, xp) / 100)));
@@ -58,8 +61,12 @@ class LevelAnalyticsService {
         this.images = images || new ServerPresentationService({ sqlite });
         this.imageQueue = imageQueue || new ProcessingQueue();
         this.confirmations = new Map();
-        this.confirmationTimer = setInterval(() => this.pruneConfirmations(), 60000);
-        this.confirmationTimer.unref?.();
+        this.analyticsPrunePromise = null;
+        this.closed = false;
+        this.pruneImmediate = null;
+        this.pruneResume = null;
+        this.maintenanceTimers = new Set();
+        this.scheduleInterval(() => this.pruneConfirmations(), 60000);
         this.processingRoleJobs = false;
     }
 
@@ -74,8 +81,19 @@ class LevelAnalyticsService {
     }
 
     cleanup() {
-        clearInterval(this.confirmationTimer);
+        this.closed = true;
+        for (const timer of this.maintenanceTimers) clearInterval(timer);
+        this.maintenanceTimers.clear();
+        clearImmediate(this.pruneImmediate);
+        this.pruneResume?.();
         this.confirmations.clear();
+    }
+
+    scheduleInterval(callback, milliseconds) {
+        if (this.closed) return;
+        const timer = setInterval(callback, milliseconds);
+        timer.unref?.();
+        this.maintenanceTimers.add(timer);
     }
 
     purgeGuild(guildId) {
@@ -204,15 +222,14 @@ class LevelAnalyticsService {
 
             let xpAwarded = 0;
             if (config.text_enabled && !ignoredChannel && !ignoredRole && !onCooldown) {
-                const targets = [['channel', message.channelId], ...roles.map(id => ['role', id])];
-                let targetMultiplier = 1;
-                for (const [type, id] of targets) {
-                    const boost = this.sqlite.prepare(`
-                        SELECT multiplier FROM level_boosts
-                        WHERE guild_id = ? AND target_type = ? AND target_id = ?
-                    `).get(guildId, type, id);
-                    if (boost) targetMultiplier = Math.max(targetMultiplier, boost.multiplier);
-                }
+                const boost = this.sqlite.prepare(`
+                    SELECT MAX(multiplier) AS multiplier FROM level_boosts
+                    WHERE guild_id = ? AND (
+                        (target_type = 'channel' AND target_id = ?)
+                        ${roles.length ? `OR (target_type = 'role' AND target_id IN (${roles.map(() => '?').join(',')}))` : ''}
+                    )
+                `).get(guildId, message.channelId, ...roles);
+                const targetMultiplier = Math.max(1, boost.multiplier ?? 1);
                 const calculated = Math.floor(20 * Math.min(10, config.base_multiplier * targetMultiplier));
                 xpAwarded = Math.min(calculated, Math.max(0, 20_000 - daily.text_xp_awarded));
             }
@@ -706,7 +723,30 @@ class LevelAnalyticsService {
         return { updated, failures };
     }
 
-    pruneAnalytics(limit = 1000) {
+    drainAnalytics() {
+        if (this.closed) return Promise.resolve({ daily: 0, activity: 0, dedupe: 0, reactions: 0 });
+        if (this.analyticsPrunePromise) return this.analyticsPrunePromise;
+        this.analyticsPrunePromise = Promise.resolve().then(async () => {
+            const total = { daily: 0, activity: 0, dedupe: 0, reactions: 0 };
+            while (!this.closed) {
+                const removed = this.pruneAnalytics();
+                for (const table of Object.keys(total)) total[table] += removed[table];
+                if (Object.values(removed).every(count => count < ANALYTICS_PRUNE_BATCH_SIZE)) return total;
+                await new Promise(resolve => {
+                    this.pruneResume = resolve;
+                    this.pruneImmediate = setImmediate(resolve);
+                });
+                this.pruneResume = null;
+                this.pruneImmediate = null;
+            }
+            return total;
+        }).finally(() => {
+            this.analyticsPrunePromise = null;
+        });
+        return this.analyticsPrunePromise;
+    }
+
+    pruneAnalytics(limit = ANALYTICS_PRUNE_BATCH_SIZE) {
         const cutoffAt = this.now() - 1095 * 86400000;
         const cutoffDate = new Date(cutoffAt).toISOString().slice(0, 10);
         return this.sqlite.transaction(() => ({
@@ -813,7 +853,10 @@ class LevelAnalyticsService {
         const configured = new Set(rewards.map(reward => reward.role_id));
         const add = [...wanted].filter(id => !member.roles.cache.has(id));
         const remove = [...configured].filter(id => !wanted.has(id) && member.roles.cache.has(id));
-        if (add.length) await member.roles.add(add, 'Level reward reconciliation');
+        for (const roleId of add) {
+            const result = await RoleManager.addRole(member, roleId, { reason: 'Level reward reconciliation' });
+            if (!result.success) throw new Error(result.error);
+        }
         if (remove.length) await member.roles.remove(remove, 'Level reward reconciliation');
         return Boolean(add.length || remove.length);
     }
@@ -834,7 +877,10 @@ class LevelAnalyticsService {
                 removed.push(member);
             }
         } catch (error) {
-            for (const member of removed) await member.roles.add(roleId, 'Restore failed level reward removal').catch(() => null);
+            for (const member of removed) {
+                const result = await RoleManager.addRole(member, roleId, { reason: 'Restore failed level reward removal' });
+                if (!result.success) logger.warn(`Level reward restore failed for ${member.id}: ${result.error}`);
+            }
             throw error;
         }
         return affected;

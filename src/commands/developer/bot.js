@@ -33,14 +33,15 @@ function aliasFor(interaction) {
 }
 
 module.exports = {
+    discovery: { category: 'Utility', publicPaths: ['help', 'ping', 'stats'] },
     data: new SlashCommandBuilder()
         .setName('bot')
-        .setDescription('Bot help, health, and developer operations')
+        .setDescription('Bot help and health')
         .setDMPermission(false)
         .addSubcommand(sub => sub
             .setName('help')
             .setDescription('Browse ByteBot commands')
-            .addStringOption(opt => opt.setName('command').setDescription('Command to inspect')))
+            .addStringOption(opt => opt.setName('command').setDescription('Full command path to inspect').setAutocomplete(true).setMaxLength(100)))
         .addSubcommand(sub => sub
             .setName('ping')
             .setDescription('Measure bot latency')
@@ -73,6 +74,16 @@ module.exports = {
                 .setName('check')
                 .setDescription('Run achievement checks')
                 .addUserOption(opt => opt.setName('user').setDescription('Specific user to check')))),
+
+    async autocomplete(interaction, client) {
+        if (interaction.options.getSubcommandGroup(false)
+            || interaction.options.getSubcommand(false) !== 'help'
+            || interaction.options.getFocused(true).name !== 'command') {
+            return interaction.respond([]);
+        }
+        const help = client.commands?.get('help') || require('../utility/help');
+        return help.autocomplete(interaction, client);
+    },
 
     async execute(interaction, client) {
         const subcommand = interaction.options.getSubcommand(false);

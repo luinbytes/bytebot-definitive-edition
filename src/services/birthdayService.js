@@ -1,6 +1,7 @@
+const { randomUUID } = require('node:crypto');
 const { db } = require('../database');
-const { birthdays, birthdayConfig } = require('../database/schema');
-const { eq, and, or } = require('drizzle-orm');
+const { birthdays, birthdayConfig, birthdayRoleGrants } = require('../database/schema');
+const { eq, and, or, lte } = require('drizzle-orm');
 const logger = require('../utils/logger');
 const embeds = require('../utils/embeds');
 const { dbLog } = require('../utils/dbLogger');
@@ -10,7 +11,9 @@ class BirthdayService {
     constructor(client) {
         this.client = client;
         this.checkInterval = null;
-        this.roleRemovalTimeouts = new Map(); // Track role removals: userId_guildId -> timeoutId
+        this.roleCleanupInterval = null;
+        this.firstCheckTimeout = null;
+        this.roleCleanupRunning = false;
     }
 
     /**
@@ -27,13 +30,11 @@ class BirthdayService {
         logger.info(`Birthday system initialized. First check in ${Math.round(msUntilMidnight / 60000)} minutes (at midnight UTC)`);
 
         // Recover role-removal timers lost while the bot was offline.
-        this.cleanupExpiredBirthdayRoles();
-
-        // Check for missed birthdays on startup
-        this.checkMissedBirthdays();
+        this.cleanupExpiredBirthdayRoles().then(() => this.checkMissedBirthdays());
+        this.roleCleanupInterval = setInterval(() => this.cleanupExpiredBirthdayRoles(), 60000);
 
         // Schedule first check at midnight
-        setTimeout(() => {
+        this.firstCheckTimeout = setTimeout(() => {
             this.checkAllGuilds();
 
             // Then check every 24 hours
@@ -44,47 +45,78 @@ class BirthdayService {
     }
 
     async cleanupExpiredBirthdayRoles() {
+        if (this.roleCleanupRunning) return;
+        this.roleCleanupRunning = true;
         try {
-            const configs = await dbLog.select('birthdayConfig',
-                () => db.select().from(birthdayConfig).where(eq(birthdayConfig.enabled, 1)),
-                { operation: 'birthdayRoleRecovery' }
-            );
-            const today = new Date();
-            const month = today.getUTCMonth() + 1;
-            const day = today.getUTCDate();
-            const year = today.getUTCFullYear();
-            const includeLeapDay = month === 2 && day === 28 &&
-                !(year % 4 === 0 && year % 100 !== 0 || year % 400 === 0);
-
-            for (const config of configs.filter(item => item.roleId)) {
-                const guild = await this.client.guilds.fetch(config.guildId).catch(() => null);
-                const role = guild?.roles.cache.get(config.roleId);
-                if (!role) continue;
-
-                const todaysBirthdays = await dbLog.select('birthdays',
-                    () => db.select().from(birthdays).where(and(
-                        eq(birthdays.guildId, config.guildId),
-                        eq(birthdays.month, month),
-                        includeLeapDay
-                            ? or(eq(birthdays.day, 28), eq(birthdays.day, 29))
-                            : eq(birthdays.day, day)
-                    )),
-                    { guildId: config.guildId, operation: 'birthdayRoleRecovery' }
-                );
-                const birthdayUsers = new Set(todaysBirthdays.map(item => item.userId));
-
-                for (const member of role.members.values()) {
-                    if (!birthdayUsers.has(member.id)) {
-                        await RoleManager.removeRole(member, role, {
-                            reason: 'Expired birthday role recovered after restart',
-                            logContext: 'birthday-role-recovery'
+            const grants = await db.select().from(birthdayRoleGrants)
+                .where(lte(birthdayRoleGrants.expiresAt, Date.now()));
+            for (const grant of grants) {
+                try {
+                    if (grant.state === 'pending') {
+                        // An interrupted or failed add cannot establish ownership from membership.
+                        logger.warn(`Unconfirmed birthday role grant ${grant.id} expired; leaving role membership unchanged`);
+                    } else {
+                        const guild = await this.client.guilds.fetch(grant.guildId);
+                        const member = await fetchMember(guild, grant.userId, {
+                            force: true, throwOnError: true, logContext: 'birthday-role-recovery'
                         });
+                        if (member && member.joinedTimestamp === grant.joinedAt && member.roles.cache.has(grant.roleId)) {
+                            const role = await guild.roles.fetch(grant.roleId);
+                            if (role) {
+                                const result = await RoleManager.removeRole(member, role, {
+                                    reason: 'Birthday role expired (24h)',
+                                    logContext: 'birthday-role-recovery'
+                                });
+                                if (!result.success) continue;
+                            }
+                        }
                     }
+                    await db.delete(birthdayRoleGrants).where(eq(birthdayRoleGrants.id, grant.id));
+                } catch (error) {
+                    logger.error(`Error recovering birthday role grant ${grant.id}:`, error);
                 }
             }
         } catch (error) {
             logger.error('Error recovering expired birthday roles:', error);
+        } finally {
+            this.roleCleanupRunning = false;
         }
+    }
+
+    async assignBirthdayRole(guild, member, role) {
+        const currentMember = await fetchMember(guild, member.id, {
+            force: true, throwOnError: true, logContext: 'birthday-role-assign'
+        });
+        if (!currentMember || currentMember.roles.cache.has(role.id) || !Number.isFinite(currentMember.joinedTimestamp)) return;
+
+        const grant = await db.insert(birthdayRoleGrants).values({
+            id: randomUUID(), guildId: guild.id, userId: member.id, roleId: role.id,
+            joinedAt: currentMember.joinedTimestamp, expiresAt: Date.now() + 86400000,
+            state: 'pending'
+        }).onConflictDoNothing().returning().get();
+        if (!grant) return;
+        if (currentMember.roles.cache.has(role.id)) {
+            await db.delete(birthdayRoleGrants).where(eq(birthdayRoleGrants.id, grant.id));
+            return;
+        }
+
+        const result = await RoleManager.addRole(currentMember, role, {
+            reason: 'Birthday role assigned', logContext: 'birthday-role-assign'
+        });
+        if (!result.success) {
+            logger.error(`Birthday role grant ${grant.id} was not confirmed: ${result.error}`);
+            return;
+        }
+        await db.update(birthdayRoleGrants).set({ state: 'granted' })
+            .where(eq(birthdayRoleGrants.id, grant.id));
+    }
+
+    async purgeGuild(guildId) {
+        await db.transaction(tx => {
+            tx.delete(birthdayRoleGrants).where(eq(birthdayRoleGrants.guildId, guildId)).run();
+            tx.delete(birthdays).where(eq(birthdays.guildId, guildId)).run();
+            tx.delete(birthdayConfig).where(eq(birthdayConfig.guildId, guildId)).run();
+        });
     }
 
     /**
@@ -267,7 +299,7 @@ class BirthdayService {
                     await owner.send({
                         embeds: [embeds.warn(
                             'Birthday Announcements Disabled',
-                            `The birthday announcement channel in **${guild.name}** was deleted. The birthday system has been disabled.\n\nUse \`/birthday setup\` to reconfigure.`
+                            `The birthday announcement channel in **${guild.name}** was deleted. The birthday system has been disabled.\n\nUse \`/server birthday setup\` to reconfigure.`
                         )]
                     }).catch(() => {
                         logger.warn(`Could not DM owner of ${guild.name} about birthday channel deletion`);
@@ -296,35 +328,7 @@ class BirthdayService {
                 } else {
                     // Assign role to birthday members
                     for (const member of validMembers) {
-                        // Skip if already has role
-                        if (member.roles.cache.has(role.id)) {
-                            continue;
-                        }
-
-                        const addResult = await RoleManager.addRole(member, role, {
-                            reason: 'Birthday role assigned',
-                            logContext: 'birthday-role-assign'
-                        });
-
-                        if (!addResult.success) {
-                            logger.error(`Failed to assign birthday role to ${member.user.tag}: ${addResult.error}`);
-                            continue;
-                        }
-
-                        // Schedule role removal after 24 hours
-                        const timeoutKey = `${member.id}_${guildId}`;
-                        const timeout = setTimeout(async () => {
-                            const refreshedMember = await fetchMember(guild, member.id, { logContext: 'birthday-role-removal' });
-                            if (refreshedMember && refreshedMember.roles.cache.has(role.id)) {
-                                await RoleManager.removeRole(refreshedMember, role, {
-                                    reason: 'Birthday role expired (24h)',
-                                    logContext: 'birthday-role-expire'
-                                });
-                            }
-                            this.roleRemovalTimeouts.delete(timeoutKey);
-                        }, 86400000); // 24 hours
-
-                        this.roleRemovalTimeouts.set(timeoutKey, timeout);
+                        await this.assignBirthdayRole(guild, member, role);
                     }
                 }
             }
@@ -426,12 +430,8 @@ class BirthdayService {
             clearInterval(this.checkInterval);
         }
 
-        // Clear all role removal timeouts
-        for (const timeout of this.roleRemovalTimeouts.values()) {
-            clearTimeout(timeout);
-        }
-
-        this.roleRemovalTimeouts.clear();
+        clearTimeout(this.firstCheckTimeout);
+        clearInterval(this.roleCleanupInterval);
     }
 }
 

@@ -19,6 +19,10 @@ ByteBot excludes messages, webhooks, application commands, global bot branding, 
 
 Restore stays in the source server and creator scope. ByteBot checks its current Discord permissions, role hierarchy, blocked-role policy, channel deletability, payload version, digest, and preview fingerprint before mutation. Role and channel IDs are remapped into channel overwrites and ByteBot configuration. Discord operations report per-item failures; ByteBot configuration restores in one SQLite transaction. Member nickname/uwulock state and discovery consent are excluded from the configuration allowlist.
 
+Applying a restore checks your current membership and real permissions for every selected section. Role work requires Manage Roles and authority over the roles. Destructive channel restore requires View Channel and Manage Channels in each channel being removed, plus Connect for voice and stage channels. Timed-out callers cannot delete channels unless they have Administrator authority. ByteBot configuration restore also requires trusted AntiNuke management authority. Settings that grant roles require the same role authority, even when the saved settings are disabled. Removing achievement settings can enable default rewards, so that reset also requires authority over retained reward roles. The server owner's hierarchy exception remains available; ByteBot permissions and blocked-role policy still apply.
+
+Role-grant settings are checked against both current and restored `denyperm` rules before mutation. If a referenced role fails to be recreated, ByteBot withholds the configuration restore instead of falling back to an old role.
+
 ## Per-server ByteBot profile
 
 Only the server owner may run `/server customize`. `name`, `avatar`, `banner`, and `bio` edit ByteBot's current guild-member profile. They do not edit the global application user. `reset` clears those four guild fields.

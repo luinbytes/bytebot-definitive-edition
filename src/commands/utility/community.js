@@ -31,7 +31,7 @@ const PAGES = {
         fields: [
             { name: 'Games', value: '`/game f1 schedule` — upcoming Formula 1 races\n`/game warthunder stats` — War Thunder statistics', inline: false },
             { name: 'Server Activity', value: '`/server stats` — server statistics\n`/server streak top` — activity streak rankings\n`/server birthday upcoming` — upcoming member birthdays', inline: false },
-            { name: 'Need More Detail?', value: 'Use `/help command:community` or `/help command:me` to browse the existing command paths.', inline: false }
+            { name: 'Need More Detail?', value: 'Use `/bot help command:community` or `/bot help command:me` to browse the existing command paths.', inline: false }
         ]
     }
 };

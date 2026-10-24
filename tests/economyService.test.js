@@ -166,15 +166,66 @@ describe('economy service', () => {
         await expect(service.buyShopItem({ guild, userId: 'user1', itemId: item.id, member }))
             .resolves.toMatchObject({ status: 'delivered', price: 40, roleId: 'role1' });
         expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(60);
+        expect(service.circulation({ guildId: 'guild1', userId: 'user1' })).toMatchObject({ circulation: 60, minted: 100n, destroyed: 40n });
         await expect(service.buyShopItem({ guild, userId: 'user1', itemId: item.id, member })).rejects.toThrow('already have');
 
         member.roles.add.mockRejectedValueOnce(Object.assign(new Error('Missing Permissions'), { code: 50013 }));
         await expect(service.buyShopItem({ guild, userId: 'user1', itemId: failed.id, member })).rejects.toThrow('reversed');
         expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(60);
+        expect(service.circulation({ guildId: 'guild1', userId: 'user1' })).toMatchObject({ circulation: 60, minted: 130n, destroyed: 70n });
+        expect(service.reconcileTotals({ scopeType: 'guild', scopeId: 'guild1' })).toEqual({ minted: 130n, destroyed: 70n });
         expect(service.listShopItems('guild1')).toEqual([
             expect.objectContaining({ id: item.id, roleId: 'role1', price: 40 }),
             expect.objectContaining({ id: failed.id, roleId: 'role2', price: 30 })
         ]);
+    });
+
+    test('pending shop supply and proven refunds reconcile exactly once, including older ledger entries', async () => {
+        service.enable('guild1', 'admin1');
+        service.configure('guild1', 'admin1', { startingBalance: 100 });
+        service.open({ guildId: 'guild1', userId: 'user1' });
+        const item = service.addShopItem({ guildId: 'guild1', actorId: 'admin1', roleId: 'role1', roleName: 'VIP', price: 40 });
+        const pending = service.reservePurchase({ guildId: 'guild1', userId: 'user1', item: service.shopItem('guild1', item.id) });
+        expect(service.circulation({ guildId: 'guild1', userId: 'user1' })).toMatchObject({ circulation: 60, minted: 100n, destroyed: 40n });
+        service.reversePurchase(pending.id, 'Role no longer exists');
+        service.reversePurchase(pending.id, 'Repeated recovery');
+        expect(service.circulation({ guildId: 'guild1', userId: 'user1' })).toMatchObject({ circulation: 100, minted: 140n, destroyed: 40n });
+
+        database.sqlite.prepare("UPDATE economy_ledger SET supply_delta = 0 WHERE kind IN ('shop_purchase', 'shop_reversal')").run();
+        database.sqlite.prepare("UPDATE economy_scope_totals SET minted_text = '100', destroyed_text = '0'").run();
+        await service.reconcile();
+        expect(service.circulation({ guildId: 'guild1', userId: 'user1' })).toMatchObject({ circulation: 100, minted: 140n, destroyed: 40n });
+        expect(service.reconcileTotals({ scopeType: 'guild', scopeId: 'guild1' })).toEqual({ minted: 140n, destroyed: 40n });
+        expect(service.reconcileTotals({ scopeType: 'guild', scopeId: 'guild1' })).toEqual({ minted: 140n, destroyed: 40n });
+        expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(100);
+    });
+
+    test('shop purchases recheck denied permissions before debiting and before pending delivery', async () => {
+        const { PermissionFlagsBits } = require('discord.js');
+        service.enable('guild1', 'admin1');
+        service.configure('guild1', 'admin1', { startingBalance: 100 });
+        service.open({ guildId: 'guild1', userId: 'user1' });
+        const item = service.addShopItem({ guildId: 'guild1', actorId: 'admin1', roleId: 'reward', roleName: 'Reward', price: 40 });
+        const role = { id: 'reward', position: 1, editable: true, managed: false,
+            permissions: { has: permission => permission === PermissionFlagsBits.ManageChannels } };
+        const member = { roles: { cache: new Map(), add: jest.fn().mockResolvedValue({}) } };
+        const guild = { id: 'guild1', roles: { cache: new Map([[role.id, role]]) },
+            members: { me: { permissions: { has: () => true } }, fetch: jest.fn().mockResolvedValue(member) } };
+        database.sqlite.prepare("INSERT INTO denied_role_permissions (guild_id, permission) VALUES ('guild1', 'ManageChannels')").run();
+        await expect(service.buyShopItem({ guild, userId: 'user1', itemId: item.id, member })).rejects.toThrow('blocked permission');
+        expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(100);
+        expect(member.roles.add).not.toHaveBeenCalled();
+        database.sqlite.prepare("DELETE FROM denied_role_permissions WHERE guild_id = 'guild1'").run();
+        const pending = service.reservePurchase({ guildId: 'guild1', userId: 'user1', item: service.shopItem(guild.id, item.id) });
+        database.sqlite.prepare("INSERT INTO denied_role_permissions (guild_id, permission) VALUES ('guild1', 'ManageChannels')").run();
+        await expect(service.reconcilePurchase(pending, guild, member)).rejects.toThrow('blocked permission');
+        expect(member.roles.add).not.toHaveBeenCalled();
+        expect(service.purchase(pending.id).status).toBe('pending');
+        expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(60);
+        member.roles.cache.set(role.id, role);
+        await expect(service.buyShopItem({ guild, userId: 'user1', itemId: item.id, member })).resolves.toMatchObject({ status: 'delivered' });
+        expect(member.roles.add).not.toHaveBeenCalled();
+        expect(service.balance({ guildId: 'guild1', userId: 'user1' }).wallet).toBe(60);
     });
 
     test('keeps a shop debit when Discord times out after assigning the role', async () => {

@@ -1,6 +1,6 @@
 const { Events, ChannelType, PermissionFlagsBits } = require('discord.js');
 const { db } = require('../database');
-const { guilds, bytepods, bytepodAutoWhitelist, bytepodUserSettings, bytepodActiveSessions, bytepodVoiceStats, bytepodSessionHistory } = require('../database/schema');
+const { guilds, bytepods, bytepodUserSettings, bytepodActiveSessions, bytepodVoiceStats, bytepodSessionHistory } = require('../database/schema');
 const { eq, and, isNull } = require('drizzle-orm');
 const logger = require('../utils/logger');
 const embeds = require('../utils/embeds');
@@ -9,6 +9,7 @@ const { getControlPanel } = require('../components/bytepodControls');
 const { dbLog } = require('../utils/dbLogger');
 const { createSummaryEmbed } = require('../utils/bytepodSummaryUtil');
 const { getRandomPodName } = require('../utils/podNameGenerator');
+const { MAX_PRESETS, listPresets } = require('../utils/bytepodPresets');
 
 // Helper to get pod state (lock status, whitelist, etc.)
 function getPodState(channel) {
@@ -513,13 +514,10 @@ module.exports = {
 
                 // Apply Auto-Whitelist Presets after the latency-sensitive move and state setup.
                 const presets = await dbLog.select('bytepodAutoWhitelist',
-                    () => db.select().from(bytepodAutoWhitelist).where(and(
-                        eq(bytepodAutoWhitelist.userId, member.id),
-                        eq(bytepodAutoWhitelist.guildId, guild.id)
-                    )),
+                    () => listPresets(member.id, guild.id, MAX_PRESETS + 1),
                     { userId: member.id, guildId: guild.id }
                 );
-                for (const preset of presets) {
+                for (const preset of presets.slice(0, MAX_PRESETS)) {
                     try {
                         const targetMember = await guild.members.fetch(preset.targetUserId).catch(() => null);
                         const targetUser = targetMember ? targetMember.user : await guild.client.users.fetch(preset.targetUserId).catch(() => null);
@@ -537,7 +535,7 @@ module.exports = {
                 // Send Welcome Message
                 await newChannel.send({
                     embeds: [embeds.brand('Welcome to Your BytePod!', `Your personal voice channel has been created! 🎉\n\n**To manage your pod:** Run \`/pod panel\` to access controls (lock/unlock, whitelist, co-owners, etc.)`)],
-                    content: `Welcome, ${member}!`
+                    content: `Welcome, ${member}!${presets.length > MAX_PRESETS ? ` Your saved preset exceeds the ${MAX_PRESETS}-user limit, so only the first ${MAX_PRESETS} entries were applied. Use /pod preset list and /pod preset remove to update it.` : ''}`
                 });
 
             } catch (error) {

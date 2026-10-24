@@ -1,13 +1,77 @@
+const { Worker } = require('worker_threads');
+
+function isolatedMatch(content, trigger, matchType, workerFault) {
+    return new Promise((resolve, reject) => {
+        const worker = new Worker(`
+            const workerThreads = require('worker_threads');
+            const { parentPort, workerData, Worker } = workerThreads;
+            if (workerData.workerFault) {
+                let failed = false;
+                workerThreads.Worker = class extends Worker {
+                    constructor(filename, options) {
+                        if (!failed && workerData.workerFault === 'startup') {
+                            failed = true;
+                            super('setInterval(() => {}, 1000)', { eval: true });
+                            return;
+                        }
+                        super(filename, options);
+                        if (!failed) {
+                            failed = true;
+                            queueMicrotask(() => workerData.workerFault === 'error'
+                                ? this.emit('error', new Error('Injected worker failure'))
+                                : this.terminate());
+                        }
+                    }
+                };
+            }
+            const AutoResponderService = require(workerData.servicePath);
+            const service = new AutoResponderService({});
+            const heartbeat = setInterval(() => parentPort.postMessage({ heartbeat: true }), 10);
+            parentPort.once('message', async () => {
+                const matched = await service.matchesTrigger(workerData.content, workerData.trigger, workerData.matchType);
+                const recovered = await service.matchesTrigger('HELLO123', '^hello[0-9]+$', 'regex');
+                await service.cleanup();
+                clearInterval(heartbeat);
+                parentPort.postMessage({ finished: true, matched, recovered });
+            });
+            parentPort.postMessage({ ready: true });
+        `, {
+            eval: true,
+            workerData: { servicePath: require.resolve('../src/services/autoResponderService'), content, trigger, matchType, workerFault }
+        });
+        let heartbeat = false;
+        let timer = setTimeout(() => finish({ finished: false }), 3000);
+        const finish = async result => {
+            clearTimeout(timer);
+            await worker.terminate();
+            resolve({ ...result, heartbeat });
+        };
+        worker.on('error', async error => {
+            clearTimeout(timer);
+            await worker.terminate();
+            reject(error);
+        });
+        worker.on('message', result => {
+            if (result.ready) {
+                clearTimeout(timer);
+                timer = setTimeout(() => finish({ finished: false }), 2000);
+                worker.postMessage('match');
+            } else if (result.heartbeat) heartbeat = true;
+            else if (result.finished) finish(result);
+        });
+    });
+}
+
 describe('Auto-Responder System', () => {
     let serviceInstances = [];
 
-    afterEach(() => {
+    afterEach(async () => {
         // Clean up all service instances to prevent timer leaks
-        serviceInstances.forEach(service => {
+        await Promise.all(serviceInstances.map(service => {
             if (service && service.cleanup) {
-                service.cleanup();
+                return service.cleanup();
             }
-        });
+        }));
         serviceInstances = [];
     });
 
@@ -42,37 +106,87 @@ describe('Auto-Responder System', () => {
             serviceInstances.push(service);
         });
 
-        test('exact match should work correctly', () => {
-            expect(service.matchesTrigger('hello', 'hello', 'exact')).toBe(true);
-            expect(service.matchesTrigger('Hello', 'hello', 'exact')).toBe(true); // Case insensitive
-            expect(service.matchesTrigger('hello world', 'hello', 'exact')).toBe(false);
+        test('exact match should work correctly', async () => {
+            expect(await service.matchesTrigger('hello', 'hello', 'exact')).toBe(true);
+            expect(await service.matchesTrigger('Hello', 'hello', 'exact')).toBe(true);
+            expect(await service.matchesTrigger('hello world', 'hello', 'exact')).toBe(false);
         });
 
-        test('contains match should work correctly', () => {
-            expect(service.matchesTrigger('hello world', 'world', 'contains')).toBe(true);
-            expect(service.matchesTrigger('test message', 'sage', 'contains')).toBe(true);
-            expect(service.matchesTrigger('test', 'example', 'contains')).toBe(false);
+        test('contains match should work correctly', async () => {
+            expect(await service.matchesTrigger('hello world', 'world', 'contains')).toBe(true);
+            expect(await service.matchesTrigger('test message', 'sage', 'contains')).toBe(true);
+            expect(await service.matchesTrigger('test', 'example', 'contains')).toBe(false);
         });
 
-        test('wildcard match should work correctly', () => {
-            expect(service.matchesTrigger('hello world', 'hello*', 'wildcard')).toBe(true);
-            expect(service.matchesTrigger('test123', 'test?23', 'wildcard')).toBe(true);
-            expect(service.matchesTrigger('hello world', 'hello', 'wildcard')).toBe(false); // Must match fully
+        test('wildcard match should work correctly', async () => {
+            expect(await service.matchesTrigger('hello world', 'hello*', 'wildcard')).toBe(true);
+            expect(await service.matchesTrigger('test123', 'test?23', 'wildcard')).toBe(true);
+            expect(await service.matchesTrigger('hello world', 'hello', 'wildcard')).toBe(false);
         });
 
-        test('wildcard match treats regex punctuation as literal text', () => {
-            expect(service.matchesTrigger('file[1].txt', 'file[1].*', 'wildcard')).toBe(true);
-            expect(service.matchesTrigger('file1.txt', 'file[1].*', 'wildcard')).toBe(false);
+        test('wildcard match treats regex punctuation as literal text', async () => {
+            expect(await service.matchesTrigger('file[1].txt', 'file[1].*', 'wildcard')).toBe(true);
+            expect(await service.matchesTrigger('file1.txt', 'file[1].*', 'wildcard')).toBe(false);
         });
 
-        test('regex match should work correctly', () => {
-            expect(service.matchesTrigger('hello123', 'hello\\d+', 'regex')).toBe(true);
-            expect(service.matchesTrigger('test@example.com', '\\S+@\\S+', 'regex')).toBe(true);
-            expect(service.matchesTrigger('hello', 'world', 'regex')).toBe(false);
+        test('regex match should work correctly', async () => {
+            expect(await service.matchesTrigger('hello123', 'hello\\d+', 'regex')).toBe(true);
+            expect(await service.matchesTrigger('test@example.com', '\\S+@\\S+', 'regex')).toBe(true);
+            expect(await service.matchesTrigger('hello', 'world', 'regex')).toBe(false);
         });
 
-        test('regex match should handle invalid patterns gracefully', () => {
-            expect(service.matchesTrigger('test', '[invalid(', 'regex')).toBe(false);
+        test('regex match should handle invalid patterns gracefully', async () => {
+            expect(await service.matchesTrigger('test', '[invalid(', 'regex')).toBe(false);
+            expect(await service.matchesTrigger('HELLO', '^hello$', 'regex')).toBe(true);
+        });
+
+        test.each([
+            ['HELLO', '^hello$', 'regex', true],
+            ['123', '\\D+', 'regex', false],
+            ['ABC', '\\D+', 'regex', true],
+            ['K', 'k', 'regex', false],
+            ['FILE[1].TXT', 'file[1].*', 'wildcard', true],
+            ['hello\n', 'hello', 'wildcard', false],
+            ['a\nb', 'a*b', 'wildcard', false],
+            ['😀', '?', 'wildcard', false],
+            ['😀', '??', 'wildcard', true],
+            ['hello', 'hello', 'unknown', false]
+        ])('matching preserves %p against %p in %s mode', async (content, trigger, mode, expected) => {
+            expect(await service.matchesTrigger(content, trigger, mode)).toBe(expected);
+        });
+
+        test.each([
+            ['regex', '(a+)+$'],
+            ['wildcard', '*a'.repeat(30) + 'b']
+        ])('%s matching times out without blocking its caller', async (matchType, trigger) => {
+            expect(await isolatedMatch('a'.repeat(100) + '!', trigger, matchType)).toEqual({
+                finished: true, matched: false, heartbeat: true, recovered: true
+            });
+        });
+
+        test.each(['exit', 'error', 'startup'])('a worker %s fails closed and the next match recovers', async fault => {
+            expect(await isolatedMatch('hello', '^hello$', 'regex', fault)).toEqual(expect.objectContaining({
+                finished: true, matched: false, recovered: true
+            }));
+        });
+
+        test('a full matcher backlog rejects overflow without affecting another service', async () => {
+            const AutoResponderService = require('../src/services/autoResponderService');
+            const other = new AutoResponderService({});
+            serviceInstances.push(other);
+            const pending = Array.from({ length: 32 }, () => service.matchesTrigger('hello', '^hello$', 'regex'));
+            await expect(service.matchesTrigger('hello', '^hello$', 'regex')).resolves.toBe(false);
+            await expect(other.matchesTrigger('hello', 'hello*', 'wildcard')).resolves.toBe(true);
+            expect(await Promise.all(pending)).toEqual(Array(32).fill(true));
+        });
+
+        test('shutdown settles active and queued matches and refuses further matching', async () => {
+            const pending = Array.from({ length: 4 }, () => service.matchesTrigger('hello', '^hello$', 'regex'));
+            await service.cleanup();
+            expect(await Promise.all(pending)).toEqual([false, false, false, false]);
+            await expect(service.matchesTrigger('hello', 'hello', 'exact')).resolves.toBe(false);
+            await expect(service.matchesTrigger('hello', '^hello$', 'regex')).resolves.toBe(false);
+            await service.cleanup();
         });
     });
 

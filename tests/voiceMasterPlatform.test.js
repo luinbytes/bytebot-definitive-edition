@@ -667,7 +667,7 @@ describe('VoiceMaster lifecycle', () => {
             return channel;
         });
         const visitorRole = { id: 'visitor-role', managed: false, editable: true };
-        const joinRole = { id: 'join-role', managed: false, editable: true };
+        const joinRole = { id: 'join-role', managed: false, editable: true, position: 1 };
         const voiceStates = new Map();
         const owner = {
             id: 'member-1', user: { id: 'member-1', bot: false, username: 'Member' }, displayName: 'Member',
@@ -681,11 +681,12 @@ describe('VoiceMaster lifecycle', () => {
         voiceStates.set(owner.id, { channelId: 'join-1' });
         const guild = {
             id: 'guild-1', name: 'Guild', maximumBitrate: 96000,
-            members: { me: { id: 'bot-1', permissions: { has: () => true } } },
-            roles: { everyone: { id: 'guild-1' } }, voiceStates: { cache: voiceStates },
+            members: { me: { id: 'bot-1', permissions: { has: () => true }, roles: { highest: { position: 10 } } } },
+            roles: { everyone: { id: 'guild-1' }, cache: new Map([[joinRole.id, joinRole]]) }, voiceStates: { cache: voiceStates },
             channels: { cache: channels, create, fetch: jest.fn(async id => channels.get(id) || null) },
             fetchVoiceRegions: jest.fn(async () => new Map([['eu-west', { id: 'eu-west', deprecated: false }]]))
         };
+        owner.guild = guild;
         const { VoiceMasterService } = require('../src/services/voiceMasterService');
         const service = new VoiceMasterService({ sqlite: database.sqlite, delay: async () => {} });
         await service.execute(adminInteraction(guild, 'setup'));
@@ -715,7 +716,7 @@ describe('VoiceMaster lifecycle', () => {
             expect.objectContaining({ id: 'visitor-role', allow: expect.arrayContaining([PermissionFlagsBits.Connect]) })
         ]));
         expect(temporary.send).not.toHaveBeenCalled();
-        expect(owner.roles.add).toHaveBeenCalledWith('join-role', 'VoiceMaster channel joined');
+        expect(owner.roles.add).toHaveBeenCalledWith(joinRole, 'VoiceMaster channel joined');
         expect(owner.roles.remove).toHaveBeenCalledWith('join-role', 'VoiceMaster channel left');
     });
 
@@ -998,18 +999,125 @@ describe('VoiceMaster lifecycle', () => {
             .get(guild.id).state).toBe('resetting');
     });
 
+    test.each([false, true])('join-role configuration requires real Administrator authority, admin=%s', async admin => {
+        const role = { id: 'join-role', managed: false, editable: true };
+        const guild = { id: 'guild-1', members: { me: { permissions: { has: () => true } } } };
+        database.sqlite.prepare(`INSERT INTO voice_master_configs (guild_id, state, generation, updated_at)
+            VALUES ('guild-1', 'active', 1, 1)`).run();
+        const { VoiceMasterService } = require('../src/services/voiceMasterService');
+        const service = new VoiceMasterService({ sqlite: database.sqlite });
+        const request = adminInteraction(guild, 'joinrole', { role });
+        request.member.permissions.has = permission => admin
+            ? permission === PermissionFlagsBits.Administrator : permission === PermissionFlagsBits.ManageRoles;
+
+        await service.execute(request);
+
+        expect(service.config(guild.id).join_role_id).toBe(admin ? role.id : null);
+    });
+
+    test.each([
+        [false, 'denied policy'], [true, 'denied policy'],
+        [false, 'role permissions'], [true, 'role permissions']
+    ])('join-role delivery rechecks policy after configuration, restoring=%s, changed=%s', async (restoring, changed) => {
+        let carriesPermission = changed === 'denied policy';
+        if (changed === 'role permissions') database.sqlite.prepare(`INSERT INTO denied_role_permissions (guild_id, permission)
+            VALUES ('guild-1', 'ManageRoles')`).run();
+        const blocked = { id: 'blocked', name: 'Blocked', position: 2, managed: false, editable: true,
+            permissions: { has: permission => carriesPermission && permission === PermissionFlagsBits.ManageRoles } };
+        const safe = { id: 'safe', name: 'Safe', position: 1, managed: false, editable: true,
+            permissions: { has: () => false } };
+        const guild = {
+            id: 'guild-1', roles: { cache: new Map([[blocked.id, blocked], [safe.id, safe]]) },
+            members: { me: { permissions: { has: () => true }, roles: { highest: { position: 10 } } } }
+        };
+        const member = { id: 'member-1', user: { tag: 'Member' }, guild,
+            roles: { cache: new Map(), add: jest.fn(async () => {}), remove: jest.fn() } };
+        database.sqlite.prepare(`INSERT INTO voice_master_configs (guild_id, state, generation, updated_at)
+            VALUES ('guild-1', 'active', 1, 1)`).run();
+        const { VoiceMasterService } = require('../src/services/voiceMasterService');
+        const service = new VoiceMasterService({ sqlite: database.sqlite });
+        await service.execute(adminInteraction(guild, 'joinrole', { role: blocked }));
+        expect(service.config(guild.id).join_role_id).toBe(blocked.id);
+        if (restoring) database.sqlite.prepare(`INSERT INTO voice_master_join_roles
+            (guild_id, channel_id, member_id, role_id, state, added_by_bot, updated_at)
+            VALUES ('guild-1', 'temporary-1', 'member-1', 'blocked', 'active', 1, 1)`).run();
+        if (changed === 'denied policy') database.sqlite.prepare(`INSERT INTO denied_role_permissions (guild_id, permission)
+            VALUES ('guild-1', 'ManageRoles')`).run();
+        else carriesPermission = true;
+
+        await service.grantJoinRole(guild, member, 'temporary-1', service.config(guild.id).join_role_id);
+
+        expect(member.roles.add).not.toHaveBeenCalled();
+        expect(database.sqlite.prepare(`SELECT state FROM voice_master_join_roles`).get()).toBeUndefined();
+
+        await service.execute(adminInteraction(guild, 'joinrole', { role: safe }));
+        await service.grantJoinRole(guild, member, 'temporary-1', service.config(guild.id).join_role_id);
+        expect(member.roles.add).toHaveBeenCalledWith(safe, 'VoiceMaster channel joined');
+        expect(database.sqlite.prepare(`SELECT role_id, state, added_by_bot FROM voice_master_join_roles`).get())
+            .toEqual({ role_id: 'safe', state: 'active', added_by_bot: 1 });
+    });
+
+    test.each(['allowed', 'blocked', 'Discord failure'])('pending join-role recovery preserves grant outcomes, %s', async outcome => {
+        const role = { id: 'join-role', name: 'Join', managed: false, position: 1,
+            permissions: { has: permission => permission === PermissionFlagsBits.ManageRoles } };
+        const member = {
+            id: 'member-1', user: { tag: 'Member' }, voice: { channelId: 'temporary-1' },
+            roles: { cache: new Map(), add: jest.fn(async () => {
+                if (outcome === 'Discord failure') throw new Error('Discord unavailable');
+            }) }
+        };
+        const guild = {
+            id: 'guild-1', roles: { cache: new Map([[role.id, role]]) }, members: {
+                cache: new Map([[member.id, member]]),
+                me: { roles: { highest: { position: 10 } } }
+            }
+        };
+        member.guild = guild;
+        database.sqlite.prepare(`INSERT INTO voice_master_configs
+            (guild_id, state, generation, join_role_id, updated_at)
+            VALUES ('guild-1', 'active', 1, 'join-role', 1)`).run();
+        database.sqlite.prepare(`INSERT INTO bytepods
+            (channel_id, guild_id, owner_id, original_owner_id, source_channel_id,
+             state, generation, bot_owned, created_at)
+            VALUES ('temporary-1', 'guild-1', 'member-1', 'member-1', 'join-1', 'active', 1, 1, 1)`).run();
+        database.sqlite.prepare(`INSERT INTO voice_master_join_roles
+            (guild_id, channel_id, member_id, role_id, state, added_by_bot, updated_at)
+            VALUES ('guild-1', 'temporary-1', 'member-1', 'join-role', 'pending', 1, 1)`).run();
+        if (outcome === 'blocked') database.sqlite.prepare(`INSERT INTO denied_role_permissions (guild_id, permission)
+            VALUES ('guild-1', 'ManageRoles')`).run();
+        const { VoiceMasterService } = require('../src/services/voiceMasterService');
+        const service = new VoiceMasterService({ sqlite: database.sqlite,
+            client: { guilds: { fetch: jest.fn(async () => guild) } } });
+        const result = { failures: [] };
+
+        await service.reconcileJoinRoleGrants(result);
+
+        if (outcome === 'blocked') expect(member.roles.add).not.toHaveBeenCalled();
+        else expect(member.roles.add).toHaveBeenCalledWith(role, 'VoiceMaster join role recovery');
+        if (outcome === 'allowed') expect(result.failures).toEqual([]);
+        else expect(result.failures).toEqual([expect.objectContaining({
+            error: expect.stringContaining(outcome === 'blocked' ? 'blocked permission ManageRoles' : 'Discord unavailable')
+        })]);
+        expect(database.sqlite.prepare(`SELECT state, added_by_bot FROM voice_master_join_roles`).get())
+            .toEqual({ state: outcome === 'allowed' ? 'active' : 'pending', added_by_bot: 1 });
+    });
+
     test('active join-role records restore a role removed outside VoiceMaster', async () => {
         const add = jest.fn(async () => {});
-        const member = { id: 'member-1', roles: { cache: new Map(), add, remove: jest.fn(async () => {}) } };
+        const member = { id: 'member-1', user: { tag: 'Member' }, roles: { cache: new Map(), add, remove: jest.fn(async () => {}) } };
         database.sqlite.prepare(`INSERT INTO voice_master_join_roles
             (guild_id, channel_id, member_id, role_id, state, added_by_bot, updated_at)
             VALUES ('guild-1', 'temporary-1', 'member-1', 'join-role', 'active', 0, 1)`).run();
+        const role = { id: 'join-role', managed: false, position: 1 };
+        const guild = { id: 'guild-1', roles: { cache: new Map([[role.id, role]]) },
+            members: { me: { roles: { highest: { position: 10 } } } } };
+        member.guild = guild;
         const { VoiceMasterService } = require('../src/services/voiceMasterService');
 
         await new VoiceMasterService({ sqlite: database.sqlite })
-            .grantJoinRole({ id: 'guild-1' }, member, 'temporary-1', 'join-role');
+            .grantJoinRole(guild, member, 'temporary-1', 'join-role');
 
-        expect(add).toHaveBeenCalledWith('join-role', 'VoiceMaster channel joined');
+        expect(add).toHaveBeenCalledWith(role, 'VoiceMaster channel joined');
         expect(database.sqlite.prepare(`SELECT state, added_by_bot FROM voice_master_join_roles
             WHERE guild_id = 'guild-1' AND channel_id = 'temporary-1' AND member_id = 'member-1'`).get())
             .toEqual({ state: 'active', added_by_bot: 0 });
@@ -1021,7 +1129,7 @@ describe('VoiceMaster lifecycle', () => {
         const gate = new Promise(resolve => { releaseAdd = resolve; });
         const started = new Promise(resolve => { addStarted = resolve; });
         const member = {
-            id: 'member-1',
+            id: 'member-1', user: { tag: 'Member' },
             roles: {
                 cache: new Map(),
                 add: jest.fn(async () => { addStarted(); await gate; }),
@@ -1032,9 +1140,12 @@ describe('VoiceMaster lifecycle', () => {
             (channel_id, guild_id, owner_id, original_owner_id, source_channel_id,
              state, generation, bot_owned, created_at)
             VALUES ('temporary-1', 'guild-1', 'member-1', 'member-1', 'join-1', 'active', 1, 1, 1)`).run();
+        const role = { id: 'join-role', managed: false, position: 1 };
+        const guild = { id: 'guild-1', roles: { cache: new Map([[role.id, role]]) },
+            members: { me: { roles: { highest: { position: 10 } } } } };
+        member.guild = guild;
         const { VoiceMasterService } = require('../src/services/voiceMasterService');
         const service = new VoiceMasterService({ sqlite: database.sqlite });
-        const guild = { id: 'guild-1' };
 
         const grant = service.grantJoinRole(guild, member, 'temporary-1', 'join-role');
         await started;

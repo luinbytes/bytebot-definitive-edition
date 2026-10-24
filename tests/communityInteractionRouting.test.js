@@ -20,7 +20,8 @@ jest.mock('../src/commands/administration/starboard', () => {
     };
 });
 
-const { PermissionFlagsBits, ChannelType } = require('discord.js');
+const { PermissionFlagsBits, ChannelType, MessageFlags } = require('discord.js');
+const { CommunityUtilityService } = require('../src/services/communityUtilityService');
 const { guilds, birthdayConfig, starboardConfig, suggestionConfig, achievementRoleConfig } = require('../src/database/schema');
 const interactionCreate = require('../src/events/interactionCreate');
 const community = require('../src/commands/utility/community');
@@ -147,6 +148,40 @@ describe('community public interaction routing', () => {
         expect(interaction.deferUpdate).toHaveBeenCalledTimes(1);
         expect(interaction.followUp).toHaveBeenCalledTimes(1);
         expect(interaction.reply).not.toHaveBeenCalled();
+    });
+
+    test('privately rejects busy and duplicate confession modals through interactionCreate', async () => {
+        const client = createClient();
+        const service = new CommunityUtilityService(client, { sqlite: {} });
+        client.communityUtilityService = service;
+        let sequence = 0;
+        const modal = userId => {
+            const interaction = createInteraction({ id: `confession-${sequence++}`, type: 'modal', customId: 'community:cf:s:0' });
+            interaction.user.id = userId;
+            interaction.isModalSubmit.mockReturnValue(true);
+            interaction.reply.mockResolvedValue({});
+            interaction.deferReply.mockImplementation(() => new Promise(() => {}));
+            return interaction;
+        };
+        const pending = Array.from({ length: 4 }, (_, index) => interactionCreate.execute(modal(`author${index}`), client));
+        try {
+            const overflow = modal('overflow');
+            await interactionCreate.execute(overflow, client);
+            expect(overflow.deferReply).not.toHaveBeenCalled();
+            expect(overflow.reply).toHaveBeenCalledWith(expect.objectContaining({
+                content: expect.stringMatching(/busy.*try again/i), flags: [MessageFlags.Ephemeral],
+                allowedMentions: { parse: [], repliedUser: false }
+            }));
+            const duplicate = modal('author0');
+            await interactionCreate.execute(duplicate, client);
+            expect(duplicate.deferReply).not.toHaveBeenCalled();
+            expect(duplicate.reply).toHaveBeenCalledWith(expect.objectContaining({
+                content: expect.stringMatching(/pending confession.*wait/i), flags: [MessageFlags.Ephemeral]
+            }));
+        } finally {
+            service.cleanup();
+            await Promise.all(pending);
+        }
     });
 
     test('acknowledges a recognized community button when its command handler is unavailable', async () => {

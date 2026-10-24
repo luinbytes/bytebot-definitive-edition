@@ -1,5 +1,10 @@
 const { createCommandAliasInteraction, executeAliasCommand } = require('../src/utils/commandAlias');
 const { db } = require('../src/database');
+const { MessageFlags } = require('discord.js');
+
+jest.mock('../src/utils/bookmarkUtil', () => ({
+    getBookmarkById: jest.fn(), getBookmarks: jest.fn(), getBookmarkCount: jest.fn(), searchBookmarks: jest.fn()
+}));
 
 jest.mock('../src/database', () => ({
     db: {
@@ -100,6 +105,31 @@ describe('command alias interaction proxy', () => {
         expect(command.execute).toHaveBeenCalledTimes(1);
         expect(interaction.reply).toHaveBeenCalledTimes(1);
         expect(interaction.reply.mock.calls[0][0].embeds[0].data.title).toContain('Cooldown Active');
+    });
+
+    test.each(['view', 'list', 'search'])('the public bookmark %s defers privately before rendering saved content', async action => {
+        const bookmarkUtil = require('../src/utils/bookmarkUtil');
+        const savedBookmark = {
+            id: 42, content: 'private cached content', authorId: 'author', channelId: 'private',
+            guildId: 'DM', savedAt: new Date(), messageDeleted: true
+        };
+        bookmarkUtil.getBookmarkById.mockResolvedValue(savedBookmark);
+        bookmarkUtil.getBookmarks.mockResolvedValue([savedBookmark]);
+        bookmarkUtil.getBookmarkCount.mockResolvedValue(1);
+        bookmarkUtil.searchBookmarks.mockResolvedValue({ results: [savedBookmark], total: 1 });
+        const interaction = {
+            ...createInteraction(), user: { id: 'owner' }, guild: null,
+            deferReply: jest.fn().mockResolvedValue(), editReply: jest.fn().mockResolvedValue()
+        };
+        interaction.options.getSubcommand.mockReturnValue(action);
+        interaction.options.getString.mockReturnValue('private');
+        await require('../src/commands/utility/me').execute(interaction, {
+            commands: new Map([['bookmark', require('../src/commands/utility/bookmark')]])
+        });
+        expect(interaction.deferReply).toHaveBeenCalledWith({ flags: [MessageFlags.Ephemeral] });
+        if (action === 'view') expect(bookmarkUtil.getBookmarkById).toHaveBeenCalledWith('owner', 42);
+        expect(JSON.stringify(interaction.editReply.mock.calls[0][0])).toContain('private cached content');
+        expect(interaction.deferReply.mock.invocationCallOrder[0]).toBeLessThan(interaction.editReply.mock.invocationCallOrder[0]);
     });
 
     test('keeps the public intent-hub path when authorizing a delegated command', async () => {
